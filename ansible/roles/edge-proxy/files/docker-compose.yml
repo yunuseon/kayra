@@ -1,0 +1,13 @@
+# Managed by Ansible (edge-proxy role).
+services:
+  caddy:
+    image: caddy:2.11.7
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - ./data:/data
+      - ./config:/config

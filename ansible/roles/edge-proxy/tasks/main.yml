@@ -1,0 +1,34 @@
+---
+# =============================================================================
+# Edge proxy role — Caddy in front of whatever edge_routes point at (upstreams
+# on the far side of the WireGuard tunnel). Caddy gets its certs itself.
+# =============================================================================
+
+- name: Create edge proxy directories
+  ansible.builtin.file:
+    path: "/opt/edge-proxy/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: ["", caddy, data, config]
+
+- name: Copy compose file
+  ansible.builtin.copy:
+    src: docker-compose.yml
+    dest: /opt/edge-proxy/docker-compose.yml
+    mode: "0644"
+
+# Into caddy/, which is mounted as a directory: Ansible replaces files
+# atomically (new inode), and a single-file bind mount would keep showing the
+# container the old one.
+- name: Render Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /opt/edge-proxy/caddy/Caddyfile
+    mode: "0644"
+  notify: Reload Caddy
+
+- name: Start Caddy
+  community.docker.docker_compose_v2:
+    project_src: /opt/edge-proxy

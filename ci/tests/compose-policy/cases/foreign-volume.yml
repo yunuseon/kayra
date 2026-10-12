@@ -1,0 +1,3 @@
+# expect: belongs to another project
+services: {x: {image: alpine, volumes: ["data:/data"]}}
+volumes: {data: {name: billing_postgres-data}}

@@ -1,0 +1,121 @@
+---
+# =============================================================================
+# restic-backup role — backs restic_backup.paths up to a restic repository (a
+# REST server, or SFTP with restic_backup.ssh), nightly, from a compose stack in restic_backup.dir. Postgres databases are
+# dumped first. Nothing outside restic_backup.dir is written, and the paths
+# are mounted read-only.
+#
+# By hand, on the server:
+#   docker compose -f <dir>/docker-compose.yml exec backup /etc/backup/backup.sh
+#   docker compose -f <dir>/docker-compose.yml logs backup
+# Restore test: kayra backup test <server> (starts one, follows its log)
+# =============================================================================
+
+- name: Assert every database has a password
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z0-9_]+$')
+      - restic_backup_postgres_passwords[item.name] | default('') | length > 0
+    fail_msg: "postgres dump {{ item.name }}: name must be [a-z0-9_], and restic_backup_postgres_passwords.{{ item.name }} set in secrets.yml"
+    quiet: true
+  loop: "{{ restic_backup.postgres | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Traversable, and log/ readable: the operator follows a restore test over
+# SSH as their own user (kayra backup test). Everything else stays root's.
+- name: Create the backup directory
+  ansible.builtin.file:
+    path: "{{ restic_backup.dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+
+- name: Create backup directories
+  ansible.builtin.file:
+    path: "{{ restic_backup.dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ '0755' if item == 'log' else '0700' }}"
+  loop: [config, cron, dumps, cache, restore-test, ssh, log]
+
+# With databases to dump, Postgres (pg_dump) with restic copied in; without,
+# restic's own image.
+- name: Copy compose file
+  ansible.builtin.copy:
+    src: "{{ 'docker-compose.postgres.yml' if restic_backup.postgres | default([]) else 'docker-compose.yml' }}"
+    dest: "{{ restic_backup.dir }}/docker-compose.yml"
+    mode: "0600"
+
+- name: Render compose override
+  ansible.builtin.template:
+    src: docker-compose.override.yml.j2
+    dest: "{{ restic_backup.dir }}/docker-compose.override.yml"
+    mode: "0600"
+
+- name: Render environment
+  ansible.builtin.template:
+    src: backup.env.j2
+    dest: "{{ restic_backup.dir }}/config/backup.env"
+    mode: "0600"
+  no_log: true
+
+- name: Render scripts
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ restic_backup.dir }}/config/{{ item }}"
+    mode: "0700"
+  loop: [backup.sh, restore-test.sh]
+
+# On the host, not in the container: the operator's SSH user runs it.
+- name: Render the restore test's follower
+  ansible.builtin.template:
+    src: follow-restore-test.sh.j2
+    dest: "{{ restic_backup.dir }}/follow-restore-test.sh"
+    owner: root
+    group: root
+    mode: "0755"
+
+# For an SFTP repository: the target's alias, its pinned host key, our key.
+- name: Render SSH config
+  ansible.builtin.template:
+    src: ssh_config.j2
+    dest: "{{ restic_backup.dir }}/ssh/config"
+    mode: "0600"
+  when: restic_backup.ssh is defined
+
+- name: Pin the target's host key
+  ansible.builtin.copy:
+    content: "{{ restic_backup.ssh.known_host }}\n"
+    dest: "{{ restic_backup.dir }}/ssh/known_hosts"
+    mode: "0600"
+  when: restic_backup.ssh is defined
+
+- name: Install the backup's SSH key
+  ansible.builtin.copy:
+    content: "{{ restic_backup_ssh_key | trim }}\n"
+    dest: "{{ restic_backup.dir }}/ssh/id_ed25519"
+    mode: "0600"
+  when: restic_backup.ssh is defined
+  no_log: true
+
+- name: Render exclude list
+  ansible.builtin.copy:
+    content: "{{ restic_backup.exclude | default([]) | join('\n') }}\n"
+    dest: "{{ restic_backup.dir }}/config/excludes.txt"
+    mode: "0600"
+
+# Into cron/, which is mounted as a directory: a single-file bind mount would
+# keep showing the container the file Ansible just replaced.
+- name: Render crontab
+  ansible.builtin.template:
+    src: root.crontab.j2
+    dest: "{{ restic_backup.dir }}/cron/root"
+    mode: "0600"
+  notify: Restart backup
+
+- name: Start backup stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ restic_backup.dir }}"

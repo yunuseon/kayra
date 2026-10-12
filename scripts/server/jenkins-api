@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# =============================================================================
+# jenkins-api <METHOD> <path> [curl args…] — one authenticated call to the
+# Jenkins API, from inside the controller (admin credentials from its env,
+# CSRF crumb fetched in the same session). Prints the response body.
+#
+#   jenkins-api GET  '/api/json?tree=jobs[name]'
+#   jenkins-api POST /configuration-as-code/reload
+#
+# Installed by the platform role at <platform_dir>/bin.
+# =============================================================================
+set -euo pipefail
+
+method="${1:?Usage: jenkins-api <METHOD> <path> [curl args…]}"
+path="${2:?}"
+shift 2
+
+cd "$(dirname "$0")/.."
+docker compose exec -T jenkins-controller sh -ec '
+    jar=$(mktemp)
+    trap "rm -f $jar" EXIT
+    auth="${JENKINS_ADMIN_USER}:${JENKINS_ADMIN_PASSWORD}"
+    base=http://127.0.0.1:8080
+    crumb=$(curl -sf -c "$jar" -u "$auth" \
+        "$base/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)")
+    method="$1"; path="$2"; shift 2
+    curl -sf -b "$jar" -u "$auth" -H "$crumb" -X "$method" "$base$path" "$@"
+' sh "$method" "$path" "$@"

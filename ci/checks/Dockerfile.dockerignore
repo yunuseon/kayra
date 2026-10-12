@@ -1,0 +1,5 @@
+# The engine as committed: keep out what only exists locally.
+**/node_modules
+**/.terraform
+compose/authelia/secrets
+compose/authelia/users_database.yml

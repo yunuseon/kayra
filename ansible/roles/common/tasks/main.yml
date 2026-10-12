@@ -1,0 +1,100 @@
+---
+# =============================================================================
+# Common role — Base system setup
+# =============================================================================
+
+# A refreshed cache changes nothing on the server: not worth a changed.
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  changed_when: false
+
+- name: Install essential packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - python3
+      # deb822_repository in the docker role needs it on the target.
+      - python3-debian
+    state: present
+  become: true
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+  become: true
+
+- name: Read timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: current_timezone
+  changed_when: false
+
+- name: Set timezone
+  ansible.builtin.command: timedatectl set-timezone {{ timezone | default('Europe/Berlin') }}
+  when: current_timezone.stdout != timezone | default('Europe/Berlin')
+  changed_when: true
+  become: true
+
+- name: Harden SSH
+  ansible.builtin.copy:
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+    # 10- sorts before cloud-init's 50-cloud-init.conf, and sshd keeps the
+    # first value it reads for each keyword.
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    mode: "0644"
+  become: true
+  notify: Restart ssh
+
+# The box runs two JVMs and builds images while serving production. Swap is not
+# a substitute for RAM — it stops the OOM killer picking a random victim
+# (postgres, say) during a Jenkins build.
+- name: Create swapfile
+  ansible.builtin.shell: fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile
+  args:
+    creates: /swapfile
+  become: true
+
+- name: Persist swapfile in fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: "/swapfile none swap sw 0 0"
+    regexp: '^/swapfile\s'
+  become: true
+
+- name: Enable swap
+  ansible.builtin.command: swapon --all
+  changed_when: false
+  become: true
+
+# Prefer reclaiming page cache over swapping; swap here is an emergency
+# backstop, not something we want the kernel reaching for routinely.
+- name: Set vm.swappiness
+  ansible.builtin.copy:
+    content: "vm.swappiness=10\n"
+    dest: /etc/sysctl.d/99-swappiness.conf
+    mode: "0644"
+  become: true
+  notify: Reload sysctl
+
+# Ubuntu's unattended-upgrades installs security fixes but never reboots, so a
+# patched kernel or libc sits unused until someone logs in and notices. Every
+# container is restart: unless-stopped, so a 04:00 reboot costs a minute.
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+  become: true
+
+- name: Reboot after unattended upgrades when required
+  ansible.builtin.copy:
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+    dest: /etc/apt/apt.conf.d/52unattended-reboot
+    mode: "0644"
+  become: true

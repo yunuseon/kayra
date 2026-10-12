@@ -1,0 +1,14 @@
+# BuildKit daemon config.
+#
+# The registry is plain HTTP on the internal docker network and has no TLS
+# anywhere. BuildKit has to be told that explicitly or it tries HTTPS.
+
+[worker.oci]
+  enabled = true
+  # Rootless: no process sandbox, and the rootless worker cannot use overlayfs
+  # on every kernel, so let BuildKit pick a snapshotter it can actually run.
+  max-parallelism = 2
+
+[registry."registry:5000"]
+  http = true
+  insecure = true

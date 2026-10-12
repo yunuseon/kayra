@@ -1,0 +1,12 @@
+# =============================================================================
+# Overlay for a server whose certificates come by DNS-01 (acme_dns in its
+# vars.yml): lego, inside Traefik, reads the zone's token from a file. Added to
+# COMPOSE_FILE only there, so other servers' Traefik stays as it is.
+# =============================================================================
+
+services:
+  traefik:
+    environment:
+      HETZNER_API_TOKEN_FILE: /run/secrets/acme-dns-token
+    volumes:
+      - ./traefik/secrets:/run/secrets:ro

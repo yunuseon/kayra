@@ -1,0 +1,13 @@
+# expect: nothing
+services:
+  x:
+    image: "localhost:5000/demo/web:abc"
+    mem_limit: 256m
+    volumes: ["data:/data"]
+    networks: {public: {aliases: [demo-x]}, private: {}}
+    labels:
+      traefik.http.routers.demo-x.rule: "Host(`www.example.test`) && Path(`/a`)"
+      traefik.http.routers.demo-x.middlewares: "security-headers@file"
+      traefik.http.services.demo-x.loadbalancer.server.port: "3000"
+networks: {public: {name: platform-public, external: true}, private: {}}
+volumes: {data: {}}

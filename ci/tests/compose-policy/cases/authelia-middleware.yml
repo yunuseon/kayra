@@ -1,0 +1,10 @@
+# expect: authelia@file is the platform's login
+services:
+  x:
+    image: "localhost:5000/demo/web:abc"
+    mem_limit: 256m
+    networks: [public]
+    labels:
+      traefik.http.routers.demo-x.rule: "Host(`www.example.test`)"
+      traefik.http.routers.demo-x.middlewares: "demo-auth, authelia@file"
+networks: {public: {name: platform-public, external: true}}

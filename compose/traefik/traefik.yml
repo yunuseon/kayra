@@ -1,0 +1,46 @@
+# Traefik static configuration
+api:
+  dashboard: true
+  # No insecure listener: the dashboard is served through a normal router on
+  # traefik.<DOMAIN>, behind Authelia. See docker-compose.yml.
+  insecure: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: le
+      # Every router, apps included: HSTS on half the hosts protects nothing.
+      middlewares:
+        - security-headers@file
+
+certificatesResolvers:
+  le:
+    acme:
+      # Traefik does not expand env vars in its static file; the platform role
+      # substitutes acme_email on copy. Local dev never registers.
+      email: "acme@example.com"
+      storage: /acme/acme.json
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: platform-public
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: INFO

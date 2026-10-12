@@ -1,0 +1,6 @@
+---
+kind: platform
+target: home
+domain: forge.home.arpa
+vault: true
+vault_password_file: ~/.vault_pass

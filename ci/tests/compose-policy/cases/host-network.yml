@@ -1,0 +1,2 @@
+# expect: network_mode is not allowed
+services: {x: {image: alpine, network_mode: host}}

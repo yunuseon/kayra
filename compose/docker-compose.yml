@@ -1,0 +1,83 @@
+# =============================================================================
+# Platform base — Traefik reverse proxy + shared network
+# App-agnostic: knows nothing about what applications run on this platform.
+# =============================================================================
+
+services:
+  traefik:
+    image: traefik:v3.7.14
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./traefik/certs:/certs:ro
+      - acme-data:/acme
+    networks:
+      - public
+      - internal
+    labels:
+      # The dashboard used to ride on an unauthenticated published :8080.
+      # It speaks no auth of its own, which is exactly what forwardAuth is for.
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=le"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=authelia@file,security-headers@file"
+
+  # ---------------------------------------------------------------------------
+  # Authelia — single sign-on for services that sit behind Traefik.
+  #
+  # Deliberately NOT behind its own authelia@file middleware: that would be an
+  # infinite redirect. The portal has to stay reachable to authenticate anyone.
+  # ---------------------------------------------------------------------------
+  authelia:
+    image: authelia/authelia:4.39.28
+    restart: unless-stopped
+    environment:
+      - X_AUTHELIA_CONFIG=/config/configuration.yml
+      # Authelia does not expand ${VAR}; this filter is what makes
+      # {{ env "DOMAIN" }} work inside configuration.yml.
+      - X_AUTHELIA_CONFIG_FILTERS=template
+      - DOMAIN=${DOMAIN:-localhost}
+      - AUTH_POLICY=${AUTH_POLICY:-two_factor}
+      - AUTHELIA_SESSION_SECRET_FILE=/config/secrets/session
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/config/secrets/storage_encryption
+      # Empty in dev, which falls the notifier back to a file — see
+      # configuration.yml. The SMTP password is NOT an env var; it is read from
+      # /config/secrets/smtp_password by the config template.
+      - SMTP_ADDRESS=${AUTHELIA_SMTP_ADDRESS:-}
+      - SMTP_USERNAME=${AUTHELIA_SMTP_USERNAME:-}
+      - SMTP_SENDER=${AUTHELIA_SMTP_SENDER:-}
+    volumes:
+      - ./authelia:/config:ro
+      - authelia-data:/data
+    mem_limit: 128m
+    networks:
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=platform-internal"
+      - "traefik.http.routers.authelia.rule=Host(`auth.${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls.certresolver=le"
+      - "traefik.http.services.authelia.loadbalancer.server.port=9091"
+
+# Two networks, so an app can reach Traefik's routes and nothing else of the
+# platform. Apps join platform-public; the platform's own services live on
+# platform-internal, where only Traefik joins them.
+networks:
+  public:
+    name: platform-public
+  internal:
+    name: platform-internal
+
+volumes:
+  acme-data:
+  # Passkeys live here. Losing this volume means every credential is gone and
+  # everyone re-enrols — back it up.
+  authelia-data:

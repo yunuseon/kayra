@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# =============================================================================
+# jenkins-reload — re-apply every JCasC fragment in jenkins/casc/ in place.
+#
+# Reload, not restart: Jenkins is shared, and recreating the controller for one
+# config change would kill every app's running builds.
+#
+# Installed by the platform role at <platform_dir>/bin.
+# =============================================================================
+set -euo pipefail
+
+"$(dirname "$0")/jenkins-api" POST /configuration-as-code/reload -o /dev/null

@@ -1,0 +1,2 @@
+# expect: outside the demo/ namespace
+services: {x: {image: "localhost:5000/other/api:abc"}}

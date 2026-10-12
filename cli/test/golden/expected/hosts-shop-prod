@@ -1,0 +1,3 @@
+--- stdout
+hosts: hetzner uses real DNS, nothing to do.
+--- exit 0

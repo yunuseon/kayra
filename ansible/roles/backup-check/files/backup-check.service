@@ -1,0 +1,9 @@
+# Managed by Ansible (backup-check role).
+[Unit]
+Description=Report stale backups as GitHub issues
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/backup-check/bin/backup-check

@@ -1,0 +1,16 @@
+# The platform's checks (linters, validators and CLAUDE.md's rules; see
+# ci/checks/) on every push to any branch. The checks are a Docker build whose
+# last RUN is run.sh --platform; a fleet runs the same image with its own part.
+name: checks
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build --progress plain -f ci/checks/Dockerfile .

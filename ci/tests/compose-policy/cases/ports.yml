@@ -1,0 +1,2 @@
+# expect: ports is not allowed
+services: {x: {image: alpine, ports: ["8080:80"]}}

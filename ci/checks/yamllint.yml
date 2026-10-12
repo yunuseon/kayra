@@ -1,0 +1,17 @@
+# yamllint for the whole repo: syntax and consistency, not style debates.
+extends: default
+# A Go template (Authelia's `template` filter), YAML only once rendered.
+ignore: |
+  **/compose/authelia/configuration.yml
+rules:
+  line-length: disable
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+  # Keys are exempt: a workflow's `on:` is one. Values stay strict.
+  truthy:
+    check-keys: false
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1

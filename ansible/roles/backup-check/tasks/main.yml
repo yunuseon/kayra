@@ -1,0 +1,59 @@
+---
+# =============================================================================
+# backup-check role — hourly, asks each of backup_check.repositories (a restic
+# repository served read-only over HTTPS) for its newest snapshot, and
+# reports one older than stale_after_hours as a GitHub issue, and likewise a
+# failed or overdue restore test (restore_test_max_days). Runs off the
+# backed-up network on purpose: it notices a source that has gone quiet.
+# =============================================================================
+
+- name: Install jq
+  ansible.builtin.apt:
+    name: jq
+
+- name: Create backup check directories
+  ansible.builtin.file:
+    path: "/opt/backup-check/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop: ["", bin, state]
+
+- name: Install GitHub App key
+  ansible.builtin.copy:
+    content: "{{ backup_check_github_app_key }}"
+    dest: /opt/backup-check/github-app.pem
+    mode: "0600"
+  no_log: true
+
+# curl reads the logins from here, so they never show in a process list.
+- name: Render repository logins
+  ansible.builtin.copy:
+    content: |
+      {% for repository in backup_check.repositories %}
+      machine {{ repository.url | urlsplit('hostname') }} login {{ repository.user }} password {{ backup_check_passwords[repository.name] }}
+      {% endfor %}
+    dest: /opt/backup-check/netrc
+    mode: "0600"
+  no_log: true
+
+- name: Render backup check
+  ansible.builtin.template:
+    src: backup-check.sh.j2
+    dest: /opt/backup-check/bin/backup-check
+    mode: "0700"
+
+- name: Install backup check units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [backup-check.service, backup-check.timer]
+
+- name: Enable backup check timer
+  ansible.builtin.systemd:
+    name: backup-check.timer
+    enabled: true
+    state: started
+    daemon_reload: true

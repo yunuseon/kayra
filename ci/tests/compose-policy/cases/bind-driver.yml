@@ -1,0 +1,3 @@
+# expect: driver_opts are not allowed
+services: {x: {image: alpine, volumes: ["data:/data"]}}
+volumes: {data: {driver_opts: {type: none, o: bind, device: /etc}}}

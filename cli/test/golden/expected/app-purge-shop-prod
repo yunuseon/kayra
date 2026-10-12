@@ -1,0 +1,4 @@
+{"argv":["bash","<kayra>/scripts/local/require-main.sh","shop-prod"],"env":{"FLEET_ROOT":"<fleet>"}}
+{"argv":["ansible","servers","-i","<fleet>/servers/shop-prod/inventory.ini","--become","-m","ansible.builtin.command","-a","/opt/platform/bin/app-purge shop"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
+--- stdout
+--- exit 0

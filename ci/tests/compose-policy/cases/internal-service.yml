@@ -1,0 +1,7 @@
+# expect: references an @internal service
+services:
+  x:
+    image: alpine
+    labels:
+      traefik.http.routers.demo-x.rule: "Host(`www.example.test`)"
+      traefik.http.routers.demo-x.service: "api@internal"

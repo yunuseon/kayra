@@ -1,0 +1,74 @@
+---
+# =============================================================================
+# Default variables for the platform role
+# App-agnostic: only knows about infrastructure concerns
+# =============================================================================
+# The server-side contract apps rely on: they drop files into platform_dir and
+# live under apps_dir/<name>. Changing either means changing every app.
+platform_dir: /opt/platform
+apps_dir: /opt/apps
+# Branch of this repo Jenkins loads the pipeline library and platform jobs
+# from. Only a test environment should ever track anything but main.
+platform_ref: main
+domain: localhost
+# The engine's files (compose files, scripts) lie above the playbooks, wherever
+# the fleet it serves is; the fleet's (servers/, .cache/) above the server's
+# folder.
+kayra_root: "{{ playbook_dir }}/../.."
+fleet_root: "{{ server_dir }}/../.."
+
+# Certificates by DNS-01 instead of HTTP-01, for a server the internet never
+# reaches (target home): "hetzner" (the only provider so far), with
+# acme_dns_token, a token of the Hetzner project holding the zone. Traefik then
+# gets a certificate per hostname that way (each router names its resolver,
+# so an entrypoint wildcard would go unused), and no mkcert cert is used.
+acme_dns: ""
+acme_dns_token: ""
+
+# Jenkins
+jenkins_admin_user: admin
+jenkins_admin_password: admin
+
+# Git
+git_remote_url: ""
+git_token: ""
+
+# owner/repo of the repos this server's platform-renovate keeps up to date
+# (weekly version-bump PRs); the job exists only where the list is not empty.
+# renovate_token is a PAT reaching each of them: Contents, Pull requests and
+# Issues (the dependency dashboard) read & write. On a server whose own
+# Forgejo hosts them, forgejo_config.tokens mints it (and git_token) instead.
+renovate_repositories: []
+renovate_token: ""
+# When platform-renovate runs, as a Jenkins cron spec: weekly suits other
+# people's releases; a server whose repos carry the operator's own images
+# runs it more often, so a new build reaches a PR soon after it is pushed.
+renovate_schedule: "H 4 * * 1"
+# Where those repos live: github, or forgejo with renovate_endpoint, its API
+# on platform-internal (http://forgejo:3000/api/v1). With a Forgejo, also
+# renovate_git_url: endpoint, so Renovate clones over that address and not the
+# public one the API reports, and a renovate_host_rules entry allowing it as
+# an internal host.
+renovate_platform: github
+renovate_endpoint: ""
+renovate_git_url: ""
+renovate_host_rules: []
+# Off GitHub, Renovate still looks versions up there (github-releases,
+# github-tags) and refuses to without a token: a fine-grained one with
+# public-repository read access only, no other permissions.
+renovate_github_com_token: ""
+
+# --- Authelia ---------------------------------------------------------------
+# Secrets are per server and belong in servers/<server>/vars.yml (vault for prod).
+authelia_session_secret: ""
+authelia_storage_encryption_key: ""
+# Leave the address empty to fall the notifier back to a file, which is what
+# dev does. Passkey enrolment needs real SMTP; see the runbook.
+authelia_smtp_address: ""
+authelia_smtp_username: ""
+authelia_smtp_sender: ""
+authelia_smtp_password: ""
+authelia_users: {}
+
+# two_factor or one_factor. Lower it per environment, never here.
+authelia_policy: "two_factor"

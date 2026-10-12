@@ -1,0 +1,2 @@
+# expect: no memory limit
+services: {x: {image: alpine}}

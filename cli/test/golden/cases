@@ -1,0 +1,29 @@
+# <case> | <stdin> | <kayra arguments>
+status | | status
+provision-shop-test | | provision shop-test
+provision-shop-prod | | provision shop-prod
+provision-box | | provision box
+provision-forge | | provision forge
+setup-shop-test | | setup shop-test
+setup-shop-prod | | setup shop-prod
+setup-edge | | setup edge
+setup-box | | setup box
+setup-forge | | setup forge
+apps-shop-test | | apps shop-test
+apps-shop-prod | | apps shop-prod
+apps-edge | | apps edge
+apps-forge | | apps forge
+deploy-shop-prod | | deploy shop-prod
+deploy-edge | | deploy edge
+up-shop-test | | up shop-test
+up-forge | | up forge
+hosts-shop-test | | hosts shop-test
+hosts-shop-prod | | hosts shop-prod
+down-shop-test | | down shop-test
+down-shop-prod | shop-prod | down shop-prod
+down-shop-prod-aborted | no | down shop-prod
+adopt-shop-prod | | adopt shop-prod
+app-purge-shop-prod | | app purge shop-prod shop
+backup-test-box | | backup test box
+ssh-forge | | ssh forge
+certs | | certs shop.test www api

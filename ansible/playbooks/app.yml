@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# App Playbook — registers one app with the platform.
+#
+# `app` is the app's entry from servers/<server>/server.yml, as JSON:
+#   {"name": "x", "repo": "https://…", "ref": "main", "path": "."}
+#
+# Usage: kayra apps <server>
+# =============================================================================
+
+- name: Register app
+  hosts: servers
+
+  # git_token: the app's repo is fetched with it.
+  vars_files:
+    - "{{ server_dir }}/../defaults.yml"
+    - "{{ server_dir }}/vars.yml"
+    - "{{ server_dir }}/secrets.yml"
+
+  roles:
+    - app

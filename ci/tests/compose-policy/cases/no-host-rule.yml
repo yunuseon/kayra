@@ -1,0 +1,5 @@
+# expect: rule must name a Host()
+services:
+  x:
+    image: alpine
+    labels: {traefik.http.routers.demo-x.rule: "PathPrefix(`/`)"}

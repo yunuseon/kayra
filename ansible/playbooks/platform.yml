@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# Platform Playbook — app-agnostic infrastructure setup
+#
+# Play 1: Bootstrap — base packages, deploy user, Docker installation.
+#         Run once on a fresh server (idempotent, safe to re-run).
+# Play 2: Platform — Traefik + Jenkins + Registry via docker compose.
+#         Re-run whenever platform config, certs, or Jenkins config changes.
+#
+# The platform lives in /opt/platform and knows no app by name. Apps live in
+# /opt/apps/<name> and register with Jenkins via /opt/platform/bin/jenkins-app-apply.
+#
+# server, server_dir, domain and target are passed via -e. Platform vars
+# (git_token, jenkins_admin_password, etc.) come from servers/<server>/vars.yml.
+#
+# Usage: kayra setup <server>
+# =============================================================================
+
+- name: Bootstrap server
+  hosts: servers
+  become: true
+
+  vars_files:
+    - "{{ server_dir }}/../defaults.yml"
+    - "{{ server_dir }}/vars.yml"
+    - "{{ server_dir }}/secrets.yml"
+
+  roles:
+    - common
+    - docker
+
+  post_tasks:
+    - name: Verify Docker is working
+      ansible.builtin.command: docker info
+      changed_when: false
+
+- name: Deploy platform stack
+  hosts: servers
+
+  vars_files:
+    - "{{ server_dir }}/../defaults.yml"
+    - "{{ server_dir }}/vars.yml"
+    - "{{ server_dir }}/secrets.yml"
+
+  roles:
+    - platform
+    # A server's own stacks (servers/<server>/stacks/), where it has any.
+    - role: compose-stacks
+      become: true
+      when: compose_stacks is defined
+    - role: forgejo-config
+      when: forgejo_config is defined
+
+  post_tasks:
+    - name: Show platform status
+      ansible.builtin.debug:
+        msg: |
+          Platform ready! ({{ server }})
+          Jenkins:   https://jenkins.{{ domain }}
+          Traefik:   https://traefik.{{ domain }}
+
+          Next: `kayra apps {{ server }}` to register this server's apps.

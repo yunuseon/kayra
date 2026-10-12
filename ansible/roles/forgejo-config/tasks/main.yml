@@ -1,0 +1,292 @@
+---
+# =============================================================================
+# forgejo-config role — what a Forgejo holds beyond its own config file, as
+# code: users and their SSH keys, Actions runners, repos (created empty
+# where missing) and their settings (issues, pull requests, actions), Actions
+# secrets, collaborators, webhooks and push mirrors, from
+# forgejo_config in the server's vars.yml. Adds what is missing through the
+# API, adopts what already matches, never deletes. Talks to Forgejo on the
+# server itself (forgejo_config.url) with forgejo_admin_token, and mints the
+# tokens the platform's own services use there (forgejo_config.tokens).
+# =============================================================================
+
+- name: Wait for Forgejo's API
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/version"
+  register: forgejo_version
+  until: forgejo_version.status == 200
+  retries: 30
+  delay: 2
+
+- name: Look up users
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/users/{{ item.name }}"
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    status_code: [200, 404]
+  register: forgejo_users
+  loop: "{{ forgejo_config.users | default([]) }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+# Random password, never stored: these users work with tokens.
+- name: Create missing users
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/admin/users"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body:
+      username: "{{ item.name }}"
+      email: "{{ item.email }}"
+      password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32) }}"
+      must_change_password: false
+    status_code: [201]
+  changed_when: true
+  loop: "{{ forgejo_users.results | selectattr('status', 'eq', 404) | map(attribute='item') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+- name: Look up SSH keys
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/users/{{ item.user }}/keys"
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+  register: forgejo_keys
+  loop: "{{ forgejo_config.ssh_keys | default([]) }}"
+  loop_control: {label: "{{ item.user }} {{ item.title }}"}
+  no_log: true
+
+# Matched by type and key, whatever title or comment either side carries.
+- name: Add missing SSH keys
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/admin/users/{{ item.item.user }}/keys"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body: {title: "{{ item.item.title }}", key: "{{ item.item.key }}", read_only: false}
+    status_code: [201]
+  changed_when: true
+  when: >-
+    (item.item.key.split()[:2] | join(' ')) not in
+    (item.json | map(attribute='key') | map('split') | map('batch', 2) | map('first') | map('join', ' ') | list)
+  loop: "{{ forgejo_keys.results }}"
+  loop_control: {label: "{{ item.item.user }} {{ item.item.title }}"}
+  no_log: true
+
+# Idempotent with the same secret; the runner side registers itself with it.
+# --keep-labels: the runner declares its labels when it starts, and a
+# register without it replaces them with none, so no job finds a runner
+# until the runner restarts.
+- name: Register runners
+  ansible.builtin.command:
+    argv: [docker, exec, -i, "{{ forgejo_config.container }}", forgejo, forgejo-cli, actions, register,
+           --secret-file, /dev/stdin, --name, "{{ item.name }}", --scope, "{{ item.scope }}", --keep-labels]
+    stdin: "{{ forgejo_runner_secrets[item.name] }}"
+    # Exactly 40 characters: a trailing newline would be a 41st.
+    stdin_add_newline: false
+  changed_when: false
+  loop: "{{ forgejo_config.runners | default([]) }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+- name: Look up repos
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.name }}"
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    status_code: [200, 404]
+  register: forgejo_repos
+  loop: "{{ forgejo_config.repos }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+# Empty, and private from the start where its settings say so (the settings
+# are applied below too, but a public repo, even for a moment, is published);
+# the content is pushed by hand.
+- name: Create missing repos
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/admin/users/{{ item.name.split('/')[0] }}/repos"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body:
+      name: "{{ item.name.split('/')[1] }}"
+      private: "{{ item.settings.private | default(false) }}"
+    status_code: [201]
+  changed_when: true
+  loop: "{{ forgejo_repos.results | selectattr('status', 'eq', 404) | map(attribute='item') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+- name: Look up collaborator permissions
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.0.name }}/collaborators/{{ item.1.user }}/permission"
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    status_code: [200, 403, 404]
+  register: forgejo_permissions
+  loop: "{{ forgejo_config.repos | subelements('collaborators', skip_missing=True) }}"
+  loop_control: {label: "{{ item.0.name }} {{ item.1.user }}"}
+  no_log: true
+
+- name: Grant collaborators their permission
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.item.0.name }}/collaborators/{{ item.item.1.user }}"
+    method: PUT
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body: {permission: "{{ item.item.1.permission }}"}
+    status_code: [204]
+  changed_when: true
+  when: item.status != 200 or item.json.permission != item.item.1.permission
+  loop: "{{ forgejo_permissions.results }}"
+  loop_control: {label: "{{ item.item.0.name }} {{ item.item.1.user }}"}
+  no_log: true
+
+# A converted mirror keeps issues and pull requests off.
+- name: Apply repo settings
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.item.name }}"
+    method: PATCH
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body: "{{ item.item.settings }}"
+  changed_when: true
+  # Differs if laying the wanted settings over the repo changes anything.
+  when: item.json | combine(item.item.settings) != item.json
+  loop: "{{ forgejo_repos.results | selectattr('item.settings', 'defined') | list }}"
+  loop_control: {label: "{{ item.item.name }}"}
+  no_log: true
+
+# Write-only in Forgejo, so no comparing: the same value every run.
+- name: Set Actions secrets
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.repo }}/actions/secrets/{{ item.name }}"
+    method: PUT
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body: {data: "{{ item.value }}"}
+    status_code: [201, 204]
+  changed_when: false
+  loop: "{{ forgejo_action_secrets | default([]) }}"
+  loop_control: {label: "{{ item.repo }} {{ item.name }}"}
+  no_log: true
+
+- name: Look up webhooks and push mirrors
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.0.name }}/{{ item.1 }}"
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+  register: forgejo_existing
+  loop: "{{ forgejo_config.repos | product(['hooks', 'push_mirrors']) | list }}"
+  loop_control: {label: "{{ item.0.name }} {{ item.1 }}"}
+  no_log: true
+
+# A push to any branch calls the URL (with notifyCommit: Jenkins polls).
+- name: Add missing webhooks
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.0.name }}/hooks"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body:
+      type: forgejo
+      active: true
+      events: [push]
+      branch_filter: "*"
+      config: {url: "{{ item.1 }}", content_type: json, http_method: post}
+    status_code: [201]
+  changed_when: true
+  when: >-
+    item.1 not in (forgejo_existing.results
+      | selectattr('item.0.name', 'eq', item.0.name) | selectattr('item.1', 'eq', 'hooks')
+      | first).json | map(attribute='config.url') | list
+  loop: "{{ forgejo_config.repos | subelements('webhooks', skip_missing=True) }}"
+  loop_control: {label: "{{ item.0.name }} {{ item.1 }}"}
+  no_log: true
+
+- name: Add missing push mirrors
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.name }}/push_mirrors"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body:
+      remote_address: "{{ item.push_mirror }}"
+      remote_username: "{{ forgejo_push_mirror_credentials.username }}"
+      remote_password: "{{ forgejo_push_mirror_credentials.password }}"
+      sync_on_commit: true
+      interval: 8h0m0s
+    status_code: [200, 201]
+  changed_when: true
+  register: forgejo_new_mirrors
+  when: >-
+    item.push_mirror is defined and item.push_mirror not in (forgejo_existing.results
+      | selectattr('item.0.name', 'eq', item.name) | selectattr('item.1', 'eq', 'push_mirrors')
+      | first).json | map(attribute='remote_address') | list
+  loop: "{{ forgejo_config.repos }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+# A new push mirror would wait for the next push or its interval.
+- name: Sync new push mirrors once
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.item.name }}/push_mirrors-sync"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+  changed_when: true
+  when: item is changed
+  loop: "{{ forgejo_new_mirrors.results }}"
+  loop_control: {label: "{{ item.item.name }}"}
+  no_log: true
+
+# Tokens for the platform's services on this server (Jenkins, Renovate), into
+# the files the platform role would otherwise fill from the vault. Nobody ever
+# sees one: kept only in that file, minted again when it is missing, wrong or
+# revoked. Unique names, since the admin token cannot delete a user's tokens.
+- name: Read service tokens
+  ansible.builtin.slurp:
+    src: "{{ platform_dir }}/platform-secrets/{{ item.secret }}"
+  register: service_token_files
+  loop: "{{ forgejo_config.tokens | default([]) }}"
+  loop_control: {label: "{{ item.secret }}"}
+  become: true
+  no_log: true
+
+- name: Check service tokens
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/user"
+    headers: {Authorization: "token {{ item.content | b64decode | trim }}"}
+    status_code: [200, 400, 401, 403]
+  register: service_token_checks
+  loop: "{{ service_token_files.results }}"
+  loop_control: {label: "{{ item.item.secret }}"}
+  no_log: true
+
+- name: Mint service tokens
+  ansible.builtin.command:
+    argv: [docker, exec, "{{ forgejo_config.container }}", forgejo, admin, user, generate-access-token,
+           --username, "{{ item.item.item.user }}",
+           --token-name, "{{ item.item.item.name }}-{{ now(utc=true, fmt='%Y%m%d%H%M') }}",
+           --scopes, "{{ (item.item.item.scopes + ['read:user']) | unique | join(',') }}", --raw]
+  register: service_tokens_minted
+  changed_when: true
+  when: item.status != 200 or item.json.login != item.item.item.user
+  loop: "{{ service_token_checks.results }}"
+  loop_control: {label: "{{ item.item.item.secret }}"}
+  no_log: true
+
+- name: Store service tokens
+  ansible.builtin.copy:
+    content: "{{ item.stdout | trim }}"
+    dest: "{{ platform_dir }}/platform-secrets/{{ item.item.item.item.secret }}"
+    owner: "1000"
+    group: "1000"
+    mode: "0400"
+  when: item is changed
+  loop: "{{ service_tokens_minted.results }}"
+  loop_control: {label: "{{ item.item.item.item.secret }}"}
+  become: true
+  no_log: true
+
+- name: Reload JCasC with the new tokens
+  ansible.builtin.command: "{{ platform_dir }}/bin/jenkins-reload"
+  when: service_tokens_minted is changed
+  become: true
+  changed_when: true

@@ -1,0 +1,298 @@
+---
+# =============================================================================
+# Platform role — Traefik, Authelia, Registry, BuildKit and Jenkins as compose
+# project "platform" in {{ platform_dir }}. App-agnostic.
+#
+# {{ platform_dir }}/.env sets COMPOSE_FILE, so on the server every compose
+# command is just `docker compose ...` run in {{ platform_dir }}.
+# =============================================================================
+
+- name: Check Renovate has a token
+  ansible.builtin.assert:
+    that: renovate_token | length > 0 or 'RENOVATE_TOKEN' in (forgejo_config.tokens | default([]) | map(attribute='secret'))
+    fail_msg: renovate_repositories is set, so renovate_token must be set in servers/{{ server }}/secrets.yml
+  when: renovate_repositories | length > 0
+
+- name: Create platform directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: deploy
+    group: deploy
+    mode: "0755"
+  loop:
+    - "{{ apps_dir }}"
+    - "{{ platform_dir }}"
+    - "{{ platform_dir }}/traefik/dynamic"
+    - "{{ platform_dir }}/traefik/certs"
+    - "{{ platform_dir }}/authelia/secrets"
+  become: true
+
+# Written by bin/jenkins-app-apply as root and chowned per app to the
+# controller's uid, so the directory itself stays root's.
+- name: Create Jenkins app secrets directory
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/jenkins-secrets"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+# buildkit/ matters more than it looks: without buildkitd.toml the bind mount
+# has no source, Docker creates a directory in its place, and buildkitd
+# crash-loops until the container is recreated.
+- name: Copy platform files
+  ansible.builtin.copy:
+    src: "{{ kayra_root }}/compose/{{ item }}"
+    dest: "{{ platform_dir }}/{{ item }}"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  loop:
+    - docker-compose.yml
+    - docker-compose.ci.yml
+    - docker-compose.acme-dns.yml
+    - traefik/dynamic/
+    - authelia/configuration.yml
+    - jenkins/
+    - jenkins-agent/
+    - buildkit/
+  become: true
+  register: platform_files
+
+# Apps register with Jenkins through these, never by touching the controller.
+- name: Install platform scripts
+  ansible.builtin.copy:
+    src: "{{ kayra_root }}/scripts/server/"
+    dest: "{{ platform_dir }}/bin/"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Render Traefik static config
+  ansible.builtin.copy:
+    content: "{{ (traefik_static_dns if acme_dns else traefik_static) ~ '\n' }}"
+    dest: "{{ platform_dir }}/traefik/traefik.yml"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  vars:
+    # Traefik does not expand env vars in its static file.
+    traefik_static: "{{ lookup('file', kayra_root ~ '/compose/traefik/traefik.yml') | regex_replace('(?m)^(\\s+email:).*$', '\\1 \"' ~ acme_email ~ '\"') }}"
+    # DNS-01: the challenge instead of HTTP-01, checked with public resolvers
+    # (a home server's own DNS may answer its zone itself), a minute after the
+    # record is set: Hetzner's three nameservers take that long to agree, and
+    # Let's Encrypt asks more than one.
+    traefik_static_dns: >-
+      {{ traefik_static | from_yaml
+         | combine({'certificatesResolvers': {'le': {'acme': {
+             'email': acme_email, 'storage': '/acme/acme.json',
+             'dnsChallenge': {'provider': acme_dns, 'resolvers': ['8.8.8.8:53', '9.9.9.9:53'],
+                              'propagation': {'delayBeforeChecks': '60s'}}}}}})
+         | to_nice_yaml(indent=2) }}
+  become: true
+  register: traefik_static_config
+
+# Vault values rendered to files rather than .env lines, which Authelia reads
+# via *_FILE. Authelia never writes the user database back — password change
+# and reset are disabled — so rendering it every run is safe.
+- name: Render Authelia user database
+  ansible.builtin.template:
+    src: authelia-users.yml.j2
+    dest: "{{ platform_dir }}/authelia/users_database.yml"
+    owner: deploy
+    group: deploy
+    mode: "0600"
+  become: true
+
+- name: Render Authelia secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ platform_dir }}/authelia/secrets/{{ item.name }}"
+    owner: deploy
+    group: deploy
+    mode: "0600"
+  loop:
+    - { name: session, value: "{{ authelia_session_secret }}" }
+    - { name: storage_encryption, value: "{{ authelia_storage_encryption_key }}" }
+    - { name: smtp_password, value: "{{ authelia_smtp_password }}" }
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name != 'smtp_password' or authelia_smtp_address | length > 0
+  no_log: true
+  become: true
+
+# Servers not on the internet (multipass, home) without acme_dns. Elsewhere
+# Traefik's ACME resolver issues the certs, and it skips ACME for any hostname
+# a file-provided cert already covers — a stray mkcert cert would be served
+# as-is, hence removed below.
+- name: Copy mkcert TLS cert + key
+  ansible.builtin.copy:
+    src: "{{ fleet_root }}/.cache/certs/{{ item.name }}"
+    dest: "{{ platform_dir }}/traefik/certs/{{ item.name }}"
+    owner: deploy
+    group: deploy
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: cert.pem, mode: "0644" }
+    - { name: key.pem, mode: "0600" }
+  when: target != 'hetzner' and not acme_dns
+  become: true
+
+- name: Remove a mkcert cert where DNS-01 issues them
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/traefik/certs/{{ item }}"
+    state: absent
+  loop: [cert.pem, key.pem]
+  when: acme_dns | length > 0
+  become: true
+
+# Read by lego through HETZNER_API_TOKEN_FILE (docker-compose.acme-dns.yml).
+- name: Create the DNS-01 token directory
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/traefik/secrets"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: acme_dns | length > 0
+  become: true
+
+- name: Render the DNS-01 token
+  ansible.builtin.copy:
+    content: "{{ acme_dns_token }}"
+    dest: "{{ platform_dir }}/traefik/secrets/acme-dns-token"
+    owner: root
+    group: root
+    mode: "0600"
+  when: acme_dns | length > 0
+  no_log: true
+  become: true
+
+- name: Look up the docker group
+  ansible.builtin.getent:
+    database: group
+    key: docker
+
+# Read by the controller as uid 1000. An empty var leaves the file as it is:
+# on a server whose Forgejo mints them (forgejo_config.tokens), that role
+# writes them.
+- name: Create platform secrets directory
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/platform-secrets"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0500"
+  become: true
+
+- name: Render platform tokens
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ platform_dir }}/platform-secrets/{{ item.name }}"
+    owner: "1000"
+    group: "1000"
+    mode: "0400"
+    force: "{{ item.value | length > 0 }}"
+  loop:
+    - {name: GIT_TOKEN, value: "{{ git_token }}"}
+    - {name: RENOVATE_TOKEN, value: "{{ renovate_token }}"}
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+  become: true
+  register: platform_tokens
+
+- name: Render platform .env
+  ansible.builtin.template:
+    src: platform.env.j2
+    dest: "{{ platform_dir }}/.env"
+    owner: deploy
+    group: deploy
+    mode: "0600"
+  become: true
+
+# The registry used to have a public, basic-auth router. Nothing outside the
+# server pushes or pulls, so it is gone; the copy above never deletes files.
+- name: Remove the retired registry basic auth
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/traefik/dynamic/{{ item }}"
+    state: absent
+  loop: [registry-auth.yml, registry-htpasswd]
+  become: true
+
+# ---------------------------------------------------------------------------
+# Start. `up` recreates any container whose interpolated config changed, so
+# a changed .env needs nothing extra.
+# ---------------------------------------------------------------------------
+- name: Pull platform images
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ platform_dir }}"
+    ignore_buildable: true
+
+- name: Start platform
+  community.docker.docker_compose_v2:
+    project_src: "{{ platform_dir }}"
+    build: always
+
+# Only dynamic/ is watched; the static file is read once at startup.
+- name: Restart Traefik when its static config changed
+  ansible.builtin.command: docker compose restart traefik
+  args:
+    chdir: "{{ platform_dir }}"
+  when: traefik_static_config is changed
+  changed_when: true
+
+# Inside the controller, not through Traefik: jenkins.<domain> sits behind
+# Authelia, which would answer every call here with a login redirect.
+- name: Wait for Jenkins
+  ansible.builtin.command: docker compose exec -T jenkins-controller curl -sf -o /dev/null http://127.0.0.1:8080/login
+  args:
+    chdir: "{{ platform_dir }}"
+  register: jenkins_health
+  retries: 30
+  delay: 10
+  until: jenkins_health.rc == 0
+  changed_when: false
+
+# casc/ is a bind mount, so a changed 00-platform.yaml only takes effect on
+# a reload; so do new tokens, read from files by ${readFile:…}.
+- name: Reload JCasC
+  ansible.builtin.command: "{{ platform_dir }}/bin/jenkins-reload"
+  when: >-
+    platform_files.results | selectattr('item', 'equalto', 'jenkins/') | selectattr('changed') | list | length > 0
+    or platform_tokens is changed
+  become: true
+  changed_when: true
+
+# ---------------------------------------------------------------------------
+# Agent secret. Fetched every run and kept in its own file: it is derived
+# from Jenkins' own state, so it has no var source, and re-rendering .env must
+# never be able to blank it. Refetching also heals a reset jenkins_home.
+# ---------------------------------------------------------------------------
+- name: Fetch Jenkins agent secret
+  ansible.builtin.command: "{{ platform_dir }}/bin/jenkins-api GET /computer/builder/jenkins-agent.jnlp"
+  register: agent_jnlp
+  no_log: true
+  changed_when: false
+  check_mode: false
+
+- name: Write Jenkins agent secret
+  ansible.builtin.copy:
+    content: "JENKINS_SECRET={{ agent_jnlp.stdout | regex_findall('<argument>([a-f0-9]{64})</argument>') | first }}\n"
+    dest: "{{ platform_dir }}/jenkins-agent.env"
+    owner: deploy
+    group: deploy
+    mode: "0600"
+  no_log: true
+  become: true
+  register: agent_secret
+
+- name: Recreate Jenkins agent with its secret
+  ansible.builtin.command: docker compose up -d --no-deps --force-recreate jenkins-agent
+  args:
+    chdir: "{{ platform_dir }}"
+  when: agent_secret is changed
+  changed_when: true

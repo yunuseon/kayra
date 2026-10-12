@@ -1,0 +1,5 @@
+# expect: only Host() rules are allowed
+services:
+  x:
+    image: alpine
+    labels: {traefik.http.routers.demo-x.rule: "HostRegexp(`.+`)"}

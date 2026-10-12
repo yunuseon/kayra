@@ -1,0 +1,107 @@
+---
+# =============================================================================
+# App role — the same for every app. Reads the app's app.yml and the
+# operator's values for it, servers/<server>/apps/<app>.yml (config,
+# plaintext) and <app>.secrets.yml (secrets, vault on real servers), and
+# registers the app:
+#   {{ apps_dir }}/<app>/.env                 operator config for compose
+#   {{ platform_dir }}/jenkins/casc/10-<app>.yaml   folder, jobs, credentials
+#   jenkins-app-apply                          secrets + JCasC reload
+#
+# Compose files are not copied: the deploy takes them from the commit it
+# deploys. Nothing here is specific to any app.
+# =============================================================================
+
+# With the token Jenkins clones with, not the operator's git credentials: a
+# token that cannot read the app fails here, at registration, rather than at
+# its first build. Sent as a header via the environment, so it is neither in
+# the clone's config nor in the process list (Ansible prints the environment
+# only at -vvv).
+- name: Fetch app from its repository
+  ansible.builtin.git:
+    repo: "{{ app.repo }}"
+    version: "{{ app.ref | default('main') }}"
+    dest: "{{ fleet_root }}/.cache/apps/{{ app.name }}"
+    depth: 1
+    force: true
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: http.extraHeader
+    GIT_CONFIG_VALUE_0: "Authorization: Basic {{ ('x-access-token:' ~ git_token) | b64encode }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Resolve app source
+  ansible.builtin.set_fact:
+    app_root: "{{ fleet_root }}/.cache/apps/{{ app.name }}/{{ app.path | default('.') }}"
+    app_repo: "{{ app.repo }}"
+    app_ref: "{{ app.ref | default('main') }}"
+
+- name: Read app.yml
+  ansible.builtin.include_vars:
+    file: "{{ app_root }}/app.yml"
+    name: manifest
+
+# Either file may be missing: an app without config or without secrets.
+- name: Read the operator's values for this app
+  ansible.builtin.include_vars:
+    file: "{{ server_dir }}/apps/{{ app.name }}{{ item.suffix }}"
+    name: "{{ item.name }}"
+  when: (server_dir ~ '/apps/' ~ app.name ~ item.suffix) is file
+  loop:
+    - {name: app_config, suffix: .yml}
+    - {name: app_secrets, suffix: .secrets.yml}
+  loop_control: {label: "{{ app.name }}{{ item.suffix }}"}
+
+- name: Check the app against the platform
+  ansible.builtin.assert:
+    that:
+      - manifest.name == app.name
+      - missing_secrets | length == 0
+      - missing_config | length == 0
+      - reserved_subdomains | length == 0
+    fail_msg: >-
+      {{ app.name }}: app.yml name={{ manifest.name }};
+      missing config {{ missing_config }} in servers/{{ server }}/apps/{{ app.name }}.yml,
+      missing secrets {{ missing_secrets }} in servers/{{ server }}/apps/{{ app.name }}.secrets.yml;
+      subdomains reserved by the platform {{ reserved_subdomains }}
+    quiet: true
+  vars:
+    missing_secrets: "{{ manifest.secrets | default([]) | difference(app_secrets | default({}) | list) }}"
+    missing_config: "{{ manifest.config | default([]) | difference(app_config | default({}) | list) }}"
+    reserved_subdomains: "{{ manifest.subdomains | intersect(lookup('file', kayra_root ~ '/hosts.conf').splitlines() | reject('match', '^\\s*(#|$)') | list) }}"
+
+- name: Create app directory
+  ansible.builtin.file:
+    path: "{{ apps_dir }}/{{ app.name }}"
+    state: directory
+    owner: deploy
+    group: deploy
+    mode: "0755"
+  become: true
+
+- name: Render app .env
+  ansible.builtin.template:
+    src: app.env.j2
+    dest: "{{ apps_dir }}/{{ app.name }}/.env"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  become: true
+
+- name: Render the app's JCasC fragment
+  ansible.builtin.template:
+    src: casc-app.yaml.j2
+    dest: "{{ platform_dir }}/jenkins/casc/10-{{ app.name }}.yaml"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  become: true
+
+- name: Apply secrets and reload Jenkins
+  ansible.builtin.command:
+    cmd: "{{ platform_dir }}/bin/jenkins-app-apply {{ app.name }}"
+    stdin: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secrets[key] }}\n{% endfor %}"
+  no_log: true
+  become: true
+  changed_when: true

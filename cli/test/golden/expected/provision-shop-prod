@@ -1,0 +1,5 @@
+{"argv":["bash","<kayra>/scripts/local/require-main.sh","shop-prod"],"env":{"FLEET_ROOT":"<fleet>"}}
+{"argv":["tofu","-chdir=<fleet>/servers/shop-prod/terraform","init","-input=false"]}
+{"argv":["tofu","-chdir=<fleet>/servers/shop-prod/terraform","apply","-auto-approve"]}
+--- stdout
+--- exit 0

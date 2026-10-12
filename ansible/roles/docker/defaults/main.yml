@@ -1,0 +1,3 @@
+---
+# apt version pattern for docker-ce/docker-ce-cli: a major, held.
+docker_version: "5:29*"

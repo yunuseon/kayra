@@ -1,0 +1,18 @@
+# Dynamic Traefik configuration — Authelia forward authentication.
+# Referenced from router labels as `authelia@file`.
+http:
+  middlewares:
+    authelia:
+      forwardAuth:
+        address: 'http://authelia:9091/api/authz/forward-auth'
+        # Safe because neither entrypoint in traefik.yml sets
+        # forwardedHeaders.trustedIPs, so Traefik overwrites any client-supplied
+        # X-Forwarded-* before this middleware runs. Do not add trustedIPs.
+        trustForwardHeader: true
+        # The regex form strips every matching header from the inbound request
+        # before copying Authelia's back, closing the gap where Authelia
+        # returns no value for one of them and a client-supplied one survives.
+        authResponseHeadersRegex: '^Remote-(User|Groups|Email|Name)$'
+        # Traefik warns on every request without this. Authelia's auth
+        # responses are small; an unbounded body is a memory-exhaustion vector.
+        maxResponseBodySize: 8192

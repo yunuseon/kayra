@@ -1,0 +1,5 @@
+# expect: HTTP routers only
+services:
+  x:
+    image: alpine
+    labels: {traefik.tcp.routers.demo-x.rule: "HostSNI(`*`)"}

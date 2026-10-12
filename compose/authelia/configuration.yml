@@ -1,0 +1,138 @@
+# =============================================================================
+# Authelia — login for the platform's own pages (Jenkins, Traefik's
+# dashboard). Apps bring their own login; their users never live here.
+#
+# Authelia does NOT expand ${VAR} the way docker compose does. Interpolation here
+# comes from the `template` config filter (X_AUTHELIA_CONFIG_FILTERS=template),
+# which is Go templating: {{ env "DOMAIN" }}.
+#
+# Secrets are never in this file — they arrive as AUTHELIA_*_FILE env vars.
+# =============================================================================
+
+theme: 'auto'
+
+server:
+  address: 'tcp://0.0.0.0:9091/'
+
+log:
+  level: 'info'
+  format: 'text'
+
+# Passkeys are the point of this setup; TOTP and Duo would only be extra
+# surface to configure and explain.
+totp:
+  disable: true
+duo_api:
+  disable: true
+
+webauthn:
+  disable: false
+  enable_passkey_login: true
+  # A passkey assertion carrying the user-verification flag satisfies the
+  # two_factor policy on its own, so login is one Touch ID prompt rather than
+  # password-then-passkey. A stolen bootstrap password alone reaches nothing.
+  experimental_enable_passkey_uv_two_factors: true
+  display_name: '{{ env "DOMAIN" }}'
+  attestation_conveyance_preference: 'indirect'
+  timeout: '60 seconds'
+  selection_criteria:
+    attachment: ''
+    discoverability: 'required'
+    # 'required', not the default 'preferred': with 'preferred' an authenticator
+    # may omit the user-verification flag, and the user is then stuck unable to
+    # satisfy a two_factor policy.
+    user_verification: 'required'
+
+identity_validation:
+  elevated_session:
+    code_lifespan: '5 minutes'
+    elevation_lifespan: '10 minutes'
+    characters: 8
+    require_second_factor: false
+    # Once someone has one passkey, registering a second skips the one-time
+    # code entirely.
+    skip_second_factor: true
+
+authentication_backend:
+  refresh_interval: 'always'
+  # Both disabled so Authelia never writes back to users_database.yml. That
+  # file is rendered from vault on every platform run and would otherwise be
+  # silently reverted.
+  password_reset:
+    disable: true
+  password_change:
+    disable: true
+  file:
+    path: '/config/users_database.yml'
+    watch: true
+    search:
+      email: true
+      case_insensitive: true
+    password:
+      algorithm: 'argon2'
+      argon2:
+        variant: 'argon2id'
+        iterations: 3
+        # KiB, allocated per concurrent hash. The default 64 MiB is too fat for
+        # a 4 GB box with no headroom; 32 MiB is still strong for a credential
+        # used once per person, at enrolment.
+        memory: 32768
+        parallelism: 2
+        key_length: 32
+        salt_length: 16
+
+# AUTH_POLICY is always set by the platform role (default two_factor); test
+# lowers it to one_factor so staging does not need passkey enrolment.
+access_control:
+  default_policy: 'deny'
+  rules:
+    - domain: 'jenkins.{{ env "DOMAIN" }}'
+      policy: '{{ env "AUTH_POLICY" }}'
+      subject:
+        - 'group:admin'
+    - domain: 'traefik.{{ env "DOMAIN" }}'
+      policy: '{{ env "AUTH_POLICY" }}'
+      subject:
+        - 'group:admin'
+
+session:
+  name: 'authelia_session'
+  same_site: 'lax'
+  # A working day of idle time. Shorter is tempting, but a session that dies
+  # mid-form turns the next POST into a 302 to the portal and the body is lost.
+  inactivity: '8 hours'
+  expiration: '1 day'
+  remember_me: '1 week'
+  cookies:
+      # The apex, not auth.<DOMAIN> — the cookie has to reach jenkins.<DOMAIN>
+      # and traefik.<DOMAIN> too. Authelia requires this to be a suffix of (or equal to) authelia_url.
+    - domain: '{{ env "DOMAIN" }}'
+      authelia_url: 'https://auth.{{ env "DOMAIN" }}'
+
+regulation:
+  max_retries: 3
+  find_time: '2 minutes'
+  ban_time: '5 minutes'
+
+storage:
+  local:
+    path: '/data/db.sqlite3'
+
+# SMTP when it is configured, otherwise write to a file. The notifier is only
+# used for the one-time code at passkey enrolment, so the file fallback keeps
+# dev working without an external dependency.
+notifier:
+  disable_startup_check: false
+{{- if env "SMTP_ADDRESS" }}
+  smtp:
+    address: '{{ env "SMTP_ADDRESS" }}'
+    username: '{{ env "SMTP_USERNAME" }}'
+    sender: '{{ env "SMTP_SENDER" }}'
+    # In the template rather than an env var on purpose: an empty
+    # AUTHELIA_NOTIFIER_SMTP_PASSWORD still creates notifier.smtp, and Authelia
+    # then refuses to start with both notifiers configured.
+    password: {{ secret "/config/secrets/smtp_password" | msquote }}
+{{- else }}
+  filesystem:
+    filename: '/data/notification.txt'
+{{- end }}

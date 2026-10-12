@@ -1,0 +1,5 @@
+# expect: Traefik names must start with demo-
+services:
+  x:
+    image: alpine
+    labels: {traefik.http.routers.api.rule: "Host(`www.example.test`)"}

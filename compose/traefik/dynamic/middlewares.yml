@@ -1,0 +1,14 @@
+# Dynamic Traefik configuration — middlewares
+http:
+  middlewares:
+    # Security headers for all services
+    security-headers:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        sslRedirect: false
+        customFrameOptionsValue: "SAMEORIGIN"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        referrerPolicy: "strict-origin-when-cross-origin"

@@ -1,0 +1,2 @@
+# expect: bind mount /var/run/docker.sock
+services: {x: {image: alpine, volumes: ["/var/run/docker.sock:/var/run/docker.sock"]}}

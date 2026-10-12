@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# NAS playbook — a storage box whose OS belongs to its vendor (UGOS). Nothing
+# here touches the OS: no packages, users or system config, which an update
+# could reset. Everything runs as containers from files below nas_root, and
+# the play stops before any change if a path it writes lies outside. What it
+# backs up may lie anywhere: mounted read-only, and only if it already exists.
+#
+# Usage: kayra setup <server>  (for servers with kind: nas)
+# =============================================================================
+
+- name: NAS
+  hosts: servers
+  become: true
+
+  vars_files:
+    - "{{ server_dir }}/../defaults.yml"
+    - "{{ server_dir }}/vars.yml"
+    - "{{ server_dir }}/secrets.yml"
+
+  pre_tasks:
+    - name: Write only inside nas_root
+      ansible.builtin.assert:
+        that: item is match('^' ~ nas_root ~ '/') and '/../' not in item ~ '/'
+        fail_msg: "{{ item }} lies outside {{ nas_root }}"
+        quiet: true
+      loop: "{{ [restic_backup.dir, compose_stacks.dir] }}"
+
+    # Docker creates a missing bind-mount source, a write wherever it points.
+    - name: Find the backed-up paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: backed_up
+      loop: "{{ restic_backup.paths }}"
+
+    - name: Back up only paths that exist
+      ansible.builtin.assert:
+        that: item.stat.isdir | default(false) and '/../' not in item.item ~ '/'
+        fail_msg: "{{ item.item }} is not an existing directory"
+        quiet: true
+      loop: "{{ backed_up.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+  roles:
+    - restic-backup
+    - compose-stacks

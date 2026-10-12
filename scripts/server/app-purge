@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# =============================================================================
+# app-purge <app> — delete a removed app's Docker volumes, i.e. its data.
+#
+# Refuses while the app is still registered here: purging is the second,
+# deliberate step after `app-remove`, never a way around it.
+#
+# Installed by the platform role at <platform_dir>/bin. Run as root.
+# =============================================================================
+set -euo pipefail
+
+app="${1:?Usage: app-purge <app>}"
+platform_dir="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ -e "${platform_dir}/jenkins/casc/10-${app}.yaml" ]; then
+    echo "ERROR: ${app} is still registered on this server — remove it from server.yml and run \`kayra apps <server>\` first." >&2
+    exit 1
+fi
+volumes=$(docker volume ls -q --filter "label=com.docker.compose.project=${app}")
+if [ -z "$volumes" ]; then
+    echo "No volumes left for ${app}."
+    exit 0
+fi
+# Word-splitting on purpose: one volume name per line, none contain spaces.
+# shellcheck disable=SC2086
+docker volume rm $volumes

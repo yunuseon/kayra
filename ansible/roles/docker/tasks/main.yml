@@ -1,0 +1,82 @@
+---
+# =============================================================================
+# Docker role — Install Docker CE + Compose plugin
+# =============================================================================
+
+- name: Add Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: stable
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+  become: true
+
+# Pinned to a major and held, so no apt upgrade, unattended or manual, moves
+# it; a new major is a tested change of docker_version.
+- name: Install Docker CE {{ docker_version }}
+  ansible.builtin.apt:
+    name:
+      - docker-ce={{ docker_version }}
+      - docker-ce-cli={{ docker_version }}
+      - containerd.io
+      - docker-compose-plugin
+    update_cache: true
+    allow_change_held_packages: true
+  become: true
+
+- name: Hold Docker
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [docker-ce, docker-ce-cli]
+  become: true
+
+# Unrotated json-file logs grow until the disk is full. `local` is compressed
+# and rotated; it applies to containers created after the change.
+- name: Configure the Docker daemon
+  ansible.builtin.copy:
+    content: "{{ {'log-driver': 'local', 'log-opts': {'max-size': '10m', 'max-file': '3'}} | to_nice_json }}\n"
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Restart Docker
+
+# Now, not at the end of the play: in a single-play playbook (edge) the
+# containers started later in the play would otherwise be created before the
+# daemon picks up its config, and keep the old log driver.
+- name: Apply the daemon config before any container starts
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure Docker is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+  become: true
+
+- name: Add deploy user to docker group
+  ansible.builtin.user:
+    name: deploy
+    groups: docker
+    append: true
+  become: true
+
+# Group membership only applies to new logins, and Ansible reuses its SSH
+# connection — without this the platform play cannot reach the docker socket.
+- name: Reconnect so the docker group takes effect
+  ansible.builtin.meta: reset_connection
+
+# Must be loaded before the platform play starts buildkitd — handlers flush at
+# the end of this play, which is the bootstrap one, so the ordering holds.
+- name: Install AppArmor profile for rootless BuildKit
+  ansible.builtin.copy:
+    src: buildkit-rootless
+    dest: /etc/apparmor.d/buildkit-rootless
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload AppArmor profiles

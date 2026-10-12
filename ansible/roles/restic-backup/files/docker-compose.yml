@@ -1,0 +1,12 @@
+# Managed by Ansible (restic-backup role). Mounts and networks, which differ
+# per server, are in docker-compose.override.yml next to it. Where databases
+# are dumped first, docker-compose.postgres.yml takes this file's place.
+services:
+  # restic's image with busybox crond for the schedule.
+  backup:
+    image: restic/restic:0.19.1
+    restart: unless-stopped
+    entrypoint: ["crond", "-f", "-d", "8"]
+    volumes:
+      - ./config:/etc/backup:ro
+      - ./cron:/etc/crontabs:ro

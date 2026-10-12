@@ -1,0 +1,2 @@
+# expect: cap_add is not allowed
+services: {x: {image: alpine, cap_add: [SYS_ADMIN]}}

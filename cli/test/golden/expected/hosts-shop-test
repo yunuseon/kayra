@@ -1,0 +1,3 @@
+{"argv":["bash","<kayra>/scripts/local/setup-hosts.sh","shop.test","203.0.113.10","www","api"]}
+--- stdout
+--- exit 0

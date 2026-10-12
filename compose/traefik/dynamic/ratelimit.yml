@@ -1,0 +1,21 @@
+# Dynamic Traefik configuration — rate limiting.
+http:
+  middlewares:
+    # The trial-request endpoint is public and unauthenticated by design: it is
+    # how strangers reach the club. That also makes it the one spam vector in
+    # the system, so it gets a ceiling.
+    #
+    # No sourceCriterion: the default keys on the client's remote address,
+    # which is correct when Traefik is the edge. An ipStrategy.depth here would
+    # expect an X-Forwarded-For chain that does not exist for a direct client,
+    # and the limit silently never engages.
+    #
+    # Values are empirical, not arithmetic: shorter periods did not actually
+    # throttle in testing, this regime does. 20 per 10 minutes with a burst of
+    # 5 is far more than a human filling in a form once, and caps a spammer at
+    # roughly 3k/day.
+    trial-ratelimit:
+      rateLimit:
+        average: 20
+        period: "10m"
+        burst: 5

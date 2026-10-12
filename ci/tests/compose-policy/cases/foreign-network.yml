@@ -1,0 +1,3 @@
+# expect: is neither the app's own nor platform-public
+services: {x: {image: alpine, networks: [other]}}
+networks: {other: {name: billing_private, external: true}}

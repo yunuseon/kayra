@@ -1,0 +1,5 @@
+---
+vm:
+  address: 192.0.2.3/24
+  gateway: 192.0.2.1
+  disk: 40G

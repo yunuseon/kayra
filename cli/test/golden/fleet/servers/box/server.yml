@@ -1,0 +1,6 @@
+---
+kind: nas
+target: home
+domain: example.com
+vault: true
+vault_password_file: ~/.vault_pass

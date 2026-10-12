@@ -1,0 +1,4 @@
+---
+# The fixture fleet the golden tests run every command against.
+acme_email: ops@example.com
+jenkins_admin_user: ops

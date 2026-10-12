@@ -1,0 +1,3 @@
+{"argv":["tofu","-chdir=<fleet>/servers/shop-prod/terraform","destroy","-auto-approve"]}
+--- stdout
+--- exit 0

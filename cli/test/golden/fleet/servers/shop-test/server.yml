@@ -1,0 +1,7 @@
+---
+kind: platform
+target: multipass
+domain: shop.test
+vault: false
+apps:
+  - {name: shop, repo: https://git.example.com/shop.git, ref: main, path: .}

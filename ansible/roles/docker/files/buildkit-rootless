@@ -1,0 +1,23 @@
+# AppArmor profile for the rootless BuildKit container.
+#
+# Ubuntu 23.10+ refuses unprivileged user namespaces to processes running
+# unconfined (kernel.apparmor_restrict_unprivileged_userns=1) — which is
+# precisely what rootlesskit needs in order to start. BuildKit's own docs
+# suggest turning that sysctl off; this grants the capability to one container
+# instead, and leaves the protection in place for everything else on the host.
+#
+# flags=(unconfined) keeps the permissive behaviour BuildKit requires (mount,
+# unshare, and friends). Being a *named* profile rather than genuinely
+# unconfined is what makes the userns grant possible at all — the restriction
+# applies only to unconfined processes.
+#
+# Compose applies it by name: security_opt: apparmor=buildkit-rootless.
+abi <abi/4.0>,
+
+include <tunables/global>
+
+profile buildkit-rootless flags=(unconfined) {
+  userns,
+
+  include if exists <local/buildkit-rootless>
+}

@@ -1,0 +1,4 @@
+{"argv":["bash","<kayra>/scripts/local/require-main.sh","forge"],"env":{"FLEET_ROOT":"<fleet>"}}
+{"argv":["bash","<kayra>/scripts/local/home-image.sh","forge"],"env":{"FLEET_ROOT":"<fleet>"}}
+--- stdout
+--- exit 0

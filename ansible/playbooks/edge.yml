@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# Edge playbook — a server that exposes services from a private network (the
+# home NAS behind a Fritzbox) to the internet: a WireGuard tunnel to the LAN
+# and Caddy terminating TLS in front of it, plus the outside check on that
+# network's backups. No platform, no apps. Its firewall is Hetzner's
+# (servers/<server>/terraform/); nothing on the host filters on top.
+#
+# Usage: kayra setup <server>  (for servers with kind: edge)
+# =============================================================================
+
+- name: Edge server
+  hosts: servers
+  become: true
+
+  vars_files:
+    - "{{ server_dir }}/../defaults.yml"
+    - "{{ server_dir }}/vars.yml"
+    - "{{ server_dir }}/secrets.yml"
+
+  roles:
+    - common
+    - docker
+    - wireguard
+    - edge-proxy
+    - backup-check
+
+  # ufw predates the repo on adopted servers: a second, drifting copy of the
+  # Hetzner firewall's rules. Docker's own FORWARD chains carry Caddy's
+  # traffic into the tunnel either way.
+  tasks:
+    - name: Read ufw's status
+      ansible.builtin.command: ufw status
+      register: ufw_status
+      changed_when: false
+      failed_when: false
+
+    - name: Disable ufw
+      ansible.builtin.command: ufw disable
+      when: "'Status: active' in ufw_status.stdout"
+      changed_when: true

@@ -1,0 +1,27 @@
+# Managed by Ansible (restic-backup role), where restic_backup.postgres lists
+# databases to dump: copied as docker-compose.yml. Mounts and networks, which
+# differ per server, are in docker-compose.override.yml next to it.
+services:
+  # Hands its static restic binary to the backup container and exits.
+  restic:
+    image: restic/restic:0.19.1
+    entrypoint: ["cp", "/usr/bin/restic", "/opt/restic/restic"]
+    volumes:
+      - restic-bin:/opt/restic
+
+  # Postgres for pg_dump, busybox crond for the schedule. A newer pg_dump
+  # reads older servers, so its major only has to be the highest dumped.
+  backup:
+    image: postgres:18.6-alpine3.24
+    restart: unless-stopped
+    entrypoint: ["crond", "-f", "-d", "8"]
+    depends_on:
+      restic:
+        condition: service_completed_successfully
+    volumes:
+      - restic-bin:/opt/restic:ro
+      - ./config:/etc/backup:ro
+      - ./cron:/etc/crontabs:ro
+
+volumes:
+  restic-bin:

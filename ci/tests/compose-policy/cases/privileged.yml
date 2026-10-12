@@ -1,0 +1,2 @@
+# expect: privileged is not allowed
+services: {x: {image: alpine, privileged: true}}

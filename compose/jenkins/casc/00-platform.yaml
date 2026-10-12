@@ -1,0 +1,158 @@
+# =============================================================================
+# Jenkins Configuration as Code — platform fragment (app-agnostic).
+#
+# Owns:
+#   - Jenkins setup, security realm, authorization
+#   - The agent node
+#   - Git credentials (for cloning the app repo)
+#   - GitHub: push-webhook secret + API token for commit statuses
+#   - Jenkins URL
+#
+# Also owns the app-agnostic jobs: platform-registry-gc and rollback work off
+# the release records every app's <app>/deploy job writes (the platform
+# library's appDeploy) and start that job with a REF. platform-renovate exists
+# only where the server has repos to keep up to date (PLATFORM_RENOVATE).
+#
+# Does NOT own any app-specific credentials (Postgres, ...) or app pipelines.
+# Each app renders its own 10-<app>.yaml next to this file and applies it with
+# bin/jenkins-app-apply. JCasC merges every YAML in this directory.
+#
+# Git remote comes from the platform .env (rendered by Ansible).
+# =============================================================================
+
+jenkins:
+  systemMessage: "Platform CI/CD — Managed by JCasC"
+  numExecutors: 1
+
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_USER:-admin}"
+          password: "${JENKINS_ADMIN_PASSWORD:-admin}"
+
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+  nodes:
+    - permanent:
+        name: "builder"
+        labelString: "buildkit linux"
+        numExecutors: 2
+        remoteFS: "/home/jenkins/agent"
+        launcher:
+          inbound:
+            workDirSettings:
+              disabled: false
+              internalDir: "remoting"
+        retentionStrategy: "always"
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: "git-credentials"
+              description: "Git credentials for cloning repositories"
+              username: "git"
+              password: "${readFile:/run/platform-secrets/GIT_TOKEN}"
+          - string:
+              scope: GLOBAL
+              id: "github-token"
+              description: "Same PAT as git-credentials; needs Commit statuses: write"
+              secret: "${readFile:/run/platform-secrets/GIT_TOKEN}"
+          - string:
+              scope: GLOBAL
+              id: "renovate-token"
+              description: "PAT for Renovate: Contents + Pull requests read & write"
+              secret: "${readFile:/run/platform-secrets/RENOVATE_TOKEN}"
+          - string:
+              scope: GLOBAL
+              id: "github-webhook-secret"
+              description: "HMAC secret GitHub signs push webhooks with"
+              secret: "${GITHUB_WEBHOOK_SECRET:-}"
+
+unclassified:
+  # The pipeline every app runs. Trusted (outside the sandbox), loaded from
+  # PLATFORM_REF (main; a test environment may track a branch) and jobs cannot
+  # pick another version, so a pushed app branch never changes what a pipeline
+  # does. See infrastructure/ci/jenkins-lib/.
+  globalLibraries:
+    libraries:
+      - name: "platform"
+        defaultVersion: "${PLATFORM_REF}"
+        allowVersionOverride: false
+        implicit: false
+        retriever:
+          modernSCM:
+            libraryPath: "infrastructure/ci/jenkins-lib/"
+            scm:
+              git:
+                remote: "${JENKINS_GIT_REPO}"
+                credentialsId: "git-credentials"
+  location:
+    url: "https://jenkins.${DOMAIN:-localhost}/"
+  # Webhook lands on /github-webhook/. Hooks are registered by hand in the
+  # repo settings, not managed from here.
+  gitHubPluginConfig:
+    configs:
+      - name: "GitHub"
+        apiUrl: "https://api.github.com"
+        credentialsId: "github-token"
+        manageHooks: false
+    hookSecretConfigs:
+      - credentialsId: "github-webhook-secret"
+
+# Platform jobs run pipelines from PLATFORM_REF of this repo, never from a pushed branch.
+jobs:
+  - script: |
+      def fromPlatform = { String path ->
+        return {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url("${JENKINS_GIT_REPO}")
+                  credentials("git-credentials")
+                }
+                branch("${PLATFORM_REF}")
+              }
+            }
+            scriptPath(path)
+            lightweight(false)
+          }
+        }
+      }
+
+      pipelineJob("platform-registry-gc") {
+        displayName("Platform Registry GC")
+        description("Nightly: deletes registry images no recent release of any app references, then prunes the BuildKit cache and host images. See infrastructure/ci/registry-gc.sh.")
+        definition(fromPlatform("infrastructure/ci/registry-gc.Jenkinsfile"))
+        triggers {
+          cron("H 3 * * *")
+        }
+      }
+
+      pipelineJob("rollback") {
+        displayName("Rollback")
+        description("Redeploys an earlier release of an app: pick the app, pick a release, done. Hands the SHA to <app>/deploy.")
+        definition(fromPlatform("infrastructure/ci/rollback.Jenkinsfile"))
+      }
+
+      if ("${PLATFORM_RENOVATE:-false}" == "true") {
+        pipelineJob("platform-renovate") {
+          displayName("Platform Renovate")
+          description("On renovate_schedule (weekly by default): opens PRs that bump pinned versions. Config: renovate.json. See infrastructure/ci/renovate.Jenkinsfile.")
+          // Declared here as well: a JCasC reload regenerates the job and drops
+          // parameters only the pipeline declares.
+          parameters {
+            booleanParam("DRY_RUN", false, "Log what would change, open no PRs")
+          }
+          definition(fromPlatform("infrastructure/ci/renovate.Jenkinsfile"))
+          triggers {
+            cron("${RENOVATE_SCHEDULE:-H 4 * * 1}")
+          }
+        }
+      }

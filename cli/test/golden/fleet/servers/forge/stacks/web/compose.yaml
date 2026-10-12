@@ -1,0 +1,6 @@
+---
+services:
+  web:
+    image: nginx:1.29.1
+    labels:
+      - traefik.http.routers.web.rule=Host(`git.forge.home.arpa`) || Host(`ci.forge.home.arpa`)

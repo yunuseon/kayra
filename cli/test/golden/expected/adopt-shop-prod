@@ -1,0 +1,5 @@
+{"argv":["bash","<kayra>/scripts/local/require-main.sh","shop-prod"],"env":{"FLEET_ROOT":"<fleet>"}}
+{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/adopt.yml"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
+--- stdout
+--- exit 0

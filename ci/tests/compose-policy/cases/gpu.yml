@@ -1,0 +1,5 @@
+# expect: deploy.resources.reservations.devices is not allowed
+services:
+  x:
+    image: alpine
+    deploy: {resources: {limits: {memory: 64m}, reservations: {devices: [{capabilities: [gpu]}]}}}

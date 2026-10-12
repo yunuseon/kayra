@@ -1,0 +1,2 @@
+# expect: env_file is not allowed
+services: {x: {image: alpine, mem_limit: 64m, env_file: [/run/app-secrets/other/KEY]}}

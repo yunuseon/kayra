@@ -1,0 +1,8 @@
+---
+kind: platform
+target: hetzner
+domain: shop.example.com
+vault: true
+vault_password_file: ~/.vault_pass
+apps:
+  - {name: shop, repo: https://git.example.com/shop.git, ref: main, path: .}

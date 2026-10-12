@@ -1,0 +1,7 @@
+---
+# busybox crond reads its crontab at start only.
+- name: Restart backup
+  ansible.builtin.command: docker compose restart backup
+  args:
+    chdir: "{{ restic_backup.dir }}"
+  changed_when: true

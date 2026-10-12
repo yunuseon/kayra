@@ -1,0 +1,9 @@
+---
+# The platform's server-side contract (see the platform role's defaults).
+platform_dir: /opt/platform
+apps_dir: /opt/apps
+# The fleet's files (servers/, .cache/apps) lie above the server's folder;
+# the engine's (compose files, scripts, hosts.conf) above the playbooks. Two
+# roots, so the engine can live apart from the fleet it serves.
+fleet_root: "{{ server_dir }}/../.."
+kayra_root: "{{ playbook_dir }}/../.."

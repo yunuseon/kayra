@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# WireGuard role — this server is the tunnel's listening end; the peer (a
+# Fritzbox) dials in. wg-quick routes the peer's AllowedIPs through wg0, which
+# is how containers here reach hosts on the peer's LAN.
+# =============================================================================
+
+- name: Install WireGuard tools
+  ansible.builtin.apt:
+    name: wireguard-tools
+
+- name: Forward IPv4 between the tunnel and Docker's bridge
+  ansible.builtin.copy:
+    content: "net.ipv4.ip_forward=1\n"
+    dest: /etc/sysctl.d/99-ip-forward.conf
+    mode: "0644"
+  notify: Apply sysctl
+
+- name: Render wg0.conf
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart WireGuard
+
+- name: Enable WireGuard
+  ansible.builtin.systemd:
+    name: wg-quick@wg0
+    enabled: true
+    state: started

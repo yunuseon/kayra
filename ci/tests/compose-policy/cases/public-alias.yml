@@ -1,0 +1,3 @@
+# expect: alias api on platform-public must start with demo-
+services: {x: {image: alpine, mem_limit: 64m, networks: {public: {aliases: [api]}}}}
+networks: {public: {name: platform-public, external: true}}

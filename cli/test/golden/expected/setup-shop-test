@@ -1,0 +1,6 @@
+{"argv":["bash","<kayra>/scripts/local/require-main.sh","shop-test"],"env":{"FLEET_ROOT":"<fleet>"}}
+{"argv":["bash","<kayra>/scripts/local/certs.sh","shop.test","<fleet>/.cache/certs","www","api"]}
+{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/shop-test/inventory.ini","<kayra>/ansible/playbooks/platform.yml","-e","server=shop-test","-e","server_dir=<fleet>/servers/shop-test","-e","domain=shop.test","-e","target=multipass"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
+--- stdout
+--- exit 0

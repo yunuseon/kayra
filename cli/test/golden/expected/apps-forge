@@ -1,0 +1,5 @@
+{"argv":["bash","<kayra>/scripts/local/require-main.sh","forge"],"env":{"FLEET_ROOT":"<fleet>"}}
+{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/forge/inventory.ini","<kayra>/ansible/playbooks/apps-prune.yml","-e","{\"keep\": []}"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+--- stdout
+--- exit 0

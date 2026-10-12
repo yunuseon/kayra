@@ -1,0 +1,3 @@
+---
+restic_backup:
+  dir: /volume2/docker/backup

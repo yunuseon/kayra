@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# Adopt playbook — makes a server we did not create reachable the way our
+# cloud-init would have: a `deploy` user with sudo and our key. Runs as root,
+# once; everything after that is the server's normal playbook as deploy.
+#
+# Usage: kayra adopt <server>
+# =============================================================================
+
+- name: Adopt server
+  hosts: servers
+  gather_facts: false
+  vars:
+    # A play var, so it beats the inventory's ansible_user=deploy (-u does not).
+    ansible_user: root
+
+  tasks:
+    - name: Create the deploy user
+      ansible.builtin.user:
+        name: deploy
+        groups: sudo
+        append: true
+        shell: /bin/bash
+
+    - name: Authorize our key for deploy
+      ansible.posix.authorized_key:
+        user: deploy
+        key: "{{ lookup('file', ansible_ssh_private_key_file ~ '.pub') }}"
+
+    - name: Passwordless sudo for deploy
+      ansible.builtin.copy:
+        content: "deploy ALL=(ALL) NOPASSWD:ALL\n"
+        dest: /etc/sudoers.d/deploy
+        mode: "0440"
+        validate: visudo -cf %s

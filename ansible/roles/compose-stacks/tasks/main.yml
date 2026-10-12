@@ -1,0 +1,74 @@
+---
+# =============================================================================
+# compose-stacks role — runs the server's own compose stacks: for each name in
+# compose_stacks.stacks, servers/<server>/stacks/<name>/ (compose.yaml and any
+# files it mounts) goes to <dir>/<name>/, its secrets
+# (compose_stack_secrets.<name>) to a .env next to it, and `docker compose up -d` brings it to that state. Data lives wherever
+# each compose file mounts it; this role writes nothing but <dir>.
+#
+# Never deletes: a stack dropped from the list keeps running until it is
+# taken down by hand (docker compose -p <name> down).
+# =============================================================================
+
+- name: Create stack directories
+  ansible.builtin.file:
+    path: "{{ compose_stacks.dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop: "{{ [''] + compose_stacks.stacks }}"
+
+# The whole stack folder: compose.yaml and any files it mounts (./…), which
+# the containers read whatever user they run as.
+- name: Copy stack files
+  ansible.builtin.copy:
+    src: "{{ server_dir }}/stacks/{{ item }}/"
+    dest: "{{ compose_stacks.dir }}/{{ item }}/"
+    mode: "0644"
+    directory_mode: "0755"
+  register: stack_files
+  loop: "{{ compose_stacks.stacks }}"
+
+# Single-quoted: Compose reads those literally, without escapes or ${…}.
+- name: Assert secrets fit in a .env
+  ansible.builtin.assert:
+    that: "\"'\" not in item.value | string and '\n' not in item.value | string"
+    fail_msg: "a secret in compose_stack_secrets contains a single quote or newline"
+    quiet: true
+  loop: "{{ compose_stack_secrets | default({}) | dict2items | map(attribute='value') | map('dict2items') | flatten }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+
+- name: Render secrets
+  ansible.builtin.copy:
+    content: |
+      {% for key, value in compose_stack_secrets[item].items() %}
+      {{ key }}='{{ value }}'
+      {% endfor %}
+    dest: "{{ compose_stacks.dir }}/{{ item }}/.env"
+    mode: "0600"
+  loop: "{{ compose_stacks.stacks | select('in', compose_stack_secrets | default({})) }}"
+  no_log: true
+
+- name: Start stacks
+  community.docker.docker_compose_v2:
+    project_src: "{{ compose_stacks.dir }}/{{ item }}"
+    project_name: "{{ item }}"
+    files: [compose.yaml]
+  register: compose_up
+  loop: "{{ compose_stacks.stacks }}"
+
+# `up` recreates a container only when its compose definition changed, not
+# when a file it mounts did (a Caddyfile, Homepage's config): those take
+# effect on a restart.
+- name: Restart stacks whose files changed
+  ansible.builtin.command: docker compose --project-name {{ item.item }} --file compose.yaml restart
+  args:
+    chdir: "{{ compose_stacks.dir }}/{{ item.item }}"
+  changed_when: true
+  when: item.changed and not (compose_up.results | selectattr('item', 'eq', item.item) | first).changed
+  loop: "{{ stack_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"

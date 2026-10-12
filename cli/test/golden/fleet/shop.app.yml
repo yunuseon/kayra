@@ -1,0 +1,5 @@
+---
+# The app the fixture servers run, as its repository would hold it.
+name: shop
+compose: [deploy/compose.yml]
+subdomains: [www, api]

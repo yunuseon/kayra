@@ -1,0 +1,2 @@
+# expect: sysctls is not allowed
+services: {x: {image: alpine, mem_limit: 64m, sysctls: {net.ipv4.ip_forward: 1}}}

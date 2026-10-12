@@ -1,0 +1,17 @@
+# =============================================================================
+# Authelia user database — rendered by Ansible from authelia_users.
+# Do not edit on the server: this file is regenerated on every platform run.
+#
+# Password hashes are argon2id, generated with:
+#   docker run --rm authelia/authelia:4.39 authelia crypto hash generate argon2 \
+#     --variant argon2id --iterations 3 --memory 32768 --parallelism 2
+# =============================================================================
+users:
+{% for username, user in authelia_users.items() %}
+  {{ username }}:
+    disabled: {{ user.disabled | default(false) | lower }}
+    displayname: '{{ user.displayname }}'
+    password: '{{ user.password }}'
+    email: '{{ user.email }}'
+    groups: [{% for group in user.groups %}'{{ group }}'{% if not loop.last %}, {% endif %}{% endfor %}]
+{% endfor %}

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# =============================================================================
+# app-remove <app> — take an app off this server, keeping its data.
+#
+# Stops its containers and removes everything the platform set up for it:
+# JCasC fragment, secret files, .env, the Jenkins folder with its jobs and
+# history, the release records (so Rollback no longer offers it). Its images
+# are collected by the next registry GC, since the app is no longer registered.
+#
+# Volumes stay: dropping a line from server.yml must never silently destroy a
+# database. `app-purge <app>` deletes them deliberately.
+#
+# Run by `kayra apps` for every registered app missing from server.yml.
+# Installed by the platform role at <platform_dir>/bin. Run as root.
+# =============================================================================
+set -euo pipefail
+
+app="${1:?Usage: app-remove <app>}"
+platform_dir="$(cd "$(dirname "$0")/.." && pwd)"
+apps_dir="$(sed -n 's/^APPS_DIR=//p' "${platform_dir}/.env")"
+
+docker compose -p "$app" down --remove-orphans
+rm -rf "${platform_dir}/jenkins/casc/10-${app}.yaml" \
+       "${platform_dir}/jenkins-secrets/${app}" \
+       "${apps_dir:?}/${app}"
+# Without its fragment the reload drops the app's credentials.
+"${platform_dir}/bin/jenkins-reload"
+"${platform_dir}/bin/jenkins-api" POST "/job/${app}/doDelete" -o /dev/null || true
+(cd "$platform_dir" && docker compose exec -T jenkins-controller rm -rf "/var/jenkins_home/releases/${app}")
+echo "Removed ${app}. Its volumes are kept — app-purge ${app} deletes them."

@@ -5,8 +5,9 @@
 // turbo or nx do; without one, it runs itself. `npm link @yunuseon/kayra` in a
 // fleet makes that pinned copy a checkout, for working on kayra itself.
 //
-// The installed package runs the compiled CLI (Node strips no types inside
-// node_modules); a checkout runs its TypeScript directly.
+// A checkout runs its TypeScript directly, never a build lying around; the
+// published package has no cli/src and runs the compiled CLI (Node strips no
+// types inside node_modules).
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -23,6 +24,6 @@ const pinned = pinnedDir !== undefined && existsSync(pinnedDir) ? realpathSync(p
 if (pinned !== self) {
   await import(pathToFileURL(join(pinned, "bin", "kayra.js")).href);
 } else {
-  const compiled = join(self, "cli", "dist", "main.js");
-  await import(pathToFileURL(existsSync(compiled) ? compiled : join(self, "cli", "src", "main.ts")).href);
+  const source = join(self, "cli", "src", "main.ts");
+  await import(pathToFileURL(existsSync(source) ? source : join(self, "cli", "dist", "main.js")).href);
 }

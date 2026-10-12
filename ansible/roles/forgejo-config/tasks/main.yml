@@ -1,7 +1,7 @@
 ---
 # =============================================================================
 # forgejo-config role — what a Forgejo holds beyond its own config file, as
-# code: users and their SSH keys, Actions runners, repos (created empty
+# code: users and their SSH keys, organizations, Actions runners, repos (created empty
 # where missing) and their settings (issues, pull requests, actions), Actions
 # secrets, collaborators, webhooks and push mirrors, from
 # forgejo_config in the server's vars.yml. Adds what is missing through the
@@ -44,6 +44,45 @@
   changed_when: true
   loop: "{{ forgejo_users.results | selectattr('status', 'eq', 404) | map(attribute='item') | list }}"
   loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+- name: Look up organizations
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/orgs/{{ item.name }}"
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    status_code: [200, 404]
+  register: forgejo_orgs
+  loop: "{{ forgejo_config.orgs | default([]) }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+# An organization owns repos and packages alike, and its visibility is
+# theirs: a private one keeps what it owns, images included, from the world.
+# Created with its visibility, so it is never public for a moment.
+- name: Create missing organizations
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/admin/users/{{ item.owner }}/orgs"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body: {username: "{{ item.name }}", visibility: "{{ item.visibility }}"}
+    status_code: [201]
+  changed_when: true
+  loop: "{{ forgejo_orgs.results | selectattr('status', 'eq', 404) | map(attribute='item') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+- name: Apply organization visibility
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/orgs/{{ item.item.name }}"
+    method: PATCH
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body: {visibility: "{{ item.item.visibility }}"}
+  changed_when: true
+  when: item.status == 200 and item.json.visibility != item.item.visibility
+  loop: "{{ forgejo_orgs.results }}"
+  loop_control: {label: "{{ item.item.name }}"}
   no_log: true
 
 - name: Look up SSH keys
@@ -103,7 +142,9 @@
 # the content is pushed by hand.
 - name: Create missing repos
   ansible.builtin.uri:
-    url: "{{ forgejo_config.url }}/api/v1/admin/users/{{ item.name.split('/')[0] }}/repos"
+    url: >-
+      {{ forgejo_config.url }}/api/v1/{{ 'orgs' if item.name.split('/')[0] in (forgejo_config.orgs | default([]) | map(attribute='name'))
+      else 'admin/users' }}/{{ item.name.split('/')[0] }}/repos
     method: POST
     headers: {Authorization: "token {{ forgejo_admin_token }}"}
     body_format: json

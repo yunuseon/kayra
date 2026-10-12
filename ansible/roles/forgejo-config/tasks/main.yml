@@ -115,10 +115,14 @@
 # --keep-labels: the runner declares its labels when it starts, and a
 # register without it replaces them with none, so no job finds a runner
 # until the runner restarts.
+# A scope (an owner, or owner/repo) limits a runner to those repos; without
+# one it serves every repo on the instance.
 - name: Register runners
   ansible.builtin.command:
-    argv: [docker, exec, -i, "{{ forgejo_config.container }}", forgejo, forgejo-cli, actions, register,
-           --secret-file, /dev/stdin, --name, "{{ item.name }}", --scope, "{{ item.scope }}", --keep-labels]
+    argv: >-
+      {{ ['docker', 'exec', '-i', forgejo_config.container, 'forgejo', 'forgejo-cli', 'actions', 'register',
+          '--secret-file', '/dev/stdin', '--name', item.name, '--keep-labels']
+         + (['--scope', item.scope] if item.scope | default('') | length > 0 else []) }}
     stdin: "{{ forgejo_runner_secrets[item.name] }}"
     # Exactly 40 characters: a trailing newline would be a 41st.
     stdin_add_newline: false

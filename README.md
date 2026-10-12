@@ -22,8 +22,10 @@ no app by name.
 Node 24, `yq`, `jq`, OpenTofu, Ansible, and for local test servers Multipass
 and `mkcert` (`brew install yq jq opentofu ansible mkcert nss && mkcert -install`).
 Git credentials that can read the apps' repositories (`gh auth login && gh auth setup-git`).
-Then the CLI from a checkout: `npm ci && npm link`, and `kayra doctor`
-in a fleet to see what is still missing.
+A fleet pins kayra in its `package.json` (`@yunus/kayra`, from
+`https://git.yunusozturk.de/api/packages/yunus/npm/`); any `kayra` on PATH runs
+the version the fleet pins. Once per machine, from a checkout: `npm ci && npm link`,
+then `kayra doctor` in a fleet to see what is still missing.
 
 ## Use
 

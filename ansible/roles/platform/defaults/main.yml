@@ -7,9 +7,11 @@
 # live under apps_dir/<name>. Changing either means changing every app.
 platform_dir: /opt/platform
 apps_dir: /opt/apps
-# Branch of this repo Jenkins loads the pipeline library and platform jobs
-# from. Only a test environment should ever track anything but main.
-platform_ref: main
+# The ref of git_remote_url (kayra's repo) Jenkins loads the pipeline library
+# and platform jobs from: the tag of the release the operator ran
+# (kayra_version, passed by kayra), so the Mac and the server run the same
+# kayra. Only a test server sets a branch here instead.
+platform_ref: "v{{ kayra_version }}"
 domain: localhost
 # The engine's files (compose files, scripts) lie above the playbooks, wherever
 # the fleet it serves is; the fleet's (servers/, .cache/) above the server's

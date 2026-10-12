@@ -49,7 +49,7 @@ App-specific code does **not** belong here: no app a fleet registers may be name
 
 ```bash
 npm ci                  # and after a lockfile change
-npm link                # `kayra` on PATH, running this checkout (again after switching Node)
+npm link                # `kayra` on PATH (again after switching Node)
 kayra doctor                           # tools, vault passwords, home servers' SSH
 ```
 
@@ -68,6 +68,8 @@ kayra setup shop-prod --dry-run   # any command: print the plan, run nothing
 
 Also `provision`, `hosts`, `adopt`, `backup test`, `app purge`, `certs`. App repos are cloned locally (`.cache/apps`) with the operator's own git credentials (`gh auth setup-git`). App development happens in each app's own repository.
 
+- **A fleet pins its kayra:** `@yunus/kayra` as an exact dev dependency in the fleet's `package.json`. Whatever `kayra` is on PATH hands over to the fleet's `node_modules/@yunus/kayra` (`bin/kayra.js`), so the version the fleet pins is the one that runs. To try a kayra checkout against a fleet: `npm link @yunus/kayra` in the fleet.
+- **One version for the Mac and the servers:** kayra passes its version as `kayra_version`; the platform role's `platform_ref` defaults to `v<version>`, the tag Jenkins loads the pipeline library and platform jobs from. Releases: bump `version` in `package.json`, merge, tag `v<version>` (release.yml publishes).
 - **A command is pure:** `(engine, server) => Result<Plan>`, a readonly list of steps: `run` (with env, and `$(…)`-style queries resolved when it runs), a `check` (a guard stops the plan; doctor's report and go on), `confirm`, `note`. `interpret.ts` is the only code that runs anything.
 - **Two roots:** the engine (`KAYRA_ROOT`, `kayra`) and the fleet (`FLEET_ROOT`, the directory holding `servers/`) are named apart everywhere, so the engine can live elsewhere (A2). kayra passes `FLEET_ROOT` to the local scripts; Ansible has `kayra_root` (above the playbooks) and `fleet_root` (above `server_dir`). Never derive one from the other.
 - **Every server is validated whenever kayra loads the fleet** (`parseServer`): kind, target, domain, apps, inventory or `terraform/`, vaulting. A broken server.yml anywhere stops every command.

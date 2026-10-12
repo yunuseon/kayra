@@ -13,15 +13,19 @@ model {
     description 'servers/<name>/: server.yml, vars.yml, vault secrets, terraform/; package.json pins kayra'
   }
   appRepo = external 'App repository' {
+    technology 'GitHub or Forgejo'
     description 'app.yml and Dockerfiles: data, no pipeline'
   }
-  hetzner = external 'Hetzner Cloud' {
-    description 'VPS, firewall; DNS for DNS-01 certificates'
+  hetzner = external 'Machine provider' {
+    technology 'Hetzner Cloud; Multipass or a machine at home'
+    description 'Where servers come from; also DNS for DNS-01 certificates'
   }
-  letsencrypt = external "Let's Encrypt" {
+  letsencrypt = external 'Certificate authority' {
+    technology "Let's Encrypt"
     description 'Certificates by HTTP-01, or DNS-01 where the internet cannot reach'
   }
   kayraRepo = external 'kayra repository' {
+    technology 'GitHub, or a mirror'
     description 'The pipeline library and platform jobs, at the pinned tag'
   }
 
@@ -33,33 +37,38 @@ model {
   platform = server 'Platform server' {
     description 'One per customer: kind platform, on Hetzner, at home or a Multipass VM'
 
-    traefik = service 'Traefik' {
+    traefik = service 'Edge router' {
       description 'The only way in: routes by hostname, terminates TLS, bridges both networks'
       technology 'Traefik v3'
     }
-    authelia = service 'Authelia' {
+    authelia = service 'Staff login' {
       #internal
+      technology 'Authelia'
       description "Login for the platform's own pages (Jenkins, Traefik's dashboard)"
     }
-    controller = service 'Jenkins controller' {
+    controller = service 'CI controller' {
       #internal
       description 'Holds the Docker socket; runs only admission and docker compose up, with the platform library'
       technology 'Jenkins, JCasC'
     }
-    agent = service 'Jenkins agent' {
+    agent = service 'Build agent' {
       #internal #untrusted
+      technology 'Jenkins agent'
       description 'Checks out app code; no Docker socket, no toolchain'
     }
-    buildkit = service 'BuildKit' {
+    buildkit = service 'Image builder' {
       #internal #untrusted
+      technology 'BuildKit, rootless'
       description "Rootless, AppArmor-confined: runs the app's Dockerfiles, the only app code CI executes"
     }
-    registry = store 'Registry' {
+    registry = store 'Image registry' {
       #internal
+      technology 'Distribution (registry:2)'
       description 'Content-addressed app images; no router; GC keeps the last 10 releases'
     }
     appContainers = app 'App containers' {
       #untrusted
+      technology 'Docker Compose'
       description "One compose project per app, admitted by the compose policy; on platform-public"
     }
   }

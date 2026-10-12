@@ -1,0 +1,91 @@
+model {
+  operator = person 'Operator' {
+    description 'Runs the fleet: its servers, their settings and secrets'
+  }
+  developer = person 'App developer' {
+    description 'Owns an app repository; pushes to deploy'
+  }
+  visitor = person 'Visitor' {
+    description "Uses an app in the browser"
+  }
+
+  fleet = external 'Fleet repository' {
+    description 'servers/<name>/: server.yml, vars.yml, vault secrets, terraform/; package.json pins kayra'
+  }
+  appRepo = external 'App repository' {
+    description 'app.yml and Dockerfiles: data, no pipeline'
+  }
+  hetzner = external 'Hetzner Cloud' {
+    description 'VPS, firewall; DNS for DNS-01 certificates'
+  }
+  letsencrypt = external "Let's Encrypt" {
+    description 'Certificates by HTTP-01, or DNS-01 where the internet cannot reach'
+  }
+  kayraRepo = external 'kayra repository' {
+    description 'The pipeline library and platform jobs, at the pinned tag'
+  }
+
+  cli = tool 'kayra CLI' {
+    description 'On the operator machine: plans each command, then runs OpenTofu, Ansible and SSH'
+    technology 'TypeScript, Node 24'
+  }
+
+  platform = server 'Platform server' {
+    description 'One per customer: kind platform, on Hetzner, at home or a Multipass VM'
+
+    traefik = service 'Traefik' {
+      description 'The only way in: routes by hostname, terminates TLS, bridges both networks'
+      technology 'Traefik v3'
+    }
+    authelia = service 'Authelia' {
+      #internal
+      description "Login for the platform's own pages (Jenkins, Traefik's dashboard)"
+    }
+    controller = service 'Jenkins controller' {
+      #internal
+      description 'Holds the Docker socket; runs only admission and docker compose up, with the platform library'
+      technology 'Jenkins, JCasC'
+    }
+    agent = service 'Jenkins agent' {
+      #internal #untrusted
+      description 'Checks out app code; no Docker socket, no toolchain'
+    }
+    buildkit = service 'BuildKit' {
+      #internal #untrusted
+      description "Rootless, AppArmor-confined: runs the app's Dockerfiles, the only app code CI executes"
+    }
+    registry = store 'Registry' {
+      #internal
+      description 'Content-addressed app images; no router; GC keeps the last 10 releases'
+    }
+    appContainers = app 'App containers' {
+      #untrusted
+      description "One compose project per app, admitted by the compose policy; on platform-public"
+    }
+  }
+
+  // Operating the fleet
+  operator -> fleet 'edits, through PRs'
+  operator -> cli 'kayra up / setup / apps / deploy'
+  cli -> fleet 'reads and validates'
+  cli -> hetzner 'provisions (OpenTofu)'
+  cli -> platform 'sets up (Ansible over SSH)'
+
+  // An app's way to production
+  developer -> appRepo 'pushes'
+  appRepo -> platform.controller 'push webhook'
+  platform.controller -> kayraRepo 'loads the pipeline library and platform jobs'
+  platform.controller -> platform.agent 'runs build stages on'
+  platform.agent -> appRepo 'checks out the commit'
+  platform.agent -> platform.buildkit 'buildctl over TCP'
+  platform.buildkit -> platform.registry 'pushes images'
+  platform.controller -> platform.registry 'pulls images'
+  platform.controller -> platform.appContainers 'admits the compose files, docker compose up'
+
+  // Traffic
+  visitor -> platform.traefik 'HTTPS'
+  platform.traefik -> platform.appContainers "the app's hosts (platform-public)"
+  platform.traefik -> platform.authelia 'forward auth for platform pages'
+  platform.traefik -> platform.controller 'jenkins.<domain>, behind Authelia'
+  platform.traefik -> letsencrypt 'ACME'
+}

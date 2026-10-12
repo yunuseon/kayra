@@ -66,10 +66,11 @@ kayra status
 
 | | |
 |---|---|
+| [**The docs site**](https://yunuseon.github.io/kayra/) | architecture diagrams, getting started, the fleet, the CLI |
+| [The app contract](https://yunuseon.github.io/kayra/concepts/app-contract/) | what an app provides and what it may not do |
+| [CI isolation](https://yunuseon.github.io/kayra/concepts/ci-isolation/) | why app code cannot reach the host or the platform |
+| [Authentication](https://yunuseon.github.io/kayra/concepts/authentication/) | staff login (Authelia), adding people, recovery |
 | [`CLAUDE.md`](CLAUDE.md) | how everything fits together, and the rules that keep it working |
-| [`docs/app-contract.md`](docs/app-contract.md) | what an app provides and what it may not do |
-| [`docs/authentication.md`](docs/authentication.md) | staff login (Authelia), adding people, recovery |
-| [`docs/ci-isolation.md`](docs/ci-isolation.md) | why app code cannot reach the host or the platform |
 
 ## Contributing
 

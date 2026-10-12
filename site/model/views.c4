@@ -1,0 +1,34 @@
+views {
+  view index {
+    title 'kayra at a glance'
+    description 'Who works with what: the operator runs a fleet through the CLI, developers push apps, the platform server builds and serves them.'
+    include *
+    exclude visitor
+  }
+
+  view platform of platform {
+    title 'Inside a platform server'
+    description 'Amber: where app code runs. Everything else on platform-internal, which no app container joins; Traefik is the only bridge.'
+    include *
+    include -> platform.traefik
+    style element.tag = #untrusted {
+      color amber
+    }
+  }
+
+  dynamic view deploy {
+    title 'From a push to a running app'
+    description 'Pipelines are the platform\'s: the app supplies only data, built where it cannot reach the host, and admitted before it starts.'
+    autoLayout TopBottom
+    developer -> appRepo 'pushes to the app\'s branch'
+    appRepo -> platform.controller 'webhook: <app>/build'
+    platform.controller -> kayraRepo 'loads appBuild from the pinned tag'
+    platform.controller -> platform.agent 'build stage per image'
+    platform.agent -> platform.buildkit 'buildctl: only images not built yet'
+    platform.buildkit -> platform.registry 'pushes <app>/<image>:<content hash>'
+    platform.controller -> platform.registry 'deploy: pulls that exact commit\'s images'
+    platform.controller -> platform.appContainers 'compose policy, then docker compose up --wait'
+    visitor -> platform.traefik 'https://www.<domain>'
+    platform.traefik -> platform.appContainers 'routes to the new release'
+  }
+}

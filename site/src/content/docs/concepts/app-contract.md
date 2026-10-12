@@ -1,4 +1,7 @@
-# The app contract
+---
+title: The app contract
+description: What an app provides to run on kayra, and what it may not do.
+---
 
 What an app has to provide to run on the platform, and what it may not do.
 An app is **data**: a manifest, compose files and Dockerfiles. It contains no

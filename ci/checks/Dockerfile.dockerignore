@@ -4,3 +4,5 @@
 compose/authelia/secrets
 compose/authelia/users_database.yml
 cli/dist
+site/dist
+site/.astro

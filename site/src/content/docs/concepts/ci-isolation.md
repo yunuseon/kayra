@@ -1,4 +1,7 @@
-# CI isolation
+---
+title: CI isolation
+description: Why app code cannot reach the host or the platform.
+---
 
 Apps are built from branches anyone with push access controls. The platform
 treats that code as untrusted: it may run, but only where it cannot reach the
@@ -65,9 +68,8 @@ The existence check is a plain `GET /v2/<image>/manifests/<tag>`.
 
 - **A build can write any app's images.** The registry is unauthenticated on
   `platform-internal`, and BuildKit `RUN` steps reach it: a hostile Dockerfile
-  can overwrite another app's tag. Per-app registry credentials (Zot, see
-  `BACKLOG.md`) close it before the first untrusted tenant.
-- **Apps can reach each other.** See [authentication](authentication.md),
+  can overwrite another app's tag. Per-app registry credentials (Zot, a planned change) close it before the first untrusted tenant.
+- **Apps can reach each other.** See [authentication](../authentication/),
   "Known residual risk".
 - **Whoever can push an app's deployed branch deploys it.** That is the
   contract — the compose policy is the gate, not a review.

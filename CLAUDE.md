@@ -26,7 +26,7 @@ The engine only: it knows no fleet and no app by name. A fleet is the directory 
 | `ci/jenkins-lib/` | The pipeline library every app runs (`appBuild`, `appDeploy`) + its scripts (`resources/platform/`) |
 | `ci/` | Platform jobs (registry GC, rollback), the compose-policy tests, the checks (`ci/checks/`) |
 | `cli/` | kayra, the CLI: every server's lifecycle — the only layer that touches both host setup and apps |
-| `docs/` | The customer-facing app contract and design notes |
+| `site/` | The docs site (Starlight on GitHub Pages): pages in `src/content/docs/`, the architecture model in `model/*.c4` (LikeC4) |
 
 Shell scripts live in four places, by **where they run**:
 
@@ -124,7 +124,7 @@ apps:
 ## Apps: the contract (read before touching any app or pipeline)
 
 An app is **data**. It never contains a Jenkinsfile, Ansible or JCasC — that is what lets it move to its own repo and be handed to a customer without exposing the platform.
-The customer-facing version of this section is `docs/app-contract.md` — keep the two in step.
+The customer-facing version of this section is the site's `concepts/app-contract.md` — keep the two in step.
 
 ```yaml
 # app.yml, at the root of the app's repository
@@ -301,7 +301,7 @@ over TCP and push straight to the registry.
   `renovate_repositories`); no
   floating tags such as `latest` or `lts`.
 
-See `docs/ci-isolation.md` for what is still reachable.
+See the site's `concepts/ci-isolation.md` for what is still reachable.
 
 ### Checks: the rules above, enforced
 
@@ -365,10 +365,18 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 
 ---
 
+## The docs site
+
+`site/` is published to https://yunuseon.github.io/kayra/ by `docs.yml` on every push to `main` that touches it (`cd site && npm ci && npm run dev` locally).
+
+- **Diagrams come from one model**, `site/model/*.c4` ([LikeC4](https://likec4.dev)): elements and relationships once, views select from them. A change to what talks to what — a new service, a moved boundary, a new network — changes the model in the same PR; never draw a diagram by hand. `npx likec4 validate model` in `site/`.
+- **Pages** are Markdown/MDX in `site/src/content/docs/`; a view goes in with `<LikeC4View viewId="…" client:only="react" />`.
+- The site is its own npm project (`site/package.json`), never part of the published package.
+
 ## Stack & conventions
 
 - **Reverse proxy:** Traefik v3.7. Platform subdomains: `auth.`, `traefik.`, `jenkins.`; apps claim their own (e.g. `www.`, `api.`). Platform subdomains live in `hosts.conf`, app ones in each `app.yml` — `scripts/local/setup-hosts.sh`, `scripts/local/certs.sh` and the app role all read those, so they cannot drift.
-- **Auth:** Authelia at `auth.<domain>`, passkeys. Staff only, one `admin` group, users in a vault-rendered YAML file. See `docs/authentication.md`.
+- **Auth:** Authelia at `auth.<domain>`, passkeys. Staff only, one `admin` group, users in a vault-rendered YAML file. See the site's `concepts/authentication.md`.
 
 ## Code style
 

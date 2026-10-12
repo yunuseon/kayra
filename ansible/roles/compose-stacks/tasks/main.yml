@@ -8,6 +8,11 @@
 #
 # Never deletes: a stack dropped from the list keeps running until it is
 # taken down by hand (docker compose -p <name> down).
+#
+# Private images: compose_registry_logins (in secrets.yml, a list of
+# {registry, username, password}) are logged in with a Docker config kept in
+# <dir>/.docker, which every compose call here uses (DOCKER_CONFIG) — the
+# host's own Docker config is never written.
 # =============================================================================
 
 - name: Create stack directories
@@ -52,7 +57,28 @@
   loop: "{{ compose_stacks.stacks | select('in', compose_stack_secrets | default({})) }}"
   no_log: true
 
+- name: Create the stacks' Docker config directory
+  ansible.builtin.file:
+    path: "{{ compose_stacks.dir }}/.docker"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: compose_registry_logins | default([]) | length > 0
+
+- name: Log in to private registries
+  community.docker.docker_login:
+    registry_url: "{{ item.registry }}"
+    username: "{{ item.username }}"
+    password: "{{ item.password }}"
+    config_path: "{{ compose_stacks.dir }}/.docker/config.json"
+  loop: "{{ compose_registry_logins | default([]) }}"
+  loop_control: {label: "{{ item.registry }}"}
+  no_log: true
+
 - name: Start stacks
+  environment:
+    DOCKER_CONFIG: "{{ compose_stacks.dir }}/.docker"
   community.docker.docker_compose_v2:
     project_src: "{{ compose_stacks.dir }}/{{ item }}"
     project_name: "{{ item }}"
@@ -64,6 +90,8 @@
 # when a file it mounts did (a Caddyfile, Homepage's config): those take
 # effect on a restart.
 - name: Restart stacks whose files changed
+  environment:
+    DOCKER_CONFIG: "{{ compose_stacks.dir }}/.docker"
   ansible.builtin.command: docker compose --project-name {{ item.item }} --file compose.yaml restart
   args:
     chdir: "{{ compose_stacks.dir }}/{{ item.item }}"

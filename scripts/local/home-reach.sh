@@ -2,7 +2,7 @@
 # Can Ansible get into a home machine (target: home)? If not, say why, in the
 # terms of the failures seen there, before Ansible's UNREACHABLE does not.
 #
-# Usage: FLEET_ROOT=<fleet> bash infrastructure/scripts/local/home-reach.sh <server-name> <kind>
+# Usage: FLEET_ROOT=<fleet> bash scripts/local/home-reach.sh <server-name> <kind>
 set -euo pipefail
 
 FLEET_ROOT="${FLEET_ROOT:?the directory of the fleet (servers/), set by kayra}"

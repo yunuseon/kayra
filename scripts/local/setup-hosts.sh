@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Point <domain> and its subdomains at <ip> in /etc/hosts. Requires sudo.
-# Subdomains: the platform's (infrastructure/hosts.conf) plus the given ones —
+# Subdomains: the platform's (hosts.conf) plus the given ones —
 # callers pass their apps' subdomains, as they do to certs.sh.
 #
-# Usage: bash infrastructure/scripts/local/setup-hosts.sh <domain> <ip> [subdomain…]
+# Usage: bash scripts/local/setup-hosts.sh <domain> <ip> [subdomain…]
 set -euo pipefail
 
 KAYRA_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

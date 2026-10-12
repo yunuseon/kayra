@@ -2,7 +2,7 @@
 # Generate local-trusted TLS certs (mkcert) for Traefik.
 # Covers `<domain>`, `*.<domain>`, the platform's subdomains and the given ones.
 #
-# Usage: bash infrastructure/scripts/local/certs.sh <domain> <certs-dir> [subdomain…]
+# Usage: bash scripts/local/certs.sh <domain> <certs-dir> [subdomain…]
 # Output: <certs-dir>/cert.pem, <certs-dir>/key.pem
 #
 # A no-op when the existing cert already covers <domain>. Local dev and the

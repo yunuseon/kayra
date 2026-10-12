@@ -16,7 +16,7 @@ pipeline {
     stages {
         stage('Collect') {
             steps {
-                sh 'bash infrastructure/ci/registry-gc.sh'
+                sh 'bash ci/registry-gc.sh'
             }
         }
     }

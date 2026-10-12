@@ -13,7 +13,7 @@ export type AppName = Brand<string, "AppName">;
 export type Subdomain = Brand<string, "Subdomain">;
 export type Domain = Brand<string, "Domain">;
 export type AbsolutePath = Brand<string, "AbsolutePath">;
-/** The engine: infrastructure/ today, the kayra checkout later. */
+/** The engine: a kayra checkout, or the package a fleet installed. */
 export type KayraRoot = Brand<AbsolutePath, "KayraRoot">;
 /** The configuration: the directory holding servers/. */
 export type FleetRoot = Brand<AbsolutePath, "FleetRoot">;

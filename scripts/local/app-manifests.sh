@@ -4,7 +4,7 @@
 # app role reads). A missing clone is
 # fetched with the operator's own git credentials (kayra doctor checks them).
 #
-# Usage: FLEET_ROOT=<fleet> bash infrastructure/scripts/local/app-manifests.sh [--subdomains] <server-name>
+# Usage: FLEET_ROOT=<fleet> bash scripts/local/app-manifests.sh [--subdomains] <server-name>
 #   --subdomains  print the apps' subdomains instead (for certs and /etc/hosts)
 set -euo pipefail
 

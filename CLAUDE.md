@@ -11,7 +11,7 @@ Open work lives in GitHub issues.
 `github.com/yunuseon/kayra` — public, MIT-licensed (`LICENSE`). Issues, pull requests, checks and releases all happen there.
 
 - **A change:** branch off `main`, push, open a PR (`gh pr create`). The checks (`.github/workflows/checks.yml`: `run.sh --platform`) run on the PR. Commits carry a DCO sign-off (`git commit -s`, see `CONTRIBUTING.md`).
-- **Releases** are tags `vMAJOR.MINOR.PATCH`, cut from `main` after bumping `version` in `package.json`: `release.yml` publishes `@yunuseon/kayra` to npmjs.org with provenance. `0.x` while the fleet contract may still change in any release; a fleet pins the version it runs.
+- **Releases** are tags `vMAJOR.MINOR.PATCH`, cut from `main` after bumping `version` in `package.json`: `release.yml` publishes `@yunuseon/kayra` to npmjs.org through trusted publishing (no token; provenance included). `0.x` while the fleet contract may still change in any release; a fleet pins the version it runs.
 - **Dependencies** arrive as Renovate PRs (`renovate.json`).
 
 ---

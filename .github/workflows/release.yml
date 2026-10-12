@@ -1,6 +1,9 @@
-# A tag vX.Y.Z publishes @yunuseon/kayra X.Y.Z to npmjs.org, with provenance
-# (npm records which workflow built it from which commit); prepack compiles
-# the CLI first. The tag and package.json's version must agree.
+# A tag vX.Y.Z publishes @yunuseon/kayra X.Y.Z to npmjs.org through npm's
+# trusted publishing: npm accepts this workflow's OIDC identity (configured on
+# the package at npmjs.com), so no token exists, and provenance comes with it.
+# prepack compiles the CLI first. The tag and package.json's version must agree;
+# a version already on npm (0.4.0, published by hand to create the package) is
+# skipped.
 name: release
 
 on:
@@ -23,7 +26,15 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: The tag is the package's version
         run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
-      - run: npm ci
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Not on npm yet
+        id: new
+        run: |
+          if npm view "$(node -p 'require("./package.json").name')@${GITHUB_REF_NAME#v}" version >/dev/null 2>&1; then
+            echo "already published, nothing to do"; echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.new.outputs.publish == 'true'
+        run: npm ci
+      - if: steps.new.outputs.publish == 'true'
+        run: npm publish

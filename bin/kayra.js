@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Runs the kayra the fleet pins. Whichever `kayra` is on PATH (a global
-// install, a linked checkout) hands over to node_modules/@yunus/kayra of the
+// install, a linked checkout) hands over to node_modules/@yunuseon/kayra of the
 // fleet it is run in (the nearest directory with servers/defaults.yml), as
-// turbo or nx do; without one, it runs itself. `npm link @yunus/kayra` in a
+// turbo or nx do; without one, it runs itself. `npm link @yunuseon/kayra` in a
 // fleet makes that pinned copy a checkout, for working on kayra itself.
 //
 // The installed package runs the compiled CLI (Node strips no types inside
@@ -17,7 +17,7 @@ const fleetOf = (dir) =>
   existsSync(join(dir, "servers", "defaults.yml")) ? dir : dirname(dir) === dir ? undefined : fleetOf(dirname(dir));
 
 const fleet = fleetOf(process.cwd());
-const pinnedDir = fleet === undefined ? undefined : join(fleet, "node_modules", "@yunus", "kayra");
+const pinnedDir = fleet === undefined ? undefined : join(fleet, "node_modules", "@yunuseon", "kayra");
 const pinned = pinnedDir !== undefined && existsSync(pinnedDir) ? realpathSync(pinnedDir) : self;
 
 if (pinned !== self) {

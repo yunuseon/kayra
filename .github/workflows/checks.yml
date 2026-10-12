@@ -1,11 +1,17 @@
 # The platform's checks (linters, validators and CLAUDE.md's rules; see
-# ci/checks/) on every push to any branch. The checks are a Docker build whose
-# last RUN is run.sh --platform; a fleet runs the same image with its own part.
+# ci/checks/) on every push and pull request. The checks are a Docker build
+# whose last RUN is run.sh --platform; a fleet runs the same image with its
+# own part (--fleet).
 name: checks
 
 on:
   push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   checks:

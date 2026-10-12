@@ -1,56 +1,80 @@
 # kayra
 
-A self-hosted app platform and the CLI that runs it. Traefik, Authelia,
-Jenkins, a registry and rootless BuildKit on each server, set up with OpenTofu
-and Ansible; apps live in their own repositories and are built and deployed
-from there — a push to an app's branch is a deploy.
+A self-hosted app platform for running other people's apps safely, one server
+per customer, all of it as code.
 
-kayra is the engine. A **fleet** is its configuration: a repository holding
-`servers/`, one folder per server (`server.yml`, `vars.yml`, `secrets.yml`,
-`apps/`, `terraform/` or a hand-written inventory). kayra knows no fleet and
-no app by name.
+kayra sets up a server (Hetzner, a machine at home, or a local Multipass VM)
+with Traefik, Authelia, Jenkins, a private registry and rootless BuildKit, and
+then builds and deploys apps from their own repositories: a push to an app's
+branch is a deploy. Servers are described in a git repository (a **fleet**);
+kayra is the engine that turns that description into running machines.
 
-| Where | What |
+```
+   kayra (this repo, versioned)            a fleet (your repo)          apps (their repos)
+ ┌──────────────────────────────┐      ┌───────────────────────┐    ┌──────────────────┐
+ │ CLI: kayra up/setup/apps/…   │◀─────│ servers/<name>/       │    │ app.yml          │
+ │ Ansible, OpenTofu, compose   │ pins │   server.yml, vars,   │    │ Dockerfiles      │
+ │ Jenkins pipeline library     │      │   vault secrets       │    └────────┬─────────┘
+ │ compose admission policy     │      │ package.json → kayra  │             │ built & deployed
+ └──────────────────────────────┘      └───────────────────────┘             ▼ by the platform
+```
+
+## Why
+
+- **Apps are untrusted by design.** Builds run in rootless BuildKit with no
+  Docker socket; an app's compose files are admitted against an allow-list
+  modelled on Kubernetes' Pod Security "restricted" before anything starts;
+  platform services sit on a network apps cannot reach.
+- **Apps are plain data.** An app is an `app.yml` and its Dockerfiles — no
+  Jenkinsfile, no Ansible. It runs without the platform locally and can leave
+  with its customer at any time.
+- **One server per customer, reproducible.** Everything about a server lives in
+  its folder of the fleet; secrets per server in Ansible Vault; machines from
+  OpenTofu; every version pinned and kept current by Renovate.
+- **Small and self-hosted.** No cloud provider beyond a VPS; it runs on a
+  single Hetzner box or at home.
+
+## Status
+
+`0.x`: in production on its author's own servers, and the fleet format may
+still change between releases. Expect to read the code.
+
+## Quick start
+
+You need Node 24, `yq`, `jq`, OpenTofu and Ansible (and Multipass plus
+`mkcert` for a local test server):
+
+```bash
+brew install yq jq opentofu ansible mkcert nss && mkcert -install
+npm install -g @yunuseon/kayra
+```
+
+A fleet is a git repository with a `package.json` that pins kayra
+(`npm install -D -E @yunuseon/kayra`), a `servers/defaults.yml` and one folder per
+server under `servers/` — see [CLAUDE.md](CLAUDE.md#the-fleet-contract-one-folder-per-server)
+for what goes where. Any `kayra` on your PATH then runs the version the fleet
+pins:
+
+```bash
+kayra doctor              # what is still missing
+kayra up shop-test        # provision + set up a server, register its apps
+kayra deploy shop-prod    # host setup + apps, no re-provision (from main only)
+kayra status
+```
+
+## Documentation
+
+| | |
 |---|---|
-| [`CLAUDE.md`](CLAUDE.md) | how everything fits together, and the rules that keep it working — read first |
+| [`CLAUDE.md`](CLAUDE.md) | how everything fits together, and the rules that keep it working |
 | [`docs/app-contract.md`](docs/app-contract.md) | what an app provides and what it may not do |
 | [`docs/authentication.md`](docs/authentication.md) | staff login (Authelia), adding people, recovery |
 | [`docs/ci-isolation.md`](docs/ci-isolation.md) | why app code cannot reach the host or the platform |
 
-## Prerequisites
+## Contributing
 
-Node 24, `yq`, `jq`, OpenTofu, Ansible, and for local test servers Multipass
-and `mkcert` (`brew install yq jq opentofu ansible mkcert nss && mkcert -install`).
-Git credentials that can read the apps' repositories (`gh auth login && gh auth setup-git`).
-A fleet pins kayra in its `package.json` (`@yunus/kayra`, from
-`https://git.yunusozturk.de/api/packages/yunus/npm/`); any `kayra` on PATH runs
-the version the fleet pins. Once per machine, from a checkout: `npm ci && npm link`,
-then `kayra doctor` in a fleet to see what is still missing.
-
-## Use
-
-From anywhere in a fleet:
-
-```bash
-kayra status              # every server + status
-kayra up shop-test        # provision + set up everything
-kayra deploy shop-prod    # host setup + apps, no re-provision (from main only)
-kayra ssh shop-prod
-kayra down shop-test
-```
-
-## Layout
-
-```
-.
-├── ansible/          # playbooks per server kind, roles
-├── compose/          # the platform's compose stack (Traefik, Authelia, Jenkins, registry, BuildKit)
-├── terraform/        # OpenTofu modules (hcloud, multipass)
-├── ci/               # pipeline library, platform jobs, compose policy, checks
-├── cli/              # kayra, the CLI
-├── scripts/          # local/ (the operator's machine) and server/ (/opt/platform/bin)
-└── docs/
-```
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Security problems: [SECURITY.md](SECURITY.md).
 
 ## License
 

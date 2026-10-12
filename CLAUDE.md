@@ -45,11 +45,11 @@ App-specific code does **not** belong here: no app a fleet registers may be name
 
 ## CLI (`kayra`)
 
-`cli/` is kayra: TypeScript run by Node 24's type stripping, no build step, [Optique](https://optique.dev) for arguments. Once per machine:
+`cli/` is kayra: TypeScript run by Node 24's type stripping, [Optique](https://optique.dev) for arguments. The repo root is the npm package `@yunus/kayra` (the CLI plus every engine file it uses); a checkout runs `cli/src` as is, the published package `cli/dist`, compiled at `npm pack`/`publish` (Node strips no types inside `node_modules`). `bin/kayra.js` picks one. Once per machine:
 
 ```bash
-npm ci --prefix cli     # and after a lockfile change
-(cd cli && npm link)    # `kayra` on PATH, running this checkout (again after switching Node)
+npm ci                  # and after a lockfile change
+npm link                # `kayra` on PATH, running this checkout (again after switching Node)
 kayra doctor                           # tools, vault passwords, home servers' SSH
 ```
 
@@ -74,7 +74,7 @@ Also `provision`, `hosts`, `adopt`, `backup test`, `app purge`, `certs`. App rep
 - **Golden tests:** `test/golden/record.sh <out>` runs `test/golden/cases` against a fixture fleet with ansible, tofu, ssh and the local scripts stubbed, recording argv, Ansible env, stdout and exit status; `cli-test` holds kayra to `expected/`. It was recorded from the justfiles kayra replaced, which proved the two equal. Re-record a case only for a change meant to alter it, and read the diff.
 - **Brands for every meaningful string** (`src/brand.ts`, the only file where `as` is allowed; arguments are minted by its Optique value parsers); errors are `Result` values, not exceptions.
 - Strictest tsconfig, `typescript-eslint` strict + `eslint-plugin-functional` (no `let`, no mutation). An inline `eslint-disable` says why. Dependencies are pinned exactly (`.npmrc`).
-- The checks run `cli-typecheck`, `cli-lint`, `cli-test`. Locally: `npm run typecheck|lint|test` in `cli/`.
+- The checks run `cli-typecheck`, `cli-lint`, `cli-test`. Locally: `npm run typecheck|lint|test` at the root.
 
 ---
 

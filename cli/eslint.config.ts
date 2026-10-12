@@ -4,6 +4,8 @@ import functional from "eslint-plugin-functional";
 import tseslint from "typescript-eslint";
 
 export default defineConfig(
+  // The compiled CLI, built for the package.
+  { ignores: ["dist/"] },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,

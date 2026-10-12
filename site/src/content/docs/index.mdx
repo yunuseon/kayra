@@ -1,0 +1,41 @@
+---
+title: kayra
+description: A self-hosted app platform for running other people's apps safely, one server per customer, all of it as code.
+template: splash
+hero:
+  tagline: A self-hosted app platform for running other people's apps safely — one server per customer, all of it as code.
+  actions:
+    - text: Get started
+      link: start/getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/yunuseon/kayra
+      icon: external
+      variant: minimal
+---
+import { Card, CardGrid } from "@astrojs/starlight/components";
+import { LikeC4View } from "likec4:react";
+
+<CardGrid>
+  <Card title="Apps are untrusted" icon="seti:lock">
+    Builds run in rootless BuildKit without a Docker socket; compose files are
+    admitted against an allow-list before anything starts.
+  </Card>
+  <Card title="Apps are data" icon="document">
+    An app is an `app.yml` and its Dockerfiles — no Jenkinsfile, no Ansible.
+    It can leave with its customer at any time.
+  </Card>
+  <Card title="Servers are code" icon="setting">
+    A fleet repository describes every server; kayra turns it into machines
+    with OpenTofu and Ansible, every version pinned.
+  </Card>
+  <Card title="Small and yours" icon="laptop">
+    A Hetzner box, a machine at home, a local VM. No cloud beyond that.
+  </Card>
+</CardGrid>
+
+## At a glance
+
+Click an element to open its view; drag to pan, scroll to zoom.
+
+<LikeC4View viewId="index" client:only="react" />

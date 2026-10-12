@@ -1,4 +1,7 @@
-# Authentication
+---
+title: Authentication
+description: Staff login with Authelia; apps bring their own.
+---
 
 Authelia guards the platform's own pages — Jenkins and Traefik's dashboard —
 for the operators. Apps bring their own login: their users belong to the app

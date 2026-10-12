@@ -1,0 +1,40 @@
+---
+title: Architecture
+description: The platform as a model — who talks to what, where app code runs, and how a push becomes a running app.
+sidebar:
+  order: 1
+---
+import { LikeC4View } from "likec4:react";
+
+The diagrams are generated from one model (`site/model/*.c4` in the
+repository, [LikeC4](https://likec4.dev)), so they cannot disagree with each
+other. Click an element to open its view; drag to pan, scroll to zoom.
+
+## Landscape
+
+The operator describes servers in a fleet repository and runs them through the
+CLI; developers push to their app repositories; the platform server builds and
+serves the apps.
+
+<LikeC4View viewId="index" client:only="react" />
+
+## Inside a platform server
+
+Amber marks where app code runs: the build agent, BuildKit and the apps
+themselves. Everything else sits on `platform-internal`, a network no app
+container joins; Traefik is the only service on both. Only the Jenkins
+controller holds the Docker socket, and it runs nothing from an app.
+
+<LikeC4View viewId="platform" client:only="react" />
+
+## From a push to a running app
+
+The pipeline is the platform's, loaded from the tag of the kayra version the
+fleet pins; the app supplies only data. Images are content-addressed, so a
+commit whose inputs did not change builds nothing, and a deploy pulls exactly
+the images of the commit it deploys.
+
+<LikeC4View viewId="deploy" client:only="react" />
+
+Read on: [CI isolation](../ci-isolation/) for what each piece may reach, and
+[the app contract](../app-contract/) for what an app provides.

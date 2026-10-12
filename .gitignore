@@ -14,3 +14,7 @@ compose/authelia/users_database.yml
 
 # The compiled CLI, built for the package (npm pack / publish)
 cli/dist/
+
+# The docs site: build output and Astro's cache
+site/dist/
+site/.astro/

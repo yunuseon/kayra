@@ -1,0 +1,48 @@
+// The kinds of thing the architecture is made of. The model (model.c4) says
+// what exists; the views (views.c4) say what each picture shows.
+specification {
+  element person {
+    style {
+      shape person
+      color slate
+    }
+  }
+  element external {
+    style {
+      color muted
+    }
+  }
+  element tool {
+    style {
+      color secondary
+    }
+  }
+  element server {
+    style {
+      color indigo
+    }
+  }
+  element service {
+    style {
+      color primary
+    }
+  }
+  element app {
+    style {
+      color green
+    }
+  }
+  element store {
+    style {
+      shape storage
+      color sky
+    }
+  }
+
+  // What an app's code may run in; drawn amber.
+  tag untrusted {
+    color amber
+  }
+  // On platform-internal, which no app container joins.
+  tag internal
+}

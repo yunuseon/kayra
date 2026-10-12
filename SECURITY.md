@@ -8,7 +8,7 @@ the Docker socket, the platform's network or another app's secrets.
 [security advisories](https://github.com/yunuseon/kayra/security/advisories/new),
 not in a public issue.
 
-Known, accepted gaps are listed in [docs/ci-isolation.md](docs/ci-isolation.md);
+Known, accepted gaps are listed in [CI isolation](https://yunuseon.github.io/kayra/concepts/ci-isolation/);
 no need to report those.
 
 Only the latest release gets fixes.

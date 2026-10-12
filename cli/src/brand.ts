@@ -13,12 +13,14 @@ export type AppName = Brand<string, "AppName">;
 export type Subdomain = Brand<string, "Subdomain">;
 export type Domain = Brand<string, "Domain">;
 export type AbsolutePath = Brand<string, "AbsolutePath">;
-/** The engine: infrastructure/ today, the kayra checkout later. */
+/** The engine: a kayra checkout, or the package a fleet installed. */
 export type KayraRoot = Brand<AbsolutePath, "KayraRoot">;
 /** The configuration: the directory holding servers/. */
 export type FleetRoot = Brand<AbsolutePath, "FleetRoot">;
 export type ServerDir = Brand<AbsolutePath, "ServerDir">;
 export type VaultPasswordFile = Brand<AbsolutePath, "VaultPasswordFile">;
+/** A release, MAJOR.MINOR.PATCH: the tag v<version> holds its pipeline library. */
+export type KayraVersion = Brand<string, "KayraVersion">;
 
 export const serverName = (value: string): Result<ServerName, string> =>
   /^[a-z0-9][a-z0-9-]*$/.test(value)
@@ -46,6 +48,10 @@ export const absolutePath = (value: string): Result<AbsolutePath, string> => {
 
 export const kayraRoot = (path: AbsolutePath): KayraRoot => path as KayraRoot;
 export const fleetRoot = (path: AbsolutePath): FleetRoot => path as FleetRoot;
+export const kayraVersion = (value: unknown): Result<KayraVersion, string> =>
+  typeof value === "string" && /^\d+\.\d+\.\d+$/.test(value)
+    ? ok(value as KayraVersion)
+    : err(`'${String(value)}' is not a version MAJOR.MINOR.PATCH`);
 export const serverDir = (root: FleetRoot, name: ServerName): ServerDir =>
   join(root, "servers", name) as ServerDir;
 export const vaultPasswordFile = (path: AbsolutePath): VaultPasswordFile => path as VaultPasswordFile;

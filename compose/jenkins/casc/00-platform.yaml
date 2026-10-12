@@ -76,9 +76,9 @@ credentials:
 
 unclassified:
   # The pipeline every app runs. Trusted (outside the sandbox), loaded from
-  # PLATFORM_REF (main; a test environment may track a branch) and jobs cannot
+  # PLATFORM_REF (the release tag, v<version>; a test server may set a branch) and jobs cannot
   # pick another version, so a pushed app branch never changes what a pipeline
-  # does. See infrastructure/ci/jenkins-lib/.
+  # does. See ci/jenkins-lib/.
   globalLibraries:
     libraries:
       - name: "platform"
@@ -87,7 +87,7 @@ unclassified:
         implicit: false
         retriever:
           modernSCM:
-            libraryPath: "infrastructure/ci/jenkins-lib/"
+            libraryPath: "ci/jenkins-lib/"
             scm:
               git:
                 remote: "${JENKINS_GIT_REPO}"
@@ -128,8 +128,8 @@ jobs:
 
       pipelineJob("platform-registry-gc") {
         displayName("Platform Registry GC")
-        description("Nightly: deletes registry images no recent release of any app references, then prunes the BuildKit cache and host images. See infrastructure/ci/registry-gc.sh.")
-        definition(fromPlatform("infrastructure/ci/registry-gc.Jenkinsfile"))
+        description("Nightly: deletes registry images no recent release of any app references, then prunes the BuildKit cache and host images. See ci/registry-gc.sh.")
+        definition(fromPlatform("ci/registry-gc.Jenkinsfile"))
         triggers {
           cron("H 3 * * *")
         }
@@ -138,19 +138,19 @@ jobs:
       pipelineJob("rollback") {
         displayName("Rollback")
         description("Redeploys an earlier release of an app: pick the app, pick a release, done. Hands the SHA to <app>/deploy.")
-        definition(fromPlatform("infrastructure/ci/rollback.Jenkinsfile"))
+        definition(fromPlatform("ci/rollback.Jenkinsfile"))
       }
 
       if ("${PLATFORM_RENOVATE:-false}" == "true") {
         pipelineJob("platform-renovate") {
           displayName("Platform Renovate")
-          description("On renovate_schedule (weekly by default): opens PRs that bump pinned versions. Config: renovate.json. See infrastructure/ci/renovate.Jenkinsfile.")
+          description("On renovate_schedule (weekly by default): opens PRs that bump pinned versions. Config: renovate.json. See ci/renovate.Jenkinsfile.")
           // Declared here as well: a JCasC reload regenerates the job and drops
           // parameters only the pipeline declares.
           parameters {
             booleanParam("DRY_RUN", false, "Log what would change, open no PRs")
           }
-          definition(fromPlatform("infrastructure/ci/renovate.Jenkinsfile"))
+          definition(fromPlatform("ci/renovate.Jenkinsfile"))
           triggers {
             cron("${RENOVATE_SCHEDULE:-H 4 * * 1}")
           }

@@ -17,6 +17,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 infrastructure="$(cd "${here}/../../.." && pwd)"
 out="${1:?Usage: record.sh <out-dir>}"
+version="$(node -p "require('${infrastructure}/package.json').version")"
 real_bash="$(command -v bash)"
 
 tmp="$(mktemp -d)"
@@ -71,6 +72,7 @@ grep -v '^#' "${here}/cases" | while IFS='|' read -r case stdin arguments; do
     status=0
     stdout="$(cd "$fleet" && echo "$stdin" | PATH="${tmp}/bin:${PATH}" "${command[@]}" 2>/dev/null)" || status=$?
     { echo "--- stdout"; [ -z "$stdout" ] || echo "$stdout"; echo "--- exit ${status}"; } >> "$TRACE"
-    sed -i.bak -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" "$TRACE"
+    sed -i.bak -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" \
+        -e "s|kayra_version=${version}|kayra_version=<version>|g" "$TRACE"
     rm "${TRACE}.bak"
 done

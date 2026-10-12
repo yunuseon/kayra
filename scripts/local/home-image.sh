@@ -4,7 +4,7 @@
 # same cloud-init as every other server plus its fixed address. Both go into
 # the hypervisor by hand, once: the image as the VM's disk, the ISO as a CD.
 #
-# Usage: FLEET_ROOT=<fleet> bash infrastructure/scripts/local/home-image.sh <server-name>
+# Usage: FLEET_ROOT=<fleet> bash scripts/local/home-image.sh <server-name>
 # Writes servers/<name>/vm/ (gitignored): <name>.qcow2, seed.iso.
 set -euo pipefail
 

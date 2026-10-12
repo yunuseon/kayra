@@ -3,7 +3,7 @@
 # names the violation it must produce (or "nothing"). Needs docker + jq;
 # Compose runs from a pinned image so the result does not depend on the
 # local Compose version, unless COMPOSE names one.
-#   bash infrastructure/ci/tests/compose-policy/run.sh
+#   bash ci/tests/compose-policy/run.sh
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 policy="${here}/../../jenkins-lib/resources/platform/compose-policy.sh"

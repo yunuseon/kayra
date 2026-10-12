@@ -8,7 +8,7 @@
 # Uncommitted changes in other servers' folders do not count: a test server's
 # branch pointers must not block a prod deploy.
 #
-# Usage: FLEET_ROOT=<fleet> bash infrastructure/scripts/local/require-main.sh <server-name>
+# Usage: FLEET_ROOT=<fleet> bash scripts/local/require-main.sh <server-name>
 set -euo pipefail
 
 FLEET_ROOT="${FLEET_ROOT:?the directory of the fleet (servers/), set by kayra}"

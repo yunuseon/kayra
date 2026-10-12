@@ -1,4 +1,4 @@
-# ansible-lint, run by the platform checks (infrastructure/ci/checks).
+# ansible-lint, run by the platform checks (ci/checks).
 skip_list:
   # Variable names are the contract with every server's vars.yml (several
   # vaulted) and are shared across roles (domain, apps_dir); prefixing them

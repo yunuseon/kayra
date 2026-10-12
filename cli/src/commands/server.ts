@@ -5,14 +5,15 @@ import {
   type Domain,
   type FleetRoot,
   type KayraRoot,
+  type KayraVersion,
   type Subdomain,
 } from "../brand.ts";
 import type { Server } from "../fleet.ts";
 import { run, type Arg, type Env, type Plan, type Query, type Step } from "../plan.ts";
 import { all, err, map, ok, type Result } from "../result.ts";
 
-/** What every command works with besides the server: the engine's files, and the fleet's. */
-export type Engine = { readonly kayra: KayraRoot; readonly fleet: FleetRoot };
+/** What every command works with besides the server: the engine's files and release, and the fleet's files. */
+export type Engine = { readonly kayra: KayraRoot; readonly version: KayraVersion; readonly fleet: FleetRoot };
 
 /** The local scripts that read the fleet's files find them here, not beside themselves. */
 const fleetEnv = ({ fleet }: Engine): Env => ({ FLEET_ROOT: fleet });
@@ -113,6 +114,8 @@ export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
         `domain=${server.domain}`,
         "-e",
         `target=${server.target}`,
+        "-e",
+        `kayra_version=${engine.version}`,
       ],
       ansibleEnv(engine, vaultEnv(server)),
     ),

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # The checks, in two parts that run apart once the engine has its own repo:
-#   --platform      the engine's own files (infrastructure/, KAYRA_ROOT)
+#   --platform      the engine's own files (KAYRA_ROOT)
 #   --fleet <dir>   a fleet (the directory holding servers/) against it
 # Runs inside the checks image (see Dockerfile next to it). Every check runs;
 # the exit status says whether any failed.
@@ -47,7 +47,7 @@ none() {
 vaulted() { head -c 14 "$1" | grep -q '^\$ANSIBLE_VAULT'; }
 
 # The fleet's files: everything under it but the engine, which may live inside
-# it (as infrastructure/ does today) or anywhere else.
+# it (a fleet repo that still carries a copy) or anywhere else.
 fleet_find() {
     find "$F" \( -path "$E" -o -path '*/node_modules' -o -path "$F/.git" -o -path "$F/.cache" \) -prune -o "$@" -print
 }
@@ -197,7 +197,7 @@ rule_fleet_no_tls_true() {
     [ "${#files[@]}" -eq 0 ] || grep -Hn 'tls=true' "${files[@]}" | none
 }
 
-# "grep -rn <app> infrastructure/ must stay empty apart from comments."
+# "No app a fleet registers is named in the engine, apart from comments."
 # Every app any server runs, wherever its code lives.
 rule_platform_names_no_app() {
     local app

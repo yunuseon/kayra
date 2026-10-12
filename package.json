@@ -50,5 +50,10 @@
     "eslint-plugin-functional": "10.0.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.1"
+  },
+  "overrides": {
+    "eslint-plugin-functional": {
+      "deepmerge-ts": "8.0.2"
+    }
   }
 }

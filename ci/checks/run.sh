@@ -101,9 +101,9 @@ platform_tofu_fmt() { tofu fmt -check -recursive -diff "$E/terraform"; }
 compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.sh"; }
 
 # The kayra CLI: strictest types, its lint rules, its tests.
-cli_typecheck() { (cd "$E/cli" && node_modules/.bin/tsc --noEmit); }
-cli_lint() { (cd "$E/cli" && node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
-cli_test() { (cd "$E/cli" && node --test 'test/**/*.test.ts'); }
+cli_typecheck() { (cd "$E" && node_modules/.bin/tsc -p cli --noEmit); }
+cli_lint() { (cd "$E/cli" && ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
+cli_test() { (cd "$E" && node --test 'cli/test/**/*.test.ts'); }
 
 # "Never tls=true on a deployed router": ACME never runs for it.
 rule_platform_no_tls_true() {

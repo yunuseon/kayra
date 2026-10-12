@@ -1,0 +1,29 @@
+# A tag vX.Y.Z publishes @yunus/kayra X.Y.Z to the Forgejo npm registry
+# (package.json's publishConfig); prepack compiles the CLI first. The tag and
+# package.json's version must agree. REGISTRY_TOKEN: a token with package
+# write, set by the operator's fleet (forgejo-config).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: The tag is the package's version
+        run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
+      - run: npm ci
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          registry="$(node -p 'require("./package.json").publishConfig.registry')"
+          npm config set "${registry#https:}:_authToken" '${NODE_AUTH_TOKEN}'
+          npm publish

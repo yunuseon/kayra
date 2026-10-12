@@ -7,13 +7,14 @@
 # the last RUN is the check. A failure fails the build.
 #
 #   docker build -f ci/checks/Dockerfile .                       # the engine alone
-#   docker build -f infrastructure/ci/checks/Dockerfile --build-context fleet=. \
-#     --build-arg CHECKS="--platform --fleet /fleet" infrastructure      # with a fleet
+#   docker build -f ci/checks/Dockerfile --build-context fleet=<fleet> \
+#     --build-arg CHECKS="--platform --fleet /fleet" .                # with a fleet
 # =============================================================================
-# The kayra CLI's dependencies, from its lockfile; the checks need only node itself.
+# The kayra CLI's dependencies, from the package's lockfile; the checks need
+# only node itself.
 FROM node:24.21.0-trixie-slim AS cli
 WORKDIR /cli
-COPY cli/package.json cli/package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --ignore-scripts
 
 FROM python:3.14.8-slim-trixie AS tools
@@ -67,7 +68,7 @@ FROM tools AS checks
 ARG CHECKS=--platform
 WORKDIR /kayra
 COPY . .
-COPY --from=cli /cli/node_modules cli/node_modules
+COPY --from=cli /cli/node_modules node_modules
 COPY --from=fleet / /fleet
 # OpenTofu's providers kept between runs, so the checks do not hang on GitHub.
 RUN --mount=type=cache,id=tofu-providers,target=/root/.cache/tofu-providers \

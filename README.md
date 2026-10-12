@@ -22,7 +22,7 @@ no app by name.
 Node 24, `yq`, `jq`, OpenTofu, Ansible, and for local test servers Multipass
 and `mkcert` (`brew install yq jq opentofu ansible mkcert nss && mkcert -install`).
 Git credentials that can read the apps' repositories (`gh auth login && gh auth setup-git`).
-Then the CLI: `npm ci --prefix cli && (cd cli && npm link)`, and `kayra doctor`
+Then the CLI from a checkout: `npm ci && npm link`, and `kayra doctor`
 in a fleet to see what is still missing.
 
 ## Use

@@ -8,7 +8,7 @@ Open work lives in the operator's fleet repository (`BACKLOG.md` there) until ka
 
 ## Where this repo lives: Forgejo, not GitHub
 
-kayra's home is the operator's Forgejo, repo `yunus/kayra`; `github.com/yunuseon/kayra` is its **push mirror**: every push to Forgejo overwrites it, branches included, so **never push to GitHub or open PRs there**. Private until a license is chosen.
+kayra's home is the operator's Forgejo, repo `yunus/kayra`; `github.com/yunuseon/kayra` is its **push mirror**: every push to Forgejo overwrites it, branches included, so **never push to GitHub or open PRs there**. Public, MIT-licensed (`LICENSE`).
 
 - **A change:** branch off `main`, push the branch to `origin`, open the PR with `tea`:
   `tea pr create --login <forgejo> --repo yunus/kayra --head <branch> --base main --title "…" --description "…"`.

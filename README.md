@@ -50,4 +50,6 @@ kayra down shop-test
 └── docs/
 ```
 
-Private until a license is chosen.
+## License
+
+[MIT](LICENSE) © Yunus Öztürk

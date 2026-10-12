@@ -4,17 +4,15 @@ You are working in **kayra**: a self-hosted app platform (Traefik + Authelia + J
 
 Read this file before making infrastructure, CI/CD, or compose changes — there are non-obvious load-bearing rules below that have already cost real time.
 
-Open work lives in the operator's fleet repository (`BACKLOG.md` there) until kayra has its own.
+Open work lives in GitHub issues.
 
-## Where this repo lives: Forgejo, not GitHub
+## Where this repo lives: GitHub
 
-kayra's home is the operator's Forgejo, repo `yunus/kayra`; `github.com/yunuseon/kayra` is its **push mirror**: every push to Forgejo overwrites it, branches included, so **never push to GitHub or open PRs there**. Public, MIT-licensed (`LICENSE`).
+`github.com/yunuseon/kayra` — public, MIT-licensed (`LICENSE`). Issues, pull requests, checks and releases all happen there.
 
-- **A change:** branch off `main`, push the branch to `origin`, open the PR with `tea`:
-  `tea pr create --login <forgejo> --repo yunus/kayra --head <branch> --base main --title "…" --description "…"`.
-  The push starts the checks (`.forgejo/workflows/checks.yml`: `run.sh --platform`); their status shows on the PR.
-- **Releases** are tags `vMAJOR.MINOR.PATCH`. `0.x` while the fleet contract may still change in any release; a fleet pins the version it runs.
-- **Renovate's PRs** come from the `renovate` user on Forgejo.
+- **A change:** branch off `main`, push, open a PR (`gh pr create`). The checks (`.github/workflows/checks.yml`: `run.sh --platform`) run on the PR. Commits carry a DCO sign-off (`git commit -s`, see `CONTRIBUTING.md`).
+- **Releases** are tags `vMAJOR.MINOR.PATCH`, cut from `main` after bumping `version` in `package.json`: `release.yml` publishes `@yunuseon/kayra` to npmjs.org with provenance. `0.x` while the fleet contract may still change in any release; a fleet pins the version it runs.
+- **Dependencies** arrive as Renovate PRs (`renovate.json`).
 
 ---
 
@@ -45,7 +43,7 @@ App-specific code does **not** belong here: no app a fleet registers may be name
 
 ## CLI (`kayra`)
 
-`cli/` is kayra: TypeScript run by Node 24's type stripping, [Optique](https://optique.dev) for arguments. The repo root is the npm package `@yunus/kayra` (the CLI plus every engine file it uses); a checkout runs `cli/src` as is, the published package `cli/dist`, compiled at `npm pack`/`publish` (Node strips no types inside `node_modules`). `bin/kayra.js` picks one. Once per machine:
+`cli/` is kayra: TypeScript run by Node 24's type stripping, [Optique](https://optique.dev) for arguments. The repo root is the npm package `@yunuseon/kayra` (the CLI plus every engine file it uses); a checkout runs `cli/src` as is, the published package `cli/dist`, compiled at `npm pack`/`publish` (Node strips no types inside `node_modules`). `bin/kayra.js` picks one. Once per machine:
 
 ```bash
 npm ci                  # and after a lockfile change
@@ -68,8 +66,8 @@ kayra setup shop-prod --dry-run   # any command: print the plan, run nothing
 
 Also `provision`, `hosts`, `adopt`, `backup test`, `app purge`, `certs`. App repos are cloned locally (`.cache/apps`) with the operator's own git credentials (`gh auth setup-git`). App development happens in each app's own repository.
 
-- **A fleet pins its kayra:** `@yunus/kayra` as an exact dev dependency in the fleet's `package.json`. Whatever `kayra` is on PATH hands over to the fleet's `node_modules/@yunus/kayra` (`bin/kayra.js`), so the version the fleet pins is the one that runs. To try a kayra checkout against a fleet: `npm link @yunus/kayra` in the fleet.
-- **One version for the Mac and the servers:** kayra passes its version as `kayra_version`; the platform role's `platform_ref` defaults to `v<version>`, the tag Jenkins loads the pipeline library and platform jobs from. Releases: bump `version` in `package.json`, merge, tag `v<version>` (release.yml publishes).
+- **A fleet pins its kayra:** `@yunuseon/kayra` as an exact dev dependency in the fleet's `package.json`. Whatever `kayra` is on PATH hands over to the fleet's `node_modules/@yunuseon/kayra` (`bin/kayra.js`), so the version the fleet pins is the one that runs. To try a kayra checkout against a fleet: `npm link @yunuseon/kayra` in the fleet.
+- **One version for the Mac and the servers:** kayra passes its version as `kayra_version`; the platform role's `platform_ref` defaults to `v<version>`, the tag Jenkins loads the pipeline library and platform jobs from. Releases: bump `version` in `package.json`, merge, tag `v<version>` (release.yml publishes to npmjs.org).
 - **A command is pure:** `(engine, server) => Result<Plan>`, a readonly list of steps: `run` (with env, and `$(…)`-style queries resolved when it runs), a `check` (a guard stops the plan; doctor's report and go on), `confirm`, `note`. `interpret.ts` is the only code that runs anything.
 - **Two roots:** the engine (`KAYRA_ROOT`, `kayra`) and the fleet (`FLEET_ROOT`, the directory holding `servers/`) are named apart everywhere, so the engine can live elsewhere (A2). kayra passes `FLEET_ROOT` to the local scripts; Ansible has `kayra_root` (above the playbooks) and `fleet_root` (above `server_dir`). Never derive one from the other.
 - **Every server is validated whenever kayra loads the fleet** (`parseServer`): kind, target, domain, apps, inventory or `terraform/`, vaulting. A broken server.yml anywhere stops every command.
@@ -307,14 +305,14 @@ See `docs/ci-isolation.md` for what is still reachable.
 
 ### Checks: the rules above, enforced
 
-The workflow `.forgejo/workflows/checks.yml` runs on every push to any branch: shellcheck, yamllint, ansible-lint (production
+The workflow `.github/workflows/checks.yml` runs on every pull request and push to `main`: shellcheck, yamllint, ansible-lint (production
 profile), `tofu fmt`/`validate`, the compose-policy cases, the kayra CLI's
 types, lint and tests, and the rules marked *(checked)* in this file. It is a
 Docker build of `ci/checks/Dockerfile`; the last `RUN` is
 `ci/checks/run.sh`.
 
-- **The repo's own CI is the forge's** (Forgejo Actions, GitHub Actions' syntax),
-  not the platform's Jenkins: Jenkins builds and deploys apps.
+- **The repo's own CI is the forge's** (GitHub Actions here; a fleet on Forgejo uses
+  Forgejo Actions), not the platform's Jenkins: Jenkins builds and deploys apps.
 
 - **Two parts:** `run.sh --platform` checks the engine (`kayra`) on
   its own; `run.sh --fleet <dir>` checks a fleet against it (its YAML, stacks,

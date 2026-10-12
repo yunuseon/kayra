@@ -4,7 +4,6 @@
     "config:recommended",
     "customManagers:dockerfileVersions"
   ],
-  "gitAuthor": "Renovate <renovate@yunusozturk.de>",
   "labels": [
     "dependencies"
   ],

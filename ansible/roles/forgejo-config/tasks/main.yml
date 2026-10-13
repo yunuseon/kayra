@@ -17,6 +17,8 @@
   until: forgejo_version.status == 200
   retries: 30
   delay: 2
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 - name: Look up users
   ansible.builtin.uri:
@@ -27,6 +29,8 @@
   loop: "{{ forgejo_config.users | default([]) }}"
   loop_control: {label: "{{ item.name }}"}
   no_log: true
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 # Random password, never stored: these users work with tokens.
 - name: Create missing users
@@ -55,6 +59,8 @@
   loop: "{{ forgejo_config.orgs | default([]) }}"
   loop_control: {label: "{{ item.name }}"}
   no_log: true
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 # An organization owns repos and packages alike, and its visibility is
 # theirs: a private one keeps what it owns, images included, from the world.
@@ -93,6 +99,8 @@
   loop: "{{ forgejo_config.ssh_keys | default([]) }}"
   loop_control: {label: "{{ item.user }} {{ item.title }}"}
   no_log: true
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 # Matched by type and key, whatever title or comment either side carries.
 - name: Add missing SSH keys
@@ -140,6 +148,8 @@
   loop: "{{ forgejo_config.repos }}"
   loop_control: {label: "{{ item.name }}"}
   no_log: true
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 # Empty, and private from the start where its settings say so (the settings
 # are applied below too, but a public repo, even for a moment, is published);
@@ -193,6 +203,8 @@
   loop: "{{ forgejo_config.repos | subelements('collaborators', skip_missing=True) }}"
   loop_control: {label: "{{ item.0.name }} {{ item.1.user }}"}
   no_log: true
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 - name: Grant collaborators their permission
   ansible.builtin.uri:
@@ -245,6 +257,8 @@
   loop: "{{ forgejo_config.repos | product(['hooks', 'push_mirrors']) | list }}"
   loop_control: {label: "{{ item.0.name }} {{ item.1 }}"}
   no_log: true
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 # A push to any branch calls the URL (with notifyCommit: Jenkins polls).
 - name: Add missing webhooks
@@ -326,6 +340,8 @@
   loop: "{{ service_token_files.results }}"
   loop_control: {label: "{{ item.item.secret }}"}
   no_log: true
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 - name: Mint service tokens
   ansible.builtin.command:

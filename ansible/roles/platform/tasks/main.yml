@@ -106,6 +106,8 @@
     group: deploy
     mode: "0600"
   become: true
+  # It holds secrets: --diff (kayra plan) says that it would change, never how.
+  diff: false
 
 - name: Render Authelia secrets
   ansible.builtin.copy:
@@ -213,6 +215,8 @@
     group: deploy
     mode: "0600"
   become: true
+  # It holds secrets: --diff (kayra plan) says that it would change, never how.
+  diff: false
 
 # The registry used to have a public, basic-auth router. Nothing outside the
 # server pushes or pulls, so it is gone; the copy above never deletes files.
@@ -256,6 +260,8 @@
   delay: 10
   until: jenkins_health.rc == 0
   changed_when: false
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 # casc/ is a bind mount, so a changed 00-platform.yaml only takes effect on
 # a reload; so do new tokens, read from files by ${readFile:…}.

@@ -31,6 +31,8 @@
   ansible.builtin.command: timedatectl show --property=Timezone --value
   register: current_timezone
   changed_when: false
+  # Only reads, so it runs in check mode too (kayra plan).
+  check_mode: false
 
 - name: Set timezone
   ansible.builtin.command: timedatectl set-timezone {{ timezone | default('Europe/Berlin') }}

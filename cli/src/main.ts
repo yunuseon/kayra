@@ -35,6 +35,8 @@ const onServer = (on: server.Engine, target: Server, command: OnServer): Result<
       return server.deploy(on, target);
     case "setup":
       return server.setup(on, target);
+    case "plan":
+      return server.preview(on, target);
     case "apps":
       return server.apps(on, target);
     case "hosts":

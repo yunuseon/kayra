@@ -1,3 +1,4 @@
+{"argv":["bash","<kayra>/scripts/local/require-latest-state.sh","<fleet>/servers/shop-prod/terraform"]}
 --- stdout
 Aborted.
 --- exit 0

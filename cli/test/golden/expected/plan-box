@@ -1,4 +1,5 @@
 {"argv":["bash","<kayra>/scripts/local/home-reach.sh","box","nas"],"env":{"FLEET_ROOT":"<fleet>"}}
+{"argv":["bash","<kayra>/scripts/local/require-latest-state.sh","<fleet>/servers/box/terraform"]}
 {"argv":["tofu","-chdir=<fleet>/servers/box/terraform","init","-input=false"]}
 {"argv":["tofu","-chdir=<fleet>/servers/box/terraform","plan","-input=false","-lock=false"]}
 {"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}

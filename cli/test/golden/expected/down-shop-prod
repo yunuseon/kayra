@@ -1,3 +1,4 @@
+{"argv":["bash","<kayra>/scripts/local/require-latest-state.sh","<fleet>/servers/shop-prod/terraform"]}
 {"argv":["tofu","-chdir=<fleet>/servers/shop-prod/terraform","destroy","-auto-approve"]}
 --- stdout
 --- exit 0

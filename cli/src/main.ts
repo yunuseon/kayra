@@ -44,7 +44,7 @@ const onServer = (on: server.Engine, target: Server, command: OnServer): Result<
     case "ssh":
       return server.ssh(target, command.remote);
     case "down":
-      return server.down(target);
+      return server.down(on, target);
     case "adopt":
       return server.adopt(on, target);
     case "backup test":

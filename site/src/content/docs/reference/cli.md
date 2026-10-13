@@ -18,7 +18,7 @@ confirmation, with its environment — and runs nothing.
 | `kayra plan <server>` | What `provision` and `setup` would change, changing nothing: OpenTofu's plan and the playbook in check mode with diffs (files holding secrets only say that they would change). Works from any branch |
 | `kayra apps <server>` | Make the server's apps match `server.yml`: register each, remove the rest (data kept) |
 | `kayra hosts <server>` | Point the domain at a multipass VM in `/etc/hosts` (sudo) |
-| `kayra ssh <server>` | SSH into the server |
+| `kayra ssh <server> [-- <command>]` | SSH into the server, or run a command there |
 | `kayra down <server>` | Destroy the machine (asks for the name on a Hetzner server) |
 | `kayra adopt <server>` | Once, for a server not created by kayra: add the `deploy` user as root |
 | `kayra backup test <server>` | Restore the latest backup to a scratch dir, check it, delete it — started on the server, followed over SSH |

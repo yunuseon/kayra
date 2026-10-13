@@ -1,7 +1,7 @@
 import { command, constant, multiple, object, option, optional, or, type InferValue } from "@optique/core";
 import { message, type Message } from "@optique/core/message";
 import { argument } from "@optique/core/primitives";
-import { choice } from "@optique/core/valueparser";
+import { choice, string } from "@optique/core/valueparser";
 import { appNameParser, domainParser, subdomainParser } from "./brand.ts";
 import type { Fleet } from "./fleet.ts";
 
@@ -23,7 +23,11 @@ export const parser = (fleet: Fleet) => {
         onServer("plan", message`What provision and setup would change, changing nothing (OpenTofu plan, Ansible check mode).`),
         onServer("apps", message`Make the server's apps match server.yml: register each, remove the rest (data kept).`),
         onServer("hosts", message`Point the domain at a multipass VM in /etc/hosts (sudo).`),
-        onServer("ssh", message`SSH into the server.`),
+        command(
+          "ssh",
+          object({ name: constant("ssh"), server, remote: multiple(argument(string({ metavar: "COMMAND" }))) }),
+          { brief: message`SSH into the server, or run a command there (after --).` },
+        ),
         onServer("down", message`Destroy the machine.`),
         onServer("adopt", message`Once, for a server we did not create: add the deploy user as root.`),
         command("backup", command("test", object({ name: constant("backup test"), server })), {

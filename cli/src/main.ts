@@ -42,7 +42,7 @@ const onServer = (on: server.Engine, target: Server, command: OnServer): Result<
     case "hosts":
       return server.hosts(on, target);
     case "ssh":
-      return server.ssh(target);
+      return server.ssh(target, command.remote);
     case "down":
       return server.down(target);
     case "adopt":

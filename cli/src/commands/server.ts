@@ -285,7 +285,8 @@ export const backupTest = (engine: Engine, server: Server): Result<Plan, string>
   ]);
 };
 
-export const ssh = (server: Server): Result<Plan, string> =>
+/** An interactive shell, or the remote command as ssh runs it (the remote shell reads it). */
+export const ssh = (server: Server, remote: readonly string[]): Result<Plan, string> =>
   server.inventory === undefined
     ? err(`no inventory for '${server.name}' — provision it first.`)
     : ok([
@@ -300,6 +301,7 @@ export const ssh = (server: Server): Result<Plan, string> =>
           "-o",
           "UserKnownHostsFile=/dev/null",
           `${server.inventory.user}@${server.inventory.host}`,
+          ...remote,
         ]),
       ]);
 

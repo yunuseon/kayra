@@ -249,6 +249,14 @@
   when: traefik_static_config is changed
   changed_when: true
 
+# buildkitd reads its config once at startup, like Traefik.
+- name: Restart BuildKit when its config changed
+  ansible.builtin.command: docker compose restart buildkitd
+  args:
+    chdir: "{{ platform_dir }}"
+  when: platform_files.results | selectattr('item', 'eq', 'buildkit/') | selectattr('changed') | list | length > 0
+  changed_when: true
+
 # Inside the controller, not through Traefik: jenkins.<domain> sits behind
 # Authelia, which would answer every call here with a login redirect.
 - name: Wait for Jenkins

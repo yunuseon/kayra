@@ -33,10 +33,11 @@
   become: true
 
 # Unrotated json-file logs grow until the disk is full. `local` is compressed
-# and rotated; it applies to containers created after the change.
+# and rotated; it applies to containers created after the change. The build
+# cache of `docker build` (a CI runner's, say) grows the same way.
 - name: Configure the Docker daemon
   ansible.builtin.copy:
-    content: "{{ {'log-driver': 'local', 'log-opts': {'max-size': '10m', 'max-file': '3'}} | to_nice_json }}\n"
+    content: "{{ {'log-driver': 'local', 'log-opts': {'max-size': '10m', 'max-file': '3'}, 'builder': {'gc': {'enabled': true, 'defaultKeepStorage': '5GB'}}} | to_nice_json }}\n"
     dest: /etc/docker/daemon.json
     owner: root
     group: root

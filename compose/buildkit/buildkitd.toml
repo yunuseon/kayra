@@ -8,6 +8,13 @@
   # Rootless: no process sandbox, and the rootless worker cannot use overlayfs
   # on every kernel, so let BuildKit pick a snapshotter it can actually run.
   max-parallelism = 2
+  # The cache shares the server's disk with everything else; unbounded, it
+  # filled alaz (27 GB). Collected down to maxUsedSpace, sooner when the disk
+  # has less than minFreeSpace left; never below reservedSpace.
+  gc = true
+  reservedSpace = "2GB"
+  maxUsedSpace = "10GB"
+  minFreeSpace = "20%"
 
 [registry."registry:5000"]
   http = true

@@ -46,6 +46,14 @@ const fromMain = (engine: Engine, server: Server): Step => ({
   onFailure: "stop",
 });
 
+/** OpenTofu only on the newest committed state: none waiting on an unmerged branch. */
+const latestState = (engine: Engine, server: Server): Step => ({
+  kind: "check",
+  label: `${server.name}'s OpenTofu state is the newest`,
+  probe: { kind: "exits-zero", argv: ["bash", script(engine, "require-latest-state.sh"), within(server.dir, "terraform")] },
+  onFailure: "stop",
+});
+
 /** Before Ansible's UNREACHABLE: why a home machine cannot be reached. */
 const reachable = (engine: Engine, server: Server): readonly Step[] =>
   server.target === "home"
@@ -86,7 +94,11 @@ export const provision = (engine: Engine, server: Server): Result<Plan, string> 
     fromMain(engine, server),
     ...(server.vm ? [run(["bash", script(engine, "home-image.sh"), server.name], fleetEnv(engine))] : []),
     ...(server.terraform
-      ? [run(["tofu", terraform(server), "init", "-input=false"]), run(["tofu", terraform(server), "apply", "-auto-approve"])]
+      ? [
+          latestState(engine, server),
+          run(["tofu", terraform(server), "init", "-input=false"]),
+          run(["tofu", terraform(server), "apply", "-auto-approve"]),
+        ]
       : []),
   ]);
 
@@ -135,7 +147,11 @@ export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
   ok([
     ...reachable(engine, server),
     ...(server.terraform
-      ? [run(["tofu", terraform(server), "init", "-input=false"]), run(["tofu", terraform(server), "plan", "-input=false", "-lock=false"])]
+      ? [
+          latestState(engine, server),
+          run(["tofu", terraform(server), "init", "-input=false"]),
+          run(["tofu", terraform(server), "plan", "-input=false", "-lock=false"]),
+        ]
       : []),
     collections(engine, vaultEnv(server)),
     hostPlaybook(engine, server, ["--check", "--diff"]),
@@ -196,9 +212,10 @@ export const deploy = (engine: Engine, server: Server): Result<Plan, string> =>
 export const up = (engine: Engine, server: Server): Result<Plan, string> =>
   sequence([provision(engine, server), deploy(engine, server), hosts(engine, server)]);
 
-export const down = (server: Server): Result<Plan, string> =>
+export const down = (engine: Engine, server: Server): Result<Plan, string> =>
   server.terraform
     ? ok([
+        latestState(engine, server),
         ...(server.target === "hetzner"
           ? [
               {

@@ -1,3 +1,8 @@
 ---
+nas_root: /volume2
 restic_backup:
   dir: /volume2/docker/backup
+  repository: sftp:backup-target:box
+  schedule: "0 1 * * *"
+  restore_test_schedule: "0 4 1 * *"
+  paths: [/volume2/docker]

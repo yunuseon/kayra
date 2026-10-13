@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "acme_email": {
+      "type": "string",
+      "description": "The Let's Encrypt account contact: expiry warnings land here."
+    },
+    "docker_version": {
+      "type": "string",
+      "description": "The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*)."
+    },
+    "wireguard": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "peer_public_key": {
+          "type": "string"
+        },
+        "peer_allowed_ips": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keepalive": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "address",
+        "port",
+        "peer_public_key",
+        "peer_allowed_ips"
+      ],
+      "additionalProperties": {},
+      "description": "The tunnel into the private network: the edge's address, port, and the one peer (its key, what it may reach)."
+    },
+    "edge_routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "subdomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "forwarded_headers": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "subdomains",
+          "upstream"
+        ],
+        "additionalProperties": {}
+      },
+      "description": "Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to."
+    },
+    "backup_check": {
+      "type": "object",
+      "properties": {
+        "stale_after_hours": {
+          "type": "number"
+        },
+        "github_repository": {
+          "type": "string"
+        },
+        "github_app_id": {
+          "type": "string"
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              },
+              "restore_test_max_days": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "url",
+              "user"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "stale_after_hours",
+        "github_repository",
+        "github_app_id",
+        "repositories"
+      ],
+      "additionalProperties": {},
+      "description": "The hourly check of the private network's backups: when a snapshot is stale, where issues go, which repositories."
+    }
+  },
+  "additionalProperties": false,
+  "title": "vars.yml (kind edge)"
+}

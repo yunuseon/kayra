@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "compose_stacks": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "stacks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "dir",
+        "stacks"
+      ],
+      "additionalProperties": {},
+      "description": "The server's own compose stacks: their directory on the server and the names under stacks/ to run."
+    },
+    "nas_root": {
+      "type": "string",
+      "description": "The only directory the NAS play writes in, asserted before any change (e.g. /volume2)."
+    },
+    "restic_backup": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "restore_test_schedule": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restore_test_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keep": {
+          "type": "object",
+          "properties": {
+            "daily": {
+              "type": "number"
+            },
+            "weekly": {
+              "type": "number"
+            },
+            "monthly": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "daily",
+            "weekly",
+            "monthly"
+          ],
+          "additionalProperties": {}
+        },
+        "ssh": {
+          "type": "object",
+          "properties": {
+            "public_key": {
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            },
+            "user": {
+              "type": "string"
+            },
+            "port": {
+              "type": "number"
+            },
+            "known_host": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "public_key",
+            "host",
+            "user",
+            "port",
+            "known_host"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "dir",
+        "repository",
+        "schedule",
+        "restore_test_schedule",
+        "paths"
+      ],
+      "additionalProperties": {},
+      "description": "The nightly restic backup: what, where to (SFTP), when, how long kept, and the monthly restore test."
+    }
+  },
+  "additionalProperties": false,
+  "title": "vars.yml (kind nas)"
+}

@@ -7,5 +7,5 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "test", "eslint.config.ts"]
+  "include": ["src", "test", "scripts", "eslint.config.ts"]
 }

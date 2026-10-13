@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The app's name, as in the server.yml entry."
+    },
+    "compose": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Compose files, relative to the app root, in order."
+    },
+    "subdomains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Hostnames the app claims: <sub>.<domain>."
+    },
+    "secrets": {
+      "description": "Secret keys; their values come from the fleet's apps/<app>.secrets.yml.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "config": {
+      "description": "Config keys; their values come from the fleet's apps/<app>.yml.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "name",
+    "compose",
+    "subdomains"
+  ],
+  "additionalProperties": false,
+  "title": "app.yml"
+}

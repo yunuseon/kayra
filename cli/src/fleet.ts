@@ -1,4 +1,4 @@
-import { parse } from "yaml";
+import { parseDocument } from "yaml";
 import {
   absolutePath,
   appName,
@@ -12,9 +12,10 @@ import {
   type VaultPasswordFile,
 } from "./brand.ts";
 import { all, err, map, ok, type Result } from "./result.ts";
+import { serverKinds, serverSchema, varsSchema, type ServerKind } from "./settings.ts";
+import { checkSettings, checkShape, knownSettings } from "./validate.ts";
 
-export const serverKinds = ["platform", "edge", "nas"] as const;
-export type ServerKind = (typeof serverKinds)[number];
+export { serverKinds, type ServerKind };
 export const serverTargets = ["multipass", "hetzner", "home"] as const;
 export type ServerTarget = (typeof serverTargets)[number];
 
@@ -81,9 +82,18 @@ type Fields = Readonly<Record<string, unknown>>;
 const mapping = (value: unknown): Fields | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 
+/** YAML text as a value; a syntax error is a value too, not an exception. */
+export const yamlOf = (text: string): Result<unknown, string> => {
+  const document = parseDocument(text);
+  const problem = document.errors.at(0);
+  return problem === undefined ? ok(document.toJS()) : err(`is not valid YAML: ${problem.message.split("\n")[0] ?? ""}`);
+};
+
 const fields = (text: string): Result<Fields, string> => {
-  const value: unknown = parse(text);
-  if (value === null) return ok({});
+  const parsed = yamlOf(text);
+  if (!parsed.ok) return parsed;
+  const value = parsed.value;
+  if (value === null || value === undefined) return ok({});
   const result = mapping(value);
   return result === undefined ? err("is not a YAML mapping") : ok(result);
 };
@@ -171,6 +181,8 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
   if (kind.value !== "platform" && declaredApps.length > 0) return err("apps run on platform servers only");
   const apps = all(declaredApps.map(app));
   if (!apps.ok) return apps;
+  const shape = checkShape("server.yml", descriptor.value, serverSchema);
+  if (!shape.ok) return shape;
   if (target.value === "home" && files.inventory === undefined)
     return err("target home needs a hand-written inventory.ini next to it");
   if (target.value !== "home" && !files.terraform) return err("no terraform/ next to it");
@@ -185,6 +197,8 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
   if (appValues !== undefined) return err(appValues);
   const vars = fields(files.vars);
   if (!vars.ok) return err(`vars.yml ${vars.error}`);
+  const varsChecked = checkSettings("vars.yml", vars.value, varsSchema(kind.value), knownSettings(kind.value));
+  if (!varsChecked.ok) return varsChecked;
   const backupDir = mapping(vars.value["restic_backup"])?.["dir"];
   return ok({
     name: files.name,

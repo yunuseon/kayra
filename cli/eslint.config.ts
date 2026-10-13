@@ -25,11 +25,17 @@ export default defineConfig(
       // ReadonlyDeep: Node's and Optique's types are readonly, not frozen; "Immutable" would flag every use of them.
       "functional/prefer-immutable-types": [
         "error",
-        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true },
+        // Zod's schemas are immutable once built (every method returns a new
+        // one), but its types are classes the rule cannot see into.
+        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true, ignoreTypePattern: ["^z\\.", "ZodType", "Setting"] },
       ],
       "functional/type-declaration-immutability": [
         "error",
-        { rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }] },
+        {
+          rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }],
+          // Setting holds a Zod schema: immutable, but a class the rule cannot see into.
+          ignoreIdentifierPattern: ["^Setting$"],
+        },
       ],
     },
   },

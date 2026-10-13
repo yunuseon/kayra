@@ -1,8 +1,10 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fleetRoot, serverDir, serverName, within, type AbsolutePath, type FleetRoot } from "./brand.ts";
-import { parseServer, type Fleet, type Server, type ServerFiles } from "./fleet.ts";
-import { all, err, map, ok, type Result } from "./result.ts";
+import { parseServer, yamlOf, type Fleet, type Server, type ServerFiles } from "./fleet.ts";
+import { all, err, flatMap, map, ok, type Result } from "./result.ts";
+import { defaultsSchema } from "./settings.ts";
+import { checkSettings, knownSettings } from "./validate.ts";
 
 /** The fleet is the nearest directory, from `from` upwards, with a servers/defaults.yml. */
 export const findFleetRoot = (from: AbsolutePath): Result<FleetRoot, string> => {
@@ -48,7 +50,20 @@ const readServer = (root: FleetRoot, entry: string): Result<Server, string> => {
   return server.ok ? server : err(`servers/${entry}/server.yml: ${server.error}`);
 };
 
+/** servers/defaults.yml: settings shared by every server, any kind's. */
+const checkDefaults = (root: FleetRoot): Result<true, string> => {
+  const parsed = yamlOf(readFileSync(join(root, "servers", "defaults.yml"), "utf8"));
+  if (!parsed.ok) return err(`servers/defaults.yml ${parsed.error}`);
+  const values = parsed.value;
+  if (values === null || values === undefined) return ok(true);
+  if (typeof values !== "object" || Array.isArray(values)) return err("servers/defaults.yml is not a YAML mapping");
+  return map(checkSettings("servers/defaults.yml", Object.fromEntries(Object.entries(values)), defaultsSchema, knownSettings(undefined)), () => true);
+};
+
 export const loadFleet = (root: FleetRoot): Result<Fleet, string> =>
+  flatMap(checkDefaults(root), () => fleetOf(root));
+
+const fleetOf = (root: FleetRoot): Result<Fleet, string> =>
   map(
     all(
       readdirSync(join(root, "servers"), { withFileTypes: true })

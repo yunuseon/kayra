@@ -263,7 +263,7 @@ over TCP and push straight to the registry.
   `poll: true` (`@watch` workspace), or the job would stop watching main. When
   green on the app's ref it starts `<app>/deploy` with **that exact SHA**. Both
   post a commit status (`jenkins/build`, `jenkins/deploy`) linking to the run.
-- **A Forgejo is configured as code** by `forgejo-config` (`forgejo_config` in the server's `vars.yml`): users and SSH keys, organizations (`orgs: [{name, owner, visibility}]` — an organization's visibility is its packages' too, so a private one keeps internal images private), runners (`runners: [{name, scope}]`; without a scope a runner serves every repo on the instance), repos (created inside their organization, private from the start where their settings say so), collaborators, Actions secrets, webhooks, push mirrors. It adds and adopts, never deletes.
+- **A Forgejo is configured as code** by `forgejo-config` (`forgejo_config` in the server's `vars.yml`): users and SSH keys, organizations (`orgs: [{name, owner, visibility}]` — an organization's visibility is its packages' too, so a private one keeps internal images private), runners (`runners: [{name, scope}]`; without a scope a runner serves every repo on the instance), repos (created inside their organization, private from the start where their settings say so; `pull_mirror: <url>` makes one a pull mirror of another forge, fetched every `mirror_interval`), collaborators, Actions secrets, webhooks, push mirrors. It adds and adopts, never deletes.
 - **A repo on GitHub or on a Forgejo works the same.** `commitStatus` posts to
   GitHub through its plugin and to any other host through Forgejo's statuses
   API (the `git-credentials` token). Forgejo tells Jenkins about a push with a

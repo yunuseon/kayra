@@ -231,10 +231,14 @@
 # Start. `up` recreates any container whose interpolated config changed, so
 # a changed .env needs nothing extra.
 # ---------------------------------------------------------------------------
+# Pinned by digest, so an image that is there is the right one: pulling only
+# what is missing makes a run without changes report none (and `kayra plan`
+# exact, where policy always is changed in check mode by definition).
 - name: Pull platform images
   community.docker.docker_compose_v2_pull:
     project_src: "{{ platform_dir }}"
     ignore_buildable: true
+    policy: missing
 
 - name: Start platform
   community.docker.docker_compose_v2:

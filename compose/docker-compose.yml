@@ -5,7 +5,7 @@
 
 services:
   traefik:
-    image: traefik:v3.7.14
+    image: traefik:v3.7.14@sha256:575fa15b135078fe5e50aa847987d96dbddd7b093c172429618404df73f3fa7c
     restart: unless-stopped
     ports:
       - "80:80"
@@ -39,7 +39,7 @@ services:
   # with no route out that nothing but Traefik joins.
   # ---------------------------------------------------------------------------
   socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.5.0
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     restart: unless-stopped
     environment:
       - CONTAINERS=1
@@ -60,7 +60,7 @@ services:
   # infinite redirect. The portal has to stay reachable to authenticate anyone.
   # ---------------------------------------------------------------------------
   authelia:
-    image: authelia/authelia:4.39.28
+    image: authelia/authelia:4.39.28@sha256:bd97cff4fcbf715b5ff1f9ae286afbe6033afce385302520b0368122d43a6f54
     restart: unless-stopped
     environment:
       - X_AUTHELIA_CONFIG=/config/configuration.yml

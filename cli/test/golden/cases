@@ -28,4 +28,5 @@ adopt-shop-prod | | adopt shop-prod
 app-purge-shop-prod | | app purge shop-prod shop
 backup-test-box | | backup test box
 ssh-forge | | ssh forge
+ssh-forge-command | | ssh forge -- df -h /
 certs | | certs shop.test www api

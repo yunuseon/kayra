@@ -213,6 +213,16 @@ rule_fleet_images_are_pinned() {
     [ "${#files[@]}" -eq 0 ] || compose_images "${files[@]}" | unpinned | none
 }
 
+# "A state in the repo is encrypted": OpenTofu's state encryption, so a
+# committed terraform.tfstate holds only encrypted_data, never resources.
+rule_fleet_states_encrypted() {
+    local f
+    fleet_find -name terraform.tfstate | while IFS= read -r f; do
+        jq -e 'has("encrypted_data") and (has("resources") | not)' "$f" >/dev/null 2>&1 \
+            || echo "${f#"$F"/}: not encrypted (OpenTofu state encryption)"
+    done | none
+}
+
 rule_fleet_no_private_keys() {
     local files
     mapfile -t files < <(fleet_find -type f)
@@ -244,6 +254,7 @@ if [ -n "$F" ]; then
     check fleet:rule:platform-names-no-app rule_platform_names_no_app
     check fleet:rule:images-are-pinned rule_fleet_images_are_pinned
     check fleet:rule:no-private-keys rule_fleet_no_private_keys
+    check fleet:rule:states-encrypted rule_fleet_states_encrypted
 fi
 
 echo

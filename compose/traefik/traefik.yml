@@ -35,7 +35,8 @@ certificatesResolvers:
 
 providers:
   docker:
-    endpoint: "unix:///var/run/docker.sock"
+    # The read-only socket proxy (compose: socket-proxy), not the socket.
+    endpoint: "tcp://socket-proxy:2375"
     exposedByDefault: false
     network: platform-public
   file:

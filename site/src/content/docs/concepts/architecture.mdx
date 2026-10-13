@@ -24,7 +24,8 @@ serves the apps.
 Amber marks where app code runs: the build agent, BuildKit and the apps
 themselves. Everything else sits on `platform-internal`, a network no app
 container joins; Traefik is the only service on both. Only the Jenkins
-controller holds the Docker socket, and it runs nothing from an app.
+controller holds the Docker socket, and it runs nothing from an app; the edge
+router sees containers only through a read-only proxy.
 
 <LikeC4View viewId="platform" client:only="react" />
 

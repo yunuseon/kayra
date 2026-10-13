@@ -222,6 +222,7 @@ The build agent runs pipeline code checked out from arbitrary branches, so it
 has **no docker socket and no docker CLI**. Builds go to a rootless `buildkitd`
 over TCP and push straight to the registry.
 
+- **Traefik never mounts the Docker socket** *(checked)*. It reads containers through `socket-proxy` (`tecnativa/docker-socket-proxy`: containers, events, version, ping; no POST), on `platform-socket`, an internal network only the two join. Traefik faces the internet; the socket, even `:ro`, is the whole Docker API.
 - **Never mount `/var/run/docker.sock` into `jenkins-agent`** *(checked)*. That is the thing
   this arrangement exists to prevent; it made any pushed branch host root.
 - **Never add `docker` back to the agent's JCasC label** *(checked)*. It is

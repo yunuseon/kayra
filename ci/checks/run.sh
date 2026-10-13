@@ -118,6 +118,12 @@ rule_agent_has_no_socket() {
         | grep docker.sock | sed 's/^/jenkins-agent mounts /' | none
 }
 
+# "Traefik never mounts the Docker socket; it reads containers through socket-proxy."
+rule_traefik_has_no_socket() {
+    yq '.services.traefik.volumes // [] | .[]' "$E/compose/docker-compose.yml" \
+        | grep docker.sock | sed 's/^/traefik mounts /' | none
+}
+
 # "Never add docker back to the agent's JCasC label."
 rule_agent_label_has_no_docker() {
     yq '.jenkins.nodes[].permanent.labelString' "$E/compose/jenkins/casc/00-platform.yaml" \
@@ -231,6 +237,7 @@ if [ "$platform" = true ]; then
     check platform:rule:no-tls-true rule_platform_no_tls_true
     check platform:rule:agent-has-no-socket rule_agent_has_no_socket
     check platform:rule:agent-label-has-no-docker rule_agent_label_has_no_docker
+    check platform:rule:traefik-has-no-socket rule_traefik_has_no_socket
     check platform:rule:controller-has-no-project-name rule_controller_has_no_project_name
     check platform:rule:images-are-pinned rule_platform_images_are_pinned
     check platform:rule:no-private-keys rule_platform_no_private_keys

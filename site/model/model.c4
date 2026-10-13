@@ -41,6 +41,11 @@ model {
       description 'The only way in: routes by hostname, terminates TLS, bridges both networks'
       technology 'Traefik v3'
     }
+    socketProxy = service 'Docker API proxy' {
+      #internal
+      technology 'docker-socket-proxy'
+      description "Read-only: the edge router's view of the containers, nothing else of the Docker API"
+    }
     authelia = service 'Staff login' {
       #internal
       technology 'Authelia'
@@ -97,4 +102,5 @@ model {
   platform.traefik -> platform.authelia 'forward auth for platform pages'
   platform.traefik -> platform.controller 'jenkins.<domain>, behind Authelia'
   platform.traefik -> letsencrypt 'ACME'
+  platform.traefik -> platform.socketProxy 'discovers containers (read-only)'
 }

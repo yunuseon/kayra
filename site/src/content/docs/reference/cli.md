@@ -15,6 +15,7 @@ confirmation, with its environment — and runs nothing.
 | `kayra provision <server>` | Create or update the machine (target home: build the image to import) |
 | `kayra deploy <server>` | Host setup and every app, no provisioning |
 | `kayra setup <server>` | The host layer only: the playbook for the server's kind |
+| `kayra plan <server>` | What `provision` and `setup` would change, changing nothing: OpenTofu's plan and the playbook in check mode with diffs (files holding secrets only say that they would change). Works from any branch |
 | `kayra apps <server>` | Make the server's apps match `server.yml`: register each, remove the rest (data kept) |
 | `kayra hosts <server>` | Point the domain at a multipass VM in `/etc/hosts` (sudo) |
 | `kayra ssh <server>` | SSH into the server |
@@ -31,6 +32,7 @@ Hetzner and home servers change only from a clean `main` equal to its remote:
 | Command | What it does |
 |---|---|
 | `kayra status` | Every server and whether a machine exists for it |
+| `kayra validate [server]` | The fleet beyond its schemas: secrets (unknown keys must be helpers `vars.yml` uses), each app's `app.yml` against the fleet's values, `compose_stacks` against `stacks/`, `edge_routes` |
 | `kayra doctor` | Check that this machine can run every command on every server: tools, vault passwords, app repositories, home servers' SSH |
 | `kayra certs <domain> [subdomain…]` | mkcert certificates for local development |
 

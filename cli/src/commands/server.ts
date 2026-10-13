@@ -90,6 +90,29 @@ export const provision = (engine: Engine, server: Server): Result<Plan, string> 
       : []),
   ]);
 
+/** The playbook for the server's kind, as setup runs it; plan adds check mode. */
+const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []): Step =>
+  run(
+    [
+      "ansible-playbook",
+      "-i",
+      inventory(server),
+      ansiblePath(engine, "playbooks", `${server.kind}.yml`),
+      "-e",
+      `server=${server.name}`,
+      "-e",
+      `server_dir=${server.dir}`,
+      "-e",
+      `domain=${server.domain}`,
+      "-e",
+      `target=${server.target}`,
+      "-e",
+      `kayra_version=${engine.version}`,
+      ...extra,
+    ],
+    ansibleEnv(engine, vaultEnv(server)),
+  );
+
 /** The host layer: the playbook for the server's kind. */
 export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
   ok([
@@ -100,25 +123,23 @@ export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
       : []),
     ...reachable(engine, server),
     collections(engine, vaultEnv(server)),
-    run(
-      [
-        "ansible-playbook",
-        "-i",
-        inventory(server),
-        ansiblePath(engine, "playbooks", `${server.kind}.yml`),
-        "-e",
-        `server=${server.name}`,
-        "-e",
-        `server_dir=${server.dir}`,
-        "-e",
-        `domain=${server.domain}`,
-        "-e",
-        `target=${server.target}`,
-        "-e",
-        `kayra_version=${engine.version}`,
-      ],
-      ansibleEnv(engine, vaultEnv(server)),
-    ),
+    hostPlaybook(engine, server),
+  ]);
+
+/**
+ * What provision and setup would change, changing nothing: OpenTofu's plan and
+ * the playbook in check mode, with diffs (files holding secrets say only that
+ * they would change). From any checkout: it previews a branch against a server.
+ */
+export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
+  ok([
+    ...reachable(engine, server),
+    ...(server.terraform
+      ? [run(["tofu", terraform(server), "init", "-input=false"]), run(["tofu", terraform(server), "plan", "-input=false", "-lock=false"])]
+      : []),
+    collections(engine, vaultEnv(server)),
+    hostPlaybook(engine, server, ["--check", "--diff"]),
+    { kind: "note", text: `kayra plan changed nothing on ${server.name}: the changed tasks above are what kayra setup would do.` },
   ]);
 
 /** Register every app in server.yml, then remove the rest (their data kept). */

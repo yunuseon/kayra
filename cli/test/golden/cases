@@ -9,6 +9,8 @@ setup-shop-prod | | setup shop-prod
 setup-edge | | setup edge
 setup-box | | setup box
 setup-forge | | setup forge
+plan-shop-prod | | plan shop-prod
+plan-box | | plan box
 apps-shop-test | | apps shop-test
 apps-shop-prod | | apps shop-prod
 apps-edge | | apps edge

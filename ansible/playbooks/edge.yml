@@ -34,6 +34,8 @@
       register: ufw_status
       changed_when: false
       failed_when: false
+      # Only reads, so it runs in check mode too (kayra plan).
+      check_mode: false
 
     - name: Disable ufw
       ansible.builtin.command: ufw disable

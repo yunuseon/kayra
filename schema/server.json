@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "Which playbook: platform (default; Traefik, Authelia, Jenkins, apps), edge or nas.",
+      "type": "string",
+      "enum": [
+        "platform",
+        "edge",
+        "nas"
+      ]
+    },
+    "target": {
+      "type": "string",
+      "enum": [
+        "hetzner",
+        "multipass",
+        "home"
+      ],
+      "description": "Where it runs: hetzner, multipass (a local VM) or home (a machine nothing creates)."
+    },
+    "domain": {
+      "type": "string",
+      "description": "The server's domain; platform subdomains and the apps' hang off it."
+    },
+    "vault": {
+      "description": "secrets.yml is vault-encrypted (required outside multipass).",
+      "type": "boolean"
+    },
+    "vault_password_file": {
+      "description": "The vault password file; without it, Ansible asks.",
+      "type": "string"
+    },
+    "apps": {
+      "description": "The apps this server runs (platform only).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string",
+            "description": "The app's repository, https://."
+          },
+          "ref": {
+            "description": "The branch to build and deploy (default main).",
+            "type": "string"
+          },
+          "path": {
+            "description": "The app's root inside the repository (default .).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "repo"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "target",
+    "domain"
+  ],
+  "additionalProperties": false,
+  "title": "server.yml"
+}

@@ -1,0 +1,211 @@
+import { z } from "zod";
+
+/** The server kinds, each with its playbook; settings say which kinds read them. */
+export const serverKinds = ["platform", "edge", "nas"] as const;
+export type ServerKind = (typeof serverKinds)[number];
+
+/**
+ * One setting: a variable the roles read, set in a server's vars.yml (or once
+ * for every server in defaults.yml) — or, if secret, in its secrets.yml.
+ */
+export type Setting = {
+  readonly name: string;
+  readonly kinds: readonly ServerKind[];
+  readonly secret: boolean;
+  readonly schema: z.ZodType;
+  readonly description: string;
+};
+
+const setting = (
+  name: string,
+  kinds: readonly ServerKind[],
+  schema: z.ZodType,
+  description: string,
+): Setting => ({ name, kinds, secret: false, schema: schema.describe(description), description });
+
+const secret = (
+  name: string,
+  kinds: readonly ServerKind[],
+  schema: z.ZodType,
+  description: string,
+): Setting => ({ name, kinds, secret: true, schema: schema.describe(description), description });
+
+const text = z.string();
+const texts = z.array(z.string());
+const platform: readonly ServerKind[] = ["platform"];
+const edge: readonly ServerKind[] = ["edge"];
+const nas: readonly ServerKind[] = ["nas"];
+
+/** Nested settings check the fields they know and allow others: a typo is caught at the top. */
+const record = (fields: Readonly<Record<string, z.ZodType>>) => z.looseObject(fields);
+
+export const settings: readonly Setting[] = [
+  // Every kind that serves HTTPS
+  setting("acme_email", ["platform", "edge"], text, "The Let's Encrypt account contact: expiry warnings land here."),
+  setting("docker_version", ["platform", "edge"], text, "The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*)."),
+
+  // platform: the platform role
+  setting("git_remote_url", platform, text, "kayra's repository: Jenkins loads the pipeline library and platform jobs from it."),
+  setting("platform_ref", platform, text, "The ref of git_remote_url Jenkins loads from; defaults to the tag of the kayra version that ran (v<version>). Only a test server sets a branch."),
+  setting("jenkins_admin_user", platform, text, "Jenkins' local admin user (default admin)."),
+  setting("authelia_policy", platform, z.enum(["one_factor", "two_factor"]), "What Authelia asks of staff: two_factor (default) or one_factor."),
+  setting("authelia_smtp_address", platform, text, "SMTP server for Authelia's mails (passkey enrolment); empty: mails go to a file."),
+  setting("authelia_smtp_username", platform, text, "SMTP user for Authelia."),
+  setting("authelia_smtp_sender", platform, text, "Sender address of Authelia's mails."),
+  setting("acme_dns", platform, z.enum(["", "hetzner"]), "Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner)."),
+  setting("renovate_repositories", platform, texts, "owner/repo of the repos this server's platform-renovate keeps up to date; the job exists only where the list is not empty."),
+  setting("renovate_schedule", platform, text, "When platform-renovate runs, as a Jenkins cron spec (default weekly: H 4 * * 1)."),
+  setting("renovate_platform", platform, z.enum(["github", "forgejo"]), "Where the repos live: github (default) or forgejo."),
+  setting("renovate_endpoint", platform, text, "With a Forgejo: its API on platform-internal, e.g. http://forgejo:3000/api/v1."),
+  setting("renovate_git_url", platform, z.enum(["default", "ssh", "endpoint"]), "How Renovate clones; endpoint with a Forgejo, so it uses the internal address."),
+  setting("renovate_host_rules", platform, z.array(record({ matchHost: text })), "Renovate hostRules: allowInternal for a Forgejo on platform-internal, credentials for a private registry."),
+  setting("vm", platform, record({ address: text, gateway: text, disk: text }), "target home: the VM kayra provision builds — fixed address (CIDR), gateway, disk size."),
+  setting(
+    "forgejo_config",
+    platform,
+    record({
+      url: text,
+      container: text,
+      runners: z.array(record({ name: text, scope: text.optional() })).optional(),
+      tokens: z.array(record({ user: text, name: text, scopes: texts, secret: text })).optional(),
+      users: z.array(record({ name: text, email: text })).optional(),
+      orgs: z.array(record({ name: text, owner: text, visibility: z.enum(["public", "limited", "private"]) })).optional(),
+      ssh_keys: z.array(record({ user: text, title: text, key: text })).optional(),
+      repos: z
+        .array(
+          record({
+            name: text,
+            settings: z.record(z.string(), z.unknown()).optional(),
+            collaborators: z.array(record({ user: text, permission: text })).optional(),
+            webhooks: texts.optional(),
+            push_mirror: text.optional(),
+            pull_mirror: text.optional(),
+          }),
+        )
+        .optional(),
+    }),
+    "What this server's own Forgejo holds, as code: users, SSH keys, organizations, runners, repos (settings, collaborators, webhooks, mirrors) and the tokens it mints for the platform.",
+  ),
+
+  // platform and nas: the compose-stacks role
+  setting("compose_stacks", ["platform", "nas"], record({ dir: text, stacks: texts }), "The server's own compose stacks: their directory on the server and the names under stacks/ to run."),
+
+  // nas
+  setting("nas_root", nas, text, "The only directory the NAS play writes in, asserted before any change (e.g. /volume2)."),
+  setting(
+    "restic_backup",
+    nas,
+    record({
+      dir: text,
+      repository: text,
+      schedule: text,
+      restore_test_schedule: text,
+      paths: texts,
+      restore_test_paths: texts.optional(),
+      exclude: texts.optional(),
+      keep: record({ daily: z.number(), weekly: z.number(), monthly: z.number() }).optional(),
+      ssh: record({ public_key: text, host: text, user: text, port: z.number(), known_host: text }).optional(),
+    }),
+    "The nightly restic backup: what, where to (SFTP), when, how long kept, and the monthly restore test.",
+  ),
+
+  // edge
+  setting(
+    "wireguard",
+    edge,
+    record({ address: text, port: z.number(), peer_public_key: text, peer_allowed_ips: texts, keepalive: z.number().optional() }),
+    "The tunnel into the private network: the edge's address, port, and the one peer (its key, what it may reach).",
+  ),
+  setting(
+    "edge_routes",
+    edge,
+    z.array(record({ subdomains: texts, upstream: text, forwarded_headers: z.boolean().optional() })),
+    "Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to.",
+  ),
+  setting(
+    "backup_check",
+    edge,
+    record({
+      stale_after_hours: z.number(),
+      github_repository: text,
+      github_app_id: text,
+      repositories: z.array(record({ name: text, url: text, user: text, restore_test_max_days: z.number().optional() })),
+    }),
+    "The hourly check of the private network's backups: when a snapshot is stale, where issues go, which repositories.",
+  ),
+
+  // Secrets
+  secret("jenkins_admin_password", platform, text, "Jenkins' admin password."),
+  secret("git_token", platform, text, "Token Jenkins clones and posts commit statuses with."),
+  secret("github_webhook_secret", platform, text, "HMAC secret of the apps' GitHub push webhooks."),
+  secret("renovate_token", platform, text, "Token platform-renovate opens PRs with."),
+  secret("renovate_github_com_token", platform, text, "Public-read GitHub token for Renovate's lookups off GitHub."),
+  secret("authelia_session_secret", platform, text, "Authelia's session secret."),
+  secret("authelia_storage_encryption_key", platform, text, "Authelia's storage encryption key."),
+  secret("authelia_smtp_password", platform, text, "Authelia's SMTP password."),
+  secret("authelia_users", platform, z.record(z.string(), z.unknown()), "Staff accounts: name, email, argon2id password hash."),
+  secret("acme_dns_token", platform, text, "With acme_dns: the DNS provider's token, for DNS-01 only."),
+  secret("forgejo_admin_token", platform, text, "forgejo-config's token: admin, organization, repository, user (read and write)."),
+  secret("forgejo_runner_secrets", platform, z.record(z.string(), text), "Per runner name: the 40-character secret shared by the runner and Forgejo."),
+  secret("forgejo_action_secrets", platform, z.array(record({ repo: text, name: text, value: text })), "Actions secrets per repo."),
+  secret("forgejo_push_mirror_credentials", platform, record({ username: text, password: text }), "The account push mirrors push with."),
+  secret("compose_stack_secrets", ["platform", "nas"], z.record(z.string(), z.record(z.string(), z.unknown())), "Per stack: the variables of its .env."),
+  secret("compose_registry_logins", ["platform", "nas"], z.array(record({ registry: text, username: text, password: text })), "Private registries the stacks pull from."),
+  secret("restic_backup_password", nas, text, "The restic repository's password."),
+  secret("restic_backup_ssh_key", nas, text, "The SSH key the backup reaches the Storage Box with."),
+  secret("restic_backup_postgres_passwords", nas, z.record(z.string(), text), "Per database container: the password its dump connects with."),
+  secret("wireguard_private_key", edge, text, "The edge's WireGuard private key."),
+  secret("wireguard_peer_psk", edge, text, "The tunnel's preshared key."),
+  secret("backup_check_github_app_key", edge, text, "The GitHub App's private key the backup check opens issues with."),
+  secret("backup_check_passwords", edge, z.record(z.string(), text), "Per watched repository: its read-only password."),
+];
+
+/** Ansible's own variables (connection, privilege escalation) are always allowed. */
+export const isAnsibleVariable = (key: string): boolean => key.startsWith("ansible_");
+
+export const settingsFor = (kind: ServerKind, secrets: boolean): readonly Setting[] =>
+  settings.filter((each) => each.secret === secrets && each.kinds.includes(kind));
+
+const shape = (chosen: readonly Setting[]): Readonly<Record<string, z.ZodType>> =>
+  Object.fromEntries(chosen.map((each) => [each.name, each.schema.optional()]));
+
+/** vars.yml for a kind: its settings and nothing else (Ansible's own variables apart). */
+export const varsSchema = (kind: ServerKind) => z.strictObject(shape(settingsFor(kind, false)));
+
+/** defaults.yml: settings shared by every server, so any kind's. */
+export const defaultsSchema = z.strictObject(shape(settings.filter((each) => !each.secret)));
+
+/** secrets.yml: the known secrets typed; other keys may be helpers that vars.yml references. */
+export const secretsSchema = (kind: ServerKind) => z.looseObject(shape(settingsFor(kind, true)));
+
+/** server.yml: topology only. */
+export const serverSchema = z.strictObject({
+  kind: z.enum(serverKinds).optional().describe("Which playbook: platform (default; Traefik, Authelia, Jenkins, apps), edge or nas."),
+  target: z.enum(["hetzner", "multipass", "home"]).describe("Where it runs: hetzner, multipass (a local VM) or home (a machine nothing creates)."),
+  domain: z.string().describe("The server's domain; platform subdomains and the apps' hang off it."),
+  vault: z.boolean().optional().describe("secrets.yml is vault-encrypted (required outside multipass)."),
+  vault_password_file: z.string().optional().describe("The vault password file; without it, Ansible asks."),
+  apps: z
+    .array(
+      z.strictObject({
+        name: z.string(),
+        repo: z.string().describe("The app's repository, https://."),
+        ref: z.string().optional().describe("The branch to build and deploy (default main)."),
+        path: z.string().optional().describe("The app's root inside the repository (default .)."),
+      }),
+    )
+    .optional()
+    .describe("The apps this server runs (platform only)."),
+});
+
+/** app.yml, at the root of an app's repository: the app contract. */
+export const appManifestSchema = z.strictObject({
+  name: z.string().describe("The app's name, as in the server.yml entry."),
+  compose: z.array(z.string()).describe("Compose files, relative to the app root, in order."),
+  subdomains: z.array(z.string()).describe("Hostnames the app claims: <sub>.<domain>."),
+  secrets: z.array(z.string()).optional().describe("Secret keys; their values come from the fleet's apps/<app>.secrets.yml."),
+  config: z.array(z.string()).optional().describe("Config keys; their values come from the fleet's apps/<app>.yml."),
+});
+
+/** apps/<app>.yml and apps/<app>.secrets.yml: flat key → value. */
+export const appValuesSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));

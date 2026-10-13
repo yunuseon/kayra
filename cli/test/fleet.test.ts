@@ -86,9 +86,9 @@ test("the vault: none, asked for, or a password file under ~", () => {
 
 test("only a home server builds a VM image, and only when vars.yml has a vm", () => {
   const home = "target: home\ndomain: a.test\nvault: true";
-  strictEqual(server("a", home, { vars: "vm:\n  address: 10.0.0.2\n" }).vm, true);
+  strictEqual(server("a", home, { vars: "vm:\n  address: 10.0.0.2/24\n  gateway: 10.0.0.1\n  disk: 40G\n" }).vm, true);
   strictEqual(server("a", home).vm, false);
-  strictEqual(server("a", "target: hetzner\ndomain: a.test\nvault: true", { vars: "vm: {}\n" }).vm, false);
+  strictEqual(server("a", "target: hetzner\ndomain: a.test\nvault: true", { vars: "vm:\n  address: 10.0.0.2/24\n  gateway: 10.0.0.1\n  disk: 40G\n" }).vm, false);
 });
 
 test("the hosts a server's stacks route, relative to its domain where they are under it", () => {
@@ -105,4 +105,35 @@ test("DNS-01 is a server whose vars.yml names a provider", () => {
   strictEqual(server("a", home, { vars: "acme_dns: hetzner\n" }).acmeDns, true);
   strictEqual(server("a", home, { vars: "acme_dns: ''\n" }).acmeDns, false);
   strictEqual(server("a", home).acmeDns, false);
+});
+
+test("vars.yml holds the kind's settings and nothing else", () => {
+  const platform = (vars: string) => refused("target: multipass\ndomain: a.test", { secrets: "admin: admin\n", vars });
+  strictEqual(platform("acme_dns: hetzner\nauthelia_policy: one_factor\n"), "accepted");
+  strictEqual(platform("acme_dsn: hetzner\n"), "vars.yml: 'acme_dsn' is not a setting — did you mean 'acme_dns'?");
+  strictEqual(platform("edge_routes: []\n"), "vars.yml: 'edge_routes' is not a setting");
+  strictEqual(platform("git_token: abc\n"), "vars.yml: 'git_token' is a secret — it goes in secrets.yml");
+  strictEqual(
+    platform("authelia_policy: three_factor\n"),
+    'vars.yml: authelia_policy: Invalid option: expected one of "one_factor"|"two_factor"',
+  );
+  strictEqual(platform("ansible_port: 2222\n"), "accepted");
+  strictEqual(
+    refused("kind: edge\ntarget: multipass\ndomain: a.test", { secrets: "x: y\n", vars: "edge_routes: [{subdomains: [git], upstream: 'h:1'}]\n" }),
+    "accepted",
+  );
+});
+
+test("a file that is not valid YAML is an error, not a crash", () => {
+  strictEqual(
+    refused("target: multipass\ndomain: a.test", { secrets: "admin: admin\n", vars: "a: [1\n" }).startsWith("vars.yml is not valid YAML: "),
+    true,
+  );
+});
+
+test("server.yml holds topology only", () => {
+  strictEqual(
+    refused("target: multipass\ndomain: a.test\nplatform_ci: true", { secrets: "admin: admin\n" }),
+    "server.yml: 'platform_ci' is not a key it knows",
+  );
 });

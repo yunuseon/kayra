@@ -2,7 +2,7 @@
 # =============================================================================
 # forgejo-config role — what a Forgejo holds beyond its own config file, as
 # code: users and their SSH keys, organizations, Actions runners, repos (created empty
-# where missing) and their settings (issues, pull requests, actions), Actions
+# where missing, or as a pull mirror of another forge) and their settings (issues, pull requests, actions), Actions
 # secrets, collaborators, webhooks and push mirrors, from
 # forgejo_config in the server's vars.yml. Adds what is missing through the
 # API, adopts what already matches, never deletes. Talks to Forgejo on the
@@ -157,7 +157,30 @@
       private: "{{ item.settings.private | default(false) }}"
     status_code: [201]
   changed_when: true
-  loop: "{{ forgejo_repos.results | selectattr('status', 'eq', 404) | map(attribute='item') | list }}"
+  loop: "{{ forgejo_repos.results | selectattr('status', 'eq', 404) | map(attribute='item') | rejectattr('pull_mirror', 'defined') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+# A repo whose home is elsewhere (pull_mirror: its clone URL): Forgejo clones
+# it once and fetches it again on mirror_interval (a setting, as
+# mirror_interval: 10m0s). An existing repo is adopted as it is.
+- name: Create missing pull mirrors
+  ansible.builtin.uri:
+    url: "{{ forgejo_config.url }}/api/v1/repos/migrate"
+    method: POST
+    headers: {Authorization: "token {{ forgejo_admin_token }}"}
+    body_format: json
+    body:
+      clone_addr: "{{ item.pull_mirror }}"
+      repo_owner: "{{ item.name.split('/')[0] }}"
+      repo_name: "{{ item.name.split('/')[1] }}"
+      mirror: true
+      private: "{{ item.settings.private | default(false) }}"
+      service: git
+    status_code: [201]
+    timeout: 300
+  changed_when: true
+  loop: "{{ forgejo_repos.results | selectattr('status', 'eq', 404) | map(attribute='item') | selectattr('pull_mirror', 'defined') | list }}"
   loop_control: {label: "{{ item.name }}"}
   no_log: true
 

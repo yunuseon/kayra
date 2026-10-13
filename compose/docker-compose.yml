@@ -10,8 +10,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # No Docker socket: containers are read through socket-proxy. A mount,
+    # even :ro, would be the whole Docker API, i.e. root on the host, for the
+    # one service the internet talks to.
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic:/etc/traefik/dynamic:ro
       - ./traefik/certs:/certs:ro
@@ -19,6 +21,7 @@ services:
     networks:
       - public
       - internal
+      - socket
     labels:
       # The dashboard used to ride on an unauthenticated published :8080.
       # It speaks no auth of its own, which is exactly what forwardAuth is for.
@@ -28,6 +31,27 @@ services:
       - "traefik.http.routers.dashboard.tls.certresolver=le"
       - "traefik.http.routers.dashboard.service=api@internal"
       - "traefik.http.routers.dashboard.middlewares=authelia@file,security-headers@file"
+
+  # ---------------------------------------------------------------------------
+  # Traefik's view of Docker: the socket behind an allow-list. Read-only
+  # (POST off), and only containers, events, version and ping — what the
+  # Docker provider asks for. Reachable on platform-socket only, a network
+  # with no route out that nothing but Traefik joins.
+  # ---------------------------------------------------------------------------
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - EVENTS=1
+      - VERSION=1
+      - PING=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 64m
+    networks:
+      - socket
 
   # ---------------------------------------------------------------------------
   # Authelia — single sign-on for services that sit behind Traefik.
@@ -75,6 +99,10 @@ networks:
     name: platform-public
   internal:
     name: platform-internal
+  # Traefik and socket-proxy only; internal, so the proxy has no way out.
+  socket:
+    name: platform-socket
+    internal: true
 
 volumes:
   acme-data:

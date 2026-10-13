@@ -197,6 +197,11 @@ fleet_tofu_validate() {
     return "$ok"
 }
 
+# The fleet against the engine's schemas and cross-checks (kayra validate):
+# without the vault password or the apps' clones, what needs them is noted
+# as not checked, never failed.
+fleet_kayra_validate() { (cd "$F" && node "$E/cli/src/main.ts" validate); }
+
 rule_fleet_no_tls_true() {
     local files
     mapfile -t files < <(fleet_compose_files)
@@ -257,6 +262,7 @@ if [ -n "$F" ]; then
     check fleet:yamllint fleet_yaml
     check fleet:tofu-fmt fleet_tofu_fmt
     check fleet:tofu-validate fleet_tofu_validate
+    check fleet:kayra-validate fleet_kayra_validate
     check fleet:rule:no-tls-true rule_fleet_no_tls_true
     check fleet:rule:platform-names-no-app rule_platform_names_no_app
     check fleet:rule:images-are-pinned rule_fleet_images_are_pinned

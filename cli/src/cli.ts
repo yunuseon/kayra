@@ -1,4 +1,4 @@
-import { command, constant, multiple, object, option, or, type InferValue } from "@optique/core";
+import { command, constant, multiple, object, option, optional, or, type InferValue } from "@optique/core";
 import { message, type Message } from "@optique/core/message";
 import { argument } from "@optique/core/primitives";
 import { choice } from "@optique/core/valueparser";
@@ -39,6 +39,9 @@ export const parser = (fleet: Fleet) => {
         object({ name: constant("certs"), domain: argument(domainParser), subdomains: multiple(argument(subdomainParser)) }),
         { brief: message`mkcert certs for a domain and its subdomains (local dev, multipass).` },
       ),
+      command("validate", object({ name: constant("validate"), server: optional(server) }), {
+        brief: message`Check the fleet beyond its schemas: secrets, apps against their contract, stacks, routes.`,
+      }),
       command("doctor", object({ name: constant("doctor") }), {
         brief: message`Check that this Mac can run every command on every server.`,
       }),

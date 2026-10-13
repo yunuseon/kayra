@@ -7,6 +7,8 @@ import { parser, type Command } from "./cli.ts";
 import { doctor } from "./commands/doctor.ts";
 import * as server from "./commands/server.ts";
 import { status } from "./commands/status.ts";
+import { findings, report } from "./commands/validate.ts";
+import { gather } from "./gather.ts";
 import { serverNamed, type Fleet, type Server } from "./fleet.ts";
 import { interpret, type Io } from "./interpret.ts";
 import { findFleetRoot, loadFleet } from "./load.ts";
@@ -21,7 +23,7 @@ const manifest: unknown = JSON.parse(readFileSync(within(kayra, "package.json"),
 const version = kayraVersion(typeof manifest === "object" && manifest !== null && "version" in manifest ? manifest.version : undefined);
 if (!version.ok) throw new Error(`kayra's package.json: ${version.error}`);
 
-type OnServer = Exclude<Command, { readonly name: "status" | "doctor" | "certs" | "app purge" }>;
+type OnServer = Exclude<Command, { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" }>;
 
 const onServer = (on: server.Engine, target: Server, command: OnServer): Result<Plan, string> => {
   switch (command.name) {
@@ -48,7 +50,7 @@ const onServer = (on: server.Engine, target: Server, command: OnServer): Result<
   }
 };
 
-const plan = (fleet: Fleet, command: Exclude<Command, { readonly name: "status" }>): Result<Plan, string> => {
+const plan = (fleet: Fleet, command: Exclude<Command, { readonly name: "status" | "validate" }>): Result<Plan, string> => {
   const on = { kayra, version: version.value, fleet: fleet.root };
   if (command.name === "doctor") return ok(doctor(fleet, kayra));
   if (command.name === "certs") return server.certsFor(on, command.domain, command.subdomains);
@@ -83,6 +85,17 @@ else {
   const args = run(parser(fleet.value), { programName: "kayra", help: "both", completion: "both" });
   if (args.command.name === "status") {
     (await status(fleet.value)).forEach(io.out);
+  } else if (args.command.name === "validate") {
+    const chosen = args.command.server;
+    const servers = fleet.value.servers.filter((each) => chosen === undefined || each.name === chosen);
+    const reports = await Promise.all(
+      servers.map(async (each) => findings(await gather(fleet.value.root, each))),
+    );
+    reports.forEach((found, index) => {
+      report(servers[index]?.name ?? "", found).forEach(io.out);
+    });
+    // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
+    process.exitCode = reports.some((found) => found.some((each) => each.problem)) ? 1 : 0;
   } else {
     const steps = plan(fleet.value, args.command);
     if (!steps.ok) fail(steps.error);

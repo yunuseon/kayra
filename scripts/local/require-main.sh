@@ -33,6 +33,6 @@ others=()
 for dir in servers/*/; do
     [ "$dir" = "servers/${name}/" ] || others+=(":(exclude)${dir}")
 done
-dirty="$(git status --porcelain --untracked-files=no -- . "${others[@]}")"
+dirty="$(git status --porcelain --untracked-files=no -- . ${others[@]+"${others[@]}"})"
 [ -z "$dirty" ] || fail "Uncommitted changes would be deployed; commit them through a PR first:
 ${dirty}"

@@ -1,6 +1,6 @@
 {"argv":["bash","<kayra>/scripts/local/require-main.sh","box"],"env":{"FLEET_ROOT":"<fleet>"}}
 {"argv":["bash","<kayra>/scripts/local/home-reach.sh","box","nas"],"env":{"FLEET_ROOT":"<fleet>"}}
 {"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-playbook","-i","<fleet>/servers/box/inventory.ini","<kayra>/ansible/playbooks/nas.yml","-e","server=box","-e","server_dir=<fleet>/servers/box","-e","domain=example.com","-e","target=home","-e","kayra_version=<version>"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/box/inventory.ini","<kayra>/ansible/playbooks/nas.yml","-e","server=box","-e","server_dir=<fleet>/servers/box","-e","domain=example.com","-e","target=home"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
 --- stdout
 --- exit 0

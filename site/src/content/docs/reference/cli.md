@@ -24,8 +24,26 @@ confirmation, with its environment — and runs nothing.
 | `kayra backup test <server>` | Restore the latest backup to a scratch dir, check it, delete it — started on the server, followed over SSH |
 | `kayra app purge <server> <app>` | Delete a removed app's volumes: its data, irreversibly |
 
-Hetzner and home servers change only from a clean `main` equal to its remote:
-`provision`, `adopt`, `setup`, `apps` and `app purge` refuse anything else.
+Hetzner and home servers change only from a clean `main` equal to its remote,
+with the kayra release the fleet pins (not a linked checkout): `provision`,
+`adopt`, `setup`, `apps` and `app purge` refuse anything else.
+
+## Apps on a server
+
+Through the server's deployer, over SSH; platform servers only.
+
+| Command | What it does |
+|---|---|
+| `kayra app runs <server> <app>` | The app's latest runs: id, result, commit, why |
+| `kayra app logs <server> <app> [run]` | A run's log, the newest unless named (`gc` or `renovate` for the jobs' runs) |
+| `kayra app deploy <server> <app> [ref]` | Build and deploy a branch, tag or commit; the app's ref by default |
+| `kayra app rollback <server> <app> [sha]` | Without a commit: what runs now and the earlier releases. With one (12 characters are enough): deploy it again |
+| `kayra job <server> gc` | The registry GC now (nightly at 03:00 otherwise) |
+| `kayra job <server> renovate [--no-prs]` | Renovate now; `--no-prs` logs what would change |
+
+A run started while one runs for the same app waits for it; of several waiting,
+only the newest runs. The runs and their logs are also at
+`https://deploy.<domain>/`, behind the staff login.
 
 ## Fleet-wide
 

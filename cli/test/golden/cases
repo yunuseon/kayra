@@ -30,3 +30,10 @@ backup-test-box | | backup test box
 ssh-forge | | ssh forge
 ssh-forge-command | | ssh forge -- df -h /
 certs | | certs shop.test www api
+app-runs-forge | | app runs forge shop
+app-logs-forge | | app logs forge shop
+app-deploy-forge | | app deploy forge shop v1.2.0
+app-rollback-forge | | app rollback forge shop
+job-gc-forge | | job forge gc
+job-renovate-forge | | job forge renovate --no-prs
+app-deploy-box | | app deploy box shop

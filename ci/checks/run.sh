@@ -112,10 +112,21 @@ rule_platform_no_tls_true() {
     grep -Hn 'tls=true' "${files[@]}" | none
 }
 
-# "Never mount /var/run/docker.sock into jenkins-agent."
-rule_agent_has_no_socket() {
-    yq '.services.jenkins-agent.volumes // [] | .[]' "$E/compose/docker-compose.ci.yml" \
-        | grep docker.sock | sed 's/^/jenkins-agent mounts /' | none
+# "The builder mounts no docker socket" — and nothing else does but the
+# deployer and socket-proxy.
+rule_builder_has_no_socket() {
+    local files file
+    mapfile -t files < <(engine_compose_files)
+    for file in "${files[@]}"; do
+        yq '.services // {} | to_entries | .[] | .key + " " + ((.value.volumes // []) | @json)' "$file" \
+            | grep docker.sock | awk '$1 != "deployer" && $1 != "socket-proxy" { print $1 " mounts the docker socket" }' \
+            | sed "s#^#${file}: #"
+    done | none
+}
+
+# "The builder has no docker CLI."
+rule_builder_has_no_docker_cli() {
+    grep -nE 'docker-ce-cli|docker-compose-plugin|docker\.io|get\.docker\.com' "$E/compose/deployer/Dockerfile.builder" | none
 }
 
 # "Traefik never mounts the Docker socket; it reads containers through socket-proxy."
@@ -124,16 +135,12 @@ rule_traefik_has_no_socket() {
         | grep docker.sock | sed 's/^/traefik mounts /' | none
 }
 
-# "Never add docker back to the agent's JCasC label."
-rule_agent_label_has_no_docker() {
-    yq '.jenkins.nodes[].permanent.labelString' "$E/compose/jenkins/casc/00-platform.yaml" \
-        | grep -w docker | sed 's/^/agent label: /' | none
-}
-
-# "Never export COMPOSE_PROJECT_NAME on the controller."
-rule_controller_has_no_project_name() {
-    yq '.services.jenkins-controller.environment // [] | .[]' "$E/compose/docker-compose.ci.yml" \
-        | grep COMPOSE_PROJECT_NAME | sed 's/^/jenkins-controller sets /' | none
+# "Never export COMPOSE_PROJECT_NAME in the deployer."
+rule_deployer_has_no_project_name() {
+    {
+        yq '.services.deployer.environment // [] | .[]' "$E/compose/docker-compose.ci.yml"
+        cat "$E/compose/deployer/Dockerfile.deployer"
+    } | grep COMPOSE_PROJECT_NAME | sed 's/^/deployer sets /' | none
 }
 
 rule_platform_images_are_pinned() {
@@ -250,10 +257,10 @@ if [ "$platform" = true ]; then
     check platform:cli-lint cli_lint
     check platform:cli-test cli_test
     check platform:rule:no-tls-true rule_platform_no_tls_true
-    check platform:rule:agent-has-no-socket rule_agent_has_no_socket
-    check platform:rule:agent-label-has-no-docker rule_agent_label_has_no_docker
+    check platform:rule:builder-has-no-socket rule_builder_has_no_socket
+    check platform:rule:builder-has-no-docker-cli rule_builder_has_no_docker_cli
     check platform:rule:traefik-has-no-socket rule_traefik_has_no_socket
-    check platform:rule:controller-has-no-project-name rule_controller_has_no_project_name
+    check platform:rule:deployer-has-no-project-name rule_deployer_has_no_project_name
     check platform:rule:images-are-pinned rule_platform_images_are_pinned
     check platform:rule:no-private-keys rule_platform_no_private_keys
 fi

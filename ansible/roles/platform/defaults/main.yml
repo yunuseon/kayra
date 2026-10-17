@@ -7,11 +7,6 @@
 # live under apps_dir/<name>. Changing either means changing every app.
 platform_dir: /opt/platform
 apps_dir: /opt/apps
-# The ref of git_remote_url (kayra's repo) Jenkins loads the pipeline library
-# and platform jobs from: the tag of the release the operator ran
-# (kayra_version, passed by kayra), so the Mac and the server run the same
-# kayra. Only a test server sets a branch here instead.
-platform_ref: "v{{ kayra_version }}"
 domain: localhost
 # The engine's files (compose files, scripts) lie above the playbooks, wherever
 # the fleet it serves is; the fleet's (servers/, .cache/) above the server's
@@ -27,25 +22,23 @@ fleet_root: "{{ server_dir }}/../.."
 acme_dns: ""
 acme_dns_token: ""
 
-# Jenkins
-jenkins_admin_user: admin
-jenkins_admin_password: admin
-
-# Git
-git_remote_url: ""
+# The token the builder clones app repos with and the deployer posts commit
+# statuses with (Contents read, Commit statuses write).
 git_token: ""
+# The secret forges sign webhooks with (deploy.<domain>/hook/<app>).
+webhook_secret: ""
 
-# owner/repo of the repos this server's platform-renovate keeps up to date
-# (weekly version-bump PRs); the job exists only where the list is not empty.
+# owner/repo of the repos this server's Renovate job keeps up to date
+# (weekly version-bump PRs); the job runs only where the list is not empty.
 # renovate_token is a PAT reaching each of them: Contents, Pull requests and
 # Issues (the dependency dashboard) read & write. On a server whose own
 # Forgejo hosts them, forgejo_config.tokens mints it (and git_token) instead.
 renovate_repositories: []
 renovate_token: ""
-# When platform-renovate runs, as a Jenkins cron spec: weekly suits other
+# When the Renovate job runs, as a five-field cron spec: weekly suits other
 # people's releases; a server whose repos carry the operator's own images
 # runs it more often, so a new build reaches a PR soon after it is pushed.
-renovate_schedule: "H 4 * * 1"
+renovate_schedule: "0 4 * * 1"
 # Where those repos live: github, or forgejo with renovate_endpoint, its API
 # on platform-internal (http://forgejo:3000/api/v1). With a Forgejo, also
 # renovate_git_url: endpoint, so Renovate clones over that address and not the

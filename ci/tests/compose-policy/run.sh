@@ -6,7 +6,7 @@
 #   bash ci/tests/compose-policy/run.sh
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-policy="${here}/../../jenkins-lib/resources/platform/compose-policy.sh"
+policy="${here}/../../../scripts/platform/compose-policy.sh"
 compose_image=docker:29.8.1-cli
 failed=0
 

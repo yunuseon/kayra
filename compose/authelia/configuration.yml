@@ -1,5 +1,5 @@
 # =============================================================================
-# Authelia — login for the platform's own pages (Jenkins, Traefik's
+# Authelia — login for the platform's own pages (the runs pages, Traefik's
 # dashboard). Apps bring their own login; their users never live here.
 #
 # Authelia does NOT expand ${VAR} the way docker compose does. Interpolation here
@@ -86,7 +86,7 @@ authentication_backend:
 access_control:
   default_policy: 'deny'
   rules:
-    - domain: 'jenkins.{{ env "DOMAIN" }}'
+    - domain: 'deploy.{{ env "DOMAIN" }}'
       policy: '{{ env "AUTH_POLICY" }}'
       subject:
         - 'group:admin'
@@ -104,7 +104,7 @@ session:
   expiration: '1 day'
   remember_me: '1 week'
   cookies:
-      # The apex, not auth.<DOMAIN> — the cookie has to reach jenkins.<DOMAIN>
+      # The apex, not auth.<DOMAIN> — the cookie has to reach deploy.<DOMAIN>
       # and traefik.<DOMAIN> too. Authelia requires this to be a suffix of (or equal to) authelia_url.
     - domain: '{{ env "DOMAIN" }}'
       authelia_url: 'https://auth.{{ env "DOMAIN" }}'

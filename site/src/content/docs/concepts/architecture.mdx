@@ -21,11 +21,11 @@ serves the apps.
 
 ## Inside a platform server
 
-Amber marks where app code runs: the build agent, BuildKit and the apps
+Amber marks where app code runs: the builder, BuildKit and the apps
 themselves. Everything else sits on `platform-internal`, a network no app
-container joins; Traefik is the only service on both. Only the Jenkins
-controller holds the Docker socket, and it runs nothing from an app; the edge
-router sees containers only through a read-only proxy.
+container joins; Traefik is the only service on both. Only the deployer holds
+the Docker socket, it runs nothing from an app and Traefik never routes to it;
+the edge router sees containers only through a read-only proxy.
 
 <LikeC4View viewId="platform" client:only="react" />
 

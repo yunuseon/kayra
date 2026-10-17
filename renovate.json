@@ -6,14 +6,5 @@
   ],
   "labels": [
     "dependencies"
-  ],
-  "packageRules": [
-    {
-      "description": "One PR for all Jenkins plugins: they are released and tested as a set",
-      "matchManagers": [
-        "jenkins"
-      ],
-      "groupName": "Jenkins plugins"
-    }
   ]
 }

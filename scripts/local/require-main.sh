@@ -6,7 +6,9 @@
 # every other server is only ever changed from a clean main that matches
 # origin/main, so what runs there is exactly what was reviewed and merged.
 # Uncommitted changes in other servers' folders do not count: a test server's
-# branch pointers must not block a prod deploy.
+# branch pointers must not block a prod deploy. The kayra that runs must be the
+# release the fleet pins, not a linked checkout: everything the server runs,
+# its deploy pipeline included, is copied from it.
 #
 # Usage: FLEET_ROOT=<fleet> bash scripts/local/require-main.sh <server-name>
 set -euo pipefail
@@ -23,6 +25,8 @@ fail() {
 }
 
 cd "$FLEET_ROOT"
+[ ! -L node_modules/@yunuseon/kayra ] \
+    || fail "node_modules/@yunuseon/kayra is a linked checkout. Release it, bump package.json, then: npm ci"
 branch="$(git branch --show-current)"
 [ "$branch" = "main" ] || fail "The checkout is on '${branch:-a detached HEAD}'. Merge it, then: git switch main && git pull"
 git fetch -q origin main || fail "Could not fetch origin/main to compare against."

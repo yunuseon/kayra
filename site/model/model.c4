@@ -24,11 +24,6 @@ model {
     technology "Let's Encrypt"
     description 'Certificates by HTTP-01, or DNS-01 where the internet cannot reach'
   }
-  kayraRepo = external 'kayra repository' {
-    technology 'GitHub, or a mirror'
-    description 'The pipeline library and platform jobs, at the pinned tag'
-  }
-
   cli = tool 'kayra CLI' {
     description 'On the operator machine: plans each command, then runs OpenTofu, Ansible and SSH'
     technology 'TypeScript, Node 24'
@@ -49,17 +44,17 @@ model {
     authelia = service 'Staff login' {
       #internal
       technology 'Authelia'
-      description "Login for the platform's own pages (Jenkins, Traefik's dashboard)"
+      description "Login for the platform's own pages (the runs pages, Traefik's dashboard)"
     }
-    controller = service 'CI controller' {
+    deployer = service 'Deployer' {
       #internal
-      description 'Holds the Docker socket; runs only admission and docker compose up, with the platform library'
-      technology 'Jenkins, JCasC'
+      description 'Holds the Docker socket and the app secrets; queues runs, re-checks what the builder hands over, admits, docker compose up, records releases; never routed'
+      technology 'kayra deployer, TypeScript'
     }
-    agent = service 'Build agent' {
+    builder = service 'Builder' {
       #internal #untrusted
-      technology 'Jenkins agent'
-      description 'Checks out app code; no Docker socket, no toolchain'
+      technology 'kayra deployer, TypeScript'
+      description 'Checks out app code, answers webhooks, shows the runs; no Docker socket, no Docker CLI, no app secrets'
     }
     buildkit = service 'Image builder' {
       #internal #untrusted
@@ -80,27 +75,28 @@ model {
 
   // Operating the fleet
   operator -> fleet 'edits, through PRs'
-  operator -> cli 'kayra up / setup / apps / deploy'
+  operator -> cli 'kayra up / setup / apps / app deploy'
   cli -> fleet 'reads and validates'
   cli -> hetzner 'provisions (OpenTofu)'
   cli -> platform 'sets up (Ansible over SSH)'
 
   // An app's way to production
   developer -> appRepo 'pushes'
-  appRepo -> platform.controller 'push webhook'
-  platform.controller -> kayraRepo 'loads the pipeline library and platform jobs'
-  platform.controller -> platform.agent 'runs build stages on'
-  platform.agent -> appRepo 'checks out the commit'
-  platform.agent -> platform.buildkit 'buildctl over TCP'
+  appRepo -> platform.builder 'push webhook, HMAC-signed'
+  platform.builder -> platform.deployer 'queues a run'
+  platform.deployer -> platform.builder 'asks for a bundle: the commit, its images built'
+  platform.builder -> appRepo 'checks out the commit'
+  platform.builder -> platform.buildkit 'buildctl over TCP'
   platform.buildkit -> platform.registry 'pushes images'
-  platform.controller -> platform.registry 'pulls images'
-  platform.controller -> platform.appContainers 'admits the compose files, docker compose up'
+  platform.deployer -> platform.registry 'pulls images'
+  platform.deployer -> platform.appContainers 'admits the compose files, docker compose up'
+  platform.deployer -> appRepo 'commit statuses'
 
   // Traffic
   visitor -> platform.traefik 'HTTPS'
   platform.traefik -> platform.appContainers "the app's hosts (platform-public)"
   platform.traefik -> platform.authelia 'forward auth for platform pages'
-  platform.traefik -> platform.controller 'jenkins.<domain>, behind Authelia'
+  platform.traefik -> platform.builder 'deploy.<domain>: the runs, behind Authelia; /hook/ signed'
   platform.traefik -> letsencrypt 'ACME'
   platform.traefik -> platform.socketProxy 'discovers containers (read-only)'
 }

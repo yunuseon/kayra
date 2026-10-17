@@ -3,7 +3,7 @@
   "type": "object",
   "properties": {
     "kind": {
-      "description": "Which playbook: platform (default; Traefik, Authelia, Jenkins, apps), edge or nas.",
+      "description": "Which playbook: platform (default; Traefik, Authelia, the deployer, apps), edge or nas.",
       "type": "string",
       "enum": [
         "platform",

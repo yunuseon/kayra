@@ -37,7 +37,7 @@ npm install -D -E @yunuseon/kayra
 
 Any `kayra` on your PATH hands over to the version the fleet pins, so a fleet
 always runs the release it was tested with — on the operator's machine and,
-through the pipeline library's tag, on every server.
+since the server runs what that release copies to it, on every server.
 
 ## First server
 

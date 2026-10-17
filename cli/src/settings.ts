@@ -45,16 +45,13 @@ export const settings: readonly Setting[] = [
   setting("docker_version", ["platform", "edge"], text, "The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*)."),
 
   // platform: the platform role
-  setting("git_remote_url", platform, text, "kayra's repository: Jenkins loads the pipeline library and platform jobs from it."),
-  setting("platform_ref", platform, text, "The ref of git_remote_url Jenkins loads from; defaults to the tag of the kayra version that ran (v<version>). Only a test server sets a branch."),
-  setting("jenkins_admin_user", platform, text, "Jenkins' local admin user (default admin)."),
   setting("authelia_policy", platform, z.enum(["one_factor", "two_factor"]), "What Authelia asks of staff: two_factor (default) or one_factor."),
   setting("authelia_smtp_address", platform, text, "SMTP server for Authelia's mails (passkey enrolment); empty: mails go to a file."),
   setting("authelia_smtp_username", platform, text, "SMTP user for Authelia."),
   setting("authelia_smtp_sender", platform, text, "Sender address of Authelia's mails."),
   setting("acme_dns", platform, z.enum(["", "hetzner"]), "Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner)."),
-  setting("renovate_repositories", platform, texts, "owner/repo of the repos this server's platform-renovate keeps up to date; the job exists only where the list is not empty."),
-  setting("renovate_schedule", platform, text, "When platform-renovate runs, as a Jenkins cron spec (default weekly: H 4 * * 1)."),
+  setting("renovate_repositories", platform, texts, "owner/repo of the repos this server's Renovate job keeps up to date; the job runs only where the list is not empty."),
+  setting("renovate_schedule", platform, text, "When the Renovate job runs, as a five-field cron spec in the server's time (default weekly: 0 4 * * 1)."),
   setting("renovate_platform", platform, z.enum(["github", "forgejo"]), "Where the repos live: github (default) or forgejo."),
   setting("renovate_endpoint", platform, text, "With a Forgejo: its API on platform-internal, e.g. http://forgejo:3000/api/v1."),
   setting("renovate_git_url", platform, z.enum(["default", "ssh", "endpoint"]), "How Renovate clones; endpoint with a Forgejo, so it uses the internal address."),
@@ -135,10 +132,9 @@ export const settings: readonly Setting[] = [
   ),
 
   // Secrets
-  secret("jenkins_admin_password", platform, text, "Jenkins' admin password."),
-  secret("git_token", platform, text, "Token Jenkins clones and posts commit statuses with."),
-  secret("github_webhook_secret", platform, text, "HMAC secret of the apps' GitHub push webhooks."),
-  secret("renovate_token", platform, text, "Token platform-renovate opens PRs with."),
+  secret("git_token", platform, text, "Token the builder clones app repos with and the deployer posts commit statuses with."),
+  secret("webhook_secret", platform, text, "HMAC secret the apps' push webhooks (deploy.<domain>/hook/<app>) are signed with."),
+  secret("renovate_token", platform, text, "Token the Renovate job opens PRs with."),
   secret("renovate_github_com_token", platform, text, "Public-read GitHub token for Renovate's lookups off GitHub."),
   secret("authelia_session_secret", platform, text, "Authelia's session secret."),
   secret("authelia_storage_encryption_key", platform, text, "Authelia's storage encryption key."),
@@ -180,7 +176,7 @@ export const secretsSchema = (kind: ServerKind) => z.looseObject(shape(settingsF
 
 /** server.yml: topology only. */
 export const serverSchema = z.strictObject({
-  kind: z.enum(serverKinds).optional().describe("Which playbook: platform (default; Traefik, Authelia, Jenkins, apps), edge or nas."),
+  kind: z.enum(serverKinds).optional().describe("Which playbook: platform (default; Traefik, Authelia, the deployer, apps), edge or nas."),
   target: z.enum(["hetzner", "multipass", "home"]).describe("Where it runs: hetzner, multipass (a local VM) or home (a machine nothing creates)."),
   domain: z.string().describe("The server's domain; platform subdomains and the apps' hang off it."),
   vault: z.boolean().optional().describe("secrets.yml is vault-encrypted (required outside multipass)."),

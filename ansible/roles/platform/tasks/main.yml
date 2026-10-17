@@ -1,6 +1,7 @@
 ---
 # =============================================================================
-# Platform role — Traefik, Authelia, Registry, BuildKit and Jenkins as compose
+# Platform role — Traefik, Authelia, Registry, BuildKit, the builder and the
+# deployer as compose
 # project "platform" in {{ platform_dir }}. App-agnostic.
 #
 # {{ platform_dir }}/.env sets COMPOSE_FILE, so on the server every compose
@@ -28,16 +29,52 @@
     - "{{ platform_dir }}/authelia/secrets"
   become: true
 
-# Written by bin/jenkins-app-apply as root and chowned per app to the
-# controller's uid, so the directory itself stays root's.
-- name: Create Jenkins app secrets directory
+# app-secrets/: written by bin/app-apply as root and chowned per app to the
+# deployer's uid, so the directory itself stays root's. apps/: one
+# registration per app, written by the app role.
+- name: Create the registration and app secrets directories
   ansible.builtin.file:
-    path: "{{ platform_dir }}/jenkins-secrets"
+    path: "{{ platform_dir }}/{{ item }}"
     state: directory
     owner: root
     group: root
     mode: "0755"
+  loop: [apps, app-secrets]
   become: true
+
+# Written by the deployer (uid 1000); the builder reads runs/ for its pages.
+- name: Create the runs and releases directories
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/{{ item }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+  loop: [runs, releases]
+  become: true
+  register: deployer_dirs
+
+# Jenkins kept the release records rollback and GC work from; carried over
+# once, the first time releases/ is created. The volume itself stays until
+# deleted by hand.
+- name: Find Jenkins' release records
+  community.docker.docker_volume_info:
+    name: platform_jenkins-home
+  register: jenkins_home
+  when: deployer_dirs.results[1] is changed
+  become: true
+
+- name: Carry Jenkins' release records over
+  ansible.builtin.shell: |
+    set -euo pipefail
+    [ -d "{{ jenkins_home.volume.Mountpoint }}/releases" ] || exit 0
+    cp -a "{{ jenkins_home.volume.Mountpoint }}/releases/." "{{ platform_dir }}/releases/"
+    chown -R 1000:1000 "{{ platform_dir }}/releases"
+  args:
+    executable: /bin/bash
+  when: deployer_dirs.results[1] is changed and jenkins_home.exists | default(false)
+  become: true
+  changed_when: true
 
 # buildkit/ matters more than it looks: without buildkitd.toml the bind mount
 # has no source, Docker creates a directory in its place, and buildkitd
@@ -55,13 +92,45 @@
     - docker-compose.acme-dns.yml
     - traefik/dynamic/
     - authelia/configuration.yml
-    - jenkins/
-    - jenkins-agent/
     - buildkit/
+    - deployer/
   become: true
   register: platform_files
 
-# Apps register with Jenkins through these, never by touching the controller.
+# The deployer's code and the scripts it and the builder run, into the build
+# context of both images: a checkout's TypeScript, or the published package's
+# JavaScript (Node strips types only outside node_modules).
+- name: Find the deployer's code
+  ansible.builtin.stat:
+    path: "{{ kayra_root }}/cli/src/deployer"
+  register: deployer_source
+  delegate_to: localhost
+  become: false
+
+- name: Copy the deployer's code
+  ansible.builtin.copy:
+    src: "{{ kayra_root }}/cli/{{ code }}/{{ item }}"
+    dest: "{{ platform_dir }}/deployer/app/{{ item }}"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  loop:
+    - deployer/
+    - "result.{{ 'ts' if deployer_source.stat.exists else 'js' }}"
+  vars:
+    code: "{{ 'src' if deployer_source.stat.exists else 'dist' }}"
+  become: true
+
+- name: Copy the platform scripts
+  ansible.builtin.copy:
+    src: "{{ kayra_root }}/scripts/platform/"
+    dest: "{{ platform_dir }}/deployer/app/scripts/platform/"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  become: true
+
+# Apps register through these, never by writing the platform's files by hand.
 - name: Install platform scripts
   ansible.builtin.copy:
     src: "{{ kayra_root }}/scripts/server/"
@@ -178,7 +247,7 @@
     database: group
     key: docker
 
-# Read by the controller as uid 1000. An empty var leaves the file as it is:
+# Read by the builder and the deployer as uid 1000. An empty var leaves the file as it is:
 # on a server whose Forgejo mints them (forgejo_config.tokens), that role
 # writes them.
 - name: Create platform secrets directory
@@ -218,6 +287,21 @@
   # It holds secrets: --diff (kayra plan) says that it would change, never how.
   diff: false
 
+# Jenkins is gone; the copies above never delete files.
+- name: Remove what Jenkins left
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - jenkins
+    - jenkins-agent
+    - jenkins-secrets
+    - jenkins-agent.env
+    - bin/jenkins-api
+    - bin/jenkins-reload
+    - bin/jenkins-app-apply
+  become: true
+
 # The registry used to have a public, basic-auth router. Nothing outside the
 # server pushes or pulls, so it is gone; the copy above never deletes files.
 - name: Remove the retired registry basic auth
@@ -240,10 +324,13 @@
     ignore_buildable: true
     policy: missing
 
+# remove_orphans: services the platform dropped (Jenkins' controller and agent)
+# must not keep running.
 - name: Start platform
   community.docker.docker_compose_v2:
     project_src: "{{ platform_dir }}"
     build: always
+    remove_orphans: true
 
 # Only dynamic/ is watched; the static file is read once at startup.
 - name: Restart Traefik when its static config changed
@@ -259,58 +346,4 @@
   args:
     chdir: "{{ platform_dir }}"
   when: platform_files.results | selectattr('item', 'eq', 'buildkit/') | selectattr('changed') | list | length > 0
-  changed_when: true
-
-# Inside the controller, not through Traefik: jenkins.<domain> sits behind
-# Authelia, which would answer every call here with a login redirect.
-- name: Wait for Jenkins
-  ansible.builtin.command: docker compose exec -T jenkins-controller curl -sf -o /dev/null http://127.0.0.1:8080/login
-  args:
-    chdir: "{{ platform_dir }}"
-  register: jenkins_health
-  retries: 30
-  delay: 10
-  until: jenkins_health.rc == 0
-  changed_when: false
-  # Only reads, so it runs in check mode too (kayra plan).
-  check_mode: false
-
-# casc/ is a bind mount, so a changed 00-platform.yaml only takes effect on
-# a reload; so do new tokens, read from files by ${readFile:…}.
-- name: Reload JCasC
-  ansible.builtin.command: "{{ platform_dir }}/bin/jenkins-reload"
-  when: >-
-    platform_files.results | selectattr('item', 'equalto', 'jenkins/') | selectattr('changed') | list | length > 0
-    or platform_tokens is changed
-  become: true
-  changed_when: true
-
-# ---------------------------------------------------------------------------
-# Agent secret. Fetched every run and kept in its own file: it is derived
-# from Jenkins' own state, so it has no var source, and re-rendering .env must
-# never be able to blank it. Refetching also heals a reset jenkins_home.
-# ---------------------------------------------------------------------------
-- name: Fetch Jenkins agent secret
-  ansible.builtin.command: "{{ platform_dir }}/bin/jenkins-api GET /computer/builder/jenkins-agent.jnlp"
-  register: agent_jnlp
-  no_log: true
-  changed_when: false
-  check_mode: false
-
-- name: Write Jenkins agent secret
-  ansible.builtin.copy:
-    content: "JENKINS_SECRET={{ agent_jnlp.stdout | regex_findall('<argument>([a-f0-9]{64})</argument>') | first }}\n"
-    dest: "{{ platform_dir }}/jenkins-agent.env"
-    owner: deploy
-    group: deploy
-    mode: "0600"
-  no_log: true
-  become: true
-  register: agent_secret
-
-- name: Recreate Jenkins agent with its secret
-  ansible.builtin.command: docker compose up -d --no-deps --force-recreate jenkins-agent
-  args:
-    chdir: "{{ platform_dir }}"
-  when: agent_secret is changed
   changed_when: true

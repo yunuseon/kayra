@@ -4,14 +4,14 @@
 #
 # Play 1: Bootstrap — base packages, deploy user, Docker installation.
 #         Run once on a fresh server (idempotent, safe to re-run).
-# Play 2: Platform — Traefik + Jenkins + Registry via docker compose.
-#         Re-run whenever platform config, certs, or Jenkins config changes.
+# Play 2: Platform — Traefik, Authelia, the registry, BuildKit, the builder and the deployer via docker compose.
+#         Re-run whenever platform config, or certs change.
 #
 # The platform lives in /opt/platform and knows no app by name. Apps live in
-# /opt/apps/<name> and register with Jenkins via /opt/platform/bin/jenkins-app-apply.
+# /opt/apps/<name> and register through /opt/platform/bin/app-apply.
 #
 # server, server_dir, domain and target are passed via -e. Platform vars
-# (git_token, jenkins_admin_password, etc.) come from servers/<server>/vars.yml.
+# (git_token, webhook_secret, etc.) come from servers/<server>/vars.yml.
 #
 # Usage: kayra setup <server>
 # =============================================================================
@@ -56,7 +56,7 @@
       ansible.builtin.debug:
         msg: |
           Platform ready! ({{ server }})
-          Jenkins:   https://jenkins.{{ domain }}
+          Runs:      https://deploy.{{ domain }}
           Traefik:   https://traefik.{{ domain }}
 
           Next: `kayra apps {{ server }}` to register this server's apps.

@@ -3,7 +3,7 @@
 {"argv":["tofu","-chdir=<fleet>/servers/box/terraform","init","-input=false"]}
 {"argv":["tofu","-chdir=<fleet>/servers/box/terraform","plan","-input=false","-lock=false"]}
 {"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-playbook","-i","<fleet>/servers/box/inventory.ini","<kayra>/ansible/playbooks/nas.yml","-e","server=box","-e","server_dir=<fleet>/servers/box","-e","domain=example.com","-e","target=home","-e","kayra_version=<version>","--check","--diff"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/box/inventory.ini","<kayra>/ansible/playbooks/nas.yml","-e","server=box","-e","server_dir=<fleet>/servers/box","-e","domain=example.com","-e","target=home","--check","--diff"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
 --- stdout
 kayra plan changed nothing on box: the changed tasks above are what kayra setup would do.
 --- exit 0

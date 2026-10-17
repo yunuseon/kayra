@@ -1,5 +1,5 @@
 # =============================================================================
-# Platform CI overlay — Docker Registry + Jenkins (controller + agent)
+# Platform CI overlay — Docker Registry, BuildKit, the builder and the deployer
 # App-agnostic: provides CI/CD infrastructure for any application.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
 # =============================================================================
@@ -53,104 +53,96 @@ services:
     networks:
       - internal
 
-  jenkins-controller:
+  # ---------------------------------------------------------------------------
+  # The builder: clones app repos and builds their images through buildkitd,
+  # answers forge webhooks, shows the runs. Faces app code and the internet,
+  # so it gets no docker socket, no docker CLI and no app secrets.
+  # ---------------------------------------------------------------------------
+  builder:
     build:
-      context: ./jenkins
-      dockerfile: Dockerfile
-    # The controller runs as jenkins (uid/gid 1000) and reaches the socket via
-    # the host's docker group, whose GID differs per host.
+      context: ./deployer
+      dockerfile: Dockerfile.builder
+    restart: unless-stopped
+    command: ["builder"]
+    environment:
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - BUILDKIT_HOST=tcp://buildkitd:1234
+      - REGISTRY_PUSH_HOST=registry:5000
+    volumes:
+      - builder-work:/work
+      - ./apps:/opt/platform/apps:ro
+      - ./runs:/opt/platform/runs:ro
+      # GIT_TOKEN, to clone. Files, so a new one needs no restart.
+      - ./platform-secrets:/run/platform-secrets:ro
+    mem_limit: 512m
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=platform-internal"
+      - "traefik.http.routers.deploy.rule=Host(`deploy.${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.deploy.entrypoints=websecure"
+      - "traefik.http.routers.deploy.tls.certresolver=le"
+      - "traefik.http.routers.deploy.middlewares=authelia@file"
+      - "traefik.http.routers.deploy.service=deploy"
+      # Forges cannot log in; the builder checks the payload's HMAC instead.
+      - "traefik.http.routers.deploy-hook.rule=Host(`deploy.${DOMAIN:-localhost}`) && PathPrefix(`/hook/`)"
+      - "traefik.http.routers.deploy-hook.entrypoints=websecure"
+      - "traefik.http.routers.deploy-hook.tls.certresolver=le"
+      - "traefik.http.routers.deploy-hook.priority=100"
+      - "traefik.http.routers.deploy-hook.service=deploy"
+      - "traefik.http.services.deploy.loadbalancer.server.port=8080"
+    networks:
+      - internal
+    depends_on:
+      buildkitd:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # The deployer: the queue, admission, `docker compose up`, release records,
+  # commit statuses, and the platform's jobs (registry GC, Renovate, the
+  # hourly poll). The one container here with the docker socket and the app
+  # secrets; Traefik never routes to it. Everything it gets from the builder
+  # is checked again, and compose files still go through the policy.
+  #
+  # No COMPOSE_PROJECT_NAME here on purpose: every deploy runs `docker
+  # compose -p <app>`, and an exported project name would beat it. The
+  # platform's directories are mounted at their own paths.
+  # ---------------------------------------------------------------------------
+  deployer:
+    build:
+      context: ./deployer
+      dockerfile: Dockerfile.deployer
+    restart: unless-stopped
+    command: ["deployer"]
+    # The socket's group, whose GID differs per host.
     group_add:
       - ${DOCKER_GID:?}
-    restart: unless-stopped
-    # No COMPOSE_PROJECT_NAME here on purpose: every app's deploy runs
-    # `docker compose` from this container, and an exported project name would
-    # beat the one the deploy passes. APPS_DIR is where app .env files live.
     environment:
-      - JENKINS_ADMIN_USER=${JENKINS_ADMIN_USER:-admin}
-      - JENKINS_ADMIN_PASSWORD=${JENKINS_ADMIN_PASSWORD:-admin}
-      - JENKINS_GIT_REPO=${GIT_REMOTE_URL:?}
-      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
       - DOMAIN=${DOMAIN:-localhost}
       - APPS_DIR=${APPS_DIR:?}
-      - PLATFORM_REF=${PLATFORM_REF:?}
+      - PLATFORM_DIR=/opt/platform
       - PLATFORM_RENOVATE=${PLATFORM_RENOVATE:-false}
-      - RENOVATE_SCHEDULE=${RENOVATE_SCHEDULE:-H 4 * * 1}
+      - RENOVATE_SCHEDULE=${RENOVATE_SCHEDULE:-0 4 * * 1}
       - RENOVATE_PLATFORM=${RENOVATE_PLATFORM:-github}
       - RENOVATE_ENDPOINT=${RENOVATE_ENDPOINT:-}
       - RENOVATE_GIT_URL=${RENOVATE_GIT_URL:-}
       - RENOVATE_GITHUB_COM_TOKEN=${RENOVATE_GITHUB_COM_TOKEN:-}
       - RENOVATE_HOST_RULES=${RENOVATE_HOST_RULES:-}
       - RENOVATE_REPOSITORIES=${RENOVATE_REPOSITORIES:-}
-      # Tell JCasC to merge every YAML in this directory at startup.
-      - CASC_JENKINS_CONFIG=/var/jenkins_home/casc
     volumes:
-      - jenkins-home:/var/jenkins_home
-      # The controller is the only node with the docker socket, and it runs
-      # the deploy stage, so it needs the app's compose directory too.
       - /var/run/docker.sock:/var/run/docker.sock
       - ${APPS_DIR:?}:${APPS_DIR:?}:ro
-      - ./jenkins/casc:/var/jenkins_home/casc:ro
-      # One directory per app, one file per secret; JCasC reads them with
-      # ${readFile:...}. Written by bin/jenkins-app-apply.
-      - ./jenkins-secrets:/run/app-secrets:ro
-      # GIT_TOKEN and RENOVATE_TOKEN, likewise: files, so a new one needs a
-      # reload, not a restart. Written by the platform role (or forgejo-config).
+      - ./apps:/opt/platform/apps:ro
+      - ./runs:/opt/platform/runs
+      - ./releases:/opt/platform/releases
+      # One directory per app, one file per secret. Written by bin/app-apply.
+      - ./app-secrets:/run/app-secrets:ro
+      # GIT_TOKEN (commit statuses) and RENOVATE_TOKEN.
       - ./platform-secrets:/run/platform-secrets:ro
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=platform-internal"
-      - "traefik.http.routers.jenkins.rule=Host(`jenkins.${DOMAIN:-localhost}`)"
-      - "traefik.http.routers.jenkins.entrypoints=websecure"
-      - "traefik.http.routers.jenkins.tls.certresolver=le"
-      - "traefik.http.routers.jenkins.middlewares=authelia@file"
-      - "traefik.http.routers.jenkins.service=jenkins"
-      # GitHub cannot log in; the plugin checks the payload's HMAC instead.
-      - "traefik.http.routers.jenkins-webhook.rule=Host(`jenkins.${DOMAIN:-localhost}`) && Path(`/github-webhook/`)"
-      - "traefik.http.routers.jenkins-webhook.entrypoints=websecure"
-      - "traefik.http.routers.jenkins-webhook.tls.certresolver=le"
-      - "traefik.http.routers.jenkins-webhook.priority=100"
-      - "traefik.http.routers.jenkins-webhook.service=jenkins"
-      - "traefik.http.services.jenkins.loadbalancer.server.port=8080"
+    mem_limit: 512m
     networks:
       - internal
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/login"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-
-  jenkins-agent:
-    build:
-      context: ./jenkins-agent
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    # Written by the platform role once Jenkins is up; absent on first start,
-    # when the agent crash-loops until the role recreates it with the secret.
-    env_file:
-      - path: ./jenkins-agent.env
-        required: false
-    environment:
-      - JENKINS_URL=http://jenkins-controller:8080
-      - JENKINS_AGENT_NAME=builder
-      - JENKINS_AGENT_WORKDIR=/home/jenkins/agent
-      - DOMAIN=${DOMAIN:-localhost}
-      # Builds go to buildkitd, not to a docker daemon. This agent runs pipeline
-      # code from untrusted branches and deliberately has no docker socket.
-      - BUILDKIT_HOST=tcp://buildkitd:1234
-      - REGISTRY_PUSH_HOST=registry:5000
-    volumes:
-      - jenkins-agent-workdir:/home/jenkins/agent
-    networks:
-      - internal
-    depends_on:
-      jenkins-controller:
-        condition: service_healthy
-      buildkitd:
-        condition: service_started
 
 volumes:
   registry-data:
   buildkit-cache:
-  jenkins-home:
-  jenkins-agent-workdir:
+  builder-work:

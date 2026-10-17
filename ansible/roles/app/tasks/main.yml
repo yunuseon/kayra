@@ -5,14 +5,15 @@
 # plaintext) and <app>.secrets.yml (secrets, vault on real servers), and
 # registers the app:
 #   {{ apps_dir }}/<app>/.env                 operator config for compose
-#   {{ platform_dir }}/jenkins/casc/10-<app>.yaml   folder, jobs, credentials
-#   jenkins-app-apply                          secrets + JCasC reload
+#   app-apply                                  secrets → app-secrets/<app>/
+#   {{ platform_dir }}/apps/<app>.json         the registration the deployer
+#                                              and the builder read
 #
 # Compose files are not copied: the deploy takes them from the commit it
 # deploys. Nothing here is specific to any app.
 # =============================================================================
 
-# With the token Jenkins clones with, not the operator's git credentials: a
+# With the token the builder clones with, not the operator's git credentials: a
 # token that cannot read the app fails here, at registration, rather than at
 # its first build. Sent as a header via the environment, so it is neither in
 # the clone's config nor in the process list (Ansible prints the environment
@@ -89,19 +90,30 @@
     mode: "0644"
   become: true
 
-- name: Render the app's JCasC fragment
-  ansible.builtin.template:
-    src: casc-app.yaml.j2
-    dest: "{{ platform_dir }}/jenkins/casc/10-{{ app.name }}.yaml"
-    owner: deploy
-    group: deploy
-    mode: "0644"
-  become: true
-
-- name: Apply secrets and reload Jenkins
+# Secrets before the registration: a push in between finds them in place.
+- name: Apply secrets
   ansible.builtin.command:
-    cmd: "{{ platform_dir }}/bin/jenkins-app-apply {{ app.name }}"
+    cmd: "{{ platform_dir }}/bin/app-apply {{ app.name }}"
     stdin: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secrets[key] }}\n{% endfor %}"
   no_log: true
   become: true
   changed_when: true
+
+# What may deploy where, approved here: hosts and secret keys come from this
+# file, never from the app's repository at the commit being deployed.
+- name: Register the app
+  ansible.builtin.copy:
+    content: "{{ registration | to_nice_json }}\n"
+    dest: "{{ platform_dir }}/apps/{{ app.name }}.json"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    registration:
+      name: "{{ app.name }}"
+      repo: "{{ app_repo }}"
+      ref: "{{ app_ref }}"
+      path: "{{ app.path | default('.') }}"
+      hosts: "{{ manifest.subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
+      secrets: "{{ manifest.secrets | default([]) }}"
+  become: true

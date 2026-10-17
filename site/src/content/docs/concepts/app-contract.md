@@ -10,19 +10,19 @@ supplies all of that, the same way for every app.
 
 ## What happens when you push
 
-1. A push to the app's branch (usually `main`) starts **`<app>/build`**. Every
-   artifact whose inputs changed since its last build is built from its
-   Dockerfile and pushed to the platform registry. Unchanged artifacts are
-   not rebuilt.
-2. A green build starts **`<app>/deploy`** with exactly that commit. It builds
-   whatever is still missing, checks the app's compose files against the
-   [policy](#compose-policy), starts them with `docker compose up --wait`,
-   and records the release.
-3. The commit gets two GitHub statuses, `jenkins/build` and `jenkins/deploy`,
-   each linking to its run.
+1. A push to the app's branch (usually `main`) starts a **run** for that
+   commit. Every artifact whose inputs changed since its last build is built
+   from its Dockerfile and pushed to the platform registry. Unchanged
+   artifacts are not rebuilt.
+2. A green build deploys exactly that commit: the app's compose files are
+   checked against the [policy](#compose-policy), started with
+   `docker compose up --wait`, and the release is recorded.
+3. The commit gets two statuses, `kayra/build` and `kayra/deploy`, each
+   linking to the run's log at `https://deploy.<environment domain>/`.
 
-Any other branch, tag or commit can be built or deployed on demand. Earlier
-releases can be restored with the platform's **Rollback** job.
+Pushes that arrive while a run goes wait for it, and only the newest of them
+runs. Any other branch, tag or commit can be deployed on demand
+(`kayra app deploy`), and earlier releases restored (`kayra app rollback`).
 
 A service you remove from your compose files is removed from the server by the
 next deploy.
@@ -35,10 +35,9 @@ deploys (usually `main`). For that the operator needs:
 
 - the platform's access token extended to the repository (Contents: read,
   Commit statuses: read and write), or registration and builds cannot clone it;
-- a GitHub webhook on the repository (push events, the platform's secret, to
-  `https://jenkins.<environment domain>/github-webhook/`);
-- one manual run of `<app>/build` after registering — the push trigger learns
-  the repository from a build that checked it out.
+- a webhook on the repository (push events, JSON, the platform's secret, to
+  `https://deploy.<environment domain>/hook/<app>`). Without it the platform
+  still notices a push within the hour.
 
 Rollback only reaches releases built from the repository the app is in now: a
 release from before a move to another repository cannot be restored.
@@ -49,7 +48,7 @@ At the root of the app (or of its directory, when an app shares a repo):
 
 ```yaml
 name: shop                     # lower-case; also the compose project, the
-                               # registry namespace and the Jenkins folder
+                               # registry namespace and the runs' name
 compose:                       # deployed together, in this order
   - deploy/compose.yml
 subdomains: [www, api]         # served as <subdomain>.<environment domain>
@@ -57,8 +56,7 @@ secrets: [DATABASE_PASSWORD]   # values provided by the operator per environment
 config: [FEATURE_FLAGS]        # same, but not secret
 ```
 
-- `subdomains` may not use the platform's own (`jenkins`, `registry`, `auth`,
-  `traefik`).
+- `subdomains` may not use the platform's own (`deploy`, `auth`, `traefik`).
 - Every name in `secrets` and `config` needs a value from the operator for each
   environment, or registering the app fails. Changing these lists, or
   `subdomains`, needs the operator to re-register the app; compose files and

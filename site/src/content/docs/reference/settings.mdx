@@ -22,16 +22,13 @@ the first line of a platform server's `vars.yml`:
 |---|---|---|
 | `acme_email` | platform, edge | The Let's Encrypt account contact: expiry warnings land here. |
 | `docker_version` | platform, edge | The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*). |
-| `git_remote_url` | platform | kayra's repository: Jenkins loads the pipeline library and platform jobs from it. |
-| `platform_ref` | platform | The ref of git_remote_url Jenkins loads from; defaults to the tag of the kayra version that ran (v&lt;version>). Only a test server sets a branch. |
-| `jenkins_admin_user` | platform | Jenkins' local admin user (default admin). |
 | `authelia_policy` | platform | What Authelia asks of staff: two_factor (default) or one_factor. |
 | `authelia_smtp_address` | platform | SMTP server for Authelia's mails (passkey enrolment); empty: mails go to a file. |
 | `authelia_smtp_username` | platform | SMTP user for Authelia. |
 | `authelia_smtp_sender` | platform | Sender address of Authelia's mails. |
 | `acme_dns` | platform | Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner). |
-| `renovate_repositories` | platform | owner/repo of the repos this server's platform-renovate keeps up to date; the job exists only where the list is not empty. |
-| `renovate_schedule` | platform | When platform-renovate runs, as a Jenkins cron spec (default weekly: H 4 * * 1). |
+| `renovate_repositories` | platform | owner/repo of the repos this server's Renovate job keeps up to date; the job runs only where the list is not empty. |
+| `renovate_schedule` | platform | When the Renovate job runs, as a five-field cron spec in the server's time (default weekly: 0 4 * * 1). |
 | `renovate_platform` | platform | Where the repos live: github (default) or forgejo. |
 | `renovate_endpoint` | platform | With a Forgejo: its API on platform-internal, e.g. http://forgejo:3000/api/v1. |
 | `renovate_git_url` | platform | How Renovate clones; endpoint with a Forgejo, so it uses the internal address. |
@@ -49,10 +46,9 @@ the first line of a platform server's `vars.yml`:
 
 | Setting | Kinds | What it is |
 |---|---|---|
-| `jenkins_admin_password` | platform | Jenkins' admin password. |
-| `git_token` | platform | Token Jenkins clones and posts commit statuses with. |
-| `github_webhook_secret` | platform | HMAC secret of the apps' GitHub push webhooks. |
-| `renovate_token` | platform | Token platform-renovate opens PRs with. |
+| `git_token` | platform | Token the builder clones app repos with and the deployer posts commit statuses with. |
+| `webhook_secret` | platform | HMAC secret the apps' push webhooks (deploy.&lt;domain>/hook/&lt;app>) are signed with. |
+| `renovate_token` | platform | Token the Renovate job opens PRs with. |
 | `renovate_github_com_token` | platform | Public-read GitHub token for Renovate's lookups off GitHub. |
 | `authelia_session_secret` | platform | Authelia's session secret. |
 | `authelia_storage_encryption_key` | platform | Authelia's storage encryption key. |

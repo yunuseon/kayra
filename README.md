@@ -4,9 +4,9 @@ A self-hosted app platform for running other people's apps safely, one server
 per customer, all of it as code.
 
 kayra sets up a server (Hetzner, a machine at home, or a local Multipass VM)
-with Traefik, Authelia, Jenkins, a private registry and rootless BuildKit, and
-then builds and deploys apps from their own repositories: a push to an app's
-branch is a deploy. Servers are described in a git repository (a **fleet**);
+with Traefik, Authelia, a private registry, rootless BuildKit and a small
+deployer, and then builds and deploys apps from their own repositories: a push
+to an app's branch is a deploy. Servers are described in a git repository (a **fleet**);
 kayra is the engine that turns that description into running machines.
 
 ```
@@ -14,7 +14,7 @@ kayra is the engine that turns that description into running machines.
  ┌──────────────────────────────┐      ┌───────────────────────┐    ┌──────────────────┐
  │ CLI: kayra up/setup/apps/…   │◀─────│ servers/<name>/       │    │ app.yml          │
  │ Ansible, OpenTofu, compose   │ pins │   server.yml, vars,   │    │ Dockerfiles      │
- │ Jenkins pipeline library     │      │   vault secrets       │    └────────┬─────────┘
+ │ the deployer: build, deploy  │      │   vault secrets       │    └────────┬─────────┘
  │ compose admission policy     │      │ package.json → kayra  │             │ built & deployed
  └──────────────────────────────┘      └───────────────────────┘             ▼ by the platform
 ```
@@ -26,7 +26,7 @@ kayra is the engine that turns that description into running machines.
   modelled on Kubernetes' Pod Security "restricted" before anything starts;
   platform services sit on a network apps cannot reach.
 - **Apps are plain data.** An app is an `app.yml` and its Dockerfiles — no
-  Jenkinsfile, no Ansible. It runs without the platform locally and can leave
+  pipeline, no Ansible. It runs without the platform locally and can leave
   with its customer at any time.
 - **One server per customer, reproducible.** Everything about a server lives in
   its folder of the fleet; secrets per server in Ansible Vault; machines from

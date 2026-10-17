@@ -1,0 +1,6 @@
+#!/bin/sh
+# kayra-deployer builder | deployer | ctl … — the deployer's one program, as
+# TypeScript from a kayra checkout or JavaScript from the published package.
+main=/opt/kayra/deployer/main.ts
+[ -e "$main" ] || main=/opt/kayra/deployer/main.js
+exec node "$main" "$@"

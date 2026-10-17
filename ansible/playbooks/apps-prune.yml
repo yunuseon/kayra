@@ -1,8 +1,8 @@
 ---
 # =============================================================================
 # Apps-prune playbook — removes every app registered on the server that
-# server.yml no longer lists. Registered = has a 10-<app>.yaml, the one file
-# every app gets. Data (volumes) is kept; see bin/app-remove.
+# server.yml no longer lists. Registered = has an apps/<app>.json, the one
+# file every app gets. Data (volumes) is kept; see bin/app-remove.
 #
 # `keep` is the list of app names in server.yml, as JSON.
 # Usage: kayra apps <server>  (runs this after registering the apps)
@@ -18,13 +18,13 @@
   tasks:
     - name: Find registered apps
       ansible.builtin.find:
-        paths: "{{ platform_dir }}/jenkins/casc"
-        patterns: "10-*.yaml"
-      register: fragments
+        paths: "{{ platform_dir }}/apps"
+        patterns: "*.json"
+      register: registrations
 
     - name: Remove apps no longer in server.yml
       ansible.builtin.command: "{{ platform_dir }}/bin/app-remove {{ item }}"
       loop: "{{ registered | difference(keep) }}"
       vars:
-        registered: "{{ fragments.files | map(attribute='path') | map('basename') | map('regex_replace', '^10-(.*)\\.yaml$', '\\1') | list }}"
+        registered: "{{ registrations.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.json$', '') | list }}"
       changed_when: true

@@ -1,0 +1,40 @@
+# =============================================================================
+# The deployer — node, the Docker CLI with Compose, buildctl and jq: it admits
+# and starts apps, records releases and runs the platform's jobs (registry GC,
+# Renovate). The only container of the platform's CI with the docker socket,
+# and Traefik never routes to it.
+#
+# Context: <platform_dir>/kayra, copied by the platform role.
+# =============================================================================
+
+FROM node:24.21.0-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66
+
+# renovate: datasource=github-releases depName=moby/buildkit
+ARG BUILDKIT_VERSION=v0.34.0
+# What the Renovate job runs, pinned here so Renovate keeps it current itself.
+# renovate: datasource=docker depName=renovate/renovate
+ARG RENOVATE_VERSION=44.115.10
+ENV RENOVATE_IMAGE=renovate/renovate:${RENOVATE_VERSION}
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg jq && \
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    chmod a+r /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+      https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+      > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin && \
+    arch="$(dpkg --print-architecture)" && \
+    curl -fsSL "https://github.com/moby/buildkit/releases/download/${BUILDKIT_VERSION}/buildkit-${BUILDKIT_VERSION}.linux-${arch}.tar.gz" \
+      | tar -xz -C /usr/local bin/buildctl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --chmod=0755 kayra-deployer /usr/local/bin/kayra-deployer
+COPY app /opt/kayra
+# The code is ES modules, from either a checkout (.ts) or the package (.js).
+RUN echo '{"type": "module"}' > /opt/kayra/package.json
+
+USER node
+ENTRYPOINT ["kayra-deployer"]

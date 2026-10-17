@@ -116,7 +116,7 @@ const vault = (descriptor: Fields): Result<Vault, string> => {
     : err("vault_password_file must be a path");
 };
 
-/** Apps live in their own repo: Jenkins clones it over HTTPS, and the app root stays inside it. */
+/** Apps live in their own repo: the builder clones it over HTTPS, and the app root stays inside it. */
 const app = (value: unknown): Result<App, string> => {
   const entry = mapping(value);
   if (entry === undefined) return err("an app must be a mapping");

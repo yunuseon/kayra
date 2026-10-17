@@ -5,15 +5,14 @@ import {
   type Domain,
   type FleetRoot,
   type KayraRoot,
-  type KayraVersion,
   type Subdomain,
 } from "../brand.ts";
 import type { Server } from "../fleet.ts";
 import { run, type Arg, type Env, type Plan, type Query, type Step } from "../plan.ts";
 import { all, err, map, ok, type Result } from "../result.ts";
 
-/** What every command works with besides the server: the engine's files and release, and the fleet's files. */
-export type Engine = { readonly kayra: KayraRoot; readonly version: KayraVersion; readonly fleet: FleetRoot };
+/** What every command works with besides the server: the engine's files and the fleet's. */
+export type Engine = { readonly kayra: KayraRoot; readonly fleet: FleetRoot };
 
 /** The local scripts that read the fleet's files find them here, not beside themselves. */
 const fleetEnv = ({ fleet }: Engine): Env => ({ FLEET_ROOT: fleet });
@@ -118,8 +117,6 @@ const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] =
       `domain=${server.domain}`,
       "-e",
       `target=${server.target}`,
-      "-e",
-      `kayra_version=${engine.version}`,
       ...extra,
     ],
     ansibleEnv(engine, vaultEnv(server)),
@@ -321,6 +318,30 @@ export const ssh = (server: Server, remote: readonly string[]): Result<Plan, str
           ...remote,
         ]),
       ]);
+
+/** What `kayra app …` and `kayra job …` ask of a server: its deployer's ctl, over SSH. */
+export type DeployerCommand =
+  | { readonly kind: "runs" | "logs" | "deploy" | "rollback"; readonly app: AppName; readonly more: string | undefined }
+  | { readonly kind: "job"; readonly job: "gc" | "renovate"; readonly noPrs: boolean };
+
+const ctlArgs = (command: DeployerCommand): readonly string[] => {
+  switch (command.kind) {
+    case "job":
+      return ["job", command.job, ...(command.noPrs ? ["--dry-run"] : [])];
+    case "logs":
+      return ["log", command.app, ...(command.more === undefined ? [] : [command.more])];
+    case "runs":
+    case "deploy":
+    case "rollback":
+      return [command.kind, command.app, ...(command.more === undefined ? [] : [command.more])];
+  }
+};
+
+/** Inside the deployer container, as the deploy user (in the docker group): nothing here needs root. */
+export const deployer = (server: Server, command: DeployerCommand): Result<Plan, string> =>
+  server.kind === "platform"
+    ? ssh(server, ["cd", "/opt/platform", "&&", "docker", "compose", "exec", "-T", "deployer", "kayra-deployer", "ctl", ...ctlArgs(command)])
+    : err(`'${server.name}' is a ${server.kind} server: only platform servers run apps.`);
 
 /** mkcert certs for a domain and its subdomains, for local dev and multipass. */
 export const certsFor = (engine: Engine, domain: Domain, subdomains: readonly Subdomain[]): Result<Plan, string> =>

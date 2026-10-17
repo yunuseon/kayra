@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# =============================================================================
+# app-apply <app> — the one way an app's secrets reach the deployer.
+#
+# Reads the app's secrets as KEY=VALUE lines on stdin and writes each to
+# app-secrets/<app>/<KEY>, which the deployer reads (mounted read-only at
+# /run/app-secrets) into the environment of that app's compose commands, and
+# nowhere else. The next deploy uses them; nothing is reloaded.
+#
+# Installed by the platform role at <platform_dir>/bin. Run as root.
+# =============================================================================
+set -euo pipefail
+
+app="${1:?Usage: app-apply <app> < secrets.env}"
+platform_dir="$(cd "$(dirname "$0")/.." && pwd)"
+secrets_dir="${platform_dir}/app-secrets/${app}"
+
+# Staged next to the target and swapped in whole, so keys the app no longer
+# declares disappear instead of lingering.
+staging="${secrets_dir}.new"
+rm -rf "$staging"
+mkdir -p "$staging"
+trap 'rm -rf "$staging"' EXIT
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    printf '%s' "${line#*=}" > "${staging}/${line%%=*}"
+done
+rm -rf "$secrets_dir"
+mv "$staging" "$secrets_dir"
+trap - EXIT
+# The deployer runs as uid 1000 and reads these through a read-only mount.
+chown -R 1000:1000 "$secrets_dir"
+find "$secrets_dir" -type f -exec chmod 0400 {} +
+chmod 0500 "$secrets_dir"
+echo "Applied ${app}'s secrets."

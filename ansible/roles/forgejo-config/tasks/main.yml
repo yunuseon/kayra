@@ -260,7 +260,8 @@
   # Only reads, so it runs in check mode too (kayra plan).
   check_mode: false
 
-# A push to any branch calls the URL (with notifyCommit: Jenkins polls).
+# A push to any branch calls the URL, signed with webhook_secret: the
+# builder's http://builder:8080/hook/<app> over platform-internal checks it.
 - name: Add missing webhooks
   ansible.builtin.uri:
     url: "{{ forgejo_config.url }}/api/v1/repos/{{ item.0.name }}/hooks"
@@ -272,7 +273,7 @@
       active: true
       events: [push]
       branch_filter: "*"
-      config: {url: "{{ item.1 }}", content_type: json, http_method: post}
+      config: {url: "{{ item.1 }}", content_type: json, http_method: post, secret: "{{ webhook_secret }}"}
     status_code: [201]
   changed_when: true
   when: >-
@@ -318,7 +319,7 @@
   loop_control: {label: "{{ item.item.name }}"}
   no_log: true
 
-# Tokens for the platform's services on this server (Jenkins, Renovate), into
+# Tokens for the platform's services on this server (builder and deployer, Renovate), into
 # the files the platform role would otherwise fill from the vault. Nobody ever
 # sees one: kept only in that file, minted again when it is missing, wrong or
 # revoked. Unique names, since the admin token cannot delete a user's tokens.
@@ -368,9 +369,3 @@
   loop_control: {label: "{{ item.item.item.item.secret }}"}
   become: true
   no_log: true
-
-- name: Reload JCasC with the new tokens
-  ansible.builtin.command: "{{ platform_dir }}/bin/jenkins-reload"
-  when: service_tokens_minted is changed
-  become: true
-  changed_when: true

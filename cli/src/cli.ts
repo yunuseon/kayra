@@ -35,8 +35,40 @@ export const parser = (fleet: Fleet) => {
         }),
         command(
           "app",
-          command("purge", object({ name: constant("app purge"), server, app: argument(appNameParser) })),
-          { brief: message`Delete a removed app's volumes: its data, irreversibly.` },
+          or(
+            command("purge", object({ name: constant("app purge"), server, app: argument(appNameParser) }), {
+              brief: message`Delete a removed app's volumes: its data, irreversibly.`,
+            }),
+            command("runs", object({ name: constant("app runs"), server, app: argument(appNameParser) }), {
+              brief: message`The app's latest runs: id, result, commit, why.`,
+            }),
+            command(
+              "logs",
+              object({ name: constant("app logs"), server, app: argument(appNameParser), more: optional(argument(string({ metavar: "RUN" }))) }),
+              { brief: message`A run's log, the newest unless named.` },
+            ),
+            command(
+              "deploy",
+              object({ name: constant("app deploy"), server, app: argument(appNameParser), more: optional(argument(string({ metavar: "REF" }))) }),
+              { brief: message`Build and deploy a branch, tag or commit (default: the app's ref).` },
+            ),
+            command(
+              "rollback",
+              object({ name: constant("app rollback"), server, app: argument(appNameParser), more: optional(argument(string({ metavar: "SHA" }))) }),
+              { brief: message`List earlier releases, or deploy one of them again.` },
+            ),
+          ),
+          { brief: message`An app on a server: its runs, logs, deploys, rollbacks, and purging its data.` },
+        ),
+        command(
+          "job",
+          object({
+            name: constant("job"),
+            server,
+            job: argument(choice(["gc", "renovate"] as const, { metavar: "JOB" })),
+            noPrs: option("--no-prs", { description: message`Renovate: log what would change, open no PRs.` }),
+          }),
+          { brief: message`Run a platform job now: the registry GC or Renovate.` },
         ),
       ),
       // On the whole fleet

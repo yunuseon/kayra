@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import { run } from "@optique/run";
-import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { absolutePath, kayraRoot, kayraVersion, within } from "./brand.ts";
+import { absolutePath, kayraRoot, within } from "./brand.ts";
 import { parser, type Command } from "./cli.ts";
 import { doctor } from "./commands/doctor.ts";
 import * as server from "./commands/server.ts";
@@ -19,11 +18,18 @@ const here = absolutePath(process.cwd());
 const engine = absolutePath(import.meta.dirname);
 if (!here.ok || !engine.ok) throw new Error("node reported a relative path");
 const kayra = kayraRoot(within(engine.value, "..", ".."));
-const manifest: unknown = JSON.parse(readFileSync(within(kayra, "package.json"), "utf8"));
-const version = kayraVersion(typeof manifest === "object" && manifest !== null && "version" in manifest ? manifest.version : undefined);
-if (!version.ok) throw new Error(`kayra's package.json: ${version.error}`);
 
-type OnServer = Exclude<Command, { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" }>;
+type Deployer = Extract<Command, { readonly name: "app runs" | "app logs" | "app deploy" | "app rollback" | "job" }>;
+type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" }>;
+
+const appKinds = { "app runs": "runs", "app logs": "logs", "app deploy": "deploy", "app rollback": "rollback" } as const;
+
+const isDeployer = (command: Command): command is Deployer => command.name === "job" || command.name in appKinds;
+
+const deployerCommand = (command: Deployer): server.DeployerCommand =>
+  command.name === "job"
+    ? { kind: "job", job: command.job, noPrs: command.noPrs }
+    : { kind: appKinds[command.name], app: command.app, more: "more" in command ? command.more : undefined };
 
 const onServer = (on: server.Engine, target: Server, command: OnServer): Result<Plan, string> => {
   switch (command.name) {
@@ -53,11 +59,15 @@ const onServer = (on: server.Engine, target: Server, command: OnServer): Result<
 };
 
 const plan = (fleet: Fleet, command: Exclude<Command, { readonly name: "status" | "validate" }>): Result<Plan, string> => {
-  const on = { kayra, version: version.value, fleet: fleet.root };
+  const on = { kayra, fleet: fleet.root };
   if (command.name === "doctor") return ok(doctor(fleet, kayra));
   if (command.name === "certs") return server.certsFor(on, command.domain, command.subdomains);
   if (command.name === "app purge")
     return flatMap(serverNamed(fleet, command.server), (target) => server.appPurge(on, target, command.app));
+  if (isDeployer(command)) {
+    const deployerArgs = deployerCommand(command);
+    return flatMap(serverNamed(fleet, command.server), (target) => server.deployer(target, deployerArgs));
+  }
   return flatMap(serverNamed(fleet, command.server), (target) => onServer(on, target, command));
 };
 

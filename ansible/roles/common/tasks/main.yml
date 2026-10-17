@@ -54,7 +54,7 @@
 
 # The box runs two JVMs and builds images while serving production. Swap is not
 # a substitute for RAM — it stops the OOM killer picking a random victim
-# (postgres, say) during a Jenkins build.
+# (postgres, say) during a build.
 - name: Create swapfile
   ansible.builtin.shell: fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile
   args:

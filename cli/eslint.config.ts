@@ -40,8 +40,24 @@ export default defineConfig(
     },
   },
   {
+    // The deployer's daemons work with Node's I/O objects (requests, responses,
+    // buffers, the environment, dates, regexps): classes the rule cannot make readonly.
+    files: ["src/deployer/**/*.ts"],
+    rules: {
+      "functional/prefer-immutable-types": [
+        "error",
+        {
+          enforcement: "ReadonlyDeep",
+          ignoreInferredTypes: true,
+          ignoreClasses: true,
+          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "ProcessEnv", "IncomingHttpHeaders", "Buffer", "Date", "RegExp"],
+        },
+      ],
+    },
+  },
+  {
     // Brands are minted here, and only here: the one place `as` may appear.
-    files: ["src/brand.ts"],
+    files: ["src/brand.ts", "src/deployer/brand.ts"],
     rules: { "@typescript-eslint/consistent-type-assertions": "off" },
   },
 );

@@ -10,33 +10,38 @@ host or the platform.
 ## Who runs what
 
 ```
-jenkins-agent        no docker socket, no docker CLI, no language toolchain
-   │                 checks out the app at the requested ref
-   │ buildctl over TCP
-   ▼
-buildkitd            rootless, under AppArmor profile buildkit-rootless;
-   │                 runs the app's Dockerfiles — the only app code CI executes
-   ▼
-registry             on platform-internal only; no router
-   ▲
-jenkins-controller   holds the docker socket; runs only admission (compose
-                     policy) and `docker compose up`, with pipeline code from
-                     the platform library, never from the app
+forge webhook ──▶ builder    no docker socket, no docker CLI, no app secrets,
+   (HMAC)           │        no language toolchain; checks out the app at the
+                    │        commit asked for
+                    │ buildctl over TCP
+                    ▼
+                  buildkitd  rootless, under AppArmor profile buildkit-rootless;
+                    │        runs the app's Dockerfiles — the only app code CI executes
+                    ▼
+                  registry   on platform-internal only; no router
+                    ▲
+                  deployer   holds the docker socket and the app secrets; never
+                             routed; re-checks the builder's bundle, runs only
+                             admission (compose policy) and `docker compose up`
 ```
 
-- **No pipeline comes from an app.** Every app's `build` and `deploy` jobs are
-  inline scripts rendered by the platform, calling the platform library, which
-  Jenkins loads — trusted, with no version override — from `PLATFORM_REF`. The
-  ref being built is data: checked out, never the source of the steps Jenkins
-  runs.
-- **The agent cannot reach the host.** No socket, no Docker CLI; its label is
-  `buildkit linux`, so nothing asking for `docker` lands there.
+- **No pipeline comes from an app.** Every app runs the same run, the
+  platform's own code, shipped with the kayra release the fleet pins. The
+  commit being built is data: checked out, never the source of the steps that
+  run.
+- **The builder cannot reach the host.** No socket and no Docker CLI, both
+  checked on every change to kayra. It answers webhooks and shows the runs; its
+  internal API (resolve, prepare) is not routed.
 - **Builds are containers, not the host.** Rootless BuildKit puts each build in
   an unprivileged user namespace.
-- **What reaches the controller is admitted first.** The app's compose files
-  pass `compose-policy.sh` (an allow-list, memory limits required, no host
-  access, no foreign images/networks/volumes, `env_file` refused) before
-  `docker compose up`.
+- **The deployer trusts nothing the builder hands it.** The bundle — the commit,
+  the image refs, the compose files — is checked again: the commit asked for,
+  images only in the app's own namespace, compose files inside the app. Then
+  the compose files pass `compose-policy.sh` (an allow-list, memory limits
+  required, no host access, no foreign images/networks/volumes, `env_file`
+  refused) before `docker compose up`.
+- **Secrets reach only their own app's compose commands**, read by the
+  deployer from files only it mounts.
 
 ## Why buildkitd has its own AppArmor profile
 
@@ -55,7 +60,7 @@ sudo aa-status | grep buildkit                                # buildkitd confin
 ```
 
 `moby/buildkit` does not read `BUILDKITD_FLAGS`; its flags are the container's
-command, or it listens on a unix socket the agent cannot reach.
+command, or it listens on a unix socket the builder cannot reach.
 
 ## Two registry hostnames, one registry
 

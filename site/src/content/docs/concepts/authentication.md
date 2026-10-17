@@ -3,7 +3,7 @@ title: Authentication
 description: Staff login with Authelia; apps bring their own.
 ---
 
-Authelia guards the platform's own pages — Jenkins and Traefik's dashboard —
+Authelia guards the platform's own pages — the runs pages and Traefik's dashboard —
 for the operators. Apps bring their own login: their users belong to the app
 and its customer, never to this file (see the app contract).
 
@@ -13,7 +13,7 @@ and its customer, never to this file (see the app contract).
 browser ──▶ Traefik ──forwardAuth──▶ Authelia     (is this operator signed in?)
                 │
                 ▼
-      Jenkins / Traefik dashboard
+      runs pages / Traefik dashboard
 ```
 
 Traefik asks Authelia about every request to a router that carries
@@ -24,7 +24,7 @@ platform hosts; the compose policy refuses `authelia@file` on an app's router.
 | What | Protection |
 |---|---|
 | Traefik dashboard (`traefik.<domain>`) | Authelia (group `admin`) |
-| Jenkins (`jenkins.<domain>`) | Authelia, then Jenkins' own admin login; `/github-webhook/` is exempt (HMAC-checked) |
+| Runs pages (`deploy.<domain>`) | Authelia (group `admin`); read-only; `/hook/` is exempt (HMAC-checked) |
 | Registry | Not routed at all — reachable only on `platform-internal` |
 | Everything an app routes | The app's own login, if it has one |
 
@@ -57,10 +57,10 @@ mail, or the operator relaying the code below).
 
 ## Recovery
 
-**Authelia is down.** Apps are unaffected; Jenkins and Traefik's dashboard
-are not reachable. `docker logs platform-authelia-1 --tail 50` usually names a
-config or secret error. Automation does not depend on it: `bin/jenkins-api` and
-the platform role talk to the controller from inside.
+**Authelia is down.** Apps and deploys are unaffected; the runs pages and
+Traefik's dashboard are not reachable. `docker logs platform-authelia-1 --tail 50` usually names a
+config or secret error. Automation does not depend on it: `kayra app …` talks
+to the deployer over SSH, and webhooks skip it.
 
 **Lost passkeys.** Credentials live in the `authelia-data` volume. If it is lost,
 everyone re-enrols with their bootstrap password. Back it up.
@@ -69,9 +69,6 @@ everyone re-enrols with their bootstrap password. Back it up.
 
 - **The registry.** The Docker CLI cannot follow a browser OIDC redirect; a
   forwardAuth on it would break every push. It has no router instead.
-- **Jenkins' own realm.** Jenkins sits behind Authelia at the edge, but keeps its
-  local realm: `bin/jenkins-api` and the agent-secret bootstrap authenticate with
-  the admin password over basic auth, which Jenkins' OIDC realm rejects.
 
 ## Why apps do not use it
 

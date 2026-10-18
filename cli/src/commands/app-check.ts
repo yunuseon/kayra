@@ -39,6 +39,6 @@ export const appCheck = (kayra: KayraRoot, root: AbsolutePath, manifest: string 
     tool("jq", "brew install jq"),
     tool("yq", "brew install yq"),
     tool("docker", "the docker CLI with Compose; no daemon is needed"),
-    run(["bash", within(kayra, "scripts", "local", "app-check.sh"), root]),
+    run("Image plan and compose policy", ["bash", within(kayra, "scripts", "local", "app-check.sh"), root]),
   ]);
 };

@@ -5,7 +5,40 @@ description: Every kayra command.
 
 Run from anywhere inside a fleet. Server and app names complete in the shell.
 Every command takes `--dry-run`: it prints the plan — each command, guard and
-confirmation, with its environment — and runs nothing.
+confirmation, with its environment — and runs nothing. On a terminal each step
+is numbered under its title, paths named by their root (`<kayra>`, `<fleet>`,
+`~`); piped, it prints one plain, copyable line per step.
+
+## What you see
+
+```
+kayra deploy shop-prod · platform on hetzner · shop.example.com · kayra 1.2.3 · 9 steps
+
+setup
+  ✓ shop-prod may be changed from this checkout                             0.3s
+  ✓ Ansible collections                                                     1.2s
+  ◆ Host layer · platform.yml                                                3/9
+  …the playbook's own output…
+  ✓ Host layer · platform.yml                                              2m03s
+…
+✗ kayra deploy shop-prod failed at Verify · step 9 of 9 · 4m12s
+  → kayra verify shop-prod runs just this part
+```
+
+- **A heading, then each step** with its time; a command made of several
+  (`up`, `deploy`) groups its steps by the command that runs each part alone,
+  and when one fails, the footer names it.
+- **stdout is the output, stderr what is around it:** the heading, the steps
+  and the footer go to stderr, so `kayra doctor > report` keeps only the
+  report. `ssh` and the `app` and `job` commands print the server's answer and
+  nothing else.
+- **Colors** follow `FORCE_COLOR`, then `NO_COLOR`, then whether the output is a
+  terminal. On one, quiet steps (guards, checks) show a spinner and a running
+  time, the window title follows the step, and a run longer than 30 seconds
+  ends with a notification where the terminal shows them (iTerm2, WezTerm,
+  Ghostty; Ghostty and WezTerm also show a progress bar).
+- **Ctrl-C** reaches the step's program; kayra stops once it has given up and
+  says where (exit status 130). A second Ctrl-C does not wait.
 
 ## Per server
 

@@ -8,7 +8,7 @@ import {
   type Subdomain,
 } from "../brand.ts";
 import type { Server } from "../fleet.ts";
-import { run, type Arg, type Env, type Plan, type Query, type Step } from "../plan.ts";
+import { partOf, run, type Arg, type Env, type Plan, type Query, type Step } from "../plan.ts";
 import { all, err, map, ok, type Result } from "../result.ts";
 
 /** What every command works with besides the server: the engine's files and the fleet's. */
@@ -73,6 +73,7 @@ const reachable = (engine: Engine, server: Server): readonly Step[] =>
 /** The pinned Ansible collections; a no-op once installed. */
 const collections = (engine: Engine, env: Env): Step => ({
   kind: "run",
+  title: "Ansible collections",
   argv: ["ansible-galaxy", "collection", "install", "-r", ansiblePath(engine, "requirements.yml")],
   env,
   stdout: "discard",
@@ -86,24 +87,27 @@ const appSubdomains = (engine: Engine, server: Server): Query => ({
 });
 
 const certs = (engine: Engine, domain: string, subdomains: readonly Arg[]): Step =>
-  run(["bash", script(engine, "certs.sh"), domain, within(engine.fleet, ".cache", "certs"), ...subdomains]);
+  run("mkcert certificates", ["bash", script(engine, "certs.sh"), domain, within(engine.fleet, ".cache", "certs"), ...subdomains]);
 
 export const provision = (engine: Engine, server: Server): Result<Plan, string> =>
-  ok([
-    fromMain(engine, server),
-    ...(server.vm ? [run(["bash", script(engine, "home-image.sh"), server.name], fleetEnv(engine))] : []),
-    ...(server.terraform
-      ? [
-          latestState(engine, server),
-          run(["tofu", terraform(server), "init", "-input=false"]),
-          run(["tofu", terraform(server), "apply", "-auto-approve"]),
-        ]
-      : []),
-  ]);
+  ok(
+    partOf("provision", [
+      fromMain(engine, server),
+      ...(server.vm ? [run("VM image and seed ISO", ["bash", script(engine, "home-image.sh"), server.name], fleetEnv(engine))] : []),
+      ...(server.terraform
+        ? [
+            latestState(engine, server),
+            run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]),
+            run("OpenTofu apply", ["tofu", terraform(server), "apply", "-auto-approve"]),
+          ]
+        : []),
+    ]),
+  );
 
 /** The playbook for the server's kind, as setup runs it; plan adds check mode. */
 const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []): Step =>
   run(
+    `Host layer · ${server.kind}.yml${extra.includes("--check") ? ", check mode" : ""}`,
     [
       "ansible-playbook",
       "-i",
@@ -124,16 +128,18 @@ const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] =
 
 /** The host layer: the playbook for the server's kind. */
 export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
-  ok([
-    fromMain(engine, server),
-    // mkcert where Let's Encrypt cannot reach: test VMs, and home servers without DNS-01.
-    ...(server.kind === "platform" && server.target !== "hetzner" && !server.acmeDns
-      ? [certs(engine, server.domain, [appSubdomains(engine, server), ...server.stackHosts])]
-      : []),
-    ...reachable(engine, server),
-    collections(engine, vaultEnv(server)),
-    hostPlaybook(engine, server),
-  ]);
+  ok(
+    partOf("setup", [
+      fromMain(engine, server),
+      // mkcert where Let's Encrypt cannot reach: test VMs, and home servers without DNS-01.
+      ...(server.kind === "platform" && server.target !== "hetzner" && !server.acmeDns
+        ? [certs(engine, server.domain, [appSubdomains(engine, server), ...server.stackHosts])]
+        : []),
+      ...reachable(engine, server),
+      collections(engine, vaultEnv(server)),
+      hostPlaybook(engine, server),
+    ]),
+  );
 
 /**
  * What provision and setup would change, changing nothing: OpenTofu's plan and
@@ -146,8 +152,8 @@ export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
     ...(server.terraform
       ? [
           latestState(engine, server),
-          run(["tofu", terraform(server), "init", "-input=false"]),
-          run(["tofu", terraform(server), "plan", "-input=false", "-lock=false"]),
+          run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]),
+          run("OpenTofu plan", ["tofu", terraform(server), "plan", "-input=false", "-lock=false"]),
         ]
       : []),
     collections(engine, vaultEnv(server)),
@@ -158,54 +164,67 @@ export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server): Result<Plan, string> => {
   const env = vaultEnv(server);
-  const playbook = (name: string, ...extra: readonly string[]): Step =>
-    run(["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, env));
-  return ok([
-    fromMain(engine, server),
-    ...(server.kind === "platform"
-      ? [
-          ...server.apps.flatMap((app) => [
+  const playbook = (title: string, name: string, ...extra: readonly string[]): Step =>
+    run(title, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, env));
+  return ok(
+    partOf("apps", [
+      fromMain(engine, server),
+      ...(server.kind === "platform"
+        ? [
+            ...server.apps.flatMap((app) => [
+              collections(engine, env),
+              playbook(
+                `App ${app.name}`,
+                "app.yml",
+                "-e",
+                `server=${server.name}`,
+                "-e",
+                `server_dir=${server.dir}`,
+                "-e",
+                `domain=${server.domain}`,
+                "-e",
+                `{"app": ${app.entry}}`,
+              ),
+            ]),
             collections(engine, env),
             playbook(
-              "app.yml",
+              "Remove apps not in server.yml",
+              "apps-prune.yml",
               "-e",
-              `server=${server.name}`,
-              "-e",
-              `server_dir=${server.dir}`,
-              "-e",
-              `domain=${server.domain}`,
-              "-e",
-              `{"app": ${app.entry}}`,
+              `{"keep": ${JSON.stringify(server.apps.map((app) => app.name))}}`,
             ),
-          ]),
-          collections(engine, env),
-          playbook("apps-prune.yml", "-e", `{"keep": ${JSON.stringify(server.apps.map((app) => app.name))}}`),
-        ]
-      : []),
-  ]);
+          ]
+        : []),
+    ]),
+  );
 };
 
 export const hosts = (engine: Engine, server: Server): Result<Plan, string> =>
   ok(
-    server.target === "multipass"
-      ? [
-          run([
-            "bash",
-            script(engine, "setup-hosts.sh"),
-            server.domain,
-            { kind: "query", argv: ["tofu", terraform(server), "output", "-raw", "server_ip"], words: "one" },
-            appSubdomains(engine, server),
-          ]),
-        ]
-      : [{ kind: "note", text: `hosts: ${server.target} uses real DNS, nothing to do.` }],
+    partOf(
+      "hosts",
+      server.target === "multipass"
+        ? [
+            run("/etc/hosts", [
+              "bash",
+              script(engine, "setup-hosts.sh"),
+              server.domain,
+              { kind: "query", argv: ["tofu", terraform(server), "output", "-raw", "server_ip"], words: "one" },
+              appSubdomains(engine, server),
+            ]),
+          ]
+        : [{ kind: "note", text: `hosts: ${server.target} uses real DNS, nothing to do.` }],
+    ),
   );
 
 const sequence = (plans: readonly Result<Plan, string>[]): Result<Plan, string> =>
   map(all(plans), (each) => each.flat());
 
 /** Whether a platform server works as its users see it (scripts/local/verify.sh); other kinds have nothing to check yet. */
-const verifyStep = (engine: Engine, server: Server): Step =>
-  run(["bash", script(engine, "verify.sh"), server.name], fleetEnv(engine));
+const verifyStep = (engine: Engine, server: Server): Step => ({
+  ...run("Verify", ["bash", script(engine, "verify.sh"), server.name], fleetEnv(engine)),
+  part: "verify",
+});
 
 export const verify = (engine: Engine, server: Server): Result<Plan, string> =>
   server.kind === "platform"
@@ -229,12 +248,12 @@ export const down = (engine: Engine, server: Server): Result<Plan, string> =>
           ? [
               {
                 kind: "confirm",
-                prompt: `This destroys the Hetzner server '${server.name}' (${server.domain}). Type the name to confirm: `,
+                warning: `This destroys the Hetzner server '${server.name}' (${server.domain}) and everything on it.`,
                 expect: server.name,
               } satisfies Step,
             ]
           : []),
-        run(["tofu", terraform(server), "destroy", "-auto-approve"]),
+        run("OpenTofu destroy", ["tofu", terraform(server), "destroy", "-auto-approve"]),
       ])
     : err(`${server.name} has no terraform/: nothing here creates it, so nothing destroys it`);
 
@@ -244,6 +263,7 @@ export const adopt = (engine: Engine, server: Server): Result<Plan, string> =>
     fromMain(engine, server),
     collections(engine, {}),
     run(
+      "Deploy user, added as root",
       ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", "adopt.yml")],
       ansibleEnv(engine, {}),
     ),
@@ -254,6 +274,7 @@ export const appPurge = (engine: Engine, server: Server, app: AppName): Result<P
   ok([
     fromMain(engine, server),
     run(
+      `Delete ${app}'s volumes`,
       [
         "ansible",
         "servers",
@@ -280,6 +301,7 @@ export const backupTest = (engine: Engine, server: Server): Result<Plan, string>
   return ok([
     ...reachable(engine, server),
     run(
+      "Start the restore test",
       [
         "ansible",
         "servers",
@@ -296,7 +318,7 @@ export const backupTest = (engine: Engine, server: Server): Result<Plan, string>
       ansibleEnv(engine, vaultEnv(server)),
     ),
     { kind: "note", text: "Following the restore test. Ctrl-C stops following, not the test." },
-    run([
+    run("Follow the restore test", [
       "ssh",
       "-p",
       server.inventory.port,
@@ -316,7 +338,7 @@ export const ssh = (server: Server, remote: readonly string[]): Result<Plan, str
   server.inventory === undefined
     ? err(`no inventory for '${server.name}' — provision it first.`)
     : ok([
-        run([
+        run("SSH", [
           "ssh",
           "-p",
           server.inventory.port,

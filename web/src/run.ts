@@ -53,8 +53,14 @@ export const reduce = (view: RunView, event: RunEvent, now: number): RunView => 
         ...view,
         asking: undefined,
         ended,
-        // A step left running was stopped under it (interrupted); those after it never ran.
-        steps: view.steps.map((step) => (step.state === "running" ? { ...step, state: "stopped" } : step.state === "waiting" ? { ...step, state: "skipped" } : step)),
+        // The step a run was interrupted at was stopped, whatever its program said on the way out; those after it never ran.
+        steps: view.steps.map((step, index) =>
+          step.state === "running" || (event.stop?.why === "interrupted" && event.stop.index === index)
+            ? { ...step, state: "stopped" }
+            : step.state === "waiting"
+              ? { ...step, state: "skipped" }
+              : step,
+        ),
       };
     }
     case "output":

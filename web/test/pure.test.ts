@@ -75,7 +75,12 @@ describe("a run, folded", () => {
     const asking = reduce(reduce(empty, plan, 0), { kind: "ask", prompt: "Type lab" }, 0);
     expect(asking.asking).toBe("Type lab");
     expect(reduce(asking, { kind: "answered" }, 0).asking).toBeUndefined();
-    const cut = [plan, { kind: "started", index: 0 } as const, { kind: "ended", failures: 0, stop: { index: 0, why: "interrupted" }, ms: 5, footer: [] } as const].reduce(
+    const cut = [
+      plan,
+      { kind: "started", index: 0 } as const,
+      { kind: "done", index: 0, failed: true, stopped: true, why: "exit 99", ms: 5 } as const,
+      { kind: "ended", failures: 0, stop: { index: 0, why: "interrupted" }, ms: 5, footer: [] } as const,
+    ].reduce(
       (so: typeof empty, event: RunEvent) => reduce(so, event, 0),
       empty,
     );

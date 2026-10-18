@@ -9,7 +9,7 @@ import { all, err, ok, type Result } from "../result.ts";
 import { field, registered, type App } from "./app.ts";
 import { appName, appOwner, jobOwner, newRunId, sha, type JobName, type Owner, type RunId, type Sha } from "./brand.ts";
 import { matches, parseCron, type Cron } from "./cron.ts";
-import { statusRequest } from "./forge.ts";
+import { forge, forgeRepo } from "./forge.ts";
 import { json, send } from "./http.ts";
 import { spawnLines } from "./process.ts";
 import { empty, enqueue, finish, type Queue, type Request, type Why } from "./queue.ts";
@@ -192,13 +192,13 @@ const effects = (s: Settings, who: Owner, id: RunId, log: (line: string) => void
     return Promise.resolve();
   },
   status: async (app, commit, context, state, description) => {
-    const request = statusRequest(app.repo, commit, { context, state, description, target: target(s, who, id) }, token("GIT_TOKEN"));
-    if (request === undefined) {
+    const repo = forgeRepo(app.repo);
+    if (repo === undefined) {
       log(`(no commit status: ${app.repo} is on no forge kayra knows)`);
       return;
     }
-    const response = await fetch(request.url, { method: "POST", headers: request.headers, body: request.body }).catch(() => undefined);
-    if (response?.ok !== true) log(`(commit status ${context} not posted: ${response === undefined ? "no answer" : `HTTP ${String(response.status)}`})`);
+    const posted = await forge(repo, token("GIT_TOKEN"), fetch).postStatus(commit, { context, state, description, target: target(s, who, id) });
+    if (!posted.ok) log(`(commit status ${context} not posted: ${posted.error})`);
   },
 });
 

@@ -52,8 +52,8 @@ deploys (usually `main`). For that the operator needs:
 
 - the platform's access token extended to the repository (Contents: read,
   Commit statuses: read and write), or registration and builds cannot clone it;
-- a webhook on the repository (push events, JSON, the platform's secret, to
-  `https://deploy.<environment domain>/hook/<app>`). Without it the platform
+- a webhook on the repository (push events, JSON, the platform's secret — on
+  GitLab its secret token — to `https://deploy.<environment domain>/hook/<app>`). Without it the platform
   still notices a push within the hour.
 
 Rollback only reaches releases built from the repository the app is in now: a

@@ -254,12 +254,16 @@ the app secrets, and Traefik never routes to it.
   bind mount has no source, Docker creates a **directory** where the config file
   should be, and buildkitd crash-loops. `docker restart` cannot recover that —
   the container has to be recreated.
-- **Pushes arrive as webhooks** at `/hook/<app>`, HMAC-SHA256 over the body with `webhook_secret` (GitHub's `X-Hub-Signature-256`, Forgejo's `X-Forgejo-Signature`); only a push to the app's ref queues a run. The **hourly poll** queues one for an app whose ref points at a commit no run has tried yet — a failing commit is not retried every hour. Both post commit statuses (`kayra/build`, `kayra/deploy`) linking to the run's page.
+- **Pushes arrive as webhooks** at `/hook/<app>`, proved the way the app's forge does it: HMAC-SHA256 over the body with `webhook_secret` (GitHub's `X-Hub-Signature-256`, Forgejo's `X-Forgejo-Signature`), or GitLab's `X-Gitlab-Token`, the secret itself; only a push to the app's ref queues a run. The **hourly poll** queues one for an app whose ref points at a commit no run has tried yet — a failing commit is not retried every hour. Both post commit statuses (`kayra/build`, `kayra/deploy`) linking to the run's page.
 - **A Forgejo is configured as code** by `forgejo-config` (`forgejo_config` in the server's `vars.yml`): users and SSH keys, organizations (`orgs: [{name, owner, visibility}]` — an organization's visibility is its packages' too, so a private one keeps internal images private), runners (`runners: [{name, scope}]`; without a scope a runner serves every repo on the instance), repos (created inside their organization, private from the start where their settings say so; `pull_mirror: <url>` makes one a pull mirror of another forge, fetched every `mirror_interval`), collaborators, Actions secrets, webhooks (signed with `webhook_secret`), push mirrors. It adds and adopts, never deletes.
-- **A repo on GitHub or on a Forgejo works the same.** Commit statuses go to
-  GitHub's REST API for `https://github.com/…` repos and to Forgejo's statuses
-  API for any other host, with `GIT_TOKEN`. A Forgejo on the same server calls
+- **A repo on GitHub, GitLab or a Forgejo works the same.** Everything the
+  platform asks of a forge — commit statuses, a webhook's proof — is an adapter
+  in `cli/src/deployer/` (`forge.ts` picks it from the repo URL):
+  `https://github.com/…` is GitHub, `https://gitlab.com/…` GitLab (group paths
+  included), any other host a Forgejo, so a self-hosted GitLab is not supported
+  yet. Clones need none: all three take `GIT_TOKEN` as a Basic password. A Forgejo on the same server calls
   `http://builder:8080/hook/<app>` over platform-internal. Renovate takes
+  `renovate_platform: gitlab` for gitlab.com, and for a Forgejo
   `renovate_platform: forgejo`, `renovate_endpoint`, `renovate_git_url:
   endpoint` (clone over the internal address, not the public one Forgejo's API
   reports) and an `allowInternal` host rule for a Forgejo, and runs on

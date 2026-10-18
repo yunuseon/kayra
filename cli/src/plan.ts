@@ -1,3 +1,5 @@
+import type { AppName, ServerName } from "./brand.ts";
+
 /** A value only known when the step runs: the stdout of a command, as `$(…)` would give it. */
 export type Query = {
   readonly kind: "query";
@@ -16,6 +18,9 @@ export type Probe =
   /** Its stdout is discarded (it may be a secret), its stderr shown on failure. */
   | { readonly kind: "exits-zero"; readonly argv: Argv; readonly env?: Env };
 
+/** A deployer's answer, read whole and drawn for the operator (ui/views.ts): which drawing, and of what. */
+export type View = { readonly view: "runs" | "releases" | "log"; readonly app: AppName; readonly server: ServerName };
+
 /** The kayra commands a longer one is made of, each of which runs its part alone. */
 export type Part = "provision" | "setup" | "apps" | "verify" | "hosts";
 
@@ -27,7 +32,8 @@ export type Step = { readonly part?: Part } & (
       readonly argv: readonly [string, ...Arg[]];
       /** Added to kayra's own environment. */
       readonly env: Env;
-      readonly stdout: "show" | "discard";
+      /** As it comes, dropped, or drawn by a view once the step is done. */
+      readonly stdout: "show" | "discard" | View;
     }
   | {
       readonly kind: "check";

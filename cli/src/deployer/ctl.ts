@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { releasesAnswer, runsAnswer } from "./answers.ts";
 import { appOwner, appName, owner as mintOwner, runId } from "./brand.ts";
 import { releases } from "./records.ts";
 import { log, runsOf } from "./store.ts";
@@ -8,7 +9,8 @@ import { log, runsOf } from "./store.ts";
  * The operator's side, run inside the deployer container by `kayra app …` and
  * `kayra job …` over SSH. Reads runs/ and releases/ directly; anything that
  * starts a run goes through the daemon's control port, so the queue stays the
- * only place runs begin.
+ * only place runs begin. `--json` makes `runs` and rollback's list answer as
+ * data (answers.ts), which kayra draws.
  */
 const platformDir = process.env["PLATFORM_DIR"] ?? "/opt/platform";
 const runs = join(platformDir, "runs");
@@ -30,11 +32,16 @@ const releasesOf = (app: string): ReturnType<typeof releases> => {
   return releases(existsSync(dir) ? readdirSync(dir) : []);
 };
 
-const commands: Readonly<Record<string, (args: readonly string[]) => Promise<number> | number>> = {
-  runs: ([app]) => {
+const commands: Readonly<Record<string, (args: readonly string[], json: boolean) => Promise<number> | number>> = {
+  runs: ([app], json) => {
     const name = appName(app ?? "");
     if (!name.ok) return fail(name.error);
-    runsOf(runs, appOwner(name.value)).slice(0, 20).forEach((run) => {
+    const latest = runsOf(runs, appOwner(name.value)).slice(0, 20);
+    if (json) {
+      console.log(JSON.stringify(runsAnswer(name.value, latest, releasesOf(name.value)[0])));
+      return 0;
+    }
+    latest.forEach((run) => {
       console.log([run.id, run.state.padEnd(8), (run.sha ?? "").slice(0, 12).padEnd(12), run.why.padEnd(8), run.what].join("  "));
     });
     return 0;
@@ -50,11 +57,16 @@ const commands: Readonly<Record<string, (args: readonly string[]) => Promise<num
     return 0;
   },
   deploy: ([app, ref]) => post("/deploy", { app, ref: ref ?? "", why: "deploy" }),
-  rollback: ([app, commit]) => {
+  rollback: ([app, commit], json) => {
     const name = appName(app ?? "");
     if (!name.ok) return fail(name.error);
-    const [live, ...earlier] = releasesOf(name.value);
+    const all = releasesOf(name.value);
+    const [live, ...earlier] = all;
     if (live === undefined) return fail(`${name.value} has not been deployed yet`);
+    if (commit === undefined && json) {
+      console.log(JSON.stringify(releasesAnswer(name.value, all)));
+      return earlier.length === 0 ? 1 : 0;
+    }
     if (commit === undefined) {
       console.log(`${name.value} runs ${live.sha} (since ${live.time}). Earlier releases:`);
       earlier.forEach((release) => {
@@ -72,5 +84,10 @@ const commands: Readonly<Record<string, (args: readonly string[]) => Promise<num
 export const ctl = async (args: readonly string[]): Promise<number> => {
   const [name, ...rest] = args;
   const command = name === undefined ? undefined : commands[name];
-  return command === undefined ? fail(`usage: ctl ${Object.keys(commands).join("|")} …`) : command(rest);
+  return command === undefined
+    ? fail(`usage: ctl ${Object.keys(commands).join("|")} … [--json]`)
+    : command(
+        rest.filter((word) => word !== "--json"),
+        rest.includes("--json"),
+      );
 };

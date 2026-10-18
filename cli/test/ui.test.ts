@@ -1,5 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { appName, serverName } from "../src/brand.ts";
 import { interpret } from "../src/interpret.ts";
 import { partOf, run, type Plan } from "../src/plan.ts";
 import { explain } from "../src/ui/explain.ts";
@@ -7,6 +8,7 @@ import { bad, flat, link, paint, strong, width } from "../src/ui/line.ts";
 import { footer, framed, position, type Invocation } from "../src/ui/progress.ts";
 import { colors, escapes, screen, settle, watch } from "../src/ui/terminal.ts";
 import { duration, fit, spread, table, truncate, wrap } from "../src/ui/text.ts";
+import { must } from "./support.ts";
 
 const guard = (label: string, code = 0) =>
   ({ kind: "check", label, probe: { kind: "exits-zero", argv: ["sh", "-c", `exit ${String(code)}`] }, onFailure: "stop" }) as const;
@@ -186,4 +188,13 @@ test("--dry-run on a terminal: numbered steps under their parts, each command be
       "              asks for 'box' to be typed, or stops",
     ],
   );
+});
+
+test("--dry-run says how a drawn answer is shown, below its command", () => {
+  const plan: Plan = [{ ...run("Runs of shop", ["ssh", "box", "ctl", "runs", "shop", "--json"]), stdout: { view: "runs", app: must(appName("shop")), server: must(serverName("box")) } }];
+  deepStrictEqual(explain(invocation, plan, (text) => text, 80).map(flat).slice(2), [
+    "  1  run      Runs of shop",
+    "              ssh box ctl runs shop --json",
+    "              → its answer drawn as a table of runs",
+  ]);
 });

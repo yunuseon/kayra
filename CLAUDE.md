@@ -378,7 +378,7 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 
 kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude Code) in its `.claude/settings.json`:
 
-- **`scripts/agent/guard.sh`**, a PreToolUse hook on Bash, makes a command that changes something real **ask** the operator first, every time:
+- **`scripts/agent/guard.sh`**, a PreToolUse hook on Bash, makes a command that changes something real **ask** the operator first, every time — or, in a mode that approves by itself (`auto`, `dontAsk`, `bypassPermissions`), **refuse** it, since an ask there goes through unseen; the agent stops and says so, and the operator runs the command or switches the session to Manual for it:
   - kayra changing a server that is not multipass (`up`, `provision`, `setup`, `deploy`, `apps`, `adopt`, `down`, `app purge|deploy|rollback`, `job`; not with `--dry-run`);
   - `ansible`/`ansible-playbook` against an inventory, and `ansible-vault` opening or writing a vault;
   - merging a PR, forge API writes, changing or deleting a repository, releases, `npm publish`;

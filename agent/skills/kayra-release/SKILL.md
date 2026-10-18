@@ -62,7 +62,9 @@ shell.
 
 `main` is protected: it changes only through a PR with green `checks`, for
 admins too. Merging and pushing a tag both ask the operator (kayra's guard);
-that is expected, say what you are doing.
+that is expected, say what you are doing. In auto mode the guard refuses
+them instead: stop, give the operator the exact command, and continue once
+they ran it (or switched the session to Manual and said so).
 
 ```bash
 gh pr merge <n> --repo yunuseon/kayra --merge --delete-branch

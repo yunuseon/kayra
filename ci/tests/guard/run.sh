@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Runs scripts/agent/guard.sh against every case below: "ask" cases must
-# come back with permissionDecision "ask", "pass" cases with no output. The
-# fixture project has a multipass server (lab) and a hetzner one (prod).
+# Runs scripts/agent/guard.sh against every case below, once per permission
+# mode: "ask" cases must come back with permissionDecision "ask" where the
+# operator sees a prompt and "deny" where the session approves by itself (or
+# names no mode), "pass" cases with no output in every mode. The fixture
+# project has a multipass server (lab) and a hetzner one (prod).
 #   bash ci/tests/guard/run.sh
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -22,11 +24,17 @@ while IFS='|' read -r expect command; do
     expect="$(xargs <<< "$expect")"
     command="${command# }"
     [ -n "$expect" ] && [ "${expect:0:1}" != "#" ] || continue
-    out="$(cd "$repo" && jq -n --arg c "$command" '{tool_name: "Bash", tool_input: {command: $c}}' | CLAUDE_PROJECT_DIR="$project" bash "$guard")"
-    got=pass
-    [ -z "$out" ] || got="$(jq -r '.hookSpecificOutput.permissionDecision' <<< "$out")"
-    if [ "$got" = "$expect" ]; then echo "ok    ${expect}  ${command}"
-    else echo "FAIL  expected ${expect}, got ${got}: ${command} ${out}"; failed=1; fi
+    for mode in default acceptEdits plan auto dontAsk bypassPermissions ""; do
+        want="$expect"
+        case "${expect}/${mode}" in ask/default|ask/acceptEdits|ask/plan) ;; ask/*) want=deny ;; esac
+        out="$(cd "$repo" && jq -n --arg c "$command" --arg m "$mode" \
+            '{tool_name: "Bash", tool_input: {command: $c}} + (if $m == "" then {} else {permission_mode: $m} end)' \
+            | CLAUDE_PROJECT_DIR="$project" bash "$guard")"
+        got=pass
+        [ -z "$out" ] || got="$(jq -r '.hookSpecificOutput.permissionDecision' <<< "$out")"
+        if [ "$got" != "$want" ]; then echo "FAIL  ${mode:-no mode}: expected ${want}, got ${got}: ${command} ${out}"; failed=1; fi
+    done
+    echo "ok    ${expect}  ${command}"
 done <<'CASES'
 # kayra on real servers asks; on multipass, with --dry-run, or reading, it does not
 ask  | kayra deploy prod

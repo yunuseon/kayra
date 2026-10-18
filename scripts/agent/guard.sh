@@ -5,8 +5,12 @@
 # command that changes something real waits for the operator to approve it,
 # in that moment.
 #
-# Reads the hook's JSON on stdin; prints a permissionDecision "ask" with the
-# reason for:
+# Reads the hook's JSON on stdin; prints a permissionDecision with the reason
+# for the commands below: "ask" in a mode that shows the operator a prompt
+# (default, acceptEdits, plan), "deny" in one that approves by itself (auto,
+# dontAsk, bypassPermissions) or an unknown one, where an "ask" would let the
+# command through unseen. Denied, the agent stops and says so; the operator
+# runs the command, or switches the session to Manual for it.
 #   - kayra commands that change a server (up, provision, setup, deploy,
 #     apps, adopt, down, app purge|deploy|rollback, job) unless --dry-run or
 #     the server is a multipass one (its server.yml under the project)
@@ -25,13 +29,19 @@
 # =============================================================================
 set -uo pipefail
 
-command="$(jq -r '.tool_input.command // empty' 2>/dev/null)"
+input="$(cat)"
+command="$(jq -r '.tool_input.command // empty' <<< "$input" 2>/dev/null)"
 [ -n "$command" ] || exit 0
+mode="$(jq -r '.permission_mode // empty' <<< "$input" 2>/dev/null)"
 project="${CLAUDE_PROJECT_DIR:-$PWD}"
 
 ask() {
-    jq -n --arg reason "$1" \
-        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: ("guard: " + $reason)}}'
+    case "$mode" in
+        default|acceptEdits|plan) decision=ask reason="guard: $1" ;;
+        *) decision=deny reason="guard: $1. This session approves by itself (${mode:-no permission mode}), so the guard refuses instead of asking: tell the operator, who runs it or switches the session to Manual for it." ;;
+    esac
+    jq -n --arg decision "$decision" --arg reason "$reason" \
+        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $decision, permissionDecisionReason: $reason}}'
     exit 0
 }
 has() { grep -qE -- "$1" <<< "$command"; }

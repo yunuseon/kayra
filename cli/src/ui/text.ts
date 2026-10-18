@@ -40,3 +40,25 @@ export const wrap = (words: readonly string[], columns: number): readonly string
     if (last === undefined) return [word];
     return characters(last).length + 1 + characters(word).length <= columns ? [...lines.slice(0, -1), `${last} ${word}`] : [...lines, word];
   }, []);
+
+/** How long ago, as a reader rounds it: 45s ago, 12m ago, 30h ago, 3d ago. */
+export const ago = (ms: number): string => {
+  const seconds = Math.floor(Math.max(0, ms) / 1000);
+  if (seconds < 60) return `${String(seconds)}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${String(minutes)}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${String(hours)}h ago` : `${String(Math.floor(hours / 24))}d ago`;
+};
+
+/** Rows of cells in columns as wide as their widest cell, two spaces apart; nothing trails a row's last cell. */
+export const table = (rows: readonly (readonly Line[])[]): readonly Line[] => {
+  const filled = rows.map((row) => row.slice(0, row.findLastIndex((cell) => width(cell) > 0) + 1));
+  const widths = filled.reduce<readonly number[]>(
+    (most, row) => Array.from({ length: Math.max(most.length, row.length) }, (_, at) => Math.max(most[at] ?? 0, width(row[at] ?? []))),
+    [],
+  );
+  return filled.map((row) =>
+    row.flatMap((cell, at): Line => (at === row.length - 1 ? cell : [...cell, " ".repeat((widths[at] ?? 0) - width(cell) + 2)])),
+  );
+};

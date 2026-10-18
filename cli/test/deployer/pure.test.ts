@@ -6,7 +6,7 @@ import { parseBundle, imagesEnv } from "../../src/deployer/bundle.ts";
 import { config, policy, up } from "../../src/deployer/compose.ts";
 import { matches, parseCron } from "../../src/deployer/cron.ts";
 import { statusRequest } from "../../src/deployer/forge.ts";
-import { expired, releaseName, releases } from "../../src/deployer/records.ts";
+import { expired, moved, releaseName, releases } from "../../src/deployer/records.ts";
 import { renovate } from "../../src/deployer/run.ts";
 import { pushedRef, signed } from "../../src/deployer/webhook.ts";
 import { commit, must, name, shop } from "./support.ts";
@@ -107,6 +107,14 @@ test("releases: newest first, one per commit; retention drops the oldest", () =>
   ]);
   deepStrictEqual(expired(["3", "1", "2"], 2), ["1"]);
   deepStrictEqual(expired(["1"], 2), []);
+});
+
+test("poll: only a commit neither the newest run nor the newest release has", () => {
+  assert(moved(commit("c"), commit("a"), commit("b")));
+  assert(moved(commit("c"), undefined, undefined));
+  assert(!moved(commit("a"), commit("a"), commit("b")));
+  assert(!moved(commit("b"), undefined, commit("b")));
+  assert(!moved(commit("b"), commit("a"), commit("b")));
 });
 
 test("renovate: the optional settings only when set", () => {

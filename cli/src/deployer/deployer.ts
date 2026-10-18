@@ -13,7 +13,7 @@ import { statusRequest } from "./forge.ts";
 import { json, send } from "./http.ts";
 import { spawnLines } from "./process.ts";
 import { empty, enqueue, finish, type Queue, type Request, type Why } from "./queue.ts";
-import { expired, releaseName, type RunMeta } from "./records.ts";
+import { expired, moved, releaseName, releases, type RunMeta } from "./records.ts";
 import { deploy, renovate, type Effects, type Env, type Outcome } from "./run.ts";
 import { runsOf } from "./store.ts";
 
@@ -232,13 +232,15 @@ const deployRequest = (app: App, ref: string, why: Why): Request => ({
 
 const jobRequest = (job: JobName, dryRun: boolean): Request => ({ owner: jobOwner(job), work: { kind: "job", job, dryRun } });
 
-/** The webhook's fallback: an app whose ref moved to a commit no run has tried yet. */
+/** The webhook's fallback: an app whose ref moved to a commit no run has tried yet and no release runs (one migrated from Jenkins has releases but no runs). */
 const poll = async (s: Settings): Promise<void> => {
   await Promise.all(
     registeredApps(s).map(async (app) => {
       const commit = await builderResolve(s, app, app.ref);
-      const last = runsOf(runsDir(s), appOwner(app.name)).find((run) => run.sha !== undefined);
-      if (commit.ok && commit.value !== last?.sha) swap(s, (queue) => enqueue(queue, deployRequest(app, app.ref, "poll")));
+      const lastRun = runsOf(runsDir(s), appOwner(app.name)).find((run) => run.sha !== undefined);
+      const releasesDir = join(s.platformDir, "releases", app.name);
+      const lastRelease = releases(existsSync(releasesDir) ? readdirSync(releasesDir) : [])[0];
+      if (commit.ok && moved(commit.value, lastRun?.sha, lastRelease?.sha)) swap(s, (queue) => enqueue(queue, deployRequest(app, app.ref, "poll")));
     }),
   );
 };

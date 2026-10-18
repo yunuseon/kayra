@@ -316,9 +316,11 @@ Docker build of `ci/checks/Dockerfile`; the last `RUN` is
 | Host config (`defaults.yml`, `vars.yml`, `secrets.yml`) | `kayra setup <name>` |
 | App values (`apps/<app>.yml`, `apps/<app>.secrets.yml`), or an app's secrets/config/subdomains in `app.yml` | `kayra apps <name>` |
 | App code or compose files | nothing — push; the next deploy takes them from the commit |
-| kayra's version (the deployer's code included) | `kayra setup <name>` |
+| kayra's version (the deployer's code included) | `kayra deploy <name>` — a new version may change the app role, which `setup` alone does not run |
 | Everything (fresh server) | `kayra up <name>` |
 | Config changes only, no re-provision | `kayra deploy <name>` |
+
+Upgrading to 0.8.0 in particular needs `kayra deploy` (or `kayra apps` after `setup`): `setup` removes the Jenkins registration, and only `apps` writes the deployer's.
 
 ---
 

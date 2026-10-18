@@ -20,6 +20,10 @@ export const releases = (names: readonly string[]): readonly Release[] =>
     })
     .filter((release, i, all) => all.findIndex((other) => other.sha === release.sha) === i);
 
+/** The poll's question: has the ref moved to a commit neither the newest run tried nor the newest release runs? */
+export const moved = (resolved: Sha, lastRun: Sha | undefined, lastRelease: Sha | undefined): boolean =>
+  resolved !== lastRun && resolved !== lastRelease;
+
 export type RunState = "running" | "success" | "failure";
 
 /** runs/<owner>/<id>/meta.json, next to its log. */

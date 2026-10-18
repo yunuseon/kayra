@@ -9,18 +9,20 @@ import { appCheck } from "./commands/app-check.ts";
 import { parser, runOptions, type Command } from "./cli.ts";
 import { doctor } from "./commands/doctor.ts";
 import * as server from "./commands/server.ts";
-import { status } from "./commands/status.ts";
-import { findings, report } from "./commands/validate.ts";
+import { look, opentofu, statusJson, statusView, type Look } from "./commands/status.ts";
+import { findings, overall, validateJson, validateView } from "./commands/validate.ts";
 import { gather } from "./gather.ts";
 import { serverNamed, type Fleet, type Server } from "./fleet.ts";
 import { interpret, type Io } from "./interpret.ts";
 import { findFleetRoot, loadFleet } from "./load.ts";
+import { network } from "./net.ts";
 import { render, type Plan } from "./plan.ts";
 import { flatMap, map, ok, type Result } from "./result.ts";
 import { explain } from "./ui/explain.ts";
 import { bad, paint } from "./ui/line.ts";
 import { framed, silent, type Invocation } from "./ui/progress.ts";
-import { screen } from "./ui/terminal.ts";
+import { screen, settle, watch } from "./ui/terminal.ts";
+import { truncate } from "./ui/text.ts";
 import { z } from "zod";
 
 const here = absolutePath(process.cwd());
@@ -87,10 +89,10 @@ const screens = { out: screen(process.stdout, process.env), err: screen(process.
 
 const io: Io = {
   out: (text) => {
-    console.log(paint(text, screens.out.colors));
+    console.log(paint(text, screens.out.colors, screens.out.links));
   },
   err: (text) => {
-    console.error(paint(text, screens.err.colors));
+    console.error(paint(text, screens.err.colors, screens.err.links));
   },
   ask: async (prompt) => {
     const terminal = createInterface({ input: process.stdin, output: process.stderr });
@@ -170,18 +172,30 @@ else {
     else if (args.dryRun) show(steps.value, invocation(undefined), short);
     else await execute(steps.value, invocation(undefined), true);
   } else if (args.command.name === "status") {
-    (await status(fleet.value)).forEach(io.out);
+    const { json, offline } = args.command;
+    const { initial, updates } = look(fleet.value, opentofu, offline ? undefined : network(2_000));
+    // On a terminal the table is there at once, its cells filled in as the answers arrive; the report itself goes to stdout.
+    const draw = (looks: readonly Look[], frame: string): readonly string[] =>
+      statusView(looks, { frame, room: screens.err.columns - 1, offline }).map((line) =>
+        paint(truncate(line, screens.err.columns - 1), screens.err.colors),
+      );
+    const looks =
+      !json && screens.out.live && screens.err.live
+        ? await watch((raw) => process.stderr.write(raw), initial, updates, draw)
+        : await settle(initial, updates);
+    (json
+      ? [JSON.stringify(statusJson(looks), null, 2)]
+      : statusView(looks, { frame: "", room: screens.out.live ? screens.out.columns : Infinity, offline })
+    ).forEach(io.out);
   } else if (args.command.name === "validate") {
-    const chosen = args.command.server;
+    const { server: chosen, json } = args.command;
     const servers = fleet.value.servers.filter((each) => chosen === undefined || each.name === chosen);
     const reports = await Promise.all(
-      servers.map(async (each) => findings(await gather(fleet.value.root, each))),
+      servers.map(async (each) => ({ server: each, findings: findings(await gather(fleet.value.root, each)) })),
     );
-    reports.forEach((found, index) => {
-      report(servers[index]?.name ?? "", found).forEach(io.out);
-    });
+    (json ? [JSON.stringify(validateJson(reports), null, 2)] : validateView(reports)).forEach(io.out);
     // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
-    process.exitCode = reports.some((found) => found.some((each) => each.problem)) ? 1 : 0;
+    process.exitCode = reports.some((each) => overall(each.findings) === "problem") ? 1 : 0;
   } else {
     const { command } = args;
     const steps = map(plan(fleet.value, command), (each) => (args.verbose ? server.verbose(each) : each));

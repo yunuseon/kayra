@@ -8,7 +8,7 @@ import {
   type Subdomain,
 } from "../brand.ts";
 import type { Server } from "../fleet.ts";
-import { partOf, run, type Arg, type Env, type Plan, type Query, type Step } from "../plan.ts";
+import { partOf, run, type Arg, type Argv, type Env, type Plan, type Query, type RunStep, type Step } from "../plan.ts";
 import { all, err, map, ok, type Result } from "../result.ts";
 
 /** What every command works with besides the server: the engine's files and the fleet's. */
@@ -341,49 +341,63 @@ export const backupTest = (engine: Engine, server: Server): Result<Plan, string>
   ]);
 };
 
-/** An interactive shell, or the remote command as ssh runs it (the remote shell reads it). */
-export const ssh = (server: Server, remote: readonly string[]): Result<Plan, string> =>
+const sshTo = (server: Server, remote: readonly string[]): Result<Argv, string> =>
   server.inventory === undefined
     ? err(`no inventory for '${server.name}' — provision it first.`)
     : ok([
-        run("SSH", [
-          "ssh",
-          "-p",
-          server.inventory.port,
-          "-i",
-          server.inventory.key,
-          "-o",
-          "StrictHostKeyChecking=no",
-          "-o",
-          "UserKnownHostsFile=/dev/null",
-          `${server.inventory.user}@${server.inventory.host}`,
-          ...remote,
-        ]),
+        "ssh",
+        "-p",
+        server.inventory.port,
+        "-i",
+        server.inventory.key,
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        `${server.inventory.user}@${server.inventory.host}`,
+        ...remote,
       ]);
+
+/** An interactive shell, or the remote command as ssh runs it (the remote shell reads it). */
+export const ssh = (server: Server, remote: readonly string[]): Result<Plan, string> =>
+  map(sshTo(server, remote), (argv) => [run("SSH", argv)]);
 
 /** What `kayra app …` and `kayra job …` ask of a server: its deployer's ctl, over SSH. */
 export type DeployerCommand =
   | { readonly kind: "runs" | "logs" | "deploy" | "rollback"; readonly app: AppName; readonly more: string | undefined }
   | { readonly kind: "job"; readonly job: "gc" | "renovate"; readonly noPrs: boolean };
 
-const ctlArgs = (command: DeployerCommand): readonly string[] => {
+/** What the deployer's ctl is asked, its title, and how its answer is shown: the lists as data kayra draws. */
+const ctlCall = (server: Server, command: DeployerCommand): { readonly title: string; readonly args: readonly string[]; readonly stdout: RunStep["stdout"] } => {
   switch (command.kind) {
     case "job":
-      return ["job", command.job, ...(command.noPrs ? ["--dry-run"] : [])];
+      return { title: `Job ${command.job}`, args: ["job", command.job, ...(command.noPrs ? ["--dry-run"] : [])], stdout: "show" };
     case "logs":
-      return ["log", command.app, ...(command.more === undefined ? [] : [command.more])];
+      return {
+        title: `Log of ${command.app}'s ${command.more === undefined ? "newest run" : `run ${command.more}`}`,
+        args: ["log", command.app, ...(command.more === undefined ? [] : [command.more])],
+        stdout: { view: "log", app: command.app, server: server.name },
+      };
     case "runs":
+      return { title: `Runs of ${command.app}`, args: ["runs", command.app, "--json"], stdout: { view: "runs", app: command.app, server: server.name } };
     case "deploy":
+      return { title: `Deploy ${command.app} at ${command.more ?? "its ref"}`, args: ["deploy", command.app, ...(command.more === undefined ? [] : [command.more])], stdout: "show" };
     case "rollback":
-      return [command.kind, command.app, ...(command.more === undefined ? [] : [command.more])];
+      return command.more === undefined
+        ? { title: `Releases of ${command.app}`, args: ["rollback", command.app, "--json"], stdout: { view: "releases", app: command.app, server: server.name } }
+        : { title: `Roll ${command.app} back to ${command.more}`, args: ["rollback", command.app, command.more], stdout: "show" };
   }
 };
 
 /** Inside the deployer container, as the deploy user (in the docker group): nothing here needs root. */
-export const deployer = (server: Server, command: DeployerCommand): Result<Plan, string> =>
-  server.kind === "platform"
-    ? ssh(server, ["cd", "/opt/platform", "&&", "docker", "compose", "exec", "-T", "deployer", "kayra-deployer", "ctl", ...ctlArgs(command)])
-    : err(`'${server.name}' is a ${server.kind} server: only platform servers run apps.`);
+export const deployer = (server: Server, command: DeployerCommand): Result<Plan, string> => {
+  if (server.kind !== "platform") return err(`'${server.name}' is a ${server.kind} server: only platform servers run apps.`);
+  const call = ctlCall(server, command);
+  return map(
+    sshTo(server, ["cd", "/opt/platform", "&&", "docker", "compose", "exec", "-T", "deployer", "kayra-deployer", "ctl", ...call.args]),
+    (argv) => [{ ...run(call.title, argv), stdout: call.stdout }],
+  );
+};
 
 /** mkcert certs for a domain and its subdomains, for local dev and multipass. */
 export const certsFor = (engine: Engine, domain: Domain, subdomains: readonly Subdomain[]): Result<Plan, string> =>

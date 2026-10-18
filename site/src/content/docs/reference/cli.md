@@ -43,6 +43,12 @@ setup
   and the footer go to stderr, so `kayra doctor > report` keeps only the
   report. `ssh` and the `app` and `job` commands print the server's answer and
   nothing else.
+- **The deployer's answers are drawn**, not passed through: `app runs` as a
+  table, `app rollback` without a commit as the releases with the live one
+  marked, `app logs` with errors and warnings marked on a terminal (piped, the
+  log byte for byte). A server not yet deployed with the kayra you run answers
+  `app runs` the old way, printed as it came, and refuses `app rollback`'s list
+  (`--json is not an earlier release`) until its `kayra deploy`.
 - **Colors** follow `FORCE_COLOR`, then `NO_COLOR`, then whether the output is a
   terminal. On one, quiet steps (guards, checks) show a spinner and a running
   time, the window title follows the step, and a run longer than 30 seconds
@@ -77,12 +83,33 @@ with the kayra release the fleet pins (not a linked checkout): `provision`,
 
 Through the server's deployer, over SSH; platform servers only.
 
+```
+$ kayra app runs shop-prod shop
+shop on shop-prod · live a1b2c3d since 2h ago
+
+  STATE      COMMIT   WHY     WHEN     TOOK   RUN
+  ◆ running  —        deploy  12s ago  12s…   20261018T115948Z-77aa00
+  ✓ success  a1b2c3d  push    2h ago   1m12s  20261018T095848Z-0f9e8d
+  ✗ failure  9f8e7d6  poll    26h ago  48s    20261017T091700Z-ab12cd
+
+  → kayra app logs shop-prod shop [RUN] shows a run's log, the newest by default
+
+$ kayra app rollback shop-prod shop
+shop on shop-prod · 2 releases
+
+    COMMIT   DEPLOYED
+  ● a1b2c3d  2h ago    live
+    9f8e7d6  2d ago
+
+  → kayra app rollback shop-prod shop 9f8e7d6 deploys that one again
+```
+
 | Command | What it does |
 |---|---|
-| `kayra app runs <server> <app>` | The app's latest runs: id, result, commit, why |
-| `kayra app logs <server> <app> [run]` | A run's log, the newest unless named (`gc` or `renovate` for the jobs' runs) |
+| `kayra app runs <server> <app>` | What runs now, and the latest runs: state, commit, why, when, how long, run id |
+| `kayra app logs <server> <app> [run]` | A run's log, the newest unless named (`gc` or `renovate` for the jobs' runs); errors and warnings marked on a terminal |
 | `kayra app deploy <server> <app> [ref]` | Build and deploy a branch, tag or commit; the app's ref by default |
-| `kayra app rollback <server> <app> [sha]` | Without a commit: what runs now and the earlier releases. With one (12 characters are enough): deploy it again |
+| `kayra app rollback <server> <app> [sha]` | Without a commit: every release, the live one marked, each with its age. With one (the 7 characters the list shows are enough): deploy it again |
 | `kayra job <server> gc` | The registry GC now (nightly at 03:00 otherwise) |
 | `kayra job <server> renovate [--no-prs]` | Renovate now; `--no-prs` logs what would change |
 
@@ -100,11 +127,105 @@ only the newest runs. The runs and their logs are also at
 
 | Command | What it does |
 |---|---|
-| `kayra status` | Every server and whether a machine exists for it |
-| `kayra validate [server]` | The fleet beyond its schemas: secrets (unknown keys must be helpers `vars.yml` uses), each app's `app.yml` against the fleet's values, `compose_stacks` against `stacks/`, `edge_routes` |
+| `kayra status [--offline] [--json]` | Every server: where it is, whether its SSH answers and, on a platform server, its login. See below |
+| `kayra validate [server] [--json]` | The fleet beyond its schemas: secrets (unknown keys must be helpers `vars.yml` uses), each app's `app.yml` against the fleet's values, `compose_stacks` against `stacks/`, `edge_routes`. Exits 1 on a problem |
 | `kayra doctor` | Check that this machine can run every command on every server: tools, vault passwords, app repositories, home servers' SSH |
 | `kayra certs <domain> [subdomain…]` | mkcert certificates for local development |
 | `kayra version`, `kayra --version` | The version of the kayra that runs: in a fleet, the one it pins. Needs no fleet |
+
+## The fleet at a glance
+
+```
+SERVER  KIND      TARGET   DOMAIN                    ADDRESS          SSH        HTTPS      APPS
+alaz    platform  home     alaz.home.example.com     192.168.1.250    open 35ms  200 101ms  wiki
+edge    edge      hetzner  example.com               203.0.113.7      open 34ms
+nas     nas       home     example.com               192.168.1.141    off
+```
+
+- **ADDRESS** is the server's `inventory.ini` where there is one (hand-written
+  for a home server, written by `provision` otherwise), else OpenTofu's
+  `server_ip` output if its state holds a machine. Otherwise `not provisioned`
+  (an empty state), `no machine` (the state holds something else, such as a
+  storage box) or `state unreadable`, with OpenTofu's reason under the table.
+- **SSH** is a TCP connection to the inventory's port, given up after two
+  seconds: `open` and how long it took, `off` when nothing listens (an SSH
+  switched on only on demand, as on a NAS), `no answer`, `unreachable`,
+  `unknown host`.
+- **HTTPS**, on platform servers, asks `https://auth.<domain>/api/health`
+  (Authelia's health) the way a browser would, through DNS: its status and time,
+  or `untrusted cert`, `wrong cert`, `cert expired`, `refused`, `no answer`.
+  The system's trust store counts, so a multipass server's mkcert certificate
+  is trusted where mkcert installed its root.
+- Every server is asked at once. On a terminal the table is there at once and
+  its cells fill in as the answers arrive, and the domains are links (iTerm2,
+  WezTerm, Ghostty, VS Code); piped, it is printed once, plain. `--offline`
+  asks no server: only the fleet and OpenTofu's state, and no columns for the
+  probes.
+
+`kayra validate` lists each server's checks under it: `✓` holds, `✗` a
+problem, with what to do about it on the line below, `·` not checked (a vault
+without its password file, an app not cloned yet). The last line sums it up:
+
+```
+✗ edge  edge on hetzner
+    ✗ secrets.yml: 'gti_token' is no secret of an edge server, and vars.yml does not use it
+      → did you mean 'git_token'?
+    ✓ edge_routes: 6 routes, each with subdomains and a host:port upstream
+
+✗ 3 servers · 1 problem · 1 not checked
+```
+
+### `--json`
+
+Both print one JSON document on stdout and nothing on stderr; `validate` still
+exits 1 on a problem. kayra adds fields to these shapes; it renames or removes
+one only in a release that says so.
+
+```json
+{
+  "servers": [
+    {
+      "name": "alaz",
+      "kind": "platform",
+      "target": "home",
+      "domain": "alaz.home.example.com",
+      "apps": ["wiki"],
+      "machine": { "state": "found", "address": "192.168.1.250", "from": "inventory", "reason": null },
+      "ssh": { "port": 22, "state": "open", "ms": 35, "error": null },
+      "https": { "url": "https://auth.alaz.home.example.com/api/health", "state": "answered", "status": 200, "ms": 101, "error": null }
+    }
+  ]
+}
+```
+
+| Field | Values |
+|---|---|
+| `machine.state` | `found` (`address`, or `null` if OpenTofu has no `server_ip`; `from`: `inventory` or `opentofu`), `not-provisioned`, `no-machine`, `unreadable` (`reason`) |
+| `ssh.state`, `https.state` | `open` (SSH) or `answered` (HTTPS, with `status`), both with `ms`; `refused`, `no-answer`, `unreachable`, `unknown-host`, `bad-certificate` and `failed` (with Node's code in `error`); `skipped` when there is nothing to ask (no address, `--offline`) |
+| `https` | `null` on a server that is not a platform |
+
+```json
+{
+  "result": "problem",
+  "problems": 1,
+  "unchecked": 1,
+  "servers": [
+    {
+      "name": "edge",
+      "kind": "edge",
+      "target": "hetzner",
+      "result": "problem",
+      "findings": [
+        { "result": "problem", "text": "secrets.yml: 'gti_token' is no secret of an edge server, and vars.yml does not use it", "hint": "did you mean 'git_token'?" },
+        { "result": "passed", "text": "edge_routes: 6 routes, each with subdomains and a host:port upstream", "hint": null }
+      ]
+    }
+  ]
+}
+```
+
+`result` is `problem`, `unchecked` or `passed`: a finding's own, a server's and
+the whole run's the worst of what is under it. `hint` is what to do, or `null`.
 
 ## When to run what
 

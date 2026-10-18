@@ -1,9 +1,11 @@
 import { styleText } from "node:util";
+import { escapes } from "./terminal.ts";
 
 /** What a piece of text means, not how it looks: the stream it goes to picks colors, or none. */
 export type Tone = "ok" | "bad" | "warn" | "active" | "muted" | "strong" | "accent";
 
-export type Span = string | { readonly tone: Tone; readonly text: string };
+/** `href`: where the text leads, on a terminal that makes links of it. */
+export type Span = string | { readonly tone?: Tone; readonly text: string; readonly href?: string };
 /** One line of output, as spans of meaning. */
 export type Line = readonly Span[];
 /** What kayra writes: a plain string, or a line of spans. */
@@ -20,6 +22,8 @@ export const active = toned("active");
 export const muted = toned("muted");
 export const strong = toned("strong");
 export const accent = toned("accent");
+
+export const link = (text: string, href: string, tone?: Tone): Span => ({ text, href, ...(tone === undefined ? {} : { tone }) });
 
 type Format = Exclude<Parameters<typeof styleText>[0], readonly unknown[]>;
 
@@ -47,11 +51,15 @@ export const characters = (text: string): readonly string[] => Array.from(graphe
 /** Columns it takes: one per character, which holds for everything kayra writes itself. */
 export const width = (text: Text): number => characters(flat(text)).length;
 
-export const paint = (text: Text, colors: boolean): string =>
+export const paint = (text: Text, colors: boolean, links = false): string =>
   spans(text)
-    .map((span) =>
-      typeof span === "string" || !colors
-        ? textOf(span)
-        : looks[span.tone].reduce((styled, format) => styleText(format, styled, { validateStream: false }), span.text),
-    )
+    .map((span) => {
+      if (typeof span === "string") return span;
+      const { tone, href } = span;
+      const styled =
+        colors && tone !== undefined
+          ? looks[tone].reduce((so, format) => styleText(format, so, { validateStream: false }), span.text)
+          : span.text;
+      return links && href !== undefined ? escapes.link(styled, href) : styled;
+    })
     .join("");

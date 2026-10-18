@@ -52,7 +52,7 @@ export const runOptions = (version: string) =>
     brief: message`kayra ${text(version)}: a fleet's servers, from the machine to the apps on it.`,
     description: message`Run it anywhere inside a fleet (the directory holding servers/); app check also outside one. Server names are the fleet's and complete in the shell.`,
     examples: examples("", [
-      ["kayra status", "every server, and whether it exists"],
+      ["kayra status", "every server, and whether it answers"],
       ["kayra up shop-test", "a server from nothing"],
       ["kayra plan shop-prod", "what this checkout would change on it"],
       ["kayra deploy shop-prod", "host setup and every app, then verify"],
@@ -176,7 +176,7 @@ export const parser = (fleet: Fleet) => {
                       brief: message`Delete a removed app's volumes: its data, irreversibly.`,
                     }),
                     command("runs", object({ name: constant("app runs"), server, app }), {
-                      brief: message`The app's latest runs: id, result, commit, why.`,
+                      brief: message`What runs now, and the app's latest runs: state, commit, why, when, how long.`,
                     }),
                     command(
                       "logs",
@@ -213,7 +213,7 @@ export const parser = (fleet: Fleet) => {
                         more: optional(argument(string({ metavar: "SHA" }), { description: message`An earlier release's commit; 12 characters are enough.` })),
                       }),
                       {
-                        brief: message`List earlier releases, or deploy one of them again.`,
+                        brief: message`The releases, the live one marked, or deploy an earlier one again.`,
                         footer: footer(
                           ["kayra app rollback shop-prod shop", "what runs now, and before"],
                           ["kayra app rollback shop-prod shop 3f2a9c81d0be", "that release again"],
@@ -245,12 +245,25 @@ export const parser = (fleet: Fleet) => {
         group(
           "The whole fleet",
           or(
-            command("status", object({ name: constant("status") }), {
-              brief: message`Every server and whether a machine exists for it.`,
-            }),
+            command(
+              "status",
+              object({
+                name: constant("status"),
+                json: option("--json", { description: message`The table as JSON on stdout, nothing on stderr.` }),
+                offline: option("--offline", { description: message`Only what the fleet and OpenTofu's state say: reach no server.` }),
+              }),
+              {
+                brief: message`Every server: where it is, whether SSH and its login answer.`,
+                footer: footer(["kayra status", "every server, asked now"], ["kayra status --offline --json", "the fleet's own view, for a program"]),
+              },
+            ),
             command(
               "validate",
-              object({ name: constant("validate"), server: optional(server) }),
+              object({
+                name: constant("validate"),
+                server: optional(server),
+                json: option("--json", { description: message`The findings as JSON on stdout, nothing on stderr.` }),
+              }),
               {
                 brief: message`Check the fleet beyond its schemas: secrets, apps against their contract, stacks, routes.`,
                 footer: footer(["kayra validate", "every server"], ["kayra validate shop-prod", "one"]),

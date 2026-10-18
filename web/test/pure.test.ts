@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { RunEvent, Status } from "../../cli/src/web/contract.ts";
+import type { RunEvent, Status } from "../../cli/src/clients/api/contract.ts";
 import { ranked, score } from "../src/fuzzy.ts";
 import { health, login, ssh } from "../src/reach.ts";
 import { href, parse, type Route } from "../src/router.ts";

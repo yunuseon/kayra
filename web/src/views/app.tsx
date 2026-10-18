@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import type { AppReleases, AppRuns } from "../../../cli/src/web/contract.ts";
+import type { AppReleases, AppRuns } from "../../../cli/src/clients/api/contract.ts";
 import { get, getText, type Answer } from "../api.ts";
 import { show } from "../components/preview.tsx";
 import { Dot, Header, Pill, Problem, Waiting } from "../components/ui.tsx";

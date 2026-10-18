@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import type { Line, Span, Text, Tone } from "../../../cli/src/web/contract.ts";
+import type { Line, Span, Text, Tone } from "../../../cli/src/clients/api/contract.ts";
 import type { Failure } from "../api.ts";
 import type { Cell } from "../reach.ts";
 

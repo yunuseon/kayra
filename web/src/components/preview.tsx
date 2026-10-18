@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { CommandInput, Listed, Preview } from "../../../cli/src/web/contract.ts";
+import type { CommandInput, Listed, Preview } from "../../../cli/src/clients/api/contract.ts";
 import { preview, startRun, type Answer, type Failure } from "../api.ts";
 import { fleet, go } from "../state.ts";
 import { Pill, Problem, Waiting } from "./ui.tsx";

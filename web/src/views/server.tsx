@@ -1,4 +1,4 @@
-import type { CommandInput, ServerCommand, ServerFacts } from "../../../cli/src/web/contract.ts";
+import type { CommandInput, ServerCommand, ServerFacts } from "../../../cli/src/clients/api/contract.ts";
 import { show } from "../components/preview.tsx";
 import { Link } from "../components/shell.tsx";
 import { Dot, Fact, Header, Pill, Waiting } from "../components/ui.tsx";

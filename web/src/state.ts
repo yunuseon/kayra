@@ -1,5 +1,5 @@
 import { signal } from "@preact/signals";
-import type { FleetFacts, Status, Validation } from "../../cli/src/web/contract.ts";
+import type { FleetFacts, Status, Validation } from "../../cli/src/clients/api/contract.ts";
 import { get, stream, type Failure } from "./api.ts";
 import { href, parse, type Route } from "./router.ts";
 

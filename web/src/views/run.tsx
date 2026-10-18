@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from "preact/hooks";
-import type { RunEvent } from "../../../cli/src/web/contract.ts";
+import type { RunEvent } from "../../../cli/src/clients/api/contract.ts";
 import { answerRun, cancelRun, stream } from "../api.ts";
 import { Header, Lines, Pill, Spans, Waiting } from "../components/ui.tsx";
 import { empty, outcome, reduce, type Outcome, type StepView } from "../run.ts";

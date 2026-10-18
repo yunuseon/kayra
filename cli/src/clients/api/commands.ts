@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { appName } from "../../core/brand.ts";
-import type { Planned } from "../../core/commands/index.ts";
+import type { Invocation } from "../../core/operations/catalog.ts";
+import { invocation } from "../../core/operations/run.ts";
 import type { Fleet, Server } from "../../core/fleet.ts";
-import { err, flatMap, map, ok, type Result } from "../../result.ts";
+import { err, ok, type Result } from "../../result.ts";
 import type { CommandInput, CommandName, ServerCommand, ServerFacts } from "./contract.ts";
 
 const onServer = z.enum(["up", "provision", "deploy", "setup", "plan", "verify", "apps", "down", "adopt", "backup test"]);
@@ -31,37 +31,32 @@ const serverOf = (fleet: Fleet, name: string): Result<Server, string> => {
 export const targetOf = (fleet: Fleet, input: CommandInput): Result<Server | undefined, string> =>
   input.name === "doctor" ? ok(undefined) : serverOf(fleet, input.server);
 
-const appOf = (server: Server, name: string) =>
-  flatMap(appName(name), (app) =>
-    server.apps.some((each) => each.name === app) ? ok(app) : err(`'${name}' is not an app of ${server.name}`),
-  );
-
-/** The command as the CLI would have parsed it, checked against the fleet. */
-export const toPlanned = (fleet: Fleet, input: CommandInput): Result<Planned, string> => {
-  if (input.name === "doctor") return ok({ name: "doctor" });
-  return flatMap(serverOf(fleet, input.server), (server): Result<Planned, string> => {
-    switch (input.name) {
-      case "app deploy":
-        return map(appOf(server, input.app), (app) => ({ name: "app deploy", server: server.name, app, more: input.ref }));
-      case "app rollback":
-        return map(appOf(server, input.app), (app) => ({ name: "app rollback", server: server.name, app, more: input.sha }));
-      case "app purge":
-        return map(appOf(server, input.app), (app) => ({ name: "app purge", server: server.name, app }));
-      case "job":
-        return ok({ name: "job", server: server.name, job: input.job, noPrs: input.noPrs });
-      case "up":
-      case "provision":
-      case "deploy":
-      case "setup":
-      case "plan":
-      case "verify":
-      case "apps":
-      case "down":
-      case "adopt":
-      case "backup test":
-        return ok({ name: input.name, server: server.name });
-    }
-  });
+/** The browser's command as the catalog's operation and input: the core checks it against the fleet. */
+export const toInvocation = (input: CommandInput): Result<Invocation, string> => {
+  switch (input.name) {
+    case "doctor":
+      return invocation("doctor", {});
+    case "backup test":
+      return invocation("backup.test", { server: input.server });
+    case "app deploy":
+      return invocation("app.deploy", { server: input.server, app: input.app, ...(input.ref === undefined ? {} : { ref: input.ref }) });
+    case "app rollback":
+      return invocation("app.rollback", { server: input.server, app: input.app, sha: input.sha });
+    case "app purge":
+      return invocation("app.purge", { server: input.server, app: input.app });
+    case "job":
+      return invocation("job", { server: input.server, job: input.job, noPrs: input.noPrs });
+    case "up":
+    case "provision":
+    case "deploy":
+    case "setup":
+    case "plan":
+    case "verify":
+    case "apps":
+    case "down":
+    case "adopt":
+      return invocation(input.name, { server: input.server });
+  }
 };
 
 /** The command's words, as typed on the command line. */

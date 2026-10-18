@@ -116,7 +116,7 @@ const at =
   (looks) =>
     looks.map((look, each) => (each === index ? { ...look, ...change } : look));
 
-type Watched = { readonly initial: readonly Look[]; readonly updates: readonly Promise<Update<readonly Look[]>>[] };
+export type Watched = { readonly initial: readonly Look[]; readonly updates: readonly Promise<Update<readonly Look[]>>[] };
 
 /**
  * Every server as far as the fleet's files tell, and the answers still to

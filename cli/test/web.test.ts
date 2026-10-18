@@ -8,7 +8,9 @@ import { z } from "zod";
 import { absolutePath, fleetRoot, kayraRoot } from "../src/core/brand.ts";
 import type { Network } from "../src/core/commands/status.ts";
 import { admit, cookieName } from "../src/clients/api/auth.ts";
-import { changes, commandInput, offered, toPlanned, words } from "../src/clients/api/commands.ts";
+import { changes, commandInput, offered, toInvocation, words } from "../src/clients/api/commands.ts";
+import { opentofu } from "../src/core/commands/status.ts";
+import { isPlan, planOf } from "../src/core/operations/run.ts";
 import type { RunEvent } from "../src/clients/api/contract.ts";
 import { busy, readRecord, recordLine, runId, stateOf } from "../src/clients/api/runs.ts";
 import { serve } from "../src/serve.ts";
@@ -28,17 +30,31 @@ test("admission: this listener's host always, its origin for a write, the token 
   deepStrictEqual(admit({ ...asked, path: "/assets/app.js", cookie: undefined }, 7700, "t0k"), { admitted: true });
 });
 
-test("commands: checked against the fleet, said as typed, offered by kind", () => {
+test("commands: the browser's command as the catalog's operation, checked against the fleet when planned, said as typed, offered by kind", () => {
   const fleet = { root, servers: [prod, lab] };
-  deepStrictEqual(must(toPlanned(fleet, { name: "deploy", server: "prod" })), { name: "deploy", server: "prod" });
-  deepStrictEqual(must(toPlanned(fleet, { name: "app rollback", server: "prod", app: "shop", sha: "0123abc" })), {
-    name: "app rollback",
-    server: "prod",
-    app: "shop",
-    more: "0123abc",
+  const context = {
+    engine: { kayra: kayraRoot(must(absolutePath("/kayra"))), fleet: root },
+    fleet,
+    version: "9.9.9",
+    here: root,
+    read: () => undefined,
+    network: { connect: () => Promise.resolve({ kind: "skipped" as const }), get: () => Promise.resolve({ kind: "skipped" as const }) },
+    tofu: opentofu,
+  };
+  const planned = (input: Parameters<typeof toInvocation>[0]): boolean => {
+    const call = toInvocation(input);
+    return call.ok && isPlan(call.value) && planOf(context, call.value).ok;
+  };
+  deepStrictEqual(must(toInvocation({ name: "deploy", server: "prod" })), { name: "deploy", input: { server: "prod" } });
+  deepStrictEqual(must(toInvocation({ name: "app rollback", server: "prod", app: "shop", sha: "0123abc" })), {
+    name: "app.rollback",
+    input: { server: "prod", app: "shop", sha: "0123abc" },
   });
-  strictEqual(toPlanned(fleet, { name: "deploy", server: "nope" }).ok, false);
-  strictEqual(toPlanned(fleet, { name: "app purge", server: "prod", app: "other" }).ok, false);
+  strictEqual(planned({ name: "deploy", server: "prod" }), true);
+  strictEqual(planned({ name: "deploy", server: "nope" }), false);
+  // A removed app's volumes are what purge is for: it need not be in server.yml.
+  strictEqual(planned({ name: "app purge", server: "prod", app: "other" }), true);
+  strictEqual(planned({ name: "app purge", server: "prod", app: "Not-An-App" }), false);
   strictEqual(commandInput.safeParse({ name: "ssh", server: "prod" }).success, false);
   strictEqual(commandInput.safeParse({ name: "app rollback", server: "prod", app: "shop", sha: "main" }).success, false);
   strictEqual(words({ name: "job", server: "prod", job: "renovate", noPrs: true }), "kayra job prod renovate --no-prs");

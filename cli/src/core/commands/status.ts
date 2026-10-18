@@ -1,10 +1,10 @@
 import { within, type AbsolutePath } from "../brand.ts";
 import type { Fleet, Server } from "../fleet.ts";
 import { capture } from "../interpret.ts";
-import { err, ok, type Result } from "../result.ts";
-import { active, bad, link, muted, ok as fine, strong, warn, type Line, type Span } from "../ui/line.ts";
-import type { Update } from "../ui/terminal.ts";
-import { fit, table } from "../ui/text.ts";
+import { err, ok, type Result } from "../../result.ts";
+import { active, bad, link, muted, ok as fine, strong, warn, type Line, type Span } from "../present/line.ts";
+import type { Update } from "../updates.ts";
+import { fit, table } from "../present/text.ts";
 
 /** Where a server's machine is, as this checkout knows it: its inventory.ini, else OpenTofu's state. */
 export type Machine =

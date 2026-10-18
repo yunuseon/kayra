@@ -1,5 +1,5 @@
-import { absolutePath, fleetRoot, serverDir, serverName } from "../src/brand.ts";
-import { parseServer, type Fleet, type Server, type ServerFiles } from "../src/fleet.ts";
+import { absolutePath, fleetRoot, serverDir, serverName } from "../src/core/brand.ts";
+import { parseServer, type Fleet, type Server, type ServerFiles } from "../src/core/fleet.ts";
 import type { Result } from "../src/result.ts";
 
 export const must = <T>(result: Result<T, string>): T => {

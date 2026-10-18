@@ -1,7 +1,7 @@
 import { appName, within, type AbsolutePath, type KayraRoot } from "../brand.ts";
 import { yamlOf } from "../fleet.ts";
 import { run, type Plan, type Step } from "../plan.ts";
-import { err, flatMap, map, type Result } from "../result.ts";
+import { err, flatMap, map, type Result } from "../../result.ts";
 import { appManifestSchema } from "../settings.ts";
 import { checkShape } from "../validate.ts";
 

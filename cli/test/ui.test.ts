@@ -1,13 +1,16 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { appName, serverName } from "../src/brand.ts";
-import { interpret } from "../src/interpret.ts";
-import { needsTerminal, partOf, run, type Plan } from "../src/plan.ts";
-import { explain } from "../src/ui/explain.ts";
-import { bad, flat, link, paint, strong, width } from "../src/ui/line.ts";
-import { footer, framed, listed, position, reporting, type Event, type Invocation } from "../src/ui/progress.ts";
-import { colors, escapes, screen, settle, watch } from "../src/ui/terminal.ts";
-import { duration, fit, spread, table, truncate, wrap } from "../src/ui/text.ts";
+import { appName, serverName } from "../src/core/brand.ts";
+import { interpret } from "../src/core/interpret.ts";
+import { needsTerminal, partOf, run, type Plan } from "../src/core/plan.ts";
+import { explain } from "../src/clients/cli/explain.ts";
+import { bad, flat, link, strong, width } from "../src/core/present/line.ts";
+import { footer, listed, position, reporting, type Event, type Invocation } from "../src/core/present/progress.ts";
+import { settle } from "../src/core/updates.ts";
+import { framed } from "../src/clients/cli/framed.ts";
+import { paint } from "../src/clients/cli/paint.ts";
+import { colors, escapes, screen, watch } from "../src/clients/cli/terminal.ts";
+import { duration, fit, spread, table, truncate, wrap } from "../src/core/present/text.ts";
 import { must } from "./support.ts";
 
 const guard = (label: string, code = 0) =>

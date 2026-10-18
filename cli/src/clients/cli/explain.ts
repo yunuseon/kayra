@@ -1,8 +1,8 @@
-import { commandOf, kindOf, titleOf, type Plan, type Step } from "../plan.ts";
-import { accent, active, bad, muted, strong, warn, type Line, type Span } from "./line.ts";
-import { position, steps as count, type Invocation } from "./progress.ts";
-import { wrap } from "./text.ts";
-import { drawnAs } from "./views.ts";
+import { commandOf, kindOf, titleOf, type Plan, type Step } from "../../core/plan.ts";
+import { accent, active, bad, muted, strong, warn, type Line, type Span } from "../../core/present/line.ts";
+import { position, steps as count, type Invocation } from "../../core/present/progress.ts";
+import { wrap } from "../../core/present/text.ts";
+import { drawnAs } from "../../core/present/views.ts";
 
 const kinds: Readonly<Record<string, (text: string) => Span>> = { guard: warn, check: active, run: active, confirm: bad, note: muted };
 

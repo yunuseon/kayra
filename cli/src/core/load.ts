@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fleetRoot, serverDir, serverName, within, type AbsolutePath, type FleetRoot } from "./brand.ts";
 import { parseServer, yamlOf, type Fleet, type Server, type ServerFiles } from "./fleet.ts";
-import { all, err, flatMap, map, ok, type Result } from "./result.ts";
+import { all, err, flatMap, map, ok, type Result } from "../result.ts";
 import { defaultsSchema } from "./settings.ts";
 import { checkSettings, knownSettings } from "./validate.ts";
 

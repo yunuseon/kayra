@@ -11,10 +11,10 @@ import {
   type Network,
   type Reach,
   type Tofu,
-} from "../src/commands/status.ts";
+} from "../src/core/commands/status.ts";
 import { err, ok } from "../src/result.ts";
-import { flat } from "../src/ui/line.ts";
-import { settle } from "../src/ui/terminal.ts";
+import { flat } from "../src/core/present/line.ts";
+import { settle } from "../src/core/updates.ts";
 import { fleet, server } from "./support.ts";
 
 const hetzner = (name: string, apps = "") =>

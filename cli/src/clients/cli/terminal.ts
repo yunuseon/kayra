@@ -62,6 +62,8 @@ export const escapes = {
   clearDown: "\u001b[J",
 } as const;
 
+import type { Update } from "../../core/updates.ts";
+
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 const frameOf = (ms: number): string => frames[Math.floor(ms / 80) % frames.length] ?? "";
@@ -82,8 +84,6 @@ export const spinner = (write: (raw: string) => void, draw: (frame: string, ms: 
 };
 
 /** A state change, as an answer brings it. */
-export type Update<S> = (state: S) => S;
-
 const tick = (ms: number): Promise<undefined> =>
   new Promise((resolve) => {
     setTimeout(() => {
@@ -121,20 +121,4 @@ export const watch = async <S>(
       : go(next.update(state), waiting.filter((each) => each.id !== next.id), shown);
   };
   return go(initial, updates.map((update, id) => ({ id, landed: update.then((done) => ({ id, update: done })) })), 0);
-};
-
-/** What watch() returns, drawn nowhere: for a stream that is no terminal. */
-export const settle = async <S>(initial: S, updates: readonly Promise<Update<S>>[]): Promise<S> =>
-  (await Promise.all(updates)).reduce((state, update) => update(state), initial);
-
-/** Each state as the updates land, in the order they land: for a viewer elsewhere (the web interface). */
-export const follow = async <S>(initial: S, updates: readonly Promise<Update<S>>[], each: (state: S) => void): Promise<S> => {
-  type Landed = { readonly id: number; readonly update: Update<S> };
-  const go = async (state: S, waiting: readonly { readonly id: number; readonly landed: Promise<Landed> }[]): Promise<S> => {
-    each(state);
-    if (waiting.length === 0) return state;
-    const next = await Promise.race(waiting.map((one) => one.landed));
-    return go(next.update(state), waiting.filter((one) => one.id !== next.id));
-  };
-  return go(initial, updates.map((update, id) => ({ id, landed: update.then((done) => ({ id, update: done })) })));
 };

@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { run } from "@optique/run";
-import { parser, runOptions } from "../src/cli.ts";
+import { parser, runOptions } from "../src/clients/cli/parser.ts";
 import { fleet, server } from "./support.ts";
 
 const servers = fleet(

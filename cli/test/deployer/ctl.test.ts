@@ -7,9 +7,9 @@ import { after, test } from "node:test";
 import { releasesAnswer, runsAnswer } from "../../src/deployer/answers.ts";
 import { runId } from "../../src/deployer/brand.ts";
 import { releases, type RunMeta } from "../../src/deployer/records.ts";
-import { appName, serverName } from "../../src/brand.ts";
-import { flat } from "../../src/ui/line.ts";
-import { draw } from "../../src/ui/views.ts";
+import { appName, serverName } from "../../src/core/brand.ts";
+import { flat } from "../../src/core/present/line.ts";
+import { draw } from "../../src/core/present/views.ts";
 import { commit, must, name } from "./support.ts";
 
 const platform = mkdtempSync(join(tmpdir(), "kayra-ctl-"));

@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { findings, summary, validateJson, validateView, type Facts, type Finding } from "../src/commands/validate.ts";
-import { flat } from "../src/ui/line.ts";
+import { findings, summary, validateJson, validateView, type Facts, type Finding } from "../src/core/commands/validate.ts";
+import { flat } from "../src/core/present/line.ts";
 import { server } from "./support.ts";
 
 const shop = server("shop", "target: multipass\ndomain: shop.test\napps: [{name: shop, repo: https://x.test/s.git}]", {

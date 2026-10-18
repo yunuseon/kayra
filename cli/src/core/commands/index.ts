@@ -1,20 +1,34 @@
-import type { Command } from "../cli.ts";
+import type { AppName, Domain, ServerName, Subdomain } from "../brand.ts";
 import { serverNamed, type Fleet, type Server } from "../fleet.ts";
 import type { Plan } from "../plan.ts";
-import { flatMap, ok, type Result } from "../result.ts";
+import { flatMap, ok, type Result } from "../../result.ts";
 import { doctor } from "./doctor.ts";
 import * as server from "./server.ts";
 
-/** The commands that run as a plan: every one but those that read and draw by themselves. */
-export type Planned = Exclude<Command, { readonly name: "status" | "validate" | "app check" | "ui" }>;
+/** A command on one server, as the core takes it from any client. */
+type OnServer =
+  | {
+      readonly name: "up" | "provision" | "deploy" | "setup" | "plan" | "verify" | "apps" | "hosts" | "down" | "adopt" | "backup test";
+      readonly server: ServerName;
+    }
+  | { readonly name: "ssh"; readonly server: ServerName; readonly remote: readonly string[] };
+type Deployer =
+  | { readonly name: "app runs"; readonly server: ServerName; readonly app: AppName }
+  | { readonly name: "app logs" | "app deploy" | "app rollback"; readonly server: ServerName; readonly app: AppName; readonly more: string | undefined }
+  | { readonly name: "job"; readonly server: ServerName; readonly job: "gc" | "renovate"; readonly noPrs: boolean };
 
-type Deployer = Extract<Command, { readonly name: "app runs" | "app logs" | "app deploy" | "app rollback" | "job" }>;
-type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" | "app check" | "ui" }>;
+/** The commands that run as a plan, as the core takes them: each client maps its own input onto these. */
+export type Planned =
+  | OnServer
+  | Deployer
+  | { readonly name: "app purge"; readonly server: ServerName; readonly app: AppName }
+  | { readonly name: "certs"; readonly domain: Domain; readonly subdomains: readonly Subdomain[] }
+  | { readonly name: "doctor" };
 
 const appKinds = { "app runs": "runs", "app logs": "logs", "app deploy": "deploy", "app rollback": "rollback" } as const;
 
 /** The deployer's commands: their answer is the output, nothing is drawn around it. */
-export const isDeployer = (command: Command): command is Deployer => command.name === "job" || command.name in appKinds;
+export const isDeployer = (command: Planned): command is Deployer => command.name === "job" || command.name in appKinds;
 
 const deployerCommand = (command: Deployer): server.DeployerCommand =>
   command.name === "job"

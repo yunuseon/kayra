@@ -1,9 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { interpret } from "../src/interpret.ts";
-import { run, type Plan } from "../src/plan.ts";
-import { appName, serverName } from "../src/brand.ts";
-import { flat } from "../src/ui/line.ts";
+import { interpret } from "../src/core/interpret.ts";
+import { run, type Plan } from "../src/core/plan.ts";
+import { appName, serverName } from "../src/core/brand.ts";
+import { flat } from "../src/core/present/line.ts";
 import { must } from "./support.ts";
 
 type Said = { readonly passed: boolean; readonly out: readonly string[]; readonly err: readonly string[] };

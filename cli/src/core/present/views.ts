@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Deployed, ReleasesAnswer, RunAnswer, RunsAnswer } from "../deployer/answers.ts";
+import type { Deployed, ReleasesAnswer, RunAnswer, RunsAnswer } from "../../deployer/answers.ts";
 import type { View } from "../plan.ts";
 import { accent, active, bad, muted, ok, strong, warn, type Line, type Span, type Text } from "./line.ts";
 import { ago, duration, table } from "./text.ts";

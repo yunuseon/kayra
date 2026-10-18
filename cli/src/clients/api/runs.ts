@@ -1,12 +1,13 @@
-import type { RunEvent, RunState, RunSummary } from "./contract.ts";
+import type { RunEvent, RunState, RunSummary } from "./contract.gen.ts";
 
-/** A run as kayra ui keeps it: what it was asked, and everything that happened since, in order. */
+/** A run as kayra keeps it: what it was asked, and everything that happened since, in order. */
 export type Run = {
   readonly id: string;
   readonly command: string;
   readonly server?: string;
   readonly started: string;
   readonly events: readonly RunEvent[];
+  readonly session: boolean;
 };
 
 /** Sortable by time (an ISO 8601 instant), unique by its tail. */
@@ -25,6 +26,7 @@ export const summary = (run: Run): RunSummary => ({
   command: run.command,
   ...(run.server === undefined ? {} : { server: run.server }),
   started: run.started,
+  session: run.session,
   state: stateOf(run.events),
 });
 
@@ -33,7 +35,7 @@ export const recordLine = (value: Omit<Run, "events"> | RunEvent): string => `${
 
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null;
 
-/** A record as kayra ui wrote it; a run killed mid-write keeps what it had, and what it had says "running". */
+/** A record as kayra wrote it; a run killed mid-write keeps what it had, and what it had says "running". */
 export const readRecord = (text: string): Run | undefined => {
   const [head, ...rest] = text
     .split("\n")
@@ -47,7 +49,7 @@ export const readRecord = (text: string): Run | undefined => {
     });
   if (!isObject(head) || typeof head["id"] !== "string" || typeof head["command"] !== "string" || typeof head["started"] !== "string")
     return undefined;
-  // Written by this kayra ui, the lines are its own events.
+  // Written by this kayra, the lines are its own events.
   const events = rest.filter((each): each is RunEvent => isObject(each) && typeof each["kind"] === "string");
   return {
     id: head["id"],
@@ -55,6 +57,7 @@ export const readRecord = (text: string): Run | undefined => {
     ...(typeof head["server"] === "string" ? { server: head["server"] } : {}),
     started: head["started"],
     events,
+    session: head["session"] === true,
   };
 };
 

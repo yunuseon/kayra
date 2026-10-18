@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import type { Line, Span, Text, Tone } from "../../../cli/src/clients/api/contract.ts";
+import type { Line, Span, Text, Tone } from "../../../cli/src/clients/api/contract.gen.ts";
 import type { Failure } from "../api.ts";
 import type { Cell } from "../reach.ts";
 
@@ -52,7 +52,7 @@ export const Fact = ({ label, cell }: { readonly label: string; readonly cell: C
 
 export const Problem = ({ failure }: { readonly failure: Failure }) => (
   <div class="problem" role="alert">
-    <strong>kayra ui answered {failure.status}</strong>
+    <strong>kayra answered {failure.status}</strong>
     <pre>{failure.message}</pre>
   </div>
 );

@@ -13,8 +13,8 @@ const types: Readonly<Record<string, string>> = {
   ".json": "application/json; charset=utf-8",
 };
 
-const unbuilt = `<!doctype html><meta charset="utf-8"><title>kayra ui</title>
-<body style="font:15px system-ui;margin:3rem auto;max-width:40rem"><h1>kayra ui</h1>
+const unbuilt = `<!doctype html><meta charset="utf-8"><title>kayra</title>
+<body style="font:15px system-ui;margin:3rem auto;max-width:40rem"><h1>kayra</h1>
 <p>The browser side is not built in this checkout:</p><pre>npm --prefix web ci &amp;&amp; npm --prefix web run build</pre>
 <p>The API is up at <code>/api/fleet</code>.</p></body>`;
 

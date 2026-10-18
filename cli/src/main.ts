@@ -14,7 +14,7 @@ import type { Fleet, Server } from "./core/fleet.ts";
 import { interpret, type Io } from "./core/interpret.ts";
 import { findFleetRoot, loadFleet } from "./core/load.ts";
 import { operation as describe } from "./core/operations/catalog.ts";
-import { isPlan, planOf, query, serverOf, stream, type Context } from "./core/operations/run.ts";
+import { hasPlan, planOf, query, serverOf, stream, type Context } from "./core/operations/run.ts";
 import { systemBrowser } from "./clients/ui/opener.ts";
 import { serve } from "./serve.ts";
 import { network } from "./core/net.ts";
@@ -103,24 +103,26 @@ else {
     network: network(2_000),
     tofu: opentofu,
   };
-  if (args.command.name === "ui") {
+  if (args.command.name === "serve") {
     if (!found.ok) fail(found.error);
     // The browser side: web/dist in a checkout, cli/dist/browser in the package.
     const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "browser")].find((dir) => existsSync(join(dir, "index.html")));
     const { port, noOpen } = args.command;
-    const listening = await serve({ kayra, fleet: fleet.value, version, short, network: context.network }, assets, port);
-    io.err([strong("kayra ui"), muted(` · ${fleet.value.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);
+    const clients = { ui: args.command.ui || !args.command.api, api: args.command.api };
+    const listening = await serve({ kayra, fleet: fleet.value, version, short, network: context.network }, assets, port, clients);
+    io.err([strong("kayra serve"), muted(` · ${fleet.value.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);
     io.out(listening.url);
-    if (!noOpen) systemBrowser.open(listening.url);
-    process.once("SIGINT", () => {
-      void listening.close().then(() => process.exit(0));
-    });
+    if (listening.discovery !== undefined) io.err([muted(`API credentials: ${listening.discovery}`)]);
+    if (clients.ui && !noOpen) systemBrowser.open(listening.url);
+    const stop = (): void => { void listening.close().then(() => process.exit(0)); };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
   } else {
     const { invocation: call, json } = fromCommand(args.command);
     const operation = describe(call.name);
     if (!found.ok && operation.scope !== "repo") fail(found.error);
     const target = serverOf(context, call);
-    if (isPlan(call)) {
+    if (hasPlan(call)) {
       const steps = map(planOf(context, call), (each) => (args.verbose ? verbose(each) : each));
       // An operation whose output is its answer (ssh, the deployer's) gets nothing drawn around it.
       if (!steps.ok) fail(steps.error);

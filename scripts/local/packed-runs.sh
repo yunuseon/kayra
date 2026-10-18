@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Packs kayra as npm publishes it, installs the tarball the way a fleet does,
-# and runs it: its version, its help, and kayra ui answering with its browser
+# and runs it: its version, its help, and kayra serve answering with its browser
 # side. Run by release.yml before npm publish, and by hand before a release.
 #   bash scripts/local/packed-runs.sh
 set -euo pipefail
@@ -19,10 +19,21 @@ expected="$(node -p "require('${here}/package.json').version")"
 [ "$version" = "$expected" ] || { echo "✗ the packed kayra says ${version}, not ${expected}" >&2; exit 1; }
 (cd "${work}/fleet" && node "$kayra" --help >/dev/null)
 
-(cd "${work}/fleet" && node "$kayra" ui --no-open --port 0 > "${work}/ui.out" 2>&1) &
+(cd "${work}/fleet" && exec node "$kayra" serve --ui --api --no-open --port 0 > "${work}/ui.out" 2>&1) &
 ui=$!
 for _ in $(seq 1 50); do grep -q '/login?token=' "${work}/ui.out" && break; sleep 0.2; done
-url="$(grep -o 'http://127.0.0.1:[0-9]*/login?token=[A-Za-z0-9_-]*' "${work}/ui.out")" || { cat "${work}/ui.out" >&2; echo "✗ kayra ui did not start" >&2; exit 1; }
+url="$(grep -o 'http://127.0.0.1:[0-9]*/login?token=[A-Za-z0-9_-]*' "${work}/ui.out")" || { cat "${work}/ui.out" >&2; echo "✗ kayra serve did not start" >&2; exit 1; }
 page="$(curl -sf -L -c "${work}/jar" -b "${work}/jar" "$url")"
-grep -q '<script type="module"' <<< "$page" || { echo "✗ kayra ui serves no built browser side" >&2; exit 1; }
-echo "✓ the packed kayra ${version} runs, and kayra ui serves its browser side"
+grep -q '<script type="module"' <<< "$page" || { echo "✗ kayra serve serves no built browser side" >&2; exit 1; }
+echo "✓ the packed kayra ${version} runs, and kayra serve serves its browser side"
+
+discovery="${work}/fleet/.cache/serve.json"
+[ -f "$discovery" ] || { echo "✗ kayra serve wrote no API discovery file" >&2; exit 1; }
+api_url="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).url" "$discovery")"
+token="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).token" "$discovery")"
+operations="$(curl -sf -H "Authorization: Bearer ${token}" "${api_url}/operations")"
+node -e 'const operations=JSON.parse(process.argv[1]); if (!operations.some(op=>op.name==="ssh") || !operations.some(op=>op.name==="deploy")) process.exit(1)' "$operations"
+kill "$ui"
+wait "$ui"
+[ ! -f "$discovery" ] || { echo "✗ kayra serve left its API discovery file" >&2; exit 1; }
+echo "✓ the packed API exposes the catalog and removes its discovery file on shutdown"

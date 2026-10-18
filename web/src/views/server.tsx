@@ -1,4 +1,5 @@
-import type { CommandInput, ServerCommand, ServerFacts } from "../../../cli/src/clients/api/contract.ts";
+import type { CommandInput } from "../commands.ts";
+import type { ServerCommand, ServerFacts } from "../../../cli/src/clients/api/contract.gen.ts";
 import { show } from "../components/preview.tsx";
 import { Link } from "../components/shell.tsx";
 import { Dot, Fact, Header, Pill, Waiting } from "../components/ui.tsx";
@@ -14,7 +15,7 @@ const what: Readonly<Record<ServerCommand, string>> = {
   plan: "What provision and setup would change, changing nothing",
   up: "Provision, set up, every app, /etc/hosts",
   provision: "Create or update the machine",
-  "backup test": "Restore the latest backup to a scratch dir and check it",
+  "backup.test": "Restore the latest backup to a scratch dir and check it",
   adopt: "Once, for a server kayra did not create",
   down: "Destroy the machine",
 };
@@ -29,7 +30,6 @@ const Actions = ({ facts }: { readonly facts: ServerFacts }) => {
         <button
           key={name}
           class={`action${index === 0 ? " primary" : ""}${danger.includes(name) ? " danger" : ""}`}
-          disabled={facts.needsTerminal && name !== "plan" && name !== "verify"}
           onClick={() => {
             show({ name, server: facts.name } satisfies CommandInput);
           }}
@@ -77,9 +77,6 @@ export const ServerView = ({ name }: { readonly name: string }) => {
           </>
         }
       />
-      {facts.needsTerminal ? (
-        <div class="notice">Its vault password is asked on a terminal: what opens its secrets runs from the command line, or give it a vault_password_file.</div>
-      ) : null}
       <div class="columns">
         <section class="card">
           <h2>Now</h2>

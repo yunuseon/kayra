@@ -26,8 +26,8 @@ test("the command line reaches every operation in the catalog, each by its own w
     const parsed = parseSync(commandLine, argv);
     strictEqual(parsed.success, true, `${name}: ${argv.join(" ")} does not parse`);
     const { command } = parsed.value;
-    strictEqual(command.name === "ui", false);
-    if (command.name === "ui") return;
+    strictEqual(command.name === "serve", false);
+    if (command.name === "serve") return;
     strictEqual(fromCommand(command).invocation.name, name, `${argv.join(" ")} lands elsewhere`);
   });
 });

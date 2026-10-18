@@ -123,8 +123,11 @@ const spawned = async (argv: Argv, streams: Streams, env: Env = {}, plumbing: Pl
     stopping.timer = setTimeout(() => { kill("SIGTERM"); }, patience);
     stopping.timer.unref();
   };
-  signal?.addEventListener("abort", stop, { once: true });
-  if (isStopped(signal)) stop();
+  // The process group exists only once Node confirms the child has spawned.
+  child.once("spawn", () => {
+    signal?.addEventListener("abort", stop, { once: true });
+    if (isStopped(signal)) stop();
+  });
   const exit = await new Promise<number | Error>((resolve) => {
     child.on("error", resolve);
     child.on("close", (code) => {

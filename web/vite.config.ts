@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 
-// `npm run dev` beside `kayra ui --port 7700 --no-open`: the API is that server's,
-// reached as if from its own page (its Host, its Origin), as kayra ui admits only those.
+// `npm run dev` beside `kayra serve --port 7700 --no-open`: the API is that server's,
+// reached as if from its own page (its Host, its Origin), as kayra serve admits only those.
 const api = "http://127.0.0.1:7700";
 const asKayraUi = { target: api, configure: (proxy: { readonly on: (event: "proxyReq", listener: (request: { readonly setHeader: (name: string, value: string) => void }) => void) => void }) => {
   proxy.on("proxyReq", (request) => {

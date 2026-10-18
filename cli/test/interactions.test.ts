@@ -247,3 +247,15 @@ test("the CLI accepts a typed confirmation on a terminal", { timeout: 5_000 }, a
     output: (chunk) => { if (chunk.includes("Type box:")) terminal.input?.("box\n"); },
   }), true);
 });
+
+
+test("a cancel before the spawn event waits for the process group to exist", { timeout: 5_000 }, async () => {
+  const stop = new AbortController();
+  const passed = await interpret([{ ...run("cancel immediately", ["sleep", "30"]), kind: "session" }], {
+    ...quiet,
+    signal: stop.signal,
+    output: () => undefined,
+    input: () => { stop.abort(); return () => undefined; },
+  });
+  strictEqual(passed, false);
+});

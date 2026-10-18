@@ -1,6 +1,7 @@
+import type { CommandInput } from "../commands.ts";
 import { signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { CommandInput, Listed, Preview } from "../../../cli/src/clients/api/contract.ts";
+import type { Listed, Preview } from "../../../cli/src/clients/api/contract.gen.ts";
 import { preview, startRun, type Answer, type Failure } from "../api.ts";
 import { fleet, go } from "../state.ts";
 import { Pill, Problem, Waiting } from "./ui.tsx";
@@ -32,7 +33,7 @@ const Step = ({ step }: { readonly step: Listed }) => (
 
 /** A real server: anything but a multipass test VM, so a change asks for its name, as `kayra down` does on the terminal. */
 const realServer = (command: CommandInput): string | undefined => {
-  if (command.name === "doctor") return undefined;
+  if (!("server" in command)) return undefined;
   const loaded = fleet.value;
   const facts = loaded.state === "ready" ? loaded.value.servers.find((each) => each.name === command.server) : undefined;
   return facts === undefined || facts.target === "multipass" ? undefined : facts.name;

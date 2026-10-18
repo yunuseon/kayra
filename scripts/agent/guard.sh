@@ -57,8 +57,15 @@ if has "${kayra} +(--[a-z-]+ +)*${verbs}( |$)" && ! has '--dry-run'; then
         || target="$(sed -n 's/^target: *\([a-z]*\).*/\1/p' "${project}/servers/${server}/server.yml")"
     [ "$target" = multipass ] || ask "kayra changes ${server:-a server}${target:+ (target ${target})}"
 fi
-# kayra ui runs any command on any server from a browser, where this guard sees none of them.
-has "${kayra} +(--[a-z-]+ +)*ui( |$)" && ask "kayra ui runs commands on every server from a browser, out of this guard's sight"
+# kayra serve runs any command on any server from a browser, where this guard sees none of them.
+has "${kayra} +(--[a-z-]+ +)*serve( |$)" && ask "kayra serve runs commands on every server from a browser, out of this guard's sight"
+
+# Local API writes can change any server; the guard cannot inspect their JSON safely.
+if has 'https?://(127\.0\.0\.1|localhost)(:[0-9]+)?/api(/|[?" ])' \
+    && { has 'curl .*((-X|--request)[ =]*(POST|PUT|PATCH|DELETE)|(-d|--data[a-z-]*|--json|--form)([ =]|$))' \
+         || { has 'fetch[ (]' && has '(POST|PUT|PATCH|DELETE)'; }; }; then
+    ask "a local kayra API write can change a real server"
+fi
 
 # ── Ansible and the vaults ──────────────────────────────────────────────────
 has '(^|[;&|( ])ansible-vault +(decrypt|view|edit|encrypt|encrypt_string|rekey|create)( |$)' \

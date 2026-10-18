@@ -7,6 +7,7 @@ export type Asked = {
   readonly host: string | undefined;
   readonly origin: string | undefined;
   readonly cookie: string | undefined;
+  readonly authorization?: string | undefined;
 };
 
 export type Admission = { readonly admitted: true } | { readonly admitted: false; readonly status: 401 | 403; readonly why: string };
@@ -30,19 +31,19 @@ const cookieValue = (header: string | undefined, name: string): string | undefin
 
 const refuse = (status: 401 | 403, why: string): Admission => ({ admitted: false, status, why });
 
-/**
- * Whether a request may reach kayra ui. Every request: a Host of this
- * listener (a page elsewhere cannot rebind a name to it). A write: an Origin
- * of this listener (no other site's form posts here). The API: the launch's
- * token, as its cookie.
- */
-export const admit = (asked: Asked, port: number, token: string): Admission => {
+/** Host always, the launch token on API calls, and the exact Origin on cookie writes. */
+export const admit = (asked: Asked, port: number, token: string, enabled = { ui: true, api: false }): Admission => {
   if (asked.host === undefined || !origins(port).includes(asked.host)) return refuse(403, "not this listener's host");
+  if (asked.authorization !== undefined) {
+    const bearer = asked.authorization.startsWith("Bearer ") ? asked.authorization.slice(7) : "";
+    return enabled.api && same(bearer, token) ? { admitted: true } : refuse(401, "invalid bearer token");
+  }
   const writes = asked.method !== "GET" && asked.method !== "HEAD";
-  if (writes && !origins(port).some((each) => asked.origin === `http://${each}`)) return refuse(403, "not this listener's origin");
+  // Cookie credentials are ambient: the request must originate at the host it names.
+  if (writes && asked.origin !== `http://${asked.host}`) return refuse(403, "not this listener's origin");
   if (!asked.path.startsWith("/api/")) return { admitted: true };
   const presented = cookieValue(asked.cookie, cookieName(port));
-  return presented !== undefined && same(presented, token) ? { admitted: true } : refuse(401, "no token: open the URL kayra ui printed");
+  return enabled.ui && presented !== undefined && same(presented, token) ? { admitted: true } : refuse(401, "no token: open the URL kayra serve printed, or use its API token");
 };
 
 /** The token the opened URL carries, if it is this launch's. */

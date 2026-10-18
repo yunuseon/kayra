@@ -84,3 +84,11 @@ test("a command's help: what it does, its arguments with the fleet's servers, ex
   ok(kayra("app", "--help").out.includes("\nIn an app's repository:\n  check "));
   ok(kayra("job", "--help").out.includes("JOB            Which job (choices: gc, renovate)"));
 });
+
+test("serve selects either client or both, and replaces the old ui command", () => {
+  deepStrictEqual(kayra("serve", "--api", "--ui", "--no-open", "--port", "7700").value, {
+    dryRun: false, verbose: false,
+    command: { name: "serve", ui: true, api: true, noOpen: true, port: 7700 },
+  });
+  strictEqual(kayra("ui").exit, 1);
+});

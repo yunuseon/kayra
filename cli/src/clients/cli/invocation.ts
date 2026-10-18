@@ -8,7 +8,7 @@ export type Asked = { readonly invocation: Invocation; readonly json: boolean };
  * The parsed command line as the operation it names. `app rollback` without a
  * commit lists the releases (`app.releases`), with one it rolls back.
  */
-export const fromCommand = (command: Exclude<Command, { readonly name: "ui" }>): Asked => {
+export const fromCommand = (command: Exclude<Command, { readonly name: "serve" }>): Asked => {
   const plainly = (invocation: Invocation): Asked => ({ invocation, json: false });
   switch (command.name) {
     case "up":
@@ -25,7 +25,7 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "ui" }>):
     case "backup test":
       return plainly({ name: "backup.test", input: { server: command.server } });
     case "ssh":
-      return plainly({ name: "ssh", input: { server: command.server, command: command.remote } });
+      return plainly(command.remote.length === 0 ? { name: "ssh", input: { server: command.server } } : { name: "ssh.exec", input: { server: command.server, command: command.remote } });
     case "app check":
       return plainly({ name: "app.check", input: { dir: command.dir ?? "." } });
     case "app purge":
@@ -70,7 +70,8 @@ export const reaches = {
   verify: ["verify", "SERVER"],
   apps: ["apps", "SERVER"],
   hosts: ["hosts", "SERVER"],
-  ssh: ["ssh", "SERVER", "--", "uptime"],
+  ssh: ["ssh", "SERVER"],
+  "ssh.exec": ["ssh", "SERVER", "--", "uptime"],
   down: ["down", "SERVER"],
   adopt: ["adopt", "SERVER"],
   "backup.test": ["backup", "test", "SERVER"],

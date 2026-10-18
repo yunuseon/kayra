@@ -347,3 +347,12 @@
     chdir: "{{ platform_dir }}"
   when: platform_files.results | selectattr('item', 'eq', 'buildkit/') | selectattr('changed') | list | length > 0
   changed_when: true
+
+# Authelia reads its configuration once at startup; the user database it
+# watches itself (authentication_backend.file.watch).
+- name: Restart Authelia when its config changed
+  ansible.builtin.command: docker compose restart authelia
+  args:
+    chdir: "{{ platform_dir }}"
+  when: platform_files.results | selectattr('item', 'eq', 'authelia/configuration.yml') | selectattr('changed') | list | length > 0
+  changed_when: true

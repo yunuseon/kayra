@@ -67,6 +67,7 @@ export const openapi = (version: string) => ({
     "/operations": { get: { responses: { "200": response("The operation catalog", { type: "array", items: ref("OperationInfo") }) } } },
     "/openapi.json": { get: { responses: { "200": response("This OpenAPI document", { type: "object" }) } } },
     "/fleet": { get: { responses: { "200": response("The fleet", ref("FleetFacts")) } } },
+    "/directories": { get: { summary: "Browse local directories for app.check", parameters: [{ name: "path", in: "query", schema: { type: "string", default: "." } }], responses: { "200": response("Directories only, relative paths resolved from the fleet", ref("DirectoryListing")), "400": { description: "Directory cannot be read" } } } },
     ...Object.fromEntries<unknown>(catalog().flatMap(({ name, summary, kind, input }): readonly (readonly [string, unknown])[] => [
       [`/operations/${name}`, { post: { summary, operationId: name, requestBody: request(input), responses: kind === "plan" || kind === "session" ? {
         [kind === "session" ? "201" : "202"]: response("Started", { type: "object", properties: { [kind === "session" ? "session" : "run"]: { type: "string" } }, required: [kind === "session" ? "session" : "run"] }),

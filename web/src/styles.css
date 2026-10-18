@@ -219,3 +219,26 @@ input:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--ac
 .palette li { display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
 .palette li .hint { display: inline; }
 .palette li.selected { background: var(--accent-soft); }
+
+/* Catalog inputs and the local repository picker. */
+button, input, select, textarea { font: inherit; color: inherit; }
+select, textarea { padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); }
+.operation-fields { display: grid; gap: 18px; }
+.operation-field { display: grid; gap: 5px; }
+.operation-field > label { font-weight: 550; }
+.operation-field input, .operation-field select, .operation-field textarea { min-width: 0; width: 100%; }
+.operation-field .inline input { flex: 1; }
+.operation-field .inline button { flex-shrink: 0; }
+.toggle { display: flex; gap: 8px; align-items: center; }
+.toggle input { width: auto; }
+.run-options { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.run-options legend { color: var(--muted); padding: 0 5px; }
+.query-result { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.directory-picker { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.directory-path { display: block; overflow-wrap: anywhere; margin: 10px 0; }
+.directory-list { max-height: 220px; overflow-y: auto; list-style: none; padding: 0; }
+.directory-list button { width: 100%; padding: 6px; text-align: left; border: 0; background: transparent; cursor: pointer; }
+.directory-list button:hover { background: var(--panel-2); }
+.terminal-scroll { overflow-x: auto; background: #0a0a0c; padding: 12px; border-radius: 8px; }
+.terminal { min-width: max-content; }
+.sheet { max-height: 90vh; overflow-y: auto; }

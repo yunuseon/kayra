@@ -1,58 +1,9 @@
-import type { CommandInput } from "../commands.ts";
-import type { ServerCommand, ServerFacts } from "../../../cli/src/clients/api/contract.gen.ts";
-import { show } from "../components/preview.tsx";
+import { OperationActions } from "../components/operations.tsx";
 import { Link } from "../components/shell.tsx";
 import { Dot, Fact, Header, Pill, Waiting } from "../components/ui.tsx";
 import { health, login, machine, ssh } from "../reach.ts";
 import { fleet, status } from "../state.ts";
 import { RunTable } from "./runs.tsx";
-
-const what: Readonly<Record<ServerCommand, string>> = {
-  deploy: "Host setup and every app, then verify",
-  apps: "Register every app in server.yml, remove the rest",
-  verify: "Check it as its users see it",
-  setup: "The host layer: the playbook for its kind",
-  plan: "What provision and setup would change, changing nothing",
-  up: "Provision, set up, every app, /etc/hosts",
-  provision: "Create or update the machine",
-  "backup.test": "Restore the latest backup to a scratch dir and check it",
-  adopt: "Once, for a server kayra did not create",
-  down: "Destroy the machine",
-};
-
-const danger: readonly ServerCommand[] = ["down", "adopt", "provision"];
-
-const Actions = ({ facts }: { readonly facts: ServerFacts }) => {
-  const commands = facts.commands.filter((name): name is ServerCommand => name !== "job");
-  return (
-    <div class="action-grid">
-      {commands.map((name, index) => (
-        <button
-          key={name}
-          class={`action${index === 0 ? " primary" : ""}${danger.includes(name) ? " danger" : ""}`}
-          onClick={() => {
-            show({ name, server: facts.name } satisfies CommandInput);
-          }}
-        >
-          <strong>{name}</strong>
-          <span>{what[name]}</span>
-        </button>
-      ))}
-      {facts.commands.includes("job") ? (
-        <>
-          <button class="action" onClick={() => { show({ name: "job", server: facts.name, job: "gc", noPrs: false }); }}>
-            <strong>job gc</strong>
-            <span>The registry's garbage collection, now</span>
-          </button>
-          <button class="action" onClick={() => { show({ name: "job", server: facts.name, job: "renovate", noPrs: true }); }}>
-            <strong>job renovate</strong>
-            <span>Renovate now, logging what it would change</span>
-          </button>
-        </>
-      ) : null}
-    </div>
-  );
-};
 
 export const ServerView = ({ name }: { readonly name: string }) => {
   const loaded = fleet.value;
@@ -107,7 +58,7 @@ export const ServerView = ({ name }: { readonly name: string }) => {
       </div>
       <section class="card">
         <h2>Commands</h2>
-        <Actions facts={facts} />
+        <OperationActions server={facts} />
       </section>
       <section class="card">
         <h2>Runs from here</h2>

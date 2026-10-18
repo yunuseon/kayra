@@ -15,6 +15,7 @@ export default defineConfig(
   {
     languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
     rules: {
+      "no-restricted-imports": ["error", { patterns: [{ regex: "(^|/)cli/(?!src/clients/api/contract\\.gen\\.ts$)", message: "The browser imports only the generated API contract." }] }],
       "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "never" }],
       "@typescript-eslint/consistent-type-definitions": ["error", "type"],
       "functional/immutable-data": ["error", { ignoreAccessorPattern: ["**.value", "**.current"] }],

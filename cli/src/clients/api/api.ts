@@ -16,6 +16,7 @@ import { follow } from "../../core/updates.ts";
 import { err, ok, type Result } from "../../result.ts";
 import { json, send } from "../../deployer/http.ts";
 import { catalog, openapi } from "./contract.ts";
+import { directories } from "./directories.ts";
 import type * as wire from "./contract.gen.ts";
 import { facts, words } from "./commands.ts";
 import { answer as queryAnswer } from "./queries.ts";
@@ -157,6 +158,10 @@ export const createApi = (api: Api) => {
     const ndjson = request.headers.accept?.includes("application/x-ndjson") === true;
     if (method === "GET" && path === "/api/operations") answerJson(response, 200, catalog());
     else if (method === "GET" && path === "/api/openapi.json") answerJson(response, 200, openapi(api.version));
+    else if (method === "GET" && path === "/api/directories") {
+      const result = await directories(url.searchParams.get("path") ?? ".", api.fleet.root);
+      if (result.ok) answerJson(response, 200, result.value); else send(response, 400, `${result.error}\n`);
+    }
     else if (method === "GET" && path === "/api/fleet") {
       const factsOfFleet: wire.FleetFacts = { fleet: api.fleet.root.split(sep).at(-1) ?? "", version: api.version, servers: api.fleet.servers.map(facts) };
       answerJson(response, 200, factsOfFleet);

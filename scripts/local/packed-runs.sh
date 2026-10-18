@@ -25,6 +25,10 @@ for _ in $(seq 1 50); do grep -q '/login?token=' "${work}/ui.out" && break; slee
 url="$(grep -o 'http://127.0.0.1:[0-9]*/login?token=[A-Za-z0-9_-]*' "${work}/ui.out")" || { cat "${work}/ui.out" >&2; echo "✗ kayra serve did not start" >&2; exit 1; }
 page="$(curl -sf -L -c "${work}/jar" -b "${work}/jar" "$url")"
 grep -q '<script type="module"' <<< "$page" || { echo "✗ kayra serve serves no built browser side" >&2; exit 1; }
+for asset in "${work}/fleet/node_modules/@yunuseon/kayra/cli/dist/browser/assets/"*; do
+  curl -sf -b "${work}/jar" "${url%%/login*}/assets/$(basename "$asset")" > "${work}/asset"
+  cmp -s "$asset" "${work}/asset" || { echo "✗ kayra serve did not serve $(basename "$asset")" >&2; exit 1; }
+done
 echo "✓ the packed kayra ${version} runs, and kayra serve serves its browser side"
 
 discovery="${work}/fleet/.cache/serve.json"

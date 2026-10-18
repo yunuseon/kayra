@@ -47,6 +47,7 @@ export const schemas = {
   ServerCommand: serverCommand,
   ServerFacts: serverFacts,
   FleetFacts: z.object({ fleet: z.string(), version: z.string(), servers: z.array(serverFacts) }),
+  DirectoryListing: z.object({ path: z.string(), parent: z.string(), directories: z.array(z.object({ name: z.string(), path: z.string() })) }),
   ReachState: reach,
   Status: z.object({ servers: z.array(z.object({
     name: z.string(), kind: z.string(), target: z.string(), domain: z.string(), apps: z.array(z.string()),

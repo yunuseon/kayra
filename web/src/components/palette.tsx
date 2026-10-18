@@ -1,30 +1,29 @@
 import { signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { CommandInput } from "../commands.ts";
+import { onServer, reaches, type Draft } from "../operations.ts";
 import { ranked, type Choice } from "../fuzzy.ts";
 import type { Route } from "../router.ts";
-import { fleet, go } from "../state.ts";
-import { show } from "./preview.tsx";
+import { catalog, fleet, go } from "../state.ts";
+import { openOperation } from "./operation.tsx";
 
 const open = signal(false);
 
-type Item = Choice & ({ readonly go: Route } | { readonly run: CommandInput });
+type Item = Choice & ({ readonly go: Route } | { readonly run: Draft });
 
 /** Everything there is to go to or run: pages, servers, apps, and each server's commands. */
 const items = (): readonly Item[] => {
   const loaded = fleet.value;
   const servers = loaded.state === "ready" ? loaded.value.servers : [];
+  const operations = catalog.value.state === "ready" ? catalog.value.value : [];
   return [
     { label: "Fleet", hint: "every server", go: { page: "fleet" } },
     { label: "Runs", hint: "what ran from here", go: { page: "runs" } },
     { label: "Validate", hint: "the fleet beyond its schemas", go: { page: "validate" } },
-    { label: "doctor", hint: "can this Mac run everything", run: { name: "doctor" } },
+    ...operations.map((operation): Item => ({ label: `${operation.name} · ${reaches[operation.name].label}`, hint: operation.summary, run: { name: operation.name, input: {} } })),
     ...servers.flatMap((server): readonly Item[] => [
       { label: server.name, hint: `${server.kind} on ${server.target}`, go: { page: "server", server: server.name } },
       ...server.apps.map((app): Item => ({ label: `${server.name}/${app}`, hint: "app", go: { page: "app", server: server.name, app } })),
-      ...server.commands.flatMap((name): readonly Item[] =>
-        name === "job" ? [] : [{ label: `${name} ${server.name}`, hint: "run", run: { name, server: server.name } }],
-      ),
+      ...onServer(operations, server).map((operation): Item => ({ label: `${operation.name} ${server.name}`, hint: operation.summary, run: { name: operation.name, input: { server: server.name } } })),
     ]),
   ];
 };
@@ -32,7 +31,7 @@ const items = (): readonly Item[] => {
 const choose = (item: Item): void => {
   open.value = false;
   if ("go" in item) go(item.go);
-  else show(item.run);
+  else openOperation(item.run.name, item.run.input);
 };
 
 /** ⌘K: go anywhere, run anything, by typing a few letters of it. */

@@ -1,7 +1,8 @@
 import { useEffect, useReducer, useState } from "preact/hooks";
 import type { RunEvent } from "../../../cli/src/clients/api/contract.gen.ts";
-import { answerRun, cancelRun, stream } from "../api.ts";
-import { Header, Lines, Pill, Spans, Waiting } from "../components/ui.tsx";
+import { cancelRun, stream, type Failure } from "../api.ts";
+import { Question } from "../components/question.tsx";
+import { Header, Lines, Pill, Problem, Spans, Waiting } from "../components/ui.tsx";
 import { empty, outcome, reduce, type Outcome, type StepView } from "../run.ts";
 import { styled } from "../sgr.ts";
 import { duration } from "../time.ts";
@@ -56,33 +57,11 @@ const Step = ({ step, now }: { readonly step: StepView; readonly now: number }) 
   );
 };
 
-const Ask = ({ id, question }: { readonly id: string; readonly question: Extract<RunEvent, { readonly kind: "ask" }> }) => {
-  const [typed, setTyped] = useState("");
-  return (
-    <form
-      class="ask"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void answerRun(id, typed);
-        setTyped("");
-      }}
-    >
-      <Spans text={question.prompt} />
-      <input type={question.secret ? "password" : "text"} autoComplete="off" value={typed} onInput={(event) => { setTyped(event.currentTarget.value); }} autoFocus spellcheck={false} />
-      <button type="submit" class="button danger">
-        Answer
-      </button>
-      <button type="button" class="button" onClick={() => void answerRun(id, "")}>
-        Don't
-      </button>
-    </form>
-  );
-};
-
 export const RunView = ({ id }: { readonly id: string }) => {
   const [view, dispatch] = useReducer((state: typeof empty, event: RunEvent) => reduce(state, event, Date.now()), empty);
   const [now, setNow] = useState(Date.now());
-  useEffect(() => stream<RunEvent>(`/api/runs/${encodeURIComponent(id)}/events`, dispatch, () => undefined), [id]);
+  const [failure, setFailure] = useState<Failure | undefined>(undefined);
+  useEffect(() => stream<RunEvent>(`/api/runs/${encodeURIComponent(id)}/events`, dispatch, () => undefined, undefined, setFailure), [id]);
   const running = outcome(view) === "running";
   useEffect(() => {
     if (!running) return undefined;
@@ -94,7 +73,7 @@ export const RunView = ({ id }: { readonly id: string }) => {
     };
   }, [running]);
   const { invocation, steps, ended, asking } = view;
-  if (invocation === undefined) return <Waiting what="Starting" />;
+  if (invocation === undefined) return failure === undefined ? <Waiting what="Starting" /> : <Problem failure={failure} />;
   const result = outcome(view);
   return (
     <>
@@ -104,12 +83,13 @@ export const RunView = ({ id }: { readonly id: string }) => {
       >
         <Pill tone={outcomeTone[result]}>{result}</Pill>
         {running ? (
-          <button class="button danger" onClick={() => void cancelRun(id)}>
+          <button class="button danger" onClick={() => { void cancelRun(id).then((answer) => { if (!answer.ok) setFailure(answer.failure); }); }}>
             Stop
           </button>
         ) : null}
       </Header>
-      {asking === undefined ? null : <Ask key={view.current} id={id} question={asking} />}
+      {failure === undefined ? null : <Problem failure={failure} />}
+      {asking === undefined ? null : <Question key={JSON.stringify(asking)} id={id} question={asking} />}
       <div class="timeline">
         {steps.map((step) => (
           <div key={step.listed.index}>

@@ -52,7 +52,7 @@ export const Fact = ({ label, cell }: { readonly label: string; readonly cell: C
 
 export const Problem = ({ failure }: { readonly failure: Failure }) => (
   <div class="problem" role="alert">
-    <strong>kayra answered {failure.status}</strong>
+    <strong>{failure.status === 0 ? "Connection problem" : `kayra answered ${String(failure.status)}`}</strong>
     <pre>{failure.message}</pre>
   </div>
 );

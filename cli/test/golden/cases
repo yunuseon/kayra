@@ -1,5 +1,5 @@
 # <case> | <stdin> | <kayra arguments>
-status | | status
+status | | status --offline
 provision-shop-test | | provision shop-test
 provision-shop-prod | | provision shop-prod
 provision-box | | provision box

@@ -1,7 +1,8 @@
 --- stdout
-box         kind=nas       target=home        domain=example.com               apps=            not provisioned
-edge        kind=edge      target=hetzner     domain=example.com               apps=            not provisioned
-forge       kind=platform  target=home        domain=forge.home.arpa           apps=            not provisioned
-shop-prod   kind=platform  target=hetzner     domain=shop.example.com          apps=shop        provisioned (203.0.113.10)
-shop-test   kind=platform  target=multipass   domain=shop.test                 apps=shop        provisioned (203.0.113.10)
+SERVER     KIND      TARGET     DOMAIN            ADDRESS          APPS
+box        nas       home       example.com       192.0.2.2
+edge       edge      hetzner    example.com       not provisioned
+forge      platform  home       forge.home.arpa   192.0.2.3
+shop-prod  platform  hetzner    shop.example.com  203.0.113.10     shop
+shop-test  platform  multipass  shop.test         203.0.113.10     shop
 --- exit 0

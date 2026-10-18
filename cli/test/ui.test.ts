@@ -3,10 +3,10 @@ import { test } from "node:test";
 import { interpret } from "../src/interpret.ts";
 import { partOf, run, type Plan } from "../src/plan.ts";
 import { explain } from "../src/ui/explain.ts";
-import { bad, flat, paint, strong, width } from "../src/ui/line.ts";
+import { bad, flat, link, paint, strong, width } from "../src/ui/line.ts";
 import { footer, framed, position, type Invocation } from "../src/ui/progress.ts";
-import { colors, escapes, screen } from "../src/ui/terminal.ts";
-import { duration, spread, truncate, wrap } from "../src/ui/text.ts";
+import { colors, escapes, screen, settle, watch } from "../src/ui/terminal.ts";
+import { duration, fit, spread, table, truncate, wrap } from "../src/ui/text.ts";
 
 const guard = (label: string, code = 0) =>
   ({ kind: "check", label, probe: { kind: "exits-zero", argv: ["sh", "-c", `exit ${String(code)}`] }, onFailure: "stop" }) as const;
@@ -45,7 +45,9 @@ test("colors: FORCE_COLOR wins, then NO_COLOR, then a terminal that is not dumb"
 
 test("a screen: live only on a terminal outside CI; notifications and progress only where they are understood", () => {
   const iterm = screen({ isTTY: true, columns: 120 }, { TERM_PROGRAM: "iTerm.app" });
-  deepStrictEqual(iterm, { colors: true, live: true, columns: 120, title: true, notifications: true, progressBar: false });
+  deepStrictEqual(iterm, { colors: true, live: true, columns: 120, title: true, notifications: true, progressBar: false, links: true });
+  strictEqual(screen({ isTTY: true }, { TERM_PROGRAM: "vscode" }).links, true);
+  strictEqual(screen({ isTTY: true }, { TERM_PROGRAM: "Apple_Terminal" }).links, false);
   strictEqual(screen({ isTTY: true }, { TERM_PROGRAM: "ghostty" }).progressBar, true);
   strictEqual(screen({ isTTY: true }, { TERM_PROGRAM: "iTerm.app", TMUX: "/tmp/tmux" }).notifications, false);
   strictEqual(screen({ isTTY: true }, { CI: "true" }).live, false);
@@ -56,9 +58,51 @@ test("a screen: live only on a terminal outside CI; notifications and progress o
     title: false,
     notifications: false,
     progressBar: false,
+    links: false,
   });
   strictEqual(screen({ isTTY: true, columns: 0 }, {}).columns, 80);
   strictEqual(escapes.title("a\u001b]b\u0007c"), "\u001b]0;a ]b c\u0007");
+});
+
+test("a link opens its URL where the terminal makes links, and is its text elsewhere", () => {
+  const domain = [link("shop.example", "https://shop.example/", "bad")];
+  strictEqual(paint(domain, false), "shop.example");
+  strictEqual(paint(domain, false, true), "\u001b]8;;https://shop.example/\u0007shop.example\u001b]8;;\u0007");
+  strictEqual(paint(domain, true, true), "\u001b]8;;https://shop.example/\u0007\u001b[31mshop.example\u001b[39m\u001b]8;;\u0007");
+  deepStrictEqual(truncate(domain, 5), [{ text: "shop", href: "https://shop.example/", tone: "bad" }, "…"]);
+});
+
+test("a table: columns as wide as their widest cell, nothing after a row's last; cut to fit, the named columns first", () => {
+  const rows = [[["NAME"], ["DOMAIN"], ["APPS"]], [["edge"], ["yunusozturk.de"], []], [["alaz"], ["alaz.home.example"], ["sudoku, wiki"]]];
+  deepStrictEqual(table(rows).map(flat), ["NAME  DOMAIN             APPS", "edge  yunusozturk.de", "alaz  alaz.home.example  sudoku, wiki"]);
+  deepStrictEqual(table(fit(rows, 30, [2, 1])).map(flat), ["NAME  DOMAIN             APPS", "edge  yunusozturk.de", "alaz  alaz.home.example  sudo…"]);
+  deepStrictEqual(table(fit(rows, 20, [2, 1])).map(flat), ["NAME  DOMAIN    APPS", "edge  yunusoz…", "alaz  alaz.ho…  sud…"]);
+});
+
+test("watch: a block drawn in place until every answer is in, then cleared; settle: the same state, drawn nowhere", async () => {
+  // eslint-disable-next-line functional/prefer-immutable-types -- capturing what is written
+  const written: string[] = [];
+  const later = (ms: number, value: string): Promise<(state: readonly string[]) => readonly string[]> =>
+    new Promise((resolve) => {
+      setTimeout(() => {
+        resolve((state) => [...state, value]);
+      }, ms);
+    });
+  const updates = [later(30, "a"), later(130, "b")];
+  const state = await watch(
+    // eslint-disable-next-line functional/immutable-data -- capturing
+    (raw) => written.push(raw),
+    [],
+    updates,
+    (so, frame) => [`${frame} ${String(so.length)}`, so.join(",")],
+  );
+  deepStrictEqual(state, ["a", "b"]);
+  deepStrictEqual(await settle([], updates), ["a", "b"]);
+  const drawn = written.join("");
+  strictEqual(drawn.startsWith(`${escapes.clearLine}⠋ 0\n${escapes.clearLine}\n`), true);
+  strictEqual(drawn.includes(`${escapes.up(2)}${escapes.clearLine}`), true);
+  strictEqual(drawn.includes(" 1\n"), true);
+  strictEqual(drawn.endsWith(`a,b\n${escapes.clearDown}${escapes.up(2)}${escapes.clearDown}`), true);
 });
 
 test("a step opens a part only in a plan of several", () => {

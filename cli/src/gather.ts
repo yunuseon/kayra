@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { FleetRoot } from "./brand.ts";
 import type { Facts, Secrets } from "./commands/validate.ts";
@@ -17,17 +18,19 @@ const mappingOf = (source: string | undefined): Readonly<Record<string, unknown>
 
 const vaulted = (source: string): boolean => source.startsWith("$ANSIBLE_VAULT");
 
-/** A secrets file's values: plaintext as is, a vault only with the server's password file. */
+/** A secrets file's values: plaintext as is, a vault only with the server's password file; a missing file has none. */
 const secretsOf = async (server: Server, path: string): Promise<Secrets> => {
   const source = text(path);
-  if (source === undefined) return { kind: "locked", reason: "missing" };
+  if (source === undefined) return { kind: "readable", values: {} };
   if (!vaulted(source)) return { kind: "readable", values: mappingOf(source) };
-  if (server.vault.kind !== "file" || !existsSync(server.vault.file))
-    return { kind: "locked", reason: "vaulted, and no vault password file here" };
+  if (server.vault.kind !== "file")
+    return { kind: "locked", reason: "vaulted, and server.yml names no vault_password_file", hint: "vault_password_file in server.yml lets kayra open it" };
+  const file = server.vault.file.replace(homedir(), "~");
+  if (!existsSync(server.vault.file)) return { kind: "locked", reason: `vaulted, and there is no ${file} here`, hint: "put the vault's password there" };
   const opened = await capture(["ansible-vault", "view", "--vault-password-file", server.vault.file, path], "capture");
   return opened.code === 0
     ? { kind: "readable", values: mappingOf(opened.stdout) }
-    : { kind: "locked", reason: "the vault password does not open it" };
+    : { kind: "locked", reason: `${file} does not open it`, hint: "is it this vault's password?" };
 };
 
 const appPath = (entry: string): string => {

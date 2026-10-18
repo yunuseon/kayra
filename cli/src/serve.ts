@@ -49,10 +49,10 @@ export const serve = (config: Api, assets: string | undefined, port: number, cli
           url: clients.ui ? `${base}/login?token=${token}` : `${base}/api`, port: actual,
           ...(clients.api ? { discovery: file } : {}),
           close: async () => {
-            if (discovery?.ok === true) discovery.value.remove();
             const stopping = api.stop();
             server.closeAllConnections();
             await Promise.all([stopping, new Promise<void>((done) => { server.close(() => { done(); }); })]);
+            if (discovery?.ok === true) discovery.value.remove();
           },
         });
       } catch (error) { server.close(); reject(error instanceof Error ? error : new Error(String(error))); }

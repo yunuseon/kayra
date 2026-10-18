@@ -374,6 +374,24 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 - **Reverse proxy:** Traefik v3.7. Platform subdomains: `auth.`, `traefik.`, `deploy.`; apps claim their own (e.g. `www.`, `api.`). Platform subdomains live in `hosts.conf`, app ones in each `app.yml` — `scripts/local/setup-hosts.sh`, `scripts/local/certs.sh` and the app role all read those, so they cannot drift.
 - **Auth:** Authelia at `auth.<domain>`, passkeys. Staff only, one `admin` group, users in a vault-rendered YAML file. See the site's `concepts/authentication.md`.
 
+## Working here as an AI agent
+
+kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude Code) in its `.claude/settings.json`:
+
+- **`scripts/agent/guard.sh`**, a PreToolUse hook on Bash, makes a command that changes something real **ask** the operator first, every time:
+  - kayra changing a server that is not multipass (`up`, `provision`, `setup`, `deploy`, `apps`, `adopt`, `down`, `app purge|deploy|rollback`, `job`; not with `--dry-run`);
+  - `ansible`/`ansible-playbook` against an inventory, and `ansible-vault` opening or writing a vault;
+  - merging a PR, forge API writes, changing or deleting a repository, releases, `npm publish`;
+  - `git push` of `main` or a tag, force pushes, deleting a remote branch;
+  - `tofu apply|destroy|import|state …`;
+  - destructive commands over SSH.
+  Building, testing, reading, `kayra verify|plan|validate|app check|app runs|app logs`, and pushing a feature branch run without asking.
+- **It fails closed** in kayra (`onFailure: block`); a fleet without its kayra installed asks for everything until `npm ci`.
+- **Editing the guardrails asks too:** `.claude/**`, `scripts/agent/**`, `.github/CODEOWNERS`.
+- **It reads the command's text.** It stops mistakes and instructions smuggled in through a file, an issue or a web page, not an adversary: a script it does not read runs whatever it contains. Each case is in `ci/tests/guard/run.sh` (in the checks as `platform:guard`); a new guard gets a case.
+- **CODEOWNERS** (`.github/CODEOWNERS`) names the trust boundary, the files a change to which the maintainer reviews: the compose policy, the deployer's webhook, forge and bundle code, the platform compose files, `require-main.sh`, the guard itself, the checks.
+- **`main` is protected on GitHub:** changes arrive through a pull request with green checks; no direct push, no force push, no deletion, for admins too.
+
 ## Code style
 
 - No comments unless WHY is non-obvious. Names narrate the code.

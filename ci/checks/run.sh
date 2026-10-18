@@ -100,6 +100,7 @@ platform_tofu_fmt() { tofu fmt -check -recursive -diff "$E/terraform"; }
 
 compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.sh"; }
 verify_cases() { bash "$E/ci/tests/verify/run.sh"; }
+guard_cases() { bash "$E/ci/tests/guard/run.sh"; }
 
 # The kayra CLI: strictest types, its lint rules, its tests.
 cli_typecheck() { (cd "$E" && node_modules/.bin/tsc -p cli --noEmit); }
@@ -255,6 +256,7 @@ if [ "$platform" = true ]; then
     check platform:tofu-fmt platform_tofu_fmt
     check platform:compose-policy compose_policy
     check platform:verify verify_cases
+    check platform:guard guard_cases
     check platform:cli-typecheck cli_typecheck
     check platform:cli-lint cli_lint
     check platform:cli-test cli_test

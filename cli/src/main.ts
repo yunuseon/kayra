@@ -15,11 +15,13 @@ import { gather } from "./gather.ts";
 import type { Fleet, Server } from "./fleet.ts";
 import { interpret, type Io } from "./interpret.ts";
 import { findFleetRoot, loadFleet } from "./load.ts";
+import { systemBrowser } from "./web/opener.ts";
+import { serveUi } from "./web/server.ts";
 import { network } from "./net.ts";
 import { render, type Plan } from "./plan.ts";
 import { flatMap, map, ok, type Result } from "./result.ts";
 import { explain } from "./ui/explain.ts";
-import { bad, paint } from "./ui/line.ts";
+import { bad, muted, paint, strong } from "./ui/line.ts";
 import { framed, silent, type Invocation } from "./ui/progress.ts";
 import { screen, settle, watch } from "./ui/terminal.ts";
 import { shortener, truncate } from "./ui/text.ts";
@@ -127,6 +129,17 @@ else {
       ? [JSON.stringify(statusJson(looks), null, 2)]
       : statusView(looks, { frame: "", room: screens.out.live ? screens.out.columns : Infinity, offline })
     ).forEach(io.out);
+  } else if (args.command.name === "ui") {
+    // The browser side: web/dist in a checkout, cli/dist/web in the package.
+    const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "web")].find((dir) => existsSync(join(dir, "index.html")));
+    const { port, noOpen } = args.command;
+    const listening = await serveUi({ kayra, fleet: fleet.value, version, assets, short, network: network(2_000) }, port);
+    io.err([strong("kayra ui"), muted(` · ${fleet.value.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);
+    io.out(listening.url);
+    if (!noOpen) systemBrowser.open(listening.url);
+    process.once("SIGINT", () => {
+      void listening.close().then(() => process.exit(0));
+    });
   } else if (args.command.name === "validate") {
     const { server: chosen, json } = args.command;
     const servers = fleet.value.servers.filter((each) => chosen === undefined || each.name === chosen);

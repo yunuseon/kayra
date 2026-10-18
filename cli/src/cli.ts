@@ -1,9 +1,9 @@
-import { command, constant, group, map, merge, multiple, object, option, optional, or, type InferValue } from "@optique/core";
+import { command, constant, group, map, merge, multiple, object, option, optional, or, withDefault, type InferValue } from "@optique/core";
 import type { DocSection } from "@optique/core/doc";
 import { lineBreak, message, text, url, type Message } from "@optique/core/message";
 import { argument } from "@optique/core/primitives";
 import type { Usage } from "@optique/core/usage";
-import { choice, string } from "@optique/core/valueparser";
+import { choice, integer, string } from "@optique/core/valueparser";
 import type { RunOptions } from "@optique/run";
 import { appNameParser, domainParser, serverNameParser, subdomainParser } from "./brand.ts";
 import type { Fleet } from "./fleet.ts";
@@ -272,6 +272,19 @@ export const parser = (fleet: Fleet) => {
             command("doctor", object({ name: constant("doctor") }), {
               brief: message`Check that this Mac can run every command on every server.`,
             }),
+            command(
+              "ui",
+              object({
+                name: constant("ui"),
+                port: withDefault(option("--port", integer({ min: 0, max: 65_535, metavar: "PORT" }), { description: message`Listen on this port (default: any free one).` }), 0),
+                noOpen: option("--no-open", { description: message`Print the URL, open no browser.` }),
+              }),
+              {
+                brief: message`The web interface on this Mac: the fleet, its servers and apps, every command with its steps live.`,
+                description: message`Listens on 127.0.0.1 only. The URL it prints carries this launch's token; nothing else gets in. Runs the same plans as the command line, with the same guards; a change to a real server asks for its name first.`,
+                footer: footer(["kayra ui", "open it in the browser"], ["kayra ui --port 7700 --no-open", "for web/'s dev server"]),
+              },
+            ),
             command(
               "certs",
               object({

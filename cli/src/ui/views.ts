@@ -6,7 +6,8 @@ import { ago, duration, table } from "./text.ts";
 
 const deployed = z.object({ sha: z.string(), time: z.iso.datetime() });
 
-const runsAnswer = z.object({
+/** `ctl runs <app> --json`, as this kayra reads it. */
+export const runsSchema = z.object({
   app: z.string(),
   live: deployed.exactOptional(),
   runs: z.array(
@@ -22,13 +23,14 @@ const runsAnswer = z.object({
   ),
 }) satisfies z.ZodType<RunsAnswer>;
 
-const releasesAnswer = z.object({
+/** `ctl rollback <app> --json`, as this kayra reads it. */
+export const releasesSchema = z.object({
   app: z.string(),
   releases: z.array(deployed.extend({ live: z.boolean() })),
 }) satisfies z.ZodType<ReleasesAnswer>;
 
 /** The answer as the schema has it, or nothing: then it is not the answer this kayra expects. */
-const parsed = <T>(schema: z.ZodType<T>, answer: string): T | undefined => {
+export const parsed = <T>(schema: z.ZodType<T>, answer: string): T | undefined => {
   try {
     const json: unknown = JSON.parse(answer);
     const result = schema.safeParse(json);
@@ -125,11 +127,11 @@ export const logView = (log: string): readonly Line[] => linesOf(log).map(logLin
 export const draw = (view: View, answer: string, now: number): readonly Text[] => {
   switch (view.view) {
     case "runs": {
-      const runs = parsed(runsAnswer, answer);
+      const runs = parsed(runsSchema, answer);
       return runs === undefined ? linesOf(answer) : runsView(view, runs, now);
     }
     case "releases": {
-      const releases = parsed(releasesAnswer, answer);
+      const releases = parsed(releasesSchema, answer);
       return releases === undefined ? linesOf(answer) : releasesView(view, releases, now);
     }
     case "log":

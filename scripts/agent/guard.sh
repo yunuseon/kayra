@@ -57,6 +57,8 @@ if has "${kayra} +(--[a-z-]+ +)*${verbs}( |$)" && ! has '--dry-run'; then
         || target="$(sed -n 's/^target: *\([a-z]*\).*/\1/p' "${project}/servers/${server}/server.yml")"
     [ "$target" = multipass ] || ask "kayra changes ${server:-a server}${target:+ (target ${target})}"
 fi
+# kayra ui runs any command on any server from a browser, where this guard sees none of them.
+has "${kayra} +(--[a-z-]+ +)*ui( |$)" && ask "kayra ui runs commands on every server from a browser, out of this guard's sight"
 
 # ── Ansible and the vaults ──────────────────────────────────────────────────
 has '(^|[;&|( ])ansible-vault +(decrypt|view|edit|encrypt|encrypt_string|rekey|create)( |$)' \

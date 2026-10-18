@@ -63,6 +63,10 @@ pass | kayra app runs prod shop
 pass | kayra app logs prod shop
 pass | kayra app check .
 pass | kayra ssh prod -- docker ps
+# kayra ui acts out of sight of the guard: starting it asks
+ask  | kayra ui
+ask  | kayra ui --port 7700 --no-open
+ask  | node ~/Work/kayra/cli/src/main.ts ui
 # Ansible and the vaults
 ask  | ansible-vault decrypt --output - servers/prod/secrets.yml
 ask  | ansible-vault view servers/prod/secrets.yml

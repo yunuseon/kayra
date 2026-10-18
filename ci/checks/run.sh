@@ -108,6 +108,13 @@ cli_typecheck() { (cd "$E" && node_modules/.bin/tsc -p cli --noEmit); }
 cli_lint() { (cd "$E/cli" && ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
 cli_test() { (cd "$E" && node --test 'cli/test/**/*.test.ts'); }
 
+# kayra ui's browser side (web/): the same strictness, its own tests, and that it builds.
+# Its lint tooling is the CLI's, from the root's node_modules.
+web_typecheck() { (cd "$E/web" && node_modules/.bin/tsc --noEmit); }
+web_lint() { (cd "$E/web" && ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
+web_test() { (cd "$E/web" && node_modules/.bin/vitest run); }
+web_build() { (cd "$E/web" && node_modules/.bin/vite build --outDir "$(mktemp -d)" --emptyOutDir); }
+
 # "Never tls=true on a deployed router": ACME never runs for it.
 rule_platform_no_tls_true() {
     local files
@@ -262,6 +269,10 @@ if [ "$platform" = true ]; then
     check platform:cli-typecheck cli_typecheck
     check platform:cli-lint cli_lint
     check platform:cli-test cli_test
+    check platform:web-typecheck web_typecheck
+    check platform:web-lint web_lint
+    check platform:web-test web_test
+    check platform:web-build web_build
     check platform:rule:no-tls-true rule_platform_no_tls_true
     check platform:rule:builder-has-no-socket rule_builder_has_no_socket
     check platform:rule:builder-has-no-docker-cli rule_builder_has_no_docker_cli

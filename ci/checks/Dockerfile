@@ -17,6 +17,12 @@ WORKDIR /cli
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --ignore-scripts
 
+# kayra ui's browser side (web/), from its own lockfile.
+FROM node:24.21.0-trixie-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json web/.npmrc ./
+RUN npm ci --ignore-scripts
+
 FROM python:3.14.8-slim-trixie AS tools
 
 # renovate: datasource=github-releases depName=koalaman/shellcheck
@@ -69,6 +75,7 @@ ARG CHECKS=--platform
 WORKDIR /kayra
 COPY . .
 COPY --from=cli /cli/node_modules node_modules
+COPY --from=web /web/node_modules web/node_modules
 COPY --from=fleet / /fleet
 # OpenTofu's providers kept between runs, so the checks do not hang on GitHub.
 RUN --mount=type=cache,id=tofu-providers,target=/root/.cache/tofu-providers \

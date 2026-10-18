@@ -34,7 +34,8 @@
   "scripts": {
     "kayra": "node cli/src/main.ts",
     "build": "tsc -p cli/tsconfig.build.json",
-    "prepack": "npm run build",
+    "build:web": "npm --prefix web ci --silent && npm --prefix web run build -- --outDir ../cli/dist/web --emptyOutDir",
+    "prepack": "npm run build && npm run build:web",
     "typecheck": "tsc -p cli --noEmit",
     "lint": "cd cli && eslint --flag unstable_native_nodejs_ts_config .",
     "test": "node --test 'cli/test/**/*.test.ts'",

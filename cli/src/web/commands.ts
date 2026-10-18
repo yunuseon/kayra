@@ -3,7 +3,7 @@ import { appName } from "../brand.ts";
 import type { Planned } from "../commands/index.ts";
 import type { Fleet, Server } from "../fleet.ts";
 import { err, flatMap, map, ok, type Result } from "../result.ts";
-import type { CommandInput, CommandName, ServerFacts } from "./contract.ts";
+import type { CommandInput, CommandName, ServerCommand, ServerFacts } from "./contract.ts";
 
 const onServer = z.enum(["up", "provision", "deploy", "setup", "plan", "verify", "apps", "down", "adopt", "backup test"]);
 
@@ -93,7 +93,7 @@ export const words = (input: CommandInput): string => {
 };
 
 /** What the browser offers for a server, the everyday ones first. */
-export const offered = (server: Server): readonly CommandName[] => {
+export const offered = (server: Server): readonly (ServerCommand | "job")[] => {
   const creates = server.terraform || server.vm;
   return [
     ...(server.kind === "platform" ? (["deploy", "apps", "verify"] as const) : []),

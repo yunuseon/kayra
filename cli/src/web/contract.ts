@@ -12,9 +12,12 @@ export type Text = string | Line;
 
 export type Part = "provision" | "setup" | "apps" | "verify" | "hosts";
 
+/** The commands a server's page offers: these and its job. */
+export type ServerCommand = "up" | "provision" | "deploy" | "setup" | "plan" | "verify" | "apps" | "down" | "adopt" | "backup test";
+
 /** A command the browser may ask for; the server checks it against the fleet before anything runs. */
 export type CommandInput =
-  | { readonly name: "up" | "provision" | "deploy" | "setup" | "plan" | "verify" | "apps" | "down" | "adopt" | "backup test"; readonly server: string }
+  | { readonly name: ServerCommand; readonly server: string }
   | { readonly name: "app deploy"; readonly server: string; readonly app: string; readonly ref?: string }
   | { readonly name: "app rollback"; readonly server: string; readonly app: string; readonly sha: string }
   | { readonly name: "app purge"; readonly server: string; readonly app: string }
@@ -30,7 +33,7 @@ export type ServerFacts = {
   readonly domain: string;
   readonly apps: readonly string[];
   /** The commands the browser offers for it, in the order it shows them. */
-  readonly commands: readonly CommandName[];
+  readonly commands: readonly (ServerCommand | "job")[];
   /** Its secrets ask for the vault password on a terminal: nothing that opens them runs here. */
   readonly needsTerminal: boolean;
 };
@@ -41,6 +44,9 @@ export type FleetFacts = {
   readonly servers: readonly ServerFacts[];
 };
 
+/** How a port answered from the Mac; `pending` until it has. */
+export type ReachState = "pending" | "open" | "answered" | "refused" | "no-answer" | "unreachable" | "unknown-host" | "bad-certificate" | "failed" | "skipped";
+
 /** `kayra status --json`. */
 export type Status = {
   readonly servers: readonly {
@@ -49,11 +55,16 @@ export type Status = {
     readonly target: string;
     readonly domain: string;
     readonly apps: readonly string[];
-    readonly machine: { readonly state: string; readonly address: string | null; readonly from: string | null; readonly reason: string | null };
-    readonly ssh: { readonly port: number; readonly state: string; readonly ms: number | null; readonly error: string | null };
+    readonly machine: {
+      readonly state: "pending" | "found" | "not-provisioned" | "no-machine" | "unreadable";
+      readonly address: string | null;
+      readonly from: "inventory" | "opentofu" | null;
+      readonly reason: string | null;
+    };
+    readonly ssh: { readonly port: number; readonly state: ReachState; readonly ms: number | null; readonly error: string | null };
     readonly https: {
       readonly url: string;
-      readonly state: string;
+      readonly state: ReachState;
       readonly status: number | null;
       readonly ms: number | null;
       readonly error: string | null;

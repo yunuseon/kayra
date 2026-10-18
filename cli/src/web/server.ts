@@ -25,7 +25,7 @@ export type Ui = {
   readonly kayra: KayraRoot;
   readonly fleet: Fleet;
   readonly version: string;
-  /** The built browser side (web/dist, or cli/dist/web in the package); without it, a page saying how to build it. */
+  /** The built browser side (web/dist, or cli/dist/browser in the package); without it, a page saying how to build it. */
   readonly assets: string | undefined;
   readonly short: (text: string) => string;
   readonly network: Network;

@@ -12,7 +12,7 @@ node_modules/
 compose/authelia/secrets/
 compose/authelia/users_database.yml
 
-# The compiled CLI, built for the package (npm pack / publish), with the web interface in cli/dist/web
+# The compiled CLI, built for the package (npm pack / publish), with kayra ui's browser side in cli/dist/browser
 cli/dist/
 
 # kayra ui's browser side, built in a checkout (web/: npm run build)

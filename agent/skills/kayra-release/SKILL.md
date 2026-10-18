@@ -97,6 +97,14 @@ d="$(mktemp -d)" && (cd "$d" && npm pack @yunuseon/kayra@<version> --silent && t
 
 Test-only paths (`test/`, `ci/`) are meant to stay out.
 
+Look for what must still be there too, not only for what is new: a build
+step can remove files another one made. 0.16.0 shipped without
+`cli/dist/web/*.js`, because the browser build emptied the directory tsc had
+put the server's modules in, and no command started. Listing the new browser
+files did not show that. `release.yml` now runs
+`scripts/local/packed-runs.sh` before `npm publish`: it packs, installs and
+runs the CLI as a fleet would. Run it yourself before opening the bump PR.
+
 ## 5. Afterwards
 
 - Remove the worktree and the local branch.

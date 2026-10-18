@@ -1,0 +1,4 @@
+---
+- name: Change something in a role
+  ansible.builtin.command: "true"
+  changed_when: true

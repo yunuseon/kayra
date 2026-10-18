@@ -373,6 +373,7 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 
 - **Reverse proxy:** Traefik v3.7. Platform subdomains: `auth.`, `traefik.`, `deploy.`; apps claim their own (e.g. `www.`, `api.`). Platform subdomains live in `hosts.conf`, app ones in each `app.yml` — `scripts/local/setup-hosts.sh`, `scripts/local/certs.sh` and the app role all read those, so they cannot drift.
 - **Auth:** Authelia at `auth.<domain>`, passkeys. Staff only, one `admin` group, users in a vault-rendered YAML file. See the site's `concepts/authentication.md`.
+- **Ansible's output is kayra's** (`ansible/callback_plugins/kayra.py`, the `stdout_callback` in `ansible.cfg`): changed tasks (with diffs under `--diff`, so `kayra plan` shows them), failures with their message and output, what a `debug` task says, a recap; ok and skipped tasks are only counted. Indented to sit under kayra's step, the task at work redrawn in place on a terminal, holding Display's lock. A task whose result an operator must read uses `debug`, not an ok result. `ANSIBLE_STDOUT_CALLBACK=default` brings back Ansible's own. Each kind of result is a task in `ci/tests/ansible-output/play.yml` (`platform:ansible-output`); a new kind gets one.
 
 ## Working here as an AI agent
 

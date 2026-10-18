@@ -1,0 +1,25 @@
+    ▸ Output
+    ~ demo › Change something in a role
+    ~ Write a file
+        --- before
+        +++ after: <dir>/file
+        @@ -0,0 +1,2 @@
+        +first
+        +second
+    ~ Change each item · one
+    ~ Change each item · two
+    · Say something
+        Ready.
+        Next: something else.
+    ~ Keep a secret
+    ✗ Fail, ignored                                                      ignored
+    ↻ Retry once: retrying, 1 left
+    ✗ Fail with output                                                    exit 3
+        The command exited with a non-zero return code.
+        stderr:
+          on stderr
+        stdout:
+          on stdout
+        at ansible-output/play.yml:54
+    8 ok · 5 changed · 1 skipped · 1 ignored · 1 failed
+--- exit 2

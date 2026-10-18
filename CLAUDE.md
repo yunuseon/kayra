@@ -386,7 +386,7 @@ kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude 
   - `tofu apply|destroy|import|state …`;
   - destructive commands over SSH.
   Building, testing, reading, `kayra verify|plan|validate|app check|app runs|app logs`, and pushing a feature branch run without asking.
-- **It fails closed** in kayra (`onFailure: block`); a fleet without its kayra installed asks for everything until `npm ci`.
+- **It fails closed** in kayra (`onFailure: block`); a fleet without its kayra installed lets only `npm ci` through until then: everything else asks, or is refused in a mode that approves by itself.
 - **Editing the guardrails asks too:** `.claude/**`, `scripts/agent/**`, `.github/CODEOWNERS`.
 - **It reads the command's text.** It stops mistakes and instructions smuggled in through a file, an issue or a web page, not an adversary: a script it does not read runs whatever it contains. Each case is in `ci/tests/guard/run.sh` (in the checks as `platform:guard`); a new guard gets a case.
 - **Procedures are skills** (`agent/skills/`, shipped in the package; `.claude/skills/` links them here): **kayra-release** (bump PR → checks → merge → tag → `release.yml` → the published package), **kayra-lab** (the upgrade lab, reading its failures), **kayra-rollout** (a release into each fleet: the bump PR in a worktree, then `kayra deploy` server by server with `verify`). A fleet links `kayra-rollout` from its pinned kayra. A procedure that went wrong gets its lesson written into its skill.

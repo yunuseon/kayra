@@ -72,8 +72,8 @@ describe("a run, folded", () => {
     expect(outcome(view)).toBe("failed");
   });
   test("a confirmation asked, then answered; a run cut short is interrupted", () => {
-    const asking = reduce(reduce(empty, plan, 0), { kind: "ask", prompt: "Type lab" }, 0);
-    expect(asking.asking).toBe("Type lab");
+    const asking = reduce(reduce(empty, plan, 0), { kind: "ask", secret: false, prompt: "Type lab" }, 0);
+    expect(asking.asking?.prompt).toBe("Type lab");
     expect(reduce(asking, { kind: "answered" }, 0).asking).toBeUndefined();
     const cut = [
       plan,

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { run } from "@optique/run";
-import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { absolutePath, fleetRoot, kayraRoot, within } from "./core/brand.ts";
+import { questions } from "./clients/cli/questions.ts";
 import { fromCommand } from "./clients/cli/invocation.ts";
 import { parser, runOptions } from "./clients/cli/parser.ts";
 import { verbose } from "./core/commands/server.ts";
@@ -38,6 +38,8 @@ const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(
 
 const screens = { out: screen(process.stdout, process.env), err: screen(process.stderr, process.env) };
 
+const input = questions((text) => paint(text, screens.err.colors));
+
 const io: Io = {
   out: (text) => {
     console.log(paint(text, screens.out.colors, screens.out.links));
@@ -45,23 +47,7 @@ const io: Io = {
   err: (text) => {
     console.error(paint(text, screens.err.colors, screens.err.links));
   },
-  ask: async (prompt) => {
-    const terminal = createInterface({ input: process.stdin, output: process.stderr });
-    // Ctrl-C at the prompt, or no more input: no answer, so nothing happens.
-    const answer = await new Promise<string>((resolve) => {
-      terminal.once("SIGINT", () => {
-        resolve("");
-      });
-      terminal.once("close", () => {
-        resolve("");
-      });
-      void terminal.question(paint(prompt, screens.err.colors)).then(resolve, () => {
-        resolve("");
-      });
-    });
-    terminal.close();
-    return answer;
-  },
+  ask: (question) => input.ask(question),
 };
 
 const fail = (message: string): never => {
@@ -92,7 +78,7 @@ const execute = async (steps: Plan, about: Invocation, framing: boolean): Promis
   const progress = framing
     ? framed(screens.err, (raw) => process.stderr.write(raw), about)
     : silent;
-  const passed = await interpret(steps, io, progress, () => interrupt.signal.aborted);
+  const passed = await interpret(steps, { ...io, signal: interrupt.signal }, progress, () => interrupt.signal.aborted).finally(input.close);
   // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
   process.exitCode = interrupt.signal.aborted ? 130 : passed ? 0 : 1;
 };

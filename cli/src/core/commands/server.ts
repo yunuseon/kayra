@@ -8,7 +8,7 @@ import {
   type Subdomain,
 } from "../brand.ts";
 import type { Server } from "../fleet.ts";
-import { partOf, run, type Arg, type Argv, type Env, type Plan, type Query, type RunStep, type Step } from "../plan.ts";
+import { partOf, run, type Arg, type Argv, type Env, type Need, type Plan, type Query, type RunStep, type Step } from "../plan.ts";
 import { all, err, map, ok, type Result } from "../../result.ts";
 
 /** What every command works with besides the server: the engine's files and the fleet's. */
@@ -23,16 +23,27 @@ const ansiblePath = ({ kayra }: Engine, ...segments: readonly string[]): Absolut
 const inventory = (server: Server): AbsolutePath => within(server.dir, "inventory.ini");
 const terraform = (server: Server): string => `-chdir=${within(server.dir, "terraform")}`;
 
-/** How Ansible gets the vault password: from a file, or by asking. */
-const vaultEnv = (server: Server): Env => {
+/**
+ * How Ansible gets the vault password: from the server's password file, or
+ * from kayra, which asks the operator once per run (Need "vault").
+ */
+const vault = (server: Server): { readonly env: Env; readonly needs: readonly Need[] } => {
   switch (server.vault.kind) {
     case "file":
-      return { ANSIBLE_VAULT_PASSWORD_FILE: server.vault.file };
+      return { env: { ANSIBLE_VAULT_PASSWORD_FILE: server.vault.file }, needs: [] };
     case "ask":
-      return { ANSIBLE_ASK_VAULT_PASS: "True" };
+      return { env: {}, needs: [{ kind: "vault", server: server.name }] };
     case "none":
-      return {};
+      return { env: {}, needs: [] };
   }
+};
+
+const needing = (step: RunStep, needs: readonly Need[]): RunStep => ({ ...step, needs });
+
+/** The vault's environment, and its need where kayra must ask for the password. */
+const vaulted = (step: RunStep, server: Server): RunStep => {
+  const { env, needs } = vault(server);
+  return { ...step, env: { ...env, ...step.env }, ...(needs.length === 0 ? {} : { needs }) };
 };
 
 const ansibleEnv = (engine: Engine, env: Env): Env => ({ ...env, ANSIBLE_CONFIG: ansiblePath(engine, "ansible.cfg") });
@@ -114,7 +125,7 @@ export const provision = (engine: Engine, server: Server): Result<Plan, string> 
 
 /** The playbook for the server's kind, as setup runs it; plan adds check mode. */
 const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []): Step =>
-  run(
+  vaulted(run(
     `Host layer · ${server.kind}.yml${extra.includes("--check") ? ", check mode" : ""}`,
     [
       "ansible-playbook",
@@ -131,8 +142,8 @@ const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] =
       `target=${server.target}`,
       ...extra,
     ],
-    ansibleEnv(engine, vaultEnv(server)),
-  );
+    ansibleEnv(engine, {}),
+  ), server);
 
 /** The host layer: the playbook for the server's kind. */
 export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
@@ -144,7 +155,7 @@ export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
         ? [certs(engine, server.domain, [appSubdomains(engine, server), ...server.stackHosts])]
         : []),
       ...reachable(engine, server),
-      collections(engine, vaultEnv(server)),
+      collections(engine, vault(server).env),
       hostPlaybook(engine, server),
     ]),
   );
@@ -164,16 +175,16 @@ export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
           run("OpenTofu plan", ["tofu", terraform(server), "plan", "-input=false", "-lock=false"]),
         ]
       : []),
-    collections(engine, vaultEnv(server)),
+    collections(engine, vault(server).env),
     hostPlaybook(engine, server, ["--check", "--diff"]),
     { kind: "note", text: `kayra plan changed nothing on ${server.name}: the changed tasks above are what kayra setup would do.` },
   ]);
 
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server): Result<Plan, string> => {
-  const env = vaultEnv(server);
+  const { env } = vault(server);
   const playbook = (title: string, name: string, ...extra: readonly string[]): Step =>
-    run(title, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, env));
+    vaulted(run(title, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, {})), server);
   return ok(
     partOf("apps", [
       fromMain(engine, server),
@@ -213,13 +224,13 @@ export const hosts = (engine: Engine, server: Server): Result<Plan, string> =>
       "hosts",
       server.target === "multipass"
         ? [
-            run("/etc/hosts", [
+            needing(run("/etc/hosts", [
               "bash",
               script(engine, "setup-hosts.sh"),
               server.domain,
               { kind: "query", argv: ["tofu", terraform(server), "output", "-raw", "server_ip"], words: "one" },
               appSubdomains(engine, server),
-            ]),
+            ]), [{ kind: "sudo" }])
           ]
         : [{ kind: "note", text: `hosts: ${server.target} uses real DNS, nothing to do.` }],
     ),
@@ -308,7 +319,7 @@ export const backupTest = (engine: Engine, server: Server): Result<Plan, string>
   if (server.inventory === undefined) return err(`no inventory for '${server.name}' — provision it first.`);
   return ok([
     ...reachable(engine, server),
-    run(
+    vaulted(run(
       "Start the restore test",
       [
         "ansible",
@@ -323,8 +334,8 @@ export const backupTest = (engine: Engine, server: Server): Result<Plan, string>
         "-a",
         `docker compose -f ${server.backupDir}/docker-compose.yml exec -d -T backup /etc/backup/restore-test.sh`,
       ],
-      ansibleEnv(engine, vaultEnv(server)),
-    ),
+      ansibleEnv(engine, {}),
+    ), server),
     { kind: "note", text: "Following the restore test. Ctrl-C stops following, not the test." },
     run("Follow the restore test", [
       "ssh",
@@ -360,7 +371,7 @@ const sshTo = (server: Server, remote: readonly string[]): Result<Argv, string> 
 
 /** An interactive shell, or the remote command as ssh runs it (the remote shell reads it). */
 export const ssh = (server: Server, remote: readonly string[]): Result<Plan, string> =>
-  map(sshTo(server, remote), (argv) => [run("SSH", argv)]);
+  map(sshTo(server, remote), (argv) => [remote.length === 0 ? { ...run("SSH", argv), kind: "session" } : run("SSH", argv)]);
 
 /** What `kayra app …` and `kayra job …` ask of a server: its deployer's ctl, over SSH. */
 export type DeployerCommand =

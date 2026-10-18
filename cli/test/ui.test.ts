@@ -223,5 +223,5 @@ test("listed: each step's kind, title, command with its paths named by their roo
     { index: 2, kind: "run", title: "Remove apps not in server.yml", command: "true", part: "apps", opens: "apps" },
   ]);
   strictEqual(needsTerminal(deploy), false);
-  strictEqual(needsTerminal([run("asks", ["ansible-playbook"], { ANSIBLE_ASK_VAULT_PASS: "True" })]), true);
+  strictEqual(needsTerminal([{ ...run("SSH", ["ssh", "box"]), kind: "session" }]), true);
 });

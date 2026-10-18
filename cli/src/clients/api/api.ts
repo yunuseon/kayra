@@ -9,7 +9,7 @@ import { json, send } from "../../deployer/http.ts";
 import type { Fleet } from "../../core/fleet.ts";
 import { gather } from "../../core/gather.ts";
 import { capture, interpret, type Io } from "../../core/interpret.ts";
-import { needsTerminal, type Plan } from "../../core/plan.ts";
+import type { Plan } from "../../core/plan.ts";
 import { err, flatMap, ok, type Result } from "../../result.ts";
 import { listed, reporting, type Invocation } from "../../core/present/progress.ts";
 import { follow } from "../../core/updates.ts";
@@ -34,6 +34,7 @@ type Live = {
   readonly stop: AbortController;
   /** The answer a confirmation waits for, while one does. */
   readonly answer: ((text: string) => void) | undefined;
+  readonly input: ((chunk: string) => void) | undefined;
 };
 
 /** kayra ui's one mutable cell: the runs it started, swapped whole on every change. */
@@ -69,7 +70,7 @@ const allRuns = (fleet: Fleet): readonly Run[] => {
 
 /** Ansible colours its output for a terminal only; the browser draws the colours too. */
 const coloured = (plan: Plan): Plan =>
-  plan.map((step) => (step.kind === "run" ? { ...step, env: { ...step.env, ANSIBLE_FORCE_COLOR: "1" } } : step));
+  plan.map((step) => (step.kind === "run" || step.kind === "session" ? { ...step, env: { ...step.env, ANSIBLE_FORCE_COLOR: "1" } } : step));
 
 /** A server-sent stream; `end` says everything is said, so the browser closes instead of reconnecting. */
 const sse = (response: ServerResponse): { readonly say: (data: unknown) => void; readonly end: () => void } => {
@@ -116,14 +117,13 @@ const preview = (ui: Api, input: wire.CommandInput): Result<wire.Preview, string
     flatMap(invocationOf(ui, input), (invocation) => ok({ invocation, steps: listed(plan, ui.short), changes: changes(input) })),
   );
 
-/** Starts a run, or says why it cannot: one per server, a terminal it needs, a real server not confirmed. */
+/** Starts a run, or says why it cannot: one per server, a real server not confirmed. */
 const start = (ui: Api, input: wire.CommandInput, confirm: unknown): Result<string, readonly [number, string]> => {
   const target = targetOf(ui.fleet, input);
   const plan = planOf(ui, input);
   const invocation = invocationOf(ui, input);
   if (!target.ok || !plan.ok || !invocation.ok) return err([400, [target, plan, invocation].flatMap((each) => (each.ok ? [] : [each.error])).join("; ")]);
   const server = target.value;
-  if (needsTerminal(plan.value)) return err([400, "its vault password is asked on a terminal: run it there, or give the server a vault_password_file"]);
   if (busy(allRuns(ui.fleet), server?.name)) return err([409, `a run on ${server?.name ?? ""} has not ended`]);
   if (changes(input) && server !== undefined && server.target !== "multipass" && confirm !== server.name)
     return err([403, `this changes ${server.name}: confirm with its name`]);
@@ -134,7 +134,7 @@ const start = (ui: Api, input: wire.CommandInput, confirm: unknown): Result<stri
   mkdirSync(runsDir(ui.fleet), { recursive: true });
   appendFileSync(file, recordLine({ id: run.id, command: run.command, ...(server === undefined ? {} : { server: server.name }), started }));
   // eslint-disable-next-line functional/immutable-data -- kayra ui's state lives here, nowhere else
-  cell.live = { ...cell.live, [id]: { run, listeners: [], stop: new AbortController(), answer: undefined } };
+  cell.live = { ...cell.live, [id]: { run, listeners: [], stop: new AbortController(), answer: undefined, input: undefined } };
   const emit = (event: wire.RunEvent): void => {
     appendFileSync(file, recordLine(event));
     swap(id, (live) => ({ ...live, run: { ...live.run, events: [...live.run.events, event] } }));
@@ -150,7 +150,7 @@ const start = (ui: Api, input: wire.CommandInput, confirm: unknown): Result<stri
     err: (text) => {
       emit({ kind: "said", stream: "err", text });
     },
-    ask: (prompt) =>
+    ask: (question) =>
       new Promise((resolve) => {
         swap(id, (live) => ({
           ...live,
@@ -160,14 +160,20 @@ const start = (ui: Api, input: wire.CommandInput, confirm: unknown): Result<stri
             resolve(text);
           },
         }));
-        emit({ kind: "ask", prompt });
+        emit({ kind: "ask", prompt: question.text, secret: question.kind === "secret", ...(question.kind === "confirm" ? { expect: question.expect } : {}) });
       }),
+    input: (deliver) => {
+      swap(id, (live) => ({ ...live, input: deliver }));
+      return () => { swap(id, (live) => ({ ...live, input: undefined })); };
+    },
     output: (chunk, stream) => {
       emit({ kind: "output", stream, chunk });
     },
     ...(stop === undefined ? {} : { signal: stop.signal }),
   };
-  void interpret(coloured(plan.value), io, reporting(emit, invocation.value, ui.short), () => stop?.signal.aborted === true);
+  void interpret(coloured(plan.value), io, reporting(emit, invocation.value, ui.short), () => stop?.signal.aborted === true).finally(() => {
+    swap(id, (live) => ({ ...live, answer: undefined, input: undefined }));
+  });
   return ok(id);
 };
 
@@ -214,7 +220,7 @@ export const handleApi = async (ui: Api, request: IncomingMessage, response: Ser
   const path = url.pathname;
   const method = request.method ?? "GET";
   const app = /^\/api\/servers\/([^/]+)\/apps\/([^/]+)\/(runs|releases|logs)(?:\/([^/]+))?$/.exec(path);
-  const runPath = /^\/api\/runs\/([^/]+)\/(events|answer|cancel)$/.exec(path);
+  const runPath = /^\/api\/runs\/([^/]+)\/(events|answer|cancel|input)$/.exec(path);
   if (method === "GET" && path === "/api/fleet") {
     const fleetFacts: wire.FleetFacts = { fleet: ui.fleet.root.split(sep).at(-1) ?? "", version: ui.version, servers: ui.fleet.servers.map(facts) };
     answerJson(response, 200, fleetFacts);
@@ -266,6 +272,13 @@ export const handleApi = async (ui: Api, request: IncomingMessage, response: Ser
     else if (method === "POST" && what === "cancel" && live !== undefined) {
       live.stop.abort();
       send(response, 202, "stopping\n");
+    } else if (method === "POST" && what === "input" && live?.input !== undefined) {
+      const body = await json(request);
+      if (typeof body !== "object" || body === null || !("text" in body) || typeof body.text !== "string") send(response, 400, "input needs text\n");
+      else {
+        live.input(body.text);
+        send(response, 204, "");
+      }
     } else if (method === "POST" && what === "answer" && live?.answer !== undefined) {
       const body = await json(request);
       live.answer(typeof body === "object" && body !== null && "text" in body && typeof body.text === "string" ? body.text : "");

@@ -6,7 +6,7 @@ provision-box | | provision box
 provision-forge | | provision forge
 setup-shop-test | | setup shop-test
 setup-shop-prod | | setup shop-prod
-setup-edge | | setup edge
+setup-edge | test-vault-password | setup edge
 setup-box | | setup box
 setup-forge | | setup forge
 setup-shop-prod-verbose | | setup shop-prod --verbose
@@ -17,7 +17,7 @@ apps-shop-prod | | apps shop-prod
 apps-edge | | apps edge
 apps-forge | | apps forge
 deploy-shop-prod | | deploy shop-prod
-deploy-edge | | deploy edge
+deploy-edge | test-vault-password | deploy edge
 deploy-shop-prod-verbose-dry-run | | deploy shop-prod -v --dry-run
 up-shop-test | | up shop-test
 up-forge | | up forge

@@ -110,5 +110,5 @@ export const facts = (server: Server): ServerFacts => ({
   domain: server.domain,
   apps: server.apps.map((app) => app.name),
   commands: offered(server),
-  needsTerminal: server.vault.kind === "ask",
+  needsTerminal: false,
 });

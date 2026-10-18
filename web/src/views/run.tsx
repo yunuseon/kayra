@@ -56,7 +56,7 @@ const Step = ({ step, now }: { readonly step: StepView; readonly now: number }) 
   );
 };
 
-const Ask = ({ id, prompt }: { readonly id: string; readonly prompt: Parameters<typeof Spans>[0]["text"] }) => {
+const Ask = ({ id, question }: { readonly id: string; readonly question: Extract<RunEvent, { readonly kind: "ask" }> }) => {
   const [typed, setTyped] = useState("");
   return (
     <form
@@ -64,10 +64,11 @@ const Ask = ({ id, prompt }: { readonly id: string; readonly prompt: Parameters<
       onSubmit={(event) => {
         event.preventDefault();
         void answerRun(id, typed);
+        setTyped("");
       }}
     >
-      <Spans text={prompt} />
-      <input value={typed} onInput={(event) => { setTyped(event.currentTarget.value); }} autoFocus spellcheck={false} />
+      <Spans text={question.prompt} />
+      <input type={question.secret ? "password" : "text"} autoComplete="off" value={typed} onInput={(event) => { setTyped(event.currentTarget.value); }} autoFocus spellcheck={false} />
       <button type="submit" class="button danger">
         Answer
       </button>
@@ -108,7 +109,7 @@ export const RunView = ({ id }: { readonly id: string }) => {
           </button>
         ) : null}
       </Header>
-      {asking === undefined ? null : <Ask id={id} prompt={asking} />}
+      {asking === undefined ? null : <Ask key={view.current} id={id} question={asking} />}
       <div class="timeline">
         {steps.map((step) => (
           <div key={step.listed.index}>

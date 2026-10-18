@@ -21,12 +21,20 @@ export type Probe =
 /** A deployer's answer, read whole and drawn for the operator (present/views.ts): which drawing, and of what. */
 export type View = { readonly view: "runs" | "releases" | "log"; readonly app: AppName; readonly server: ServerName };
 
+/**
+ * What a step needs from the operator before it can run, asked by kayra
+ * (on the terminal, or in the client that started it) and never written
+ * down: a server's vault password, or sudo's password where sudo has none
+ * cached.
+ */
+export type Need = { readonly kind: "vault"; readonly server: ServerName } | { readonly kind: "sudo" };
+
 /** The kayra commands a longer one is made of, each of which runs its part alone. */
 export type Part = "provision" | "setup" | "apps" | "verify" | "hosts";
 
 export type Step = { readonly part?: Part } & (
   | {
-      readonly kind: "run";
+      readonly kind: "run" | "session";
       /** What it does, in a few words: what the operator sees while it runs. */
       readonly title: string;
       readonly argv: readonly [string, ...Arg[]];
@@ -34,6 +42,7 @@ export type Step = { readonly part?: Part } & (
       readonly env: Env;
       /** As it comes, dropped, or drawn by a view once the step is done. */
       readonly stdout: "show" | "discard" | View;
+      readonly needs?: readonly Need[];
     }
   | {
       readonly kind: "check";
@@ -51,7 +60,7 @@ export type Step = { readonly part?: Part } & (
 /** What a command decides to do, as data: run by the interpreter, printed by --dry-run, compared by tests. */
 export type Plan = readonly Step[];
 
-export type RunStep = Extract<Step, { readonly kind: "run" }>;
+export type RunStep = Extract<Step, { readonly kind: "run" | "session" }>;
 
 export const run = (title: string, argv: readonly [string, ...Arg[]], env: Env = {}): RunStep => ({
   kind: "run",
@@ -88,6 +97,7 @@ export const kindOf = (step: Step): string => (step.kind === "check" ? (step.onF
 /** What it is called while it runs; a confirmation and a note say what they say. */
 export const titleOf = (step: Step): string => {
   switch (step.kind) {
+    case "session":
     case "run":
       return step.title;
     case "check":
@@ -99,11 +109,18 @@ export const titleOf = (step: Step): string => {
   }
 };
 
+/** What --dry-run says a step will ask for: kayra asks it when the step runs. */
+const asks = (needs: readonly Need[] = []): string =>
+  needs.length === 0
+    ? ""
+    : `  # asks for ${needs.map((need) => (need.kind === "vault" ? `${need.server}'s vault password` : "sudo's password, unless cached")).join(" and ")}`;
+
 /** The shell command a step runs, or undefined if it runs none. */
 export const commandOf = (step: Step): string | undefined => {
   switch (step.kind) {
+    case "session":
     case "run":
-      return `${assignments(step.env)}${step.argv.map(arg).join(" ")}${step.stdout === "discard" ? " >/dev/null" : ""}`;
+      return `${assignments(step.env)}${step.argv.map(arg).join(" ")}${step.stdout === "discard" ? " >/dev/null" : ""}${asks(step.needs)}`;
     case "check":
       return describeProbe(step.probe);
     case "confirm":
@@ -114,8 +131,9 @@ export const commandOf = (step: Step): string | undefined => {
 
 const describe = (step: Step): string => {
   switch (step.kind) {
+    case "session":
     case "run":
-      return `run      ${commandOf(step) ?? ""}`;
+      return `${step.kind.padEnd(8)} ${commandOf(step) ?? ""}`;
     case "check":
       return `${kindOf(step).padEnd(8)} ${step.label}: ${commandOf(step) ?? ""}`;
     case "confirm":
@@ -128,6 +146,5 @@ const describe = (step: Step): string => {
 /** The plan as plain lines: --dry-run's output where it is read by a program. */
 export const render = (plan: Plan): readonly string[] => plan.map(describe);
 
-/** A plan with a step that asks on the terminal (the vault password, typed): it cannot run without one. */
-export const needsTerminal = (plan: Plan): boolean =>
-  plan.some((step) => step.kind === "run" && step.env["ANSIBLE_ASK_VAULT_PASS"] === "True");
+/** A plan with a step that talks with a person: a client without a terminal gives it a pty and the person's keys. */
+export const needsTerminal = (plan: Plan): boolean => plan.some((step) => step.kind === "session");

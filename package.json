@@ -22,6 +22,7 @@
     "compose/",
     "terraform/",
     "scripts/",
+    "agent/",
     "cloud-init.yml.tpl",
     "hosts.conf",
     "schema/"

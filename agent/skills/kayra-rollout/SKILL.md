@@ -58,7 +58,9 @@ Commit (the message names the release and anything the fleet changed),
 push, open the PR the fleet's way, wait for its checks (GitHub:
 `gh pr checks --watch`; Forgejo: `tea api /repos/<owner>/<repo>/commits/<sha>/status`
 until `success`), then merge. Merges ask the operator (kayra's guard); that
-is expected. Remove the worktree and the local branch.
+is expected. In auto mode the guard refuses them, and every non-multipass
+deploy below, instead: stop, give the operator the exact command, continue
+once they ran it. Remove the worktree and the local branch.
 
 ## 3. Deploy, server by server
 

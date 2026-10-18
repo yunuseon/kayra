@@ -3,11 +3,22 @@ title: CLI
 description: Every kayra command.
 ---
 
-Run from anywhere inside a fleet. Server and app names complete in the shell.
+Run from anywhere inside a fleet. Server and app names complete in the shell
+(`eval "$(kayra completion zsh)"`; also `bash`, `fish`, `pwsh`, `nu`).
 Every command takes `--dry-run`: it prints the plan — each command, guard and
 confirmation, with its environment — and runs nothing. On a terminal each step
 is numbered under its title, paths named by their root (`<kayra>`, `<fleet>`,
 `~`); piped, it prints one plain, copyable line per step.
+
+Every command also takes `-v`/`--verbose`: its playbooks print Ansible's own
+output (`ANSIBLE_STDOUT_CALLBACK=default`, with `-v`) instead of kayra's
+summary of it, for a failure the summary does not explain. It is part of the
+plan, so `--dry-run -v` shows it.
+
+`kayra --help` lists the commands in the sections below, with examples;
+`kayra <command> --help` (or `kayra help <command>`) says what one does, its
+arguments — the fleet's servers among them — and examples. A misspelt server,
+job or command is refused with the nearest one: `Did you mean "shop-test"?`.
 
 ## What you see
 

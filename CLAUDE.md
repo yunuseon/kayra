@@ -389,6 +389,8 @@ kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude 
 - **It fails closed** in kayra (`onFailure: block`); a fleet without its kayra installed asks for everything until `npm ci`.
 - **Editing the guardrails asks too:** `.claude/**`, `scripts/agent/**`, `.github/CODEOWNERS`.
 - **It reads the command's text.** It stops mistakes and instructions smuggled in through a file, an issue or a web page, not an adversary: a script it does not read runs whatever it contains. Each case is in `ci/tests/guard/run.sh` (in the checks as `platform:guard`); a new guard gets a case.
+- **Procedures are skills** (`agent/skills/`, shipped in the package; `.claude/skills/` links them here): **kayra-release** (bump PR → checks → merge → tag → `release.yml` → the published package), **kayra-lab** (the upgrade lab, reading its failures), **kayra-rollout** (a release into each fleet: the bump PR in a worktree, then `kayra deploy` server by server with `verify`). A fleet links `kayra-rollout` from its pinned kayra. A procedure that went wrong gets its lesson written into its skill.
+- **The user works in the same checkouts in parallel.** Changes happen in a separate git worktree off `origin/main`, steps as one `set -euo pipefail` script, never a write after `;` behind a guard.
 - **CODEOWNERS** (`.github/CODEOWNERS`) names the trust boundary, the files a change to which the maintainer reviews: the compose policy, the deployer's webhook, forge and bundle code, the platform compose files, `require-main.sh`, the guard itself, the checks.
 - **`main` is protected on GitHub:** changes arrive through a pull request with green checks; no direct push, no force push, no deletion, for admins too.
 

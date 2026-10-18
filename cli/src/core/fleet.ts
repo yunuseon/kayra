@@ -11,7 +11,7 @@ import {
   type ServerName,
   type VaultPasswordFile,
 } from "./brand.ts";
-import { all, err, map, ok, type Result } from "./result.ts";
+import { all, err, map, ok, type Result } from "../result.ts";
 import { serverKinds, serverSchema, varsSchema, type ServerKind } from "./settings.ts";
 import { checkSettings, checkShape, knownSettings } from "./validate.ts";
 

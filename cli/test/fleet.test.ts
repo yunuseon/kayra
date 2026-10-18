@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseServer, type ServerFiles } from "../src/fleet.ts";
+import { parseServer, type ServerFiles } from "../src/core/fleet.ts";
 import { files, server } from "./support.ts";
 
 const refused = (descriptor: string, overrides: Partial<ServerFiles> = {}) => {

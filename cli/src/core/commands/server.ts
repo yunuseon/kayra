@@ -9,7 +9,7 @@ import {
 } from "../brand.ts";
 import type { Server } from "../fleet.ts";
 import { partOf, run, type Arg, type Argv, type Env, type Plan, type Query, type RunStep, type Step } from "../plan.ts";
-import { all, err, map, ok, type Result } from "../result.ts";
+import { all, err, map, ok, type Result } from "../../result.ts";
 
 /** What every command works with besides the server: the engine's files and the fleet's. */
 export type Engine = { readonly kayra: KayraRoot; readonly fleet: FleetRoot };

@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { appName } from "../brand.ts";
-import type { Planned } from "../commands/index.ts";
-import type { Fleet, Server } from "../fleet.ts";
-import { err, flatMap, map, ok, type Result } from "../result.ts";
+import { appName } from "../../core/brand.ts";
+import type { Planned } from "../../core/commands/index.ts";
+import type { Fleet, Server } from "../../core/fleet.ts";
+import { err, flatMap, map, ok, type Result } from "../../result.ts";
 import type { CommandInput, CommandName, ServerCommand, ServerFacts } from "./contract.ts";
 
 const onServer = z.enum(["up", "provision", "deploy", "setup", "plan", "verify", "apps", "down", "adopt", "backup test"]);

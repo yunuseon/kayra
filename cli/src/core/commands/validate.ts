@@ -1,6 +1,6 @@
 import { appManifestSchema, secretsSchema, settings, type ServerKind } from "../settings.ts";
 import type { Server } from "../fleet.ts";
-import { active, bad, muted, ok, strong, type Line, type Span } from "../ui/line.ts";
+import { active, bad, muted, ok, strong, type Line, type Span } from "../present/line.ts";
 import { closest } from "../validate.ts";
 
 /** A secrets file as validate could read it; a missing one holds no values. */

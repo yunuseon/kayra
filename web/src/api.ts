@@ -1,4 +1,4 @@
-import type { CommandInput, Preview, RunSummary } from "../../cli/src/web/contract.ts";
+import type { CommandInput, Preview, RunSummary } from "../../cli/src/clients/api/contract.ts";
 
 /** What went wrong asking kayra ui: its own words, as it said them. */
 export type Failure = { readonly status: number; readonly message: string };
@@ -6,7 +6,7 @@ export type Answer<T> = { readonly ok: true; readonly value: T } | { readonly ok
 
 /**
  * kayra ui's answers, typed by the contract both sides compile against
- * (cli/src/web/contract.ts): the one place a value from the server takes a type.
+ * (cli/src/clients/api/contract.ts): the one place a value from the server takes a type.
  */
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions, @typescript-eslint/no-unnecessary-type-parameters -- see above
 const trusted = <T>(value: unknown): T => value as T;

@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { z } from "zod";
-import { absolutePath, fleetRoot, kayraRoot } from "../src/brand.ts";
-import type { Network } from "../src/commands/status.ts";
-import { admit, cookieName } from "../src/web/auth.ts";
-import { changes, commandInput, offered, toPlanned, words } from "../src/web/commands.ts";
-import type { RunEvent } from "../src/web/contract.ts";
-import { busy, readRecord, recordLine, runId, stateOf } from "../src/web/runs.ts";
-import { serveUi } from "../src/web/server.ts";
+import { absolutePath, fleetRoot, kayraRoot } from "../src/core/brand.ts";
+import type { Network } from "../src/core/commands/status.ts";
+import { admit, cookieName } from "../src/clients/api/auth.ts";
+import { changes, commandInput, offered, toPlanned, words } from "../src/clients/api/commands.ts";
+import type { RunEvent } from "../src/clients/api/contract.ts";
+import { busy, readRecord, recordLine, runId, stateOf } from "../src/clients/api/runs.ts";
+import { serve } from "../src/serve.ts";
 import { must, root, server } from "./support.ts";
 
 const prod = server("prod", "target: hetzner\ndomain: prod.example\nvault: true\nvault_password_file: /pass\napps: [{name: shop, repo: https://git.example/shop.git}]");
@@ -101,7 +101,7 @@ const call = (port: number, path: string, options: { readonly method?: string; r
 
 test("kayra ui: in only with this launch's token, a preview of any command, a real server's change only confirmed, a run's events to its end", async () => {
   const fleet = { root: fleetRoot(must(absolutePath(dir))), servers: [prod, lab] };
-  const ui = await serveUi({ kayra: kayraRoot(must(absolutePath("/kayra"))), fleet, version: "9.9.9", assets: undefined, short: (text) => text, network: quiet }, 0);
+  const ui = await serve({ kayra: kayraRoot(must(absolutePath("/kayra"))), fleet, version: "9.9.9", short: (text) => text, network: quiet }, undefined, 0);
   try {
     const { port } = ui;
     const token = new URL(ui.url).searchParams.get("token") ?? "";

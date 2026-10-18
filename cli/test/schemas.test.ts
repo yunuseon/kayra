@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { jsonSchemas, settingsPage } from "../src/schemas.ts";
+import { jsonSchemas, settingsPage } from "../src/core/schemas.ts";
 
 const root = join(import.meta.dirname, "..", "..");
 

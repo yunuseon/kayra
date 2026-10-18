@@ -18,7 +18,7 @@ export type Probe =
   /** Its stdout is discarded (it may be a secret), its stderr shown on failure. */
   | { readonly kind: "exits-zero"; readonly argv: Argv; readonly env?: Env };
 
-/** A deployer's answer, read whole and drawn for the operator (ui/views.ts): which drawing, and of what. */
+/** A deployer's answer, read whole and drawn for the operator (present/views.ts): which drawing, and of what. */
 export type View = { readonly view: "runs" | "releases" | "log"; readonly app: AppName; readonly server: ServerName };
 
 /** The kayra commands a longer one is made of, each of which runs its part alone. */

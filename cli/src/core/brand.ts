@@ -2,7 +2,7 @@ import { text } from "@optique/core/message";
 import type { NonEmptyString, ValueParser } from "@optique/core/valueparser";
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
-import { err, ok, type Result } from "./result.ts";
+import { err, ok, type Result } from "../result.ts";
 
 declare const brands: unique symbol;
 /** A T that only the matching constructor below can produce. */

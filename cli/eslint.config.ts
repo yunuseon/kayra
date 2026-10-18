@@ -56,9 +56,9 @@ export default defineConfig(
     },
   },
   {
-    // kayra ui's server works with Node's I/O objects too (requests, responses,
+    // The local server (the API, the browser side, serve.ts) works with Node's I/O objects too (requests, responses,
     // the abort controller that stops a run): classes the rule cannot make readonly.
-    files: ["src/web/**/*.ts"],
+    files: ["src/clients/api/**/*.ts", "src/clients/ui/**/*.ts", "src/serve.ts"],
     rules: {
       "functional/prefer-immutable-types": [
         "error",
@@ -66,7 +66,7 @@ export default defineConfig(
           enforcement: "ReadonlyDeep",
           ignoreInferredTypes: true,
           ignoreClasses: true,
-          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "URLSearchParams", "^Live$"],
+          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "^URL$", "URLSearchParams", "^Live$"],
         },
       ],
       "functional/type-declaration-immutability": [
@@ -75,9 +75,34 @@ export default defineConfig(
       ],
     },
   },
+  // Core and clients: the core knows no client, no client knows another, the
+  // deployer (it runs on servers) knows neither. main.ts and serve.ts compose them.
+  // The core may name the deployer's answers as types: they are ctl's wire format.
+  ...(
+    [
+      ["src/core/**/*.ts", ["**/clients/**", "**/main.ts", "**/serve.ts"], true],
+      ["src/clients/cli/**/*.ts", ["**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/api/**/*.ts", ["**/clients/cli/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts"], false],
+    ] as const
+  ).map(([files, forbidden, deployerTypes]) => ({
+    files: [files],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { group: [...forbidden], message: "Core and clients stay apart: see CLAUDE.md, Core and clients." },
+            ...(deployerTypes ? [{ group: ["**/deployer/**"], allowTypeImports: true, message: "The core runs no deployer code; its answers' types are fine." }] : []),
+          ],
+        },
+      ] satisfies ["error", unknown],
+    },
+  })),
   {
     // Brands are minted here, and only here: the one place `as` may appear.
-    files: ["src/brand.ts", "src/deployer/brand.ts"],
+    files: ["src/core/brand.ts", "src/deployer/brand.ts"],
     rules: { "@typescript-eslint/consistent-type-assertions": "off" },
   },
 );

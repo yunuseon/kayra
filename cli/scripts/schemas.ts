@@ -1,9 +1,9 @@
 // Writes the JSON Schemas (schema/) and the docs site's settings page from
-// cli/src/settings.ts: `npm run schemas`. The test schemas.test.ts fails
+// cli/src/core/settings.ts: `npm run schemas`. The test schemas.test.ts fails
 // while what is committed differs from what this writes.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { jsonSchemas, settingsPage } from "../src/schemas.ts";
+import { jsonSchemas, settingsPage } from "../src/core/schemas.ts";
 
 const root = join(import.meta.dirname, "..", "..");
 mkdirSync(join(root, "schema"), { recursive: true });

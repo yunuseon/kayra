@@ -5,8 +5,8 @@ import { argument } from "@optique/core/primitives";
 import type { Usage } from "@optique/core/usage";
 import { choice, integer, string } from "@optique/core/valueparser";
 import type { RunOptions } from "@optique/run";
-import { appNameParser, domainParser, serverNameParser, subdomainParser } from "./brand.ts";
-import type { Fleet } from "./fleet.ts";
+import { appNameParser, domainParser, serverNameParser, subdomainParser } from "../../core/brand.ts";
+import type { Fleet } from "../../core/fleet.ts";
 
 type Example = readonly [line: string, what: string];
 

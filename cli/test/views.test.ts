@@ -1,10 +1,11 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { appName, serverName } from "../src/brand.ts";
-import type { View } from "../src/plan.ts";
-import { flat, paint } from "../src/ui/line.ts";
-import { ago, table } from "../src/ui/text.ts";
-import { draw, logView, releasesView, runsView } from "../src/ui/views.ts";
+import { appName, serverName } from "../src/core/brand.ts";
+import type { View } from "../src/core/plan.ts";
+import { flat } from "../src/core/present/line.ts";
+import { paint } from "../src/clients/cli/paint.ts";
+import { ago, table } from "../src/core/present/text.ts";
+import { draw, logView, releasesView, runsView } from "../src/core/present/views.ts";
 import { must } from "./support.ts";
 
 const about = { app: must(appName("shop")), server: must(serverName("forge")) };

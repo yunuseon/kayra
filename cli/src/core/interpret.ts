@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { text } from "node:stream/consumers";
 import type { Arg, Argv, Env, Plan, Probe, Step } from "./plan.ts";
-import { all, err, flatMap, ok, type Result } from "./result.ts";
-import { active, bad, muted, ok as fine, strong, type Line, type Text } from "./ui/line.ts";
-import { position, silent, type Done, type Ended, type Progress } from "./ui/progress.ts";
-import { draw } from "./ui/views.ts";
+import { all, err, flatMap, ok, type Result } from "../result.ts";
+import { active, bad, muted, ok as fine, strong, type Line, type Text } from "./present/line.ts";
+import { position, silent, type Done, type Ended, type Progress } from "./present/progress.ts";
+import { draw } from "./present/views.ts";
 
 /** Where the interpreter talks to the operator. */
 export type Io = {

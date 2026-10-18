@@ -19,7 +19,7 @@ docker build -f ci/checks/Dockerfile .            # everything the CI checks
 ```
 
 - One concern per pull request; the description says what changed and why.
-- The CLI is strict TypeScript (no `any`, no `as` outside `cli/src/brand.ts`,
+- The CLI is strict TypeScript (no `any`, no `as` outside `cli/src/core/brand.ts`,
   no mutation) — the linter will tell you.
 - A change to what a command does updates its golden case
   (`cli/test/golden/record.sh`); review the diff.

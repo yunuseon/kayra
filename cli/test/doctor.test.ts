@@ -1,8 +1,8 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { absolutePath, kayraRoot } from "../src/brand.ts";
-import { doctor } from "../src/commands/doctor.ts";
-import { render } from "../src/plan.ts";
+import { absolutePath, kayraRoot } from "../src/core/brand.ts";
+import { doctor } from "../src/core/commands/doctor.ts";
+import { render } from "../src/core/plan.ts";
 import { fleet, must, server } from "./support.ts";
 
 const kayra = kayraRoot(must(absolutePath("/kayra")));

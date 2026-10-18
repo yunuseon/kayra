@@ -1,37 +1,32 @@
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, normalize, sep } from "node:path";
-import { within, type KayraRoot } from "../brand.ts";
-import { planFor } from "../commands/index.ts";
-import { look, opentofu, statusJson, type Network } from "../commands/status.ts";
-import { findings, validateJson } from "../commands/validate.ts";
-import { json, send } from "../deployer/http.ts";
-import type { Fleet } from "../fleet.ts";
-import { gather } from "../gather.ts";
-import { capture, interpret, type Io } from "../interpret.ts";
-import { needsTerminal, type Plan } from "../plan.ts";
-import { err, flatMap, ok, type Result } from "../result.ts";
-import { listed, reporting, type Invocation } from "../ui/progress.ts";
-import { follow } from "../ui/terminal.ts";
-import { parsed, releasesSchema, runsSchema } from "../ui/views.ts";
-import { admit, cookieName, tokenIn } from "./auth.ts";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { join, sep } from "node:path";
+import { within, type KayraRoot } from "../../core/brand.ts";
+import { planFor } from "../../core/commands/index.ts";
+import { look, opentofu, statusJson, type Network } from "../../core/commands/status.ts";
+import { findings, validateJson } from "../../core/commands/validate.ts";
+import { json, send } from "../../deployer/http.ts";
+import type { Fleet } from "../../core/fleet.ts";
+import { gather } from "../../core/gather.ts";
+import { capture, interpret, type Io } from "../../core/interpret.ts";
+import { needsTerminal, type Plan } from "../../core/plan.ts";
+import { err, flatMap, ok, type Result } from "../../result.ts";
+import { listed, reporting, type Invocation } from "../../core/present/progress.ts";
+import { follow } from "../../core/updates.ts";
+import { parsed, releasesSchema, runsSchema } from "../../core/present/views.ts";
 import { changes, commandInput, facts, targetOf, toPlanned, words } from "./commands.ts";
 import type * as wire from "./contract.ts";
 import { busy, readRecord, recordLine, runId, stateOf, summary, type Run } from "./runs.ts";
 
-/** What kayra ui serves from: the engine, the fleet, and where the browser side was built. */
-export type Ui = {
+/** What the API answers from: the engine, the fleet, and how it names paths and reaches servers. */
+export type Api = {
   readonly kayra: KayraRoot;
   readonly fleet: Fleet;
   readonly version: string;
-  /** The built browser side (web/dist, or cli/dist/browser in the package); without it, a page saying how to build it. */
-  readonly assets: string | undefined;
   readonly short: (text: string) => string;
   readonly network: Network;
 };
-
-export type Listening = { readonly url: string; readonly port: number; readonly close: () => Promise<void> };
 
 type Live = {
   readonly run: Run;
@@ -93,7 +88,7 @@ const answerJson = (response: ServerResponse, status: number, value: unknown): v
   send(response, status, JSON.stringify(value), "application/json; charset=utf-8");
 };
 
-const invocationOf = (ui: Ui, input: wire.CommandInput): Result<Invocation, string> =>
+const invocationOf = (ui: Api, input: wire.CommandInput): Result<Invocation, string> =>
   flatMap(targetOf(ui.fleet, input), (target) =>
     ok({
       command: words(input),
@@ -102,16 +97,16 @@ const invocationOf = (ui: Ui, input: wire.CommandInput): Result<Invocation, stri
     }),
   );
 
-const planOf = (ui: Ui, input: wire.CommandInput): Result<Plan, string> =>
+const planOf = (ui: Api, input: wire.CommandInput): Result<Plan, string> =>
   flatMap(toPlanned(ui.fleet, input), (planned) => planFor({ kayra: ui.kayra, fleet: ui.fleet.root }, ui.fleet, planned));
 
-const preview = (ui: Ui, input: wire.CommandInput): Result<wire.Preview, string> =>
+const preview = (ui: Api, input: wire.CommandInput): Result<wire.Preview, string> =>
   flatMap(planOf(ui, input), (plan) =>
     flatMap(invocationOf(ui, input), (invocation) => ok({ invocation, steps: listed(plan, ui.short), changes: changes(input) })),
   );
 
 /** Starts a run, or says why it cannot: one per server, a terminal it needs, a real server not confirmed. */
-const start = (ui: Ui, input: wire.CommandInput, confirm: unknown): Result<string, readonly [number, string]> => {
+const start = (ui: Api, input: wire.CommandInput, confirm: unknown): Result<string, readonly [number, string]> => {
   const target = targetOf(ui.fleet, input);
   const plan = planOf(ui, input);
   const invocation = invocationOf(ui, input);
@@ -166,7 +161,7 @@ const start = (ui: Ui, input: wire.CommandInput, confirm: unknown): Result<strin
 };
 
 /** A run's events from the start, then each as it happens, until it has ended. */
-const watchRun = (ui: Ui, id: string, response: ServerResponse): void => {
+const watchRun = (ui: Api, id: string, response: ServerResponse): void => {
   const live = cell.live[id];
   const run = live?.run ?? recorded(ui.fleet).find((each) => each.id === id);
   if (run === undefined) {
@@ -190,7 +185,7 @@ const watchRun = (ui: Ui, id: string, response: ServerResponse): void => {
 };
 
 /** What a deployer's ctl answers, captured over SSH as `kayra app …` asks it. */
-const ctl = async (ui: Ui, input: { readonly name: "app runs" | "app logs" | "app rollback"; readonly server: string; readonly app: string; readonly more?: string }): Promise<Result<string, string>> => {
+const ctl = async (ui: Api, input: { readonly name: "app runs" | "app logs" | "app rollback"; readonly server: string; readonly app: string; readonly more?: string }): Promise<Result<string, string>> => {
   const server = ui.fleet.servers.find((each) => each.name === input.server);
   if (server === undefined) return err(`no server '${input.server}'`);
   const app = server.apps.find((each) => each.name === input.app);
@@ -205,60 +200,10 @@ const ctl = async (ui: Ui, input: { readonly name: "app runs" | "app logs" | "ap
   return exit.code === 0 ? ok(exit.stdout) : err(exit.stderr.trim() === "" ? `exit ${String(exit.code)}` : exit.stderr.trim());
 };
 
-const types: Readonly<Record<string, string>> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-  ".woff2": "font/woff2",
-  ".json": "application/json; charset=utf-8",
-};
-
-const unbuilt = `<!doctype html><meta charset="utf-8"><title>kayra ui</title>
-<body style="font:15px system-ui;margin:3rem auto;max-width:40rem"><h1>kayra ui</h1>
-<p>The browser side is not built in this checkout:</p><pre>npm --prefix web ci &amp;&amp; npm --prefix web run build</pre>
-<p>The API is up at <code>/api/fleet</code>.</p></body>`;
-
-/** The built browser side; a path that is no file is the app's own route, answered by its index. */
-const asset = (ui: Ui, path: string, response: ServerResponse): void => {
-  if (ui.assets === undefined) {
-    send(response, 200, unbuilt, "text/html; charset=utf-8");
-    return;
-  }
-  const file = normalize(join(ui.assets, decodeURIComponent(path)));
-  const inside = file.startsWith(ui.assets + sep) && existsSync(file) && statSync(file).isFile();
-  const chosen = inside ? file : join(ui.assets, "index.html");
-  response.writeHead(200, {
-    "Content-Type": types[extname(chosen)] ?? "application/octet-stream",
-    "Cache-Control": chosen.includes(`${sep}assets${sep}`) ? "public, max-age=31536000, immutable" : "no-cache",
-  });
-  response.end(readFileSync(chosen));
-};
-
-const route = async (ui: Ui, port: number, token: string, request: IncomingMessage, response: ServerResponse): Promise<void> => {
-  const url = new URL(request.url ?? "/", `http://127.0.0.1:${String(port)}`);
+/** A request to /api/, admitted by the host that serves it. */
+export const handleApi = async (ui: Api, request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
   const path = url.pathname;
   const method = request.method ?? "GET";
-  const admission = admit({ method, path, host: request.headers.host, origin: request.headers.origin, cookie: request.headers.cookie }, port, token);
-  if (!admission.admitted) {
-    send(response, admission.status, `${admission.why}\n`);
-    return;
-  }
-  if (path === "/login") {
-    if (!tokenIn(url.searchParams, token)) {
-      send(response, 401, "not this launch's token: open the URL kayra ui printed\n");
-      return;
-    }
-    response.writeHead(303, { "Set-Cookie": `${cookieName(port)}=${token}; HttpOnly; SameSite=Strict; Path=/`, Location: "/" });
-    response.end();
-    return;
-  }
-  if (!path.startsWith("/api/")) {
-    asset(ui, path, response);
-    return;
-  }
   const app = /^\/api\/servers\/([^/]+)\/apps\/([^/]+)\/(runs|releases|logs)(?:\/([^/]+))?$/.exec(path);
   const runPath = /^\/api\/runs\/([^/]+)\/(events|answer|cancel)$/.exec(path);
   if (method === "GET" && path === "/api/fleet") {
@@ -321,37 +266,9 @@ const route = async (ui: Ui, port: number, token: string, request: IncomingMessa
   } else send(response, 404, "not found\n");
 };
 
-/** kayra ui: listens on 127.0.0.1 only; the URL it returns carries this launch's token. */
-export const serveUi = (ui: Ui, port: number): Promise<Listening> => {
-  const token = randomBytes(32).toString("base64url");
-  return new Promise((resolve, reject) => {
-    const server = createServer((request, response) => {
-      route(ui, listening(), token, request, response).catch((error: unknown) => {
-        if (!response.headersSent) send(response, 500, `${error instanceof Error ? error.message : String(error)}\n`);
-        else response.end();
-      });
-    });
-    const listening = (): number => {
-      const address = server.address();
-      return typeof address === "object" && address !== null ? address.port : port;
-    };
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
-      const actual = listening();
-      resolve({
-        url: `http://127.0.0.1:${String(actual)}/login?token=${token}`,
-        port: actual,
-        close: () =>
-          new Promise((done) => {
-            Object.values(cell.live).forEach((live) => {
-              live.stop.abort();
-            });
-            server.closeAllConnections();
-            server.close(() => {
-              done();
-            });
-          }),
-      });
-    });
+/** Stops every run this server started: it is going away. */
+export const stopRuns = (): void => {
+  Object.values(cell.live).forEach((live) => {
+    live.stop.abort();
   });
 };

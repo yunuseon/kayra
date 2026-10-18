@@ -56,6 +56,26 @@ export default defineConfig(
     },
   },
   {
+    // kayra ui's server works with Node's I/O objects too (requests, responses,
+    // the abort controller that stops a run): classes the rule cannot make readonly.
+    files: ["src/web/**/*.ts"],
+    rules: {
+      "functional/prefer-immutable-types": [
+        "error",
+        {
+          enforcement: "ReadonlyDeep",
+          ignoreInferredTypes: true,
+          ignoreClasses: true,
+          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "URLSearchParams", "^Live$"],
+        },
+      ],
+      "functional/type-declaration-immutability": [
+        "error",
+        { rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }], ignoreIdentifierPattern: ["^Live$"] },
+      ],
+    },
+  },
+  {
     // Brands are minted here, and only here: the one place `as` may appear.
     files: ["src/brand.ts", "src/deployer/brand.ts"],
     rules: { "@typescript-eslint/consistent-type-assertions": "off" },

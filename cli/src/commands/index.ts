@@ -6,10 +6,10 @@ import { doctor } from "./doctor.ts";
 import * as server from "./server.ts";
 
 /** The commands that run as a plan: every one but those that read and draw by themselves. */
-export type Planned = Exclude<Command, { readonly name: "status" | "validate" | "app check" }>;
+export type Planned = Exclude<Command, { readonly name: "status" | "validate" | "app check" | "ui" }>;
 
 type Deployer = Extract<Command, { readonly name: "app runs" | "app logs" | "app deploy" | "app rollback" | "job" }>;
-type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" | "app check" }>;
+type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" | "app check" | "ui" }>;
 
 const appKinds = { "app runs": "runs", "app logs": "logs", "app deploy": "deploy", "app rollback": "rollback" } as const;
 

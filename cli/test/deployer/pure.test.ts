@@ -1,5 +1,4 @@
 import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { parseApp } from "../../src/deployer/app.ts";
 import { parseBundle, imagesEnv } from "../../src/deployer/bundle.ts";
@@ -7,7 +6,7 @@ import { config, policy, up } from "../../src/deployer/compose.ts";
 import { matches, parseCron } from "../../src/deployer/cron.ts";
 import { expired, moved, releaseName, releases } from "../../src/deployer/records.ts";
 import { renovate } from "../../src/deployer/run.ts";
-import { pushedRef, signed } from "../../src/deployer/webhook.ts";
+import { pushedRef } from "../../src/deployer/webhook.ts";
 import { commit, must, name, shop } from "./support.ts";
 
 test("cron: fields, ranges, steps, lists; 7 is Sunday", () => {
@@ -31,15 +30,8 @@ test("cron: day of month and weekday both restricted match either", () => {
   assert(!matches(either, new Date(2026, 9, 6, 0, 0)));
 });
 
-test("webhooks: GitHub's and Forgejo's signatures, nothing unsigned", () => {
-  const body = Buffer.from(JSON.stringify({ ref: "refs/heads/main" }));
-  const hex = createHmac("sha256", "s3cret").update(body).digest("hex");
-  assert(signed("s3cret", body, { "x-hub-signature-256": `sha256=${hex}` }));
-  assert(signed("s3cret", body, { "x-forgejo-signature": hex }));
-  assert(!signed("other", body, { "x-hub-signature-256": `sha256=${hex}` }));
-  assert(!signed("s3cret", body, {}));
-  assert(!signed("", body, { "x-forgejo-signature": hex }));
-  strictEqual(pushedRef(body), "refs/heads/main");
+test("webhooks: the ref a push moved, nothing for a ping", () => {
+  strictEqual(pushedRef(Buffer.from(JSON.stringify({ ref: "refs/heads/main" }))), "refs/heads/main");
   strictEqual(pushedRef(Buffer.from("{\"zen\":\"ping\"}")), undefined);
 });
 

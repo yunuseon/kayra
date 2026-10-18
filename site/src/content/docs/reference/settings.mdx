@@ -29,7 +29,7 @@ the first line of a platform server's `vars.yml`:
 | `acme_dns` | platform | Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner). |
 | `renovate_repositories` | platform | owner/repo of the repos this server's Renovate job keeps up to date; the job runs only where the list is not empty. |
 | `renovate_schedule` | platform | When the Renovate job runs, as a five-field cron spec in the server's time (default weekly: 0 4 * * 1). |
-| `renovate_platform` | platform | Where the repos live: github (default) or forgejo. |
+| `renovate_platform` | platform | Where the repos live: github (default), forgejo or gitlab. |
 | `renovate_endpoint` | platform | With a Forgejo: its API on platform-internal, e.g. http://forgejo:3000/api/v1. |
 | `renovate_git_url` | platform | How Renovate clones; endpoint with a Forgejo, so it uses the internal address. |
 | `renovate_host_rules` | platform | Renovate hostRules: allowInternal for a Forgejo on platform-internal, credentials for a private registry. |

@@ -52,7 +52,7 @@ export const settings: readonly Setting[] = [
   setting("acme_dns", platform, z.enum(["", "hetzner"]), "Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner)."),
   setting("renovate_repositories", platform, texts, "owner/repo of the repos this server's Renovate job keeps up to date; the job runs only where the list is not empty."),
   setting("renovate_schedule", platform, text, "When the Renovate job runs, as a five-field cron spec in the server's time (default weekly: 0 4 * * 1)."),
-  setting("renovate_platform", platform, z.enum(["github", "forgejo"]), "Where the repos live: github (default) or forgejo."),
+  setting("renovate_platform", platform, z.enum(["github", "forgejo", "gitlab"]), "Where the repos live: github (default), forgejo or gitlab."),
   setting("renovate_endpoint", platform, text, "With a Forgejo: its API on platform-internal, e.g. http://forgejo:3000/api/v1."),
   setting("renovate_git_url", platform, z.enum(["default", "ssh", "endpoint"]), "How Renovate clones; endpoint with a Forgejo, so it uses the internal address."),
   setting("renovate_host_rules", platform, z.array(record({ matchHost: text })), "Renovate hostRules: allowInternal for a Forgejo on platform-internal, credentials for a private registry."),

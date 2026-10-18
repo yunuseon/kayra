@@ -39,8 +39,9 @@ renovate_token: ""
 # people's releases; a server whose repos carry the operator's own images
 # runs it more often, so a new build reaches a PR soon after it is pushed.
 renovate_schedule: "0 4 * * 1"
-# Where those repos live: github, or forgejo with renovate_endpoint, its API
-# on platform-internal (http://forgejo:3000/api/v1). With a Forgejo, also
+# Where those repos live: github, gitlab (gitlab.com), or forgejo with
+# renovate_endpoint, its API on platform-internal
+# (http://forgejo:3000/api/v1). With a Forgejo, also
 # renovate_git_url: endpoint, so Renovate clones over that address and not the
 # public one the API reports, and a renovate_host_rules entry allowing it as
 # an internal host.

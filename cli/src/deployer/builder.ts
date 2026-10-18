@@ -9,7 +9,8 @@ import { body, json, send } from "./http.ts";
 import { page, runPage } from "./page.ts";
 import { spawnLines } from "./process.ts";
 import type { Env } from "./run.ts";
-import { pushedRef, signed } from "./webhook.ts";
+import { forgeRepo, signed } from "./forge.ts";
+import { pushedRef } from "./webhook.ts";
 
 /**
  * The builder: the half of the deployer that faces app code and the internet.
@@ -17,7 +18,7 @@ import { pushedRef, signed } from "./webhook.ts";
  * images through buildkitd, answers forge webhooks and shows the runs; the
  * deployer asks it for bundles and trusts none of what it returns.
  *
- *   :8080  Traefik → deploy.<domain>: POST /hook/<app> (HMAC, no login), the
+ *   :8080  Traefik → deploy.<domain>: POST /hook/<app> (signed per forge, no login), the
  *          runs pages (behind Authelia)
  *   :8081  platform-internal only: POST /resolve, POST /prepare
  */
@@ -142,13 +143,14 @@ export const prepare = async (app: App, commit: Sha, s: Settings, line: Line): P
 
 const hook = async (s: Settings, name: string, request: IncomingMessage, response: ServerResponse): Promise<void> => {
   const raw = await body(request);
-  if (raw === undefined || !signed(s.webhookSecret(), raw, request.headers)) {
-    send(response, 401, "bad signature\n");
-    return;
-  }
   const app = registered(s.platformDir, name);
   if (!app.ok) {
     send(response, 404, `${app.error}\n`);
+    return;
+  }
+  const repo = forgeRepo(app.value.repo);
+  if (raw === undefined || repo === undefined || !signed(repo, s.webhookSecret(), raw, request.headers)) {
+    send(response, 401, "bad signature\n");
     return;
   }
   const ref = pushedRef(raw);

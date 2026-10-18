@@ -24,13 +24,20 @@ model {
     technology "Let's Encrypt"
     description 'Certificates by HTTP-01, or DNS-01 where the internet cannot reach'
   }
+  localProgram = tool 'Local program' {
+    description 'A script or client on the operator machine, authenticated by the private discovery token'
+  }
   cli = tool 'kayra CLI' {
     description 'On the operator machine: plans each command, then runs OpenTofu, Ansible and SSH'
     technology 'TypeScript, Node 24'
 
-    ui = tool 'kayra ui' {
+    ui = tool 'Browser interface' {
       description 'The web interface, on 127.0.0.1 with a launch token: the same plans and guards, each run live'
-      technology 'Preact, served by the CLI'
+      technology 'Preact, kayra serve --ui'
+    }
+    api = tool 'Local API' {
+      description 'The catalog, plans, queries, runs and terminal sessions at /api on 127.0.0.1; compatibility follows the pinned kayra version'
+      technology 'HTTP, SSE or NDJSON, kayra serve --api'
     }
   }
 
@@ -82,6 +89,8 @@ model {
   operator -> fleet 'edits, through PRs'
   operator -> cli 'kayra up / setup / apps / app deploy'
   operator -> cli.ui 'in the browser: the fleet, previews, runs as they happen'
+  cli.ui -> cli.api 'same-origin cookie: catalog operations and live events'
+  localProgram -> cli.api 'bearer token: /api operations and events'
   cli -> fleet 'reads and validates'
   cli -> hetzner 'provisions (OpenTofu)'
   cli -> platform 'sets up (Ansible over SSH)'

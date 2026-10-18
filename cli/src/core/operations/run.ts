@@ -8,9 +8,11 @@ import { look, type Network, type Tofu, type Watched } from "../commands/status.
 import { findings, type Report } from "../commands/validate.ts";
 import type { Fleet, Server } from "../fleet.ts";
 import { gather } from "../gather.ts";
+import { interpret } from "../interpret.ts";
+import { flat } from "../present/line.ts";
 import type { Plan } from "../plan.ts";
 import { all, err, flatMap, map, ok, type Result } from "../../result.ts";
-import { operations, type InputOf, type Invocation, type PlanName, type QueryName, type StreamName } from "./catalog.ts";
+import { operations, type InputOf, type Invocation, type PlanName, type QueryName, type StreamName, type SessionName } from "./catalog.ts";
 
 /** What the core runs an operation with: the engine, the fleet, and the world as the client's machine sees it. */
 export type Context = {
@@ -36,6 +38,7 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("apps"), input: operations.apps.input }),
   z.strictObject({ name: z.literal("hosts"), input: operations.hosts.input }),
   z.strictObject({ name: z.literal("ssh"), input: operations.ssh.input }),
+  z.strictObject({ name: z.literal("ssh.exec"), input: operations["ssh.exec"].input }),
   z.strictObject({ name: z.literal("down"), input: operations.down.input }),
   z.strictObject({ name: z.literal("adopt"), input: operations.adopt.input }),
   z.strictObject({ name: z.literal("backup.test"), input: operations["backup.test"].input }),
@@ -75,7 +78,8 @@ const onServer = (ctx: Context, name: string): Result<Server, string> => {
 const onApp = (ctx: Context, input: { readonly server: string; readonly app: string }): Result<readonly [Server, AppName], string> =>
   flatMap(onServer(ctx, input.server), (target) => map(appName(input.app), (app) => [target, app] as const));
 
-type Plans = { readonly [N in PlanName]: (ctx: Context, input: InputOf<N>) => Result<Plan, string> };
+type RecipeName = PlanName | SessionName | "app.runs" | "app.log" | "app.releases";
+type Plans = { readonly [N in RecipeName]: (ctx: Context, input: InputOf<N>) => Result<Plan, string> };
 
 const withServer =
   (make: (engine: server.Engine, target: Server) => Result<Plan, string>) =>
@@ -102,7 +106,8 @@ const plans: Plans = {
   down: withServer(server.down),
   adopt: withServer(server.adopt),
   "backup.test": withServer(server.backupTest),
-  ssh: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => server.ssh(target, input.command)),
+  ssh: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => server.ssh(target, [])),
+  "ssh.exec": (ctx, input) => flatMap(onServer(ctx, input.server), (target) => server.ssh(target, input.command)),
   "app.check": (ctx, input) =>
     flatMap(absolutePath(resolve(ctx.here, input.dir)), (dir) => appCheck(ctx.engine.kayra, dir, ctx.read(within(dir, "app.yml")))),
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => server.appPurge(ctx.engine, target, app)),
@@ -119,20 +124,43 @@ const plans: Plans = {
     ),
 };
 
-/** An invocation of a plan operation, its name and input still paired. */
-export type PlanCall = { readonly [N in PlanName]: { readonly name: N; readonly input: InputOf<N> } }[PlanName];
+/** An operation backed by a plan, its name and input still paired. */
+export type RecipeCall = { readonly [N in RecipeName]: { readonly name: N; readonly input: InputOf<N> } }[RecipeName];
 
-export const planOf = <N extends PlanName>(ctx: Context, call: { readonly name: N; readonly input: InputOf<N> }): Result<Plan, string> =>
+export const planOf = <N extends RecipeName>(ctx: Context, call: { readonly name: N; readonly input: InputOf<N> }): Result<Plan, string> =>
   plans[call.name](ctx, call.input);
 
-export const isPlan = (call: Invocation): call is PlanCall => operations[call.name].kind === "plan";
+export const hasPlan = (call: Invocation): call is RecipeCall => Object.hasOwn(plans, call.name);
 
 /** What each query answers. */
-export type Answers = { readonly validate: readonly Report[]; readonly version: string };
+export type Answers = { readonly validate: readonly Report[]; readonly version: string; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
 
 type Queries = { readonly [N in QueryName]: (ctx: Context, input: InputOf<N>) => Promise<Result<Answers[N], string>> };
 
+const deployerAnswer = async (ctx: Context, name: "app.runs" | "app.releases" | "app.log", input: InputOf<typeof name>): Promise<Result<string, string>> => {
+  const plan = planOf(ctx, { name, input });
+  if (!plan.ok) return plan;
+  // eslint-disable-next-line functional/prefer-immutable-types -- the interpreter's captured streams
+  const said: { stdout: string; stderr: string } = { stdout: "", stderr: "" };
+  const passed = await interpret(plan.value.map((step) => step.kind === "run" ? { ...step, stdout: "show" } : step), {
+    out: () => undefined,
+    // eslint-disable-next-line functional/immutable-data -- capturing interpreter diagnostics
+    err: (text) => { said.stderr += flat(text); },
+    ask: () => Promise.resolve(""),
+    output: (chunk, stream) => {
+      // eslint-disable-next-line functional/immutable-data -- capturing program output
+      if (stream === "stdout") said.stdout += chunk;
+      // eslint-disable-next-line functional/immutable-data -- capturing program errors
+      else said.stderr += chunk;
+    },
+  });
+  return passed ? ok(said.stdout) : err(said.stderr.trim() || "the deployer query failed");
+};
+
 const queries: Queries = {
+  "app.runs": (ctx, input) => deployerAnswer(ctx, "app.runs", input),
+  "app.releases": (ctx, input) => deployerAnswer(ctx, "app.releases", input),
+  "app.log": (ctx, input) => deployerAnswer(ctx, "app.log", input),
   validate: async (ctx, input) => {
     const chosen = input.server === undefined ? ok(ctx.fleet.servers) : map(onServer(ctx, input.server), (one) => [one]);
     if (!chosen.ok) return chosen;
@@ -157,3 +185,9 @@ export const serverOf = (ctx: Context, invocation: Invocation): Server | undefin
   const named: unknown = "server" in invocation.input ? invocation.input.server : undefined;
   return typeof named === "string" ? ctx.fleet.servers.find((each) => each.name === named) : undefined;
 };
+
+export type QueryCall = { readonly [N in QueryName]: { readonly name: N; readonly input: InputOf<N> } }[QueryName];
+export const isQuery = (call: Invocation): call is QueryCall => operations[call.name].kind === "query";
+
+export type StreamCall = { readonly [N in StreamName]: { readonly name: N; readonly input: InputOf<N> } }[StreamName];
+export const isStream = (call: Invocation): call is StreamCall => operations[call.name].kind === "stream";

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import type { RunState, RunSummary } from "../../../cli/src/clients/api/contract.ts";
+import type { RunState, RunSummary } from "../../../cli/src/clients/api/contract.gen.ts";
 import { runs, type Answer } from "../api.ts";
 import { Link } from "../components/shell.tsx";
 import { Dot, Header, Problem, Waiting } from "../components/ui.tsx";

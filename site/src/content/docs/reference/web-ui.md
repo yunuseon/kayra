@@ -1,15 +1,15 @@
 ---
 title: Web interface
-description: kayra ui, the fleet in the browser on the operator's machine.
+description: kayra serve, the fleet in the browser on the operator's machine.
 ---
 
-`kayra ui` serves a web interface for the fleet from the operator's machine. It
+`kayra serve` serves a web interface for the fleet from the operator's machine. It
 shows the same fleet as the command line and runs the same commands through
 the same plans and guards. It is a view of the CLI, not a second control plane.
 
 ```bash
-kayra ui                         # opens the browser
-kayra ui --port 7700 --no-open   # prints the URL instead
+kayra serve                         # opens the browser
+kayra serve --port 7700 --no-open   # prints the URL instead
 ```
 
 ## What it shows
@@ -57,7 +57,7 @@ It listens on 127.0.0.1 only. The URL it prints carries a token made for this
 launch, which the browser exchanges for a cookie. Every request must name this
 listener as its host, so no other site can reach it through DNS rebinding.
 Every write must come from its own origin, and every API call must carry the
-token. Stopping `kayra ui` stops whatever it runs.
+token. Stopping `kayra serve` stops whatever it runs.
 
-For an AI agent working in a fleet, starting `kayra ui` asks the operator
+For an AI agent working in a fleet, starting `kayra serve` asks the operator
 first: commands run from the browser are out of the agent guard's sight.

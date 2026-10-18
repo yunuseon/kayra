@@ -1,5 +1,5 @@
 import { useEffect } from "preact/hooks";
-import type { Validation } from "../../../cli/src/clients/api/contract.ts";
+import type { Validation } from "../../../cli/src/clients/api/contract.gen.ts";
 import { Dot, Header, Pill, Problem, Waiting } from "../components/ui.tsx";
 import { loadValidation, validation } from "../state.ts";
 

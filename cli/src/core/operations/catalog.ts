@@ -16,9 +16,9 @@ export type Effect = "reads" | "changes" | "destroys";
 
 /**
  * How it runs: a plan of steps (shown before, followed while), a query
- * answering at once, or a stream of answers as they land (status).
+ * answering at once, a stream of answers as they land (status), or an interactive session.
  */
-export type Kind = "plan" | "query" | "stream";
+export type Kind = "plan" | "query" | "stream" | "session";
 
 export type Operation = {
   readonly summary: string;
@@ -31,7 +31,7 @@ export type Operation = {
 };
 
 const server = z.string().min(1).describe("A server of the fleet (servers/<name>/)");
-const app = z.string().min(1).describe("An app in the server's server.yml");
+const app = z.string().min(1).describe("An app name, including a removed app whose records or data remain");
 const onServer = z.strictObject({ server });
 const onApp = z.strictObject({ server, app });
 
@@ -74,13 +74,10 @@ export const operations = {
     input: onServer,
   },
   hosts: { summary: "Point the domain at a multipass VM in /etc/hosts (sudo).", scope: "server", effect: "changes", kind: "plan", input: onServer },
-  ssh: {
-    summary: "SSH into the server, or run a command there.",
-    scope: "server",
-    effect: "changes",
-    kind: "plan",
-    bare: true,
-    input: z.strictObject({ server, command: z.array(z.string()).default([]).describe("Run this instead of a shell") }),
+  ssh: { summary: "Open an interactive SSH session.", scope: "server", effect: "changes", kind: "session", bare: true, input: onServer },
+  "ssh.exec": {
+    summary: "Run a command over SSH.", scope: "server", effect: "changes", kind: "plan", bare: true,
+    input: z.strictObject({ server, command: z.array(z.string()).min(1).describe("The remote command and arguments") }),
   },
   down: { summary: "Destroy the machine.", scope: "server", effect: "destroys", kind: "plan", input: onServer },
   adopt: {
@@ -109,7 +106,7 @@ export const operations = {
     summary: "What runs now, and the app's latest runs: state, commit, why, when, how long.",
     scope: "app",
     effect: "reads",
-    kind: "plan",
+    kind: "query",
     bare: true,
     input: onApp,
   },
@@ -117,7 +114,7 @@ export const operations = {
     summary: "A run's log, the newest unless named; its errors and warnings marked.",
     scope: "app",
     effect: "reads",
-    kind: "plan",
+    kind: "query",
     bare: true,
     input: z.strictObject({ server, app, run: z.string().min(1).optional().describe("A run's id; the newest by default") }),
   },
@@ -133,7 +130,7 @@ export const operations = {
     summary: "The app's releases: what runs now, and the earlier ones to roll back to.",
     scope: "app",
     effect: "reads",
-    kind: "plan",
+    kind: "query",
     bare: true,
     input: onApp,
   },
@@ -193,10 +190,11 @@ type OfKind<K extends Kind> = { readonly [N in OperationName]: (typeof operation
 export type PlanName = OfKind<"plan">;
 export type QueryName = OfKind<"query">;
 export type StreamName = OfKind<"stream">;
+export type SessionName = OfKind<"session">;
 
-export const operationNames = Object.keys(operations).filter((name): name is OperationName => name in operations);
+export const operationNames = Object.keys(operations).filter((name): name is OperationName => Object.hasOwn(operations, name));
 
-export const isOperation = (name: string): name is OperationName => name in operations;
+export const isOperation = (name: string): name is OperationName => Object.hasOwn(operations, name);
 
 /** An operation as every client reads it, whatever its own entry spells out. */
 export const operation = (name: OperationName): Operation => operations[name];

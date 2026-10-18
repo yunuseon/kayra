@@ -63,10 +63,20 @@ pass | kayra app runs prod shop
 pass | kayra app logs prod shop
 pass | kayra app check .
 pass | kayra ssh prod -- docker ps
-# kayra ui acts out of sight of the guard: starting it asks
-ask  | kayra ui
-ask  | kayra ui --port 7700 --no-open
-ask  | node ~/Work/kayra/cli/src/main.ts ui
+# kayra serve acts out of sight of the guard: starting it asks
+ask  | kayra serve
+ask  | kayra serve --port 7700 --no-open
+ask  | node ~/Work/kayra/cli/src/main.ts serve
+ask  | kayra serve --api --no-open
+ask  | kayra serve --ui --api
+ask  | curl -X POST http://127.0.0.1:7700/api/operations/deploy -d '{}'
+ask  | curl --json '{}' http://localhost:7700/api/operations/setup
+ask  | curl -XPOST http://127.0.0.1:7700/api/runs/r1/answers
+ask  | curl -X DELETE http://127.0.0.1:7700/api/sessions/s1
+ask  | node -e "fetch('http://127.0.0.1:7700/api/operations/deploy', {method: 'POST'})"
+pass | curl http://127.0.0.1:7700/api/operations
+pass | node -e "fetch('http://127.0.0.1:7700/api/fleet')"
+pass | curl -X POST https://example.com/api/operations/deploy
 # Ansible and the vaults
 ask  | ansible-vault decrypt --output - servers/prod/secrets.yml
 ask  | ansible-vault view servers/prod/secrets.yml

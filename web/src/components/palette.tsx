@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { CommandInput } from "../../../cli/src/clients/api/contract.ts";
+import type { CommandInput } from "../commands.ts";
 import { ranked, type Choice } from "../fuzzy.ts";
 import type { Route } from "../router.ts";
 import { fleet, go } from "../state.ts";

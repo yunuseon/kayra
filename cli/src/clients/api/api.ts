@@ -2,294 +2,214 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, sep } from "node:path";
+import { z } from "zod";
 import { within, type KayraRoot } from "../../core/brand.ts";
-import { look, opentofu, statusJson, type Network } from "../../core/commands/status.ts";
-import { findings, validateJson } from "../../core/commands/validate.ts";
-import { json, send } from "../../deployer/http.ts";
+import { verbose } from "../../core/commands/server.ts";
+import { opentofu, statusJson, type Network, type Tofu } from "../../core/commands/status.ts";
 import type { Fleet } from "../../core/fleet.ts";
-import { gather } from "../../core/gather.ts";
-import { capture, interpret, type Io } from "../../core/interpret.ts";
+import { interpret, type Io } from "../../core/interpret.ts";
+import { operation, isOperation, type Invocation as Call } from "../../core/operations/catalog.ts";
+import { invocation, hasPlan, isQuery, isStream, planOf, serverOf, stream, type Context } from "../../core/operations/run.ts";
 import type { Plan } from "../../core/plan.ts";
-import { err, flatMap, ok, type Result } from "../../result.ts";
 import { listed, reporting, type Invocation } from "../../core/present/progress.ts";
 import { follow } from "../../core/updates.ts";
-import { parsed, releasesSchema, runsSchema } from "../../core/present/views.ts";
-import { invocation, isPlan, planOf as planOfCall, type Context } from "../../core/operations/run.ts";
-import { changes, commandInput, facts, targetOf, toInvocation, words } from "./commands.ts";
-import type * as wire from "./contract.ts";
+import { err, ok, type Result } from "../../result.ts";
+import { json, send } from "../../deployer/http.ts";
+import { catalog, openapi } from "./contract.ts";
+import type * as wire from "./contract.gen.ts";
+import { facts, words } from "./commands.ts";
+import { answer as queryAnswer } from "./queries.ts";
+import { options, requestBody } from "./protocol.ts";
 import { busy, readRecord, recordLine, runId, stateOf, summary, type Run } from "./runs.ts";
 
-/** What the API answers from: the engine, the fleet, and how it names paths and reaches servers. */
 export type Api = {
   readonly kayra: KayraRoot;
   readonly fleet: Fleet;
   readonly version: string;
   readonly short: (text: string) => string;
   readonly network: Network;
+  readonly tofu?: Tofu;
 };
 
 type Live = {
   readonly run: Run;
   readonly listeners: readonly ((event: wire.RunEvent) => void)[];
   readonly stop: AbortController;
-  /** The answer a confirmation waits for, while one does. */
   readonly answer: ((text: string) => void) | undefined;
   readonly input: ((chunk: string) => void) | undefined;
+  readonly done: Promise<unknown>;
 };
-
-/** kayra ui's one mutable cell: the runs it started, swapped whole on every change. */
-// eslint-disable-next-line functional/prefer-immutable-types -- kayra ui's state lives here, nowhere else
-const cell: { live: Readonly<Record<string, Live>> } = { live: {} };
-
-const swap = (id: string, change: (live: Live) => Live): void => {
-  const current = cell.live[id];
-  // eslint-disable-next-line functional/immutable-data -- kayra ui's state lives here, nowhere else
-  if (current !== undefined) cell.live = { ...cell.live, [id]: change(current) };
-};
-
-const runsDir = (fleet: Fleet): string => within(fleet.root, ".cache", "ui", "runs");
-
-const recorded = (fleet: Fleet): readonly Run[] => {
-  const dir = runsDir(fleet);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => name.endsWith(".jsonl"))
-    .flatMap((name) => {
-      const run = readRecord(readFileSync(join(dir, name), "utf8"));
-      return run === undefined ? [] : [run];
-    });
-};
-
-/** Every run kayra ui knows: those it runs now, and those its records keep. */
-const allRuns = (fleet: Fleet): readonly Run[] => {
-  const live = Object.values(cell.live).map((each) => each.run);
-  return [...live, ...recorded(fleet).filter((run) => !live.some((each) => each.id === run.id))].toSorted((a, b) =>
-    b.id.localeCompare(a.id),
-  );
-};
-
-/** Ansible colours its output for a terminal only; the browser draws the colours too. */
-const coloured = (plan: Plan): Plan =>
-  plan.map((step) => (step.kind === "run" || step.kind === "session" ? { ...step, env: { ...step.env, ANSIBLE_FORCE_COLOR: "1" } } : step));
-
-/** A server-sent stream; `end` says everything is said, so the browser closes instead of reconnecting. */
-const sse = (response: ServerResponse): { readonly say: (data: unknown) => void; readonly end: () => void } => {
-  response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-  return {
-    say: (data) => {
-      response.write(`data: ${JSON.stringify(data)}\n\n`);
-    },
-    end: () => {
-      response.end("event: end\ndata: {}\n\n");
-    },
-  };
-};
+type Settings = Readonly<z.infer<typeof options>>;
+type Refusal = readonly [number, string];
 
 const answerJson = (response: ServerResponse, status: number, value: unknown): void => {
   send(response, status, JSON.stringify(value), "application/json; charset=utf-8");
 };
-
-const invocationOf = (ui: Api, input: wire.CommandInput): Result<Invocation, string> =>
-  flatMap(targetOf(ui.fleet, input), (target) =>
-    ok({
-      command: words(input),
-      ...(target === undefined ? {} : { server: target.name }),
-      about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${ui.version}`],
-    }),
-  );
-
-/** The core's context for the fleet this server serves; paths start at the fleet. */
-const contextOf = (ui: Api): Context => ({
-  engine: { kayra: ui.kayra, fleet: ui.fleet.root },
-  fleet: ui.fleet,
-  version: ui.version,
-  here: ui.fleet.root,
-  read: (path) => (existsSync(path) ? readFileSync(path, "utf8") : undefined),
-  network: ui.network,
-  tofu: opentofu,
-});
-
-const planOf = (ui: Api, input: wire.CommandInput): Result<Plan, string> =>
-  flatMap(toInvocation(input), (call) => (isPlan(call) ? planOfCall(contextOf(ui), call) : err(`${call.name} runs no plan`)));
-
-const preview = (ui: Api, input: wire.CommandInput): Result<wire.Preview, string> =>
-  flatMap(planOf(ui, input), (plan) =>
-    flatMap(invocationOf(ui, input), (invocation) => ok({ invocation, steps: listed(plan, ui.short), changes: changes(input) })),
-  );
-
-/** Starts a run, or says why it cannot: one per server, a real server not confirmed. */
-const start = (ui: Api, input: wire.CommandInput, confirm: unknown): Result<string, readonly [number, string]> => {
-  const target = targetOf(ui.fleet, input);
-  const plan = planOf(ui, input);
-  const invocation = invocationOf(ui, input);
-  if (!target.ok || !plan.ok || !invocation.ok) return err([400, [target, plan, invocation].flatMap((each) => (each.ok ? [] : [each.error])).join("; ")]);
-  const server = target.value;
-  if (busy(allRuns(ui.fleet), server?.name)) return err([409, `a run on ${server?.name ?? ""} has not ended`]);
-  if (changes(input) && server !== undefined && server.target !== "multipass" && confirm !== server.name)
-    return err([403, `this changes ${server.name}: confirm with its name`]);
-  const started = new Date().toISOString();
-  const id = runId(started, randomBytes(3).toString("hex"));
-  const run: Run = { id, command: words(input), ...(server === undefined ? {} : { server: server.name }), started, events: [] };
-  const file = join(runsDir(ui.fleet), `${id}.jsonl`);
-  mkdirSync(runsDir(ui.fleet), { recursive: true });
-  appendFileSync(file, recordLine({ id: run.id, command: run.command, ...(server === undefined ? {} : { server: server.name }), started }));
-  // eslint-disable-next-line functional/immutable-data -- kayra ui's state lives here, nowhere else
-  cell.live = { ...cell.live, [id]: { run, listeners: [], stop: new AbortController(), answer: undefined, input: undefined } };
-  const emit = (event: wire.RunEvent): void => {
-    appendFileSync(file, recordLine(event));
-    swap(id, (live) => ({ ...live, run: { ...live.run, events: [...live.run.events, event] } }));
-    cell.live[id]?.listeners.forEach((listener) => {
-      listener(event);
-    });
+const events = (response: ServerResponse, ndjson = false) => {
+  response.writeHead(200, { "Content-Type": ndjson ? "application/x-ndjson" : "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  return {
+    say: (value: unknown): void => { if (!response.destroyed) response.write(ndjson ? `${JSON.stringify(value)}\n` : `data: ${JSON.stringify(value)}\n\n`); },
+    end: (): void => { response.end(ndjson ? "" : "event: end\ndata: {}\n\n"); },
   };
-  const stop = cell.live[id]?.stop;
-  const io: Io = {
-    out: (text) => {
-      emit({ kind: "said", stream: "out", text });
-    },
-    err: (text) => {
-      emit({ kind: "said", stream: "err", text });
-    },
-    ask: (question) =>
-      new Promise((resolve) => {
-        swap(id, (live) => ({
-          ...live,
-          answer: (text) => {
-            swap(id, (after) => ({ ...after, answer: undefined }));
-            emit({ kind: "answered" });
-            resolve(text);
-          },
-        }));
+};
+
+export const createApi = (api: Api) => {
+  // eslint-disable-next-line functional/prefer-immutable-types -- per-listener state; no launch shares locks, credentials or sessions
+  const cell: { live: Readonly<Record<string, Live>> } = { live: {} };
+  const swap = (id: string, change: (live: Live) => Live): void => {
+    const current = cell.live[id];
+    // eslint-disable-next-line functional/immutable-data -- replace the one state cell whole
+    if (current !== undefined) cell.live = { ...cell.live, [id]: change(current) };
+  };
+  const context: Context = {
+    engine: { kayra: api.kayra, fleet: api.fleet.root }, fleet: api.fleet, version: api.version, here: api.fleet.root,
+    read: (path) => existsSync(path) ? readFileSync(path, "utf8") : undefined,
+    network: api.network, tofu: api.tofu ?? opentofu,
+  };
+  const dir = within(api.fleet.root, ".cache", "ui", "runs");
+  const allRuns = (): readonly Run[] => {
+    const live = Object.values(cell.live).map((each) => each.run);
+    const records = existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".jsonl")).flatMap((name) => {
+      const run = readRecord(readFileSync(join(dir, name), "utf8"));
+      return run === undefined || live.some((each) => each.id === run.id) ? [] : [run];
+    }) : [];
+    return [...live, ...records].toSorted((a, b) => b.id.localeCompare(a.id));
+  };
+  const about = (call: Call): Invocation => {
+    const target = serverOf(context, call);
+    return { command: words(call), about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${api.version}`], ...(target === undefined ? {} : { server: target.name }) };
+  };
+  const recipe = (call: Call, settings: Settings): Result<Plan, string> => {
+    if (!hasPlan(call)) return err(`${call.name} has no plan`);
+    const plan = planOf(context, call);
+    return plan.ok && settings.verbose ? ok(verbose(plan.value)) : plan;
+  };
+  const preview = (call: Call, settings: Settings): Result<wire.Preview, string> => {
+    const plan = recipe(call, settings);
+    return plan.ok ? ok({ invocation: about(call), steps: listed(plan.value, api.short), changes: operation(call.name).effect !== "reads" }) : plan;
+  };
+  const start = (call: Call, settings: Settings, confirm: string | undefined): Result<string, Refusal> => {
+    const plan = recipe(call, settings);
+    if (!plan.ok) return err([400, plan.error]);
+    const server = serverOf(context, call);
+    if (busy(Object.values(cell.live).map((live) => live.run), server?.name)) return err([409, `a run on ${server?.name ?? ""} has not ended`]);
+    if (operation(call.name).effect !== "reads" && server !== undefined && server.target !== "multipass" && confirm !== server.name) return err([403, `this changes ${server.name}: confirm with its name`]);
+    const started = new Date().toISOString();
+    const id = runId(started, randomBytes(6).toString("hex"));
+    const session = operation(call.name).kind === "session";
+    const run: Run = { id, command: words(call), started, events: [], session, ...(server === undefined ? {} : { server: server.name }) };
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${id}.jsonl`);
+    appendFileSync(file, recordLine({ id, command: run.command, started, session, ...(server === undefined ? {} : { server: server.name }) }));
+    const stop = new AbortController();
+    // eslint-disable-next-line functional/immutable-data -- install the lock before any asynchronous work
+    cell.live = { ...cell.live, [id]: { run, stop, listeners: [], answer: undefined, input: undefined, done: Promise.resolve() } };
+    const emit = (event: wire.RunEvent): void => {
+      appendFileSync(file, recordLine(event));
+      swap(id, (live) => ({ ...live, run: { ...live.run, events: [...live.run.events, event] } }));
+      cell.live[id]?.listeners.forEach((listener) => { listener(event); });
+    };
+    const io: Io = {
+      out: (text) => { emit({ kind: "said", stream: "out", text }); },
+      err: (text) => { emit({ kind: "said", stream: "err", text }); },
+      ask: (question) => new Promise((resolve) => {
+        swap(id, (live) => ({ ...live, answer: (text) => {
+          swap(id, (after) => ({ ...after, answer: undefined }));
+          emit({ kind: "answered" });
+          resolve(text);
+        } }));
         emit({ kind: "ask", prompt: question.text, secret: question.kind === "secret", ...(question.kind === "confirm" ? { expect: question.expect } : {}) });
       }),
-    input: (deliver) => {
-      swap(id, (live) => ({ ...live, input: deliver }));
-      return () => { swap(id, (live) => ({ ...live, input: undefined })); };
-    },
-    output: (chunk, stream) => {
-      emit({ kind: "output", stream, chunk });
-    },
-    ...(stop === undefined ? {} : { signal: stop.signal }),
+      output: (chunk, stream) => { emit({ kind: "output", stream, chunk }); },
+      input: (deliver) => {
+        swap(id, (live) => ({ ...live, input: deliver }));
+        return () => { swap(id, (live) => ({ ...live, input: undefined })); };
+      },
+      size: { columns: settings.columns, rows: settings.rows }, signal: stop.signal,
+    };
+    const coloured = plan.value.map((step) => step.kind === "run" ? { ...step, env: { ...step.env, ANSIBLE_FORCE_COLOR: "1" } } : step);
+    const done = interpret(coloured, io, reporting(emit, about(call), api.short)).catch(() => {
+      emit({ kind: "said", stream: "err", text: "The run could not finish; check the local kayra process." });
+      emit({ kind: "ended", failures: 1, ms: Date.now() - Date.parse(started), footer: [] });
+    }).finally(() => { swap(id, (live) => ({ ...live, answer: undefined, input: undefined })); });
+    swap(id, (live) => ({ ...live, done }));
+    return ok(id);
   };
-  void interpret(coloured(plan.value), io, reporting(emit, invocation.value, ui.short), () => stop?.signal.aborted === true).finally(() => {
-    swap(id, (live) => ({ ...live, answer: undefined, input: undefined }));
-  });
-  return ok(id);
-};
-
-/** A run's events from the start, then each as it happens, until it has ended. */
-const watchRun = (ui: Api, id: string, response: ServerResponse): void => {
-  const live = cell.live[id];
-  const run = live?.run ?? recorded(ui.fleet).find((each) => each.id === id);
-  if (run === undefined) {
-    send(response, 404, `no run ${id}\n`);
-    return;
-  }
-  const { say, end } = sse(response);
-  run.events.forEach(say);
-  if (live === undefined || stateOf(run.events) !== "running") {
-    end();
-    return;
-  }
-  const listener = (event: wire.RunEvent): void => {
-    say(event);
-    if (event.kind === "ended") end();
-  };
-  swap(id, (current) => ({ ...current, listeners: [...current.listeners, listener] }));
-  response.on("close", () => {
-    swap(id, (current) => ({ ...current, listeners: current.listeners.filter((each) => each !== listener) }));
-  });
-};
-
-/** What a deployer's ctl answers, captured over SSH as the command line asks it. */
-const ctl = async (ui: Api, name: "app.runs" | "app.log" | "app.releases", input: Readonly<Record<string, string>>): Promise<Result<string, string>> => {
-  const call = invocation(name, input);
-  if (!call.ok) return call;
-  const plan = isPlan(call.value) ? planOfCall(contextOf(ui), call.value) : err(`${name} runs no plan`);
-  if (!plan.ok) return plan;
-  const [step] = plan.value;
-  if (step?.kind !== "run") return err("the deployer's plan has no step");
-  const [program, ...args] = step.argv;
-  const argv = args.flatMap((arg) => (typeof arg === "string" ? [arg] : []));
-  const exit = await capture([program, ...argv], "capture");
-  return exit.code === 0 ? ok(exit.stdout) : err(exit.stderr.trim() === "" ? `exit ${String(exit.code)}` : exit.stderr.trim());
-};
-
-/** A request to /api/, admitted by the host that serves it. */
-export const handleApi = async (ui: Api, request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
-  const path = url.pathname;
-  const method = request.method ?? "GET";
-  const app = /^\/api\/servers\/([^/]+)\/apps\/([^/]+)\/(runs|releases|logs)(?:\/([^/]+))?$/.exec(path);
-  const runPath = /^\/api\/runs\/([^/]+)\/(events|answer|cancel|input)$/.exec(path);
-  if (method === "GET" && path === "/api/fleet") {
-    const fleetFacts: wire.FleetFacts = { fleet: ui.fleet.root.split(sep).at(-1) ?? "", version: ui.version, servers: ui.fleet.servers.map(facts) };
-    answerJson(response, 200, fleetFacts);
-  } else if (method === "GET" && path === "/api/status") {
-    const { say, end } = sse(response);
-    const { initial, updates } = look(ui.fleet, opentofu, ui.network);
-    await follow(initial, updates, (looks) => {
-      const status: wire.Status = statusJson(looks);
-      say(status);
-    });
-    end();
-  } else if (method === "GET" && path === "/api/validate") {
-    const reports = await Promise.all(ui.fleet.servers.map(async (server) => ({ server, findings: findings(await gather(ui.fleet.root, server)) })));
-    const validation: wire.Validation = validateJson(reports);
-    answerJson(response, 200, validation);
-  } else if (method === "GET" && app !== null) {
-    const [, server = "", name = "", what, more] = app;
-    const asked = { server: decodeURIComponent(server), app: decodeURIComponent(name) };
-    const answer = await ctl(ui, what === "runs" ? "app.runs" : what === "releases" ? "app.releases" : "app.log", {
-      ...asked,
-      ...(more === undefined ? {} : { run: decodeURIComponent(more) }),
-    });
-    if (!answer.ok) send(response, 502, `${answer.error}\n`);
-    else if (what === "logs") send(response, 200, answer.value);
-    else {
-      const value: wire.AppRuns | wire.AppReleases | undefined = what === "runs" ? parsed(runsSchema, answer.value) : parsed(releasesSchema, answer.value);
-      if (value === undefined) send(response, 502, "the server's deployer answered in a form this kayra does not read: deploy it with this kayra\n");
-      else answerJson(response, 200, value);
-    }
-  } else if (method === "POST" && path === "/api/plan") {
-    const input = commandInput.safeParse(await json(request));
-    const shown = input.success ? preview(ui, input.data) : err(input.error.issues.at(0)?.message ?? "not a command");
-    if (shown.ok) answerJson(response, 200, shown.value);
-    else send(response, 400, `${shown.error}\n`);
-  } else if (method === "GET" && path === "/api/runs") {
-    const runs: readonly wire.RunSummary[] = allRuns(ui.fleet).slice(0, 50).map(summary);
-    answerJson(response, 200, runs);
-  } else if (method === "POST" && path === "/api/runs") {
-    const body = await json(request);
-    const input = commandInput.safeParse(typeof body === "object" && body !== null && "command" in body ? body.command : undefined);
-    const confirm = typeof body === "object" && body !== null && "confirm" in body ? body.confirm : undefined;
-    const started = input.success ? start(ui, input.data, confirm) : err([400, input.error.issues.at(0)?.message ?? "not a command"] as const);
-    if (started.ok) answerJson(response, 201, { id: started.value });
-    else send(response, started.error[0], `${started.error[1]}\n`);
-  } else if (runPath !== null) {
-    const [, id = "", what] = runPath;
+  const watch = (id: string, response: ServerResponse, ndjson: boolean, session = false): void => {
     const live = cell.live[id];
-    if (method === "GET" && what === "events") watchRun(ui, id, response);
-    else if (method === "POST" && what === "cancel" && live !== undefined) {
-      live.stop.abort();
-      send(response, 202, "stopping\n");
-    } else if (method === "POST" && what === "input" && live?.input !== undefined) {
-      const body = await json(request);
-      if (typeof body !== "object" || body === null || !("text" in body) || typeof body.text !== "string") send(response, 400, "input needs text\n");
-      else {
-        live.input(body.text);
-        send(response, 204, "");
+    const run = live?.run ?? allRuns().find((each) => each.id === id);
+    if (run === undefined || (session && !run.session)) { send(response, 404, "no run or session\n"); return; }
+    const { say, end } = events(response, ndjson);
+    run.events.forEach(say);
+    if (live === undefined || stateOf(run.events) !== "running") { end(); return; }
+    const listener = (event: wire.RunEvent): void => { say(event); if (event.kind === "ended") end(); };
+    swap(id, (current) => ({ ...current, listeners: [...current.listeners, listener] }));
+    response.on("close", () => { swap(id, (current) => ({ ...current, listeners: current.listeners.filter((each) => each !== listener) })); });
+  };
+  const handle = async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
+    const method = request.method ?? "GET";
+    const path = url.pathname;
+    const named = /^\/api\/operations\/([^/]+)(\/preview)?$/.exec(path);
+    const runPath = /^\/api\/runs\/([^/]+)(?:\/(events|answers|cancel))?$/.exec(path);
+    const sessionPath = /^\/api\/sessions\/([^/]+)(?:\/(output|input))?$/.exec(path);
+    const ndjson = request.headers.accept?.includes("application/x-ndjson") === true;
+    if (method === "GET" && path === "/api/operations") answerJson(response, 200, catalog());
+    else if (method === "GET" && path === "/api/openapi.json") answerJson(response, 200, openapi(api.version));
+    else if (method === "GET" && path === "/api/fleet") {
+      const factsOfFleet: wire.FleetFacts = { fleet: api.fleet.root.split(sep).at(-1) ?? "", version: api.version, servers: api.fleet.servers.map(facts) };
+      answerJson(response, 200, factsOfFleet);
+    } else if (method === "POST" && named !== null) {
+      const name = decodeURIComponent(named[1] ?? "");
+      if (!isOperation(name)) { send(response, 404, "no such operation\n"); return; }
+      const body = requestBody.safeParse(await json(request));
+      if (!body.success) { send(response, 400, "expected {input, options?, confirm?}\n"); return; }
+      const call = invocation(name, body.data.input);
+      const settings = options.parse(body.data.options ?? {});
+      if (!call.ok) { send(response, 400, `${call.error}\n`); return; }
+      const kind = operation(call.value.name).kind;
+      if (named[2] !== undefined || settings.dryRun) {
+        const shown = preview(call.value, settings);
+        if (shown.ok) answerJson(response, 200, shown.value); else send(response, 400, `${shown.error}\n`);
+      } else if (kind === "plan" || kind === "session") {
+        const started = start(call.value, settings, body.data.confirm);
+        if (!started.ok) send(response, started.error[0], `${started.error[1]}\n`);
+        else answerJson(response, kind === "session" ? 201 : 202, { [kind === "session" ? "session" : "run"]: started.value });
+      } else if (isStream(call.value)) {
+        const { initial, updates } = stream(context, call.value.name, call.value.input);
+        const sink = events(response, ndjson);
+        await follow(initial, updates, (looks) => { const value: wire.Status = statusJson(looks); sink.say(value); });
+        sink.end();
+      } else if (isQuery(call.value)) {
+        const result = await queryAnswer(context, call.value.name, call.value.input);
+        if (result.ok) answerJson(response, 200, result.value);
+        else send(response, call.value.name === "validate" ? 400 : 502, `${result.error}\n`);
       }
-    } else if (method === "POST" && what === "answer" && live?.answer !== undefined) {
-      const body = await json(request);
-      live.answer(typeof body === "object" && body !== null && "text" in body && typeof body.text === "string" ? body.text : "");
-      send(response, 204, "");
-    } else send(response, 404, `nothing to ${what ?? ""} for run ${id}\n`);
-  } else send(response, 404, "not found\n");
-};
 
-/** Stops every run this server started: it is going away. */
-export const stopRuns = (): void => {
-  Object.values(cell.live).forEach((live) => {
-    live.stop.abort();
-  });
+    } else if (method === "GET" && path === "/api/runs") {
+      const runs: readonly wire.RunSummary[] = allRuns().map(summary);
+      answerJson(response, 200, runs);
+    } else if (runPath !== null || sessionPath !== null) {
+      const [, id = "", action] = runPath ?? sessionPath ?? [];
+      const live = cell.live[id];
+      const session = sessionPath !== null;
+      if (session && live?.run.session !== true && !allRuns().some((each) => each.id === id && each.session)) { send(response, 404, "no session\n"); return; }
+      if (method === "GET" && (action === "events" || action === "output")) watch(id, response, ndjson, session);
+      else if (method === "GET" && action === undefined && !session) {
+        const run = allRuns().find((each) => each.id === id);
+        if (run === undefined) send(response, 404, "no run\n"); else { const value: wire.Run = { ...summary(run), events: run.events }; answerJson(response, 200, value); }
+      } else if (((method === "POST" && action === "cancel") || (session && method === "DELETE" && action === undefined)) && live !== undefined && stateOf(live.run.events) === "running") {
+        live.stop.abort(); send(response, 204, "");
+      } else if (method === "POST" && (action === "answers" || action === "input")) {
+        const deliver = action === "answers" ? live?.answer : session ? live?.input : undefined;
+        if (deliver === undefined || live?.stop.signal.aborted === true) { send(response, 404, "nothing waiting for input\n"); return; }
+        const body = z.strictObject({ text: z.string() }).safeParse(await json(request));
+        if (!body.success) send(response, 400, "expected {text: string}\n");
+        else { deliver(body.data.text); send(response, 204, ""); }
+      } else send(response, 404, "no active resource\n");
+    } else send(response, 404, "not found\n");
+  };
+  return { handle, stop: async (): Promise<void> => {
+    Object.values(cell.live).forEach((live) => { live.stop.abort(); });
+    await Promise.all(Object.values(cell.live).map((live) => live.done));
+  } };
 };

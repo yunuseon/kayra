@@ -278,16 +278,18 @@ export const parser = (fleet: Fleet) => {
               brief: summary("doctor"),
             }),
             command(
-              "ui",
+              "serve",
               object({
-                name: constant("ui"),
+                name: constant("serve"),
+                ui: option("--ui", { description: message`Serve the browser interface (the default unless --api alone).` }),
+                api: option("--api", { description: message`Allow local programs to use a bearer token; write .cache/serve.json.` }),
                 port: withDefault(option("--port", integer({ min: 0, max: 65_535, metavar: "PORT" }), { description: message`Listen on this port (default: any free one).` }), 0),
                 noOpen: option("--no-open", { description: message`Print the URL, open no browser.` }),
               }),
               {
-                brief: message`The web interface on this Mac: the fleet, its servers and apps, every command with its steps live.`,
+                brief: message`The local browser interface and API: the fleet, its servers and apps, every command with its steps live.`,
                 description: message`Listens on 127.0.0.1 only. The URL it prints carries this launch's token; nothing else gets in. Runs the same plans as the command line, with the same guards; a change to a real server asks for its name first.`,
-                footer: footer(["kayra ui", "open it in the browser"], ["kayra ui --port 7700 --no-open", "for web/'s dev server"]),
+                footer: footer(["kayra serve", "open it in the browser"], ["kayra serve --port 7700 --no-open", "for web/'s dev server"]),
               },
             ),
             command(

@@ -1,14 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
-import type { AppReleases, AppRuns } from "../../../cli/src/clients/api/contract.ts";
-import { get, getText, type Answer } from "../api.ts";
+import type { AppReleases, AppRuns } from "../../../cli/src/clients/api/contract.gen.ts";
+import { operation, type Answer } from "../api.ts";
 import { show } from "../components/preview.tsx";
 import { Dot, Header, Pill, Problem, Waiting } from "../components/ui.tsx";
 import { ago, duration } from "../time.ts";
 
 type Tab = "runs" | "releases" | "log";
-
-const path = (server: string, app: string, what: string): string =>
-  `/api/servers/${encodeURIComponent(server)}/apps/${encodeURIComponent(app)}/${what}`;
 
 const useAnswer = <T,>(load: () => Promise<Answer<T>>, key: string): readonly [Answer<T> | undefined, () => void] => {
   const [answer, setAnswer] = useState<Answer<T> | undefined>(undefined);
@@ -23,7 +20,7 @@ const useAnswer = <T,>(load: () => Promise<Answer<T>>, key: string): readonly [A
 const stateTone = (state: AppRuns["runs"][number]["state"]) => (state === "success" ? "ok" : state === "failure" ? "bad" : "waiting");
 
 const Runs = ({ server, app, open }: { readonly server: string; readonly app: string; readonly open: (run: string) => void }) => {
-  const [answer] = useAnswer(() => get<AppRuns>(path(server, app, "runs")), `${server}/${app}`);
+  const [answer] = useAnswer(() => operation<AppRuns>("app.runs", {server, app}), `${server}/${app}`);
   if (answer === undefined) return <Waiting what="Asking the deployer" />;
   if (!answer.ok) return <Problem failure={answer.failure} />;
   const now = Date.now();
@@ -64,7 +61,7 @@ const Runs = ({ server, app, open }: { readonly server: string; readonly app: st
 };
 
 const Releases = ({ server, app }: { readonly server: string; readonly app: string }) => {
-  const [answer] = useAnswer(() => get<AppReleases>(path(server, app, "releases")), `${server}/${app}`);
+  const [answer] = useAnswer(() => operation<AppReleases>("app.releases", {server, app}), `${server}/${app}`);
   if (answer === undefined) return <Waiting what="Asking the deployer" />;
   if (!answer.ok) return <Problem failure={answer.failure} />;
   const now = Date.now();
@@ -77,7 +74,7 @@ const Releases = ({ server, app }: { readonly server: string; readonly app: stri
           {release.live ? (
             <Pill tone="ok">live</Pill>
           ) : (
-            <button class="button small" onClick={() => { show({ name: "app rollback", server, app, sha: release.sha }); }}>
+            <button class="button small" onClick={() => { show({ name: "app.rollback", server, app, sha: release.sha }); }}>
               Roll back to it
             </button>
           )}
@@ -95,7 +92,7 @@ const mark = (line: string): string | undefined => {
 };
 
 const Log = ({ server, app, run }: { readonly server: string; readonly app: string; readonly run: string | undefined }) => {
-  const [answer] = useAnswer(() => getText(path(server, app, run === undefined ? "logs" : `logs/${encodeURIComponent(run)}`)), `${server}/${app}/${run ?? ""}`);
+  const [answer] = useAnswer(() => operation<string>("app.log", {server, app, ...(run === undefined ? {} : {run})}), `${server}/${app}/${run ?? ""}`);
   if (answer === undefined) return <Waiting what="Fetching the log" />;
   if (!answer.ok) return <Problem failure={answer.failure} />;
   return (
@@ -120,7 +117,7 @@ export const AppView = ({ server, app }: { readonly server: string; readonly app
           class="inline"
           onSubmit={(event) => {
             event.preventDefault();
-            show({ name: "app deploy", server, app, ...(ref.trim() === "" ? {} : { ref: ref.trim() }) });
+            show({ name: "app.deploy", server, app, ...(ref.trim() === "" ? {} : { ref: ref.trim() }) });
           }}
         >
           <input value={ref} onInput={(event) => { setRef(event.currentTarget.value); }} placeholder="its ref" spellcheck={false} aria-label="Branch, tag or commit" />
@@ -155,7 +152,7 @@ export const AppView = ({ server, app }: { readonly server: string; readonly app
       </section>
       <p class="tone-muted small">
         Purging an app's data is irreversible:{" "}
-        <button class="link danger-link" onClick={() => { show({ name: "app purge", server, app }); }}>
+        <button class="link danger-link" onClick={() => { show({ name: "app.purge", server, app }); }}>
           purge {app}'s volumes
         </button>
       </p>

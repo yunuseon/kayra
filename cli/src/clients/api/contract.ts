@@ -1,150 +1,89 @@
-/**
- * What kayra ui's server and the browser say to each other. Standalone: web/
- * imports these types and nothing else of the CLI. The server assigns its own
- * values to them, so a change on either side that breaks the other does not
- * compile.
- */
+import { z } from "zod";
+import { operations, operationNames, type OperationName, type QueryName } from "../../core/operations/catalog.ts";
+import { options, schemas, querySchemas } from "./protocol.ts";
 
-export type Tone = "ok" | "bad" | "warn" | "active" | "muted" | "strong" | "accent";
-export type Span = string | { readonly tone?: Tone; readonly text: string; readonly href?: string };
-export type Line = readonly Span[];
-export type Text = string | Line;
+export const catalog = () => operationNames.map((name) => {
+  const { summary, scope, effect, kind, input } = operations[name];
+  return { name, summary, scope, effect, kind, input: z.toJSONSchema(input, { io: "input" }) };
+});
 
-export type Part = "provision" | "setup" | "apps" | "verify" | "hosts";
+type Schema = Readonly<Record<string, unknown>>;
+const isObject = (value: unknown): value is Schema => typeof value === "object" && value !== null;
+const object = (value: unknown): Schema => isObject(value) ? value : {};
+const list = (value: unknown): readonly unknown[] => Array.isArray(value) ? value : [];
+const literal = (value: unknown): string => JSON.stringify(value);
 
-/** The commands a server's page offers: these and its job. */
-export type ServerCommand = "up" | "provision" | "deploy" | "setup" | "plan" | "verify" | "apps" | "down" | "adopt" | "backup test";
-
-/** A command the browser may ask for; the server checks it against the fleet before anything runs. */
-export type CommandInput =
-  | { readonly name: ServerCommand; readonly server: string }
-  | { readonly name: "app deploy"; readonly server: string; readonly app: string; readonly ref?: string }
-  | { readonly name: "app rollback"; readonly server: string; readonly app: string; readonly sha: string }
-  | { readonly name: "app purge"; readonly server: string; readonly app: string }
-  | { readonly name: "job"; readonly server: string; readonly job: "gc" | "renovate"; readonly noPrs: boolean }
-  | { readonly name: "doctor" };
-
-export type CommandName = CommandInput["name"];
-
-export type ServerFacts = {
-  readonly name: string;
-  readonly kind: "platform" | "edge" | "nas";
-  readonly target: "multipass" | "hetzner" | "home";
-  readonly domain: string;
-  readonly apps: readonly string[];
-  /** The commands the browser offers for it, in the order it shows them. */
-  readonly commands: readonly (ServerCommand | "job")[];
-  /** Its secrets ask for the vault password on a terminal: nothing that opens them runs here. */
-  readonly needsTerminal: boolean;
-};
-
-export type FleetFacts = {
-  readonly fleet: string;
-  readonly version: string;
-  readonly servers: readonly ServerFacts[];
-};
-
-/** How a port answered from the Mac; `pending` until it has. */
-export type ReachState = "pending" | "open" | "answered" | "refused" | "no-answer" | "unreachable" | "unknown-host" | "bad-certificate" | "failed" | "skipped";
-
-/** `kayra status --json`. */
-export type Status = {
-  readonly servers: readonly {
-    readonly name: string;
-    readonly kind: string;
-    readonly target: string;
-    readonly domain: string;
-    readonly apps: readonly string[];
-    readonly machine: {
-      readonly state: "pending" | "found" | "not-provisioned" | "no-machine" | "unreadable";
-      readonly address: string | null;
-      readonly from: "inventory" | "opentofu" | null;
-      readonly reason: string | null;
-    };
-    readonly ssh: { readonly port: number; readonly state: ReachState; readonly ms: number | null; readonly error: string | null };
-    readonly https: {
-      readonly url: string;
-      readonly state: ReachState;
-      readonly status: number | null;
-      readonly ms: number | null;
-      readonly error: string | null;
-    } | null;
-  }[];
-};
-
-/** `kayra validate --json`. */
-export type Validation = {
-  readonly result: "problem" | "unchecked" | "passed";
-  readonly servers: readonly {
-    readonly name: string;
-    readonly kind: string;
-    readonly target: string;
-    readonly result: "problem" | "unchecked" | "passed";
-    readonly findings: readonly { readonly result: "problem" | "unchecked" | "passed"; readonly text: string; readonly hint: string | null }[];
-  }[];
-};
-
-/** A step as listed before it runs. */
-export type Listed = {
-  readonly index: number;
-  readonly kind: string;
-  readonly title: string;
-  readonly command?: string;
-  readonly part?: Part;
-  readonly opens?: Part;
-};
-
-export type Invocation = { readonly command: string; readonly server?: string; readonly about: readonly string[] };
-
-/** What the server answers for a dry run. */
-export type Preview = { readonly invocation: Invocation; readonly steps: readonly Listed[]; readonly changes: boolean };
-
-export type Stop = "failed" | "declined" | "interrupted";
-
-/** One thing that happened in a run, in order: replayed in full to a viewer that comes late. */
-export type RunEvent =
-  | { readonly kind: "plan"; readonly invocation: Invocation; readonly steps: readonly Listed[] }
-  | { readonly kind: "started"; readonly index: number }
-  | { readonly kind: "done"; readonly index: number; readonly failed: boolean; readonly stopped: boolean; readonly why?: string; readonly ms: number }
-  | {
-      readonly kind: "ended";
-      readonly failures: number;
-      readonly stop?: { readonly index: number; readonly why: Stop };
-      readonly ms: number;
-      readonly footer: readonly Line[];
+const typescript = (value: unknown): string => {
+  const schema = object(value);
+  if ("const" in schema) return literal(schema["const"]);
+  if (Array.isArray(schema["enum"])) return schema["enum"].map(literal).join(" | ");
+  if (Array.isArray(schema["anyOf"])) return schema["anyOf"].map(typescript).join(" | ");
+  if (Array.isArray(schema["oneOf"])) return schema["oneOf"].map(typescript).join(" | ");
+  if (Array.isArray(schema["type"])) return schema["type"].map((type: unknown) => typescript({ ...schema, type })).join(" | ");
+  switch (schema["type"]) {
+    case "null": return "null";
+    case "string": return "string";
+    case "integer":
+    case "number": return "number";
+    case "boolean": return "boolean";
+    case "array": return `readonly (${typescript(schema["items"])})[]`;
+    case "object": {
+      const properties = Object.entries(object(schema["properties"]));
+      const required = list(schema["required"]);
+      const fields = properties.map(([key, property]) => `readonly ${literal(key)}${required.includes(key) ? "" : "?"}: ${typescript(property)}`).join("; ");
+      if (properties.length === 0 && schema["additionalProperties"] === false) return "Readonly<Record<string, never>>";
+      return properties.length === 0 ? `Readonly<Record<string, ${typescript(schema["additionalProperties"]) }>>` : `{ ${fields} }`;
     }
-  /** A program's output, as it came; Ansible's is coloured (SGR). */
-  | { readonly kind: "output"; readonly stream: "stdout" | "stderr"; readonly chunk: string }
-  /** What kayra itself says: a check's result, why a step stopped, a note. */
-  | { readonly kind: "said"; readonly stream: "out" | "err"; readonly text: Text }
-  /** A question: only its prompt, never the answer, is recorded. */
-  | { readonly kind: "ask"; readonly prompt: Text; readonly secret: boolean; readonly expect?: string }
-  | { readonly kind: "answered" };
-
-export type RunState = "running" | "passed" | "failed" | "interrupted" | "declined";
-
-export type RunSummary = {
-  readonly id: string;
-  readonly command: string;
-  readonly server?: string;
-  readonly started: string;
-  readonly state: RunState;
+    default: return "unknown";
+  }
 };
 
-/** What the deployer's ctl answers for `runs --json`. */
-export type AppRuns = {
-  readonly app: string;
-  readonly live?: { readonly sha: string; readonly time: string };
-  readonly runs: readonly {
-    readonly id: string;
-    readonly state: "running" | "success" | "failure";
-    readonly why: string;
-    readonly what: string;
-    readonly sha?: string;
-    readonly started: string;
-    readonly finished?: string;
-  }[];
-};
+export const contractTypes = (): string => [
+  "// Generated by npm run contract. The pinned kayra version defines this /api contract.",
+  ...Object.entries(schemas).map(([name, schema]) => `export type ${name} = ${typescript(z.toJSONSchema(schema))};`),
+  `export type OperationInputs = { ${operationNames.map((name) => `readonly ${literal(name)}: ${typescript(z.toJSONSchema(operations[name].input, { io: "input" }))}`).join("; ")} };`,
+  'export type OperationName = keyof OperationInputs;',
+  'export type InputOf<N extends OperationName> = OperationInputs[N];',
+  'export type OperationCall = { readonly [N in OperationName]: { readonly name: N; readonly input: InputOf<N> } }[OperationName];',
+  `export type RunOptions = ${typescript(z.toJSONSchema(options, { io: "input" }))};`,
+  "",
+].join("\n");
 
-/** What the deployer's ctl answers for `rollback <app> --json`. */
-export type AppReleases = { readonly app: string; readonly releases: readonly { readonly sha: string; readonly time: string; readonly live: boolean }[] };
+const response = (description: string, schema: unknown, media = "application/json") => ({ description, content: { [media]: { schema } } });
+const ref = (name: keyof typeof schemas) => ({ $ref: `#/components/schemas/${name}` });
+const isQueryName = (name: OperationName): name is QueryName => Object.hasOwn(querySchemas, name);
+const resultOf = (name: OperationName): unknown => isQueryName(name) ? z.toJSONSchema(querySchemas[name]) : {};
+const request = (input: unknown) => ({ required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false, properties: { input, options: z.toJSONSchema(options, { io: "input" }), confirm: { type: "string", description: "The real server's name, required before a change" } } } } } });
+const id = { name: "id", in: "path", required: true, schema: { type: "string" } };
+const body = (properties: unknown, required: readonly string[]) => ({ required: true, content: { "application/json": { schema: { type: "object", properties, required, additionalProperties: false } } } });
+const write = (description: string) => ({ description, responses: { "204": { description: "Accepted" }, "404": { description: "No active resource" } } });
+
+export const openapi = (version: string) => ({
+  openapi: "3.1.0",
+  info: { title: "kayra local API", version, description: "127.0.0.1 only. Compatibility follows the fleet's pinned kayra version." },
+  servers: [{ url: "/api" }],
+  security: [{ bearer: [] }, { cookie: [] }],
+  paths: {
+    "/operations": { get: { responses: { "200": response("The operation catalog", { type: "array", items: ref("OperationInfo") }) } } },
+    "/openapi.json": { get: { responses: { "200": response("This OpenAPI document", { type: "object" }) } } },
+    "/fleet": { get: { responses: { "200": response("The fleet", ref("FleetFacts")) } } },
+    ...Object.fromEntries<unknown>(catalog().flatMap(({ name, summary, kind, input }): readonly (readonly [string, unknown])[] => [
+      [`/operations/${name}`, { post: { summary, operationId: name, requestBody: request(input), responses: kind === "plan" || kind === "session" ? {
+        [kind === "session" ? "201" : "202"]: response("Started", { type: "object", properties: { [kind === "session" ? "session" : "run"]: { type: "string" } }, required: [kind === "session" ? "session" : "run"] }),
+        "200": response("Dry run", ref("Preview")), "400": { description: "Invalid input" }, "403": { description: "Real server not confirmed" }, "409": { description: "Server busy" },
+      } : { "200": response(summary, kind === "stream" ? ref("Status") : resultOf(name), kind === "stream" ? "text/event-stream" : "application/json") } } }],
+      ...(kind === "plan" || kind === "session" ? [[`/operations/${name}/preview`, { post: { summary: `Preview: ${summary}`, requestBody: request(input), responses: { "200": response("Plan preview", ref("Preview")) } } }]] as const : []),
+    ])),
+    "/runs": { get: { responses: { "200": response("Runs from this fleet", { type: "array", items: ref("RunSummary") }) } } },
+    "/runs/{id}": { get: { parameters: [id], responses: { "200": response("A recorded run", ref("Run")), "404": { description: "No run" } } } },
+    "/runs/{id}/events": { get: { parameters: [id], responses: { "200": { description: "Events replayed from the start, then followed until the run ends", content: { "text/event-stream": { schema: ref("RunEvent") }, "application/x-ndjson": { schema: ref("RunEvent") } } } } } },
+    "/runs/{id}/answers": { post: { ...write("Answer the pending question; answers are never recorded"), parameters: [id], requestBody: body({ text: { type: "string" } }, ["text"]) } },
+    "/runs/{id}/cancel": { post: { ...write("Cancel a run"), parameters: [id] } },
+    "/sessions/{id}/output": { get: { parameters: [id], responses: { "200": response("Session events", ref("RunEvent"), "text/event-stream") } } },
+    "/sessions/{id}/input": { post: { ...write("Send terminal input; input is never recorded"), parameters: [id], requestBody: body({ text: { type: "string" } }, ["text"]) } },
+    "/sessions/{id}": { delete: { ...write("Close the session"), parameters: [id] } },
+  },
+  components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" }, cookie: { type: "apiKey", in: "cookie", name: "kayra_ui_<port>", description: "The browser's per-port cookie, set by the launch URL" } }, schemas: Object.fromEntries(Object.entries(schemas).map(([name, schema]) => {
+    return [name, Object.fromEntries(Object.entries(z.toJSONSchema(schema)).filter(([key]) => key !== "$schema"))];
+  })) },
+});

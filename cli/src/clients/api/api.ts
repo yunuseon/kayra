@@ -55,7 +55,8 @@ const events = (response: ServerResponse, ndjson = false) => {
 
 export const createApi = (api: Api) => {
   // eslint-disable-next-line functional/prefer-immutable-types -- per-listener state; no launch shares locks, credentials or sessions
-  const cell: { live: Readonly<Record<string, Live>> } = { live: {} };
+  const cell: { live: Readonly<Record<string, Live>>; pending: readonly Promise<void>[] } = { live: {}, pending: [] };
+  const shutdown = new AbortController();
   const swap = (id: string, change: (live: Live) => Live): void => {
     const current = cell.live[id];
     // eslint-disable-next-line functional/immutable-data -- replace the one state cell whole
@@ -64,7 +65,7 @@ export const createApi = (api: Api) => {
   const context: Context = {
     engine: { kayra: api.kayra, fleet: api.fleet.root }, fleet: api.fleet, version: api.version, here: api.fleet.root,
     read: (path) => existsSync(path) ? readFileSync(path, "utf8") : undefined,
-    network: api.network, tofu: api.tofu ?? opentofu,
+    network: api.network, tofu: api.tofu ?? opentofu, signal: shutdown.signal,
   };
   const dir = within(api.fleet.root, ".cache", "ui", "runs");
   const allRuns = (): readonly Run[] => {
@@ -89,6 +90,7 @@ export const createApi = (api: Api) => {
     return plan.ok ? ok({ invocation: about(call), steps: listed(plan.value, api.short), changes: operation(call.name).effect !== "reads" }) : plan;
   };
   const start = (call: Call, settings: Settings, confirm: string | undefined): Result<string, Refusal> => {
+    if (shutdown.signal.aborted) return err([503, "kayra is stopping"]);
     const plan = recipe(call, settings);
     if (!plan.ok) return err([400, plan.error]);
     const server = serverOf(context, call);
@@ -146,7 +148,7 @@ export const createApi = (api: Api) => {
     swap(id, (current) => ({ ...current, listeners: [...current.listeners, listener] }));
     response.on("close", () => { swap(id, (current) => ({ ...current, listeners: current.listeners.filter((each) => each !== listener) })); });
   };
-  const handle = async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
+  const dispatch = async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
     const method = request.method ?? "GET";
     const path = url.pathname;
     const named = /^\/api\/operations\/([^/]+)(\/preview)?$/.exec(path);
@@ -208,8 +210,18 @@ export const createApi = (api: Api) => {
       } else send(response, 404, "no active resource\n");
     } else send(response, 404, "not found\n");
   };
+  const handle = (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
+    const work = dispatch(request, response, url).finally(() => {
+      // eslint-disable-next-line functional/immutable-data -- release this request after its response completes
+      cell.pending = cell.pending.filter((pending) => pending !== work);
+    });
+    // eslint-disable-next-line functional/immutable-data -- shutdown waits for in-flight requests as well as runs
+    cell.pending = [...cell.pending, work];
+    return work;
+  };
   return { handle, stop: async (): Promise<void> => {
+    shutdown.abort();
     Object.values(cell.live).forEach((live) => { live.stop.abort(); });
-    await Promise.all(Object.values(cell.live).map((live) => live.done));
+    await Promise.allSettled([...cell.pending, ...Object.values(cell.live).map((live) => live.done)]);
   } };
 };

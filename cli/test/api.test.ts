@@ -274,3 +274,23 @@ test("a terminal session can be closed through DELETE, and stale discovery is re
     strictEqual(readFileSync(api.discovery, "utf8").includes('"token":"old"'), false);
   } finally { await restarted.close(); }
 });
+
+
+test("shutdown cancels an in-flight SSH query and waits for its child to exit", { timeout: 5_000 }, async (t) => {
+  const api = await fixture(); t.after(api.cleanup);
+  const marker = join(api.dir, "query.pid");
+  writeFileSync(join(api.bin, "ssh"), `#!/bin/sh\necho $$ > '${marker}'\nexec sleep 30\n`, { mode: 0o700 });
+  const request = api.post("app.runs", { server: "lab", app: "shop" }).then(() => undefined, () => undefined);
+  const ready = async (attempts: number): Promise<void> => {
+    if (existsSync(marker)) return;
+    if (attempts === 0) throw new Error("the query never started");
+    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    await ready(attempts - 1);
+  };
+  await ready(100);
+  const pid = Number(readFileSync(marker, "utf8").trim());
+  await api.close();
+  await request;
+  const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  strictEqual(alive(), false);
+});

@@ -8,7 +8,7 @@ import { look, type Network, type Tofu, type Watched } from "../commands/status.
 import { findings, type Report } from "../commands/validate.ts";
 import type { Fleet, Server } from "../fleet.ts";
 import { gather } from "../gather.ts";
-import { interpret } from "../interpret.ts";
+import { interpret, type Io } from "../interpret.ts";
 import { flat } from "../present/line.ts";
 import type { Plan } from "../plan.ts";
 import { all, err, flatMap, map, ok, type Result } from "../../result.ts";
@@ -25,6 +25,7 @@ export type Context = {
   readonly read: (path: AbsolutePath) => string | undefined;
   readonly network: Network;
   readonly tofu: Tofu;
+  readonly signal?: Io["signal"];
 };
 
 /** Every operation with its input: what a client sends, parsed in one go. */
@@ -147,6 +148,7 @@ const deployerAnswer = async (ctx: Context, name: "app.runs" | "app.releases" | 
     // eslint-disable-next-line functional/immutable-data -- capturing interpreter diagnostics
     err: (text) => { said.stderr += flat(text); },
     ask: () => Promise.resolve(""),
+    ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
     output: (chunk, stream) => {
       // eslint-disable-next-line functional/immutable-data -- capturing program output
       if (stream === "stdout") said.stdout += chunk;

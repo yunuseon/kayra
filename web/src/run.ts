@@ -1,4 +1,4 @@
-import type { Invocation, Line, Listed, RunEvent, Stop, Text } from "../../cli/src/web/contract.ts";
+import type { Invocation, Line, Listed, RunEvent, Stop, Text } from "../../cli/src/clients/api/contract.ts";
 
 export type StepState = "waiting" | "running" | "passed" | "failed" | "stopped" | "skipped";
 

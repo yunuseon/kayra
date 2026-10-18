@@ -1,4 +1,4 @@
-import type { ReachState, Status, Tone } from "../../cli/src/web/contract.ts";
+import type { ReachState, Status, Tone } from "../../cli/src/clients/api/contract.ts";
 
 export type Server = Status["servers"][number];
 

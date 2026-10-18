@@ -204,7 +204,7 @@ ln -s "$KAYRA_ROOT" node_modules/@yunuseon/kayra
 [ "$app_at_release" = true ] || descriptor with-app > "servers/${server}/server.yml"
 upgraded="$(kayra_cmd deploy "$server" 2>&1)" && ok=true || ok=false
 printf '%s\n' "$upgraded" >> "$log"
-grep -E '^(✓|✗)' <<< "$upgraded" || true
+grep -E '^(    )?(✓|✗)' <<< "$upgraded" || true
 [ "$ok" = true ] || die "kayra deploy after the upgrade"
 [ "$app_at_release" = true ] || first_deploy
 expect_serves v1

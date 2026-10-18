@@ -2,6 +2,7 @@
 import { run } from "@optique/run";
 import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { absolutePath, fleetRoot, kayraRoot, within } from "./brand.ts";
 import { appCheck } from "./commands/app-check.ts";
@@ -16,6 +17,10 @@ import { interpret, type Io } from "./interpret.ts";
 import { findFleetRoot, loadFleet } from "./load.ts";
 import { render, type Plan } from "./plan.ts";
 import { flatMap, ok, type Result } from "./result.ts";
+import { explain } from "./ui/explain.ts";
+import { bad, paint } from "./ui/line.ts";
+import { framed, silent, type Invocation } from "./ui/progress.ts";
+import { screen } from "./ui/terminal.ts";
 import { z } from "zod";
 
 const here = absolutePath(process.cwd());
@@ -78,24 +83,71 @@ const plan = (fleet: Fleet, command: Exclude<Command, { readonly name: "status" 
   return flatMap(serverNamed(fleet, command.server), (target) => onServer(on, target, command));
 };
 
+const screens = { out: screen(process.stdout, process.env), err: screen(process.stderr, process.env) };
+
 const io: Io = {
-  out: (line) => {
-    console.log(line);
+  out: (text) => {
+    console.log(paint(text, screens.out.colors));
   },
-  err: (line) => {
-    console.error(line);
+  err: (text) => {
+    console.error(paint(text, screens.err.colors));
   },
   ask: async (prompt) => {
     const terminal = createInterface({ input: process.stdin, output: process.stderr });
-    const answer = await terminal.question(prompt);
+    // Ctrl-C at the prompt, or no more input: no answer, so nothing happens.
+    const answer = await new Promise<string>((resolve) => {
+      terminal.once("SIGINT", () => {
+        resolve("");
+      });
+      terminal.once("close", () => {
+        resolve("");
+      });
+      void terminal.question(paint(prompt, screens.err.colors)).then(resolve, () => {
+        resolve("");
+      });
+    });
     terminal.close();
     return answer;
   },
 };
 
 const fail = (message: string): never => {
-  console.error(`kayra: ${message}`);
+  io.err(screens.err.live ? [bad("✗"), " ", message] : `kayra: ${message}`);
   process.exit(1);
+};
+
+/** The heading's facts: what the server is, and which kayra runs. */
+const invocation = (target: Server | undefined): Invocation => ({
+  command: ["kayra", ...process.argv.slice(2).filter((word) => word !== "--dry-run")].join(" "),
+  ...(target === undefined ? {} : { server: target.name }),
+  about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${version}`],
+});
+
+/** Paths by the root they are under, the longest first: the engine may live inside the fleet. */
+const shortener =
+  (roots: readonly (readonly [string, string])[]) =>
+  (text: string): string =>
+    roots.toSorted(([a], [b]) => b.length - a.length).reduce((short, [path, name]) => short.replaceAll(path, name), text);
+
+/** --dry-run: the plan as data, styled on a terminal, plain and copyable for a program. */
+const show = (steps: Plan, about: Invocation, short: (text: string) => string): void => {
+  (screens.out.live ? explain(about, steps, short, screens.out.columns) : render(steps)).forEach(io.out);
+};
+
+/** Runs a plan, framed on stderr unless its output is the point; the exit status says how it went. */
+const execute = async (steps: Plan, about: Invocation, framing: boolean): Promise<void> => {
+  const interrupt = new AbortController();
+  // Ctrl-C reaches the step's program too; the plan stops once it gives up. A second one does not wait.
+  process.once("SIGINT", () => {
+    interrupt.abort();
+    process.once("SIGINT", () => process.exit(130));
+  });
+  const progress = framing
+    ? framed(screens.err, (raw) => process.stderr.write(raw), about)
+    : silent;
+  const passed = await interpret(steps, io, progress, () => interrupt.signal.aborted);
+  // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
+  process.exitCode = interrupt.signal.aborted ? 130 : passed ? 0 : 1;
 };
 
 const found = flatMap(findFleetRoot(here.value), loadFleet);
@@ -105,14 +157,18 @@ if (!fleet.ok) fail(fleet.error);
 else {
   const args = run(parser(fleet.value), { programName: "kayra", help: "both", completion: "both", version: { value: version, command: true, option: true } });
   if (!found.ok && args.command.name !== "app check") fail(found.error);
+  const short = shortener([
+    [kayra, "<kayra>"],
+    ...(found.ok ? [[fleet.value.root, "<fleet>"] as const] : []),
+    [homedir(), "~"],
+  ]);
   if (args.command.name === "app check") {
     const root = absolutePath(resolve(here.value, args.command.dir ?? "."));
     const manifestPath = root.ok ? join(root.value, "app.yml") : "";
     const steps = flatMap(root, (dir) => appCheck(kayra, dir, existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : undefined));
     if (!steps.ok) fail(steps.error);
-    else if (args.dryRun) render(steps.value).forEach(io.out);
-    // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
-    else process.exitCode = (await interpret(steps.value, io)) ? 0 : 1;
+    else if (args.dryRun) show(steps.value, invocation(undefined), short);
+    else await execute(steps.value, invocation(undefined), true);
   } else if (args.command.name === "status") {
     (await status(fleet.value)).forEach(io.out);
   } else if (args.command.name === "validate") {
@@ -127,10 +183,13 @@ else {
     // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
     process.exitCode = reports.some((found) => found.some((each) => each.problem)) ? 1 : 0;
   } else {
-    const steps = plan(fleet.value, args.command);
+    const { command } = args;
+    const steps = plan(fleet.value, command);
+    const target = "server" in command ? fleet.value.servers.find((each) => each.name === command.server) : undefined;
+    // ssh and the deployer's answers are the output itself: nothing around them.
+    const framing = command.name !== "ssh" && !isDeployer(command);
     if (!steps.ok) fail(steps.error);
-    else if (args.dryRun) render(steps.value).forEach(io.out);
-    // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
-    else process.exitCode = (await interpret(steps.value, io)) ? 0 : 1;
+    else if (args.dryRun) show(steps.value, invocation(target), short);
+    else await execute(steps.value, invocation(target), framing);
   }
 }

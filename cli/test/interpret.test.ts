@@ -2,24 +2,30 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { interpret } from "../src/interpret.ts";
 import { run, type Plan } from "../src/plan.ts";
+import { flat } from "../src/ui/line.ts";
 
 type Said = { readonly passed: boolean; readonly out: readonly string[]; readonly err: readonly string[] };
 
-const interpreted = async (plan: Plan, answer = ""): Promise<Said> => {
+const interpreted = async (plan: Plan, answer = "", interrupted = false): Promise<Said> => {
   // eslint-disable-next-line functional/prefer-immutable-types -- capturing what the interpreter says
   const said: { out: string[]; err: string[] } = { out: [], err: [] };
-  const passed = await interpret(plan, {
-    // eslint-disable-next-line functional/immutable-data -- capturing
-    out: (line) => said.out.push(line),
-    // eslint-disable-next-line functional/immutable-data -- capturing
-    err: (line) => said.err.push(line),
-    ask: () => Promise.resolve(answer),
-  });
+  const passed = await interpret(
+    plan,
+    {
+      // eslint-disable-next-line functional/immutable-data -- capturing
+      out: (text) => said.out.push(flat(text)),
+      // eslint-disable-next-line functional/immutable-data -- capturing
+      err: (text) => said.err.push(flat(text)),
+      ask: () => Promise.resolve(answer),
+    },
+    undefined,
+    () => interrupted,
+  );
   return { passed, ...said };
 };
 
 test("a failing run stops the plan", async () => {
-  const said = await interpreted([run(["false"]), { kind: "note", text: "never" }]);
+  const said = await interpreted([run("fails", ["false"]), { kind: "note", text: "never" }]);
   deepStrictEqual(said, { passed: false, out: [], err: [] });
 });
 
@@ -34,10 +40,10 @@ test("a diagnosis reports its failure with stderr and hint, and the plan goes on
     },
     { kind: "check", label: "sh", probe: { kind: "on-path", program: "sh" }, onFailure: "continue" },
   ]);
-  deepStrictEqual(said, { passed: false, out: ["FAIL  says no", "    nope", "    → try again", "ok    sh"], err: [] });
+  deepStrictEqual(said, { passed: false, out: ["✗ says no", "    nope", "    → try again", "✓ sh"], err: [] });
 });
 
-test("a guard is silent when it passes, says why on stderr when it stops the plan", async () => {
+test("a guard says nothing when it passes, why on stderr when it stops the plan", async () => {
   const guard = (code: number) =>
     ({
       kind: "check",
@@ -53,13 +59,13 @@ test("a guard is silent when it passes, says why on stderr when it stops the pla
   deepStrictEqual(await interpreted([guard(1), { kind: "note", text: "never" }]), {
     passed: false,
     out: [],
-    err: ["refused"],
+    err: ["    refused"],
   });
 });
 
 test("a query's answer takes its place: one word, or many", async () => {
   const said = await interpreted([
-    run([
+    run("queries", [
       "sh",
       "-c",
       'test "$1" = "a b" && test "$2" = c && test "$3" = d',
@@ -72,16 +78,31 @@ test("a query's answer takes its place: one word, or many", async () => {
 });
 
 test("a failing query stops the plan before its step runs", async () => {
-  const said = await interpreted([run(["true", { kind: "query", argv: ["false"], words: "one" }])]);
-  deepStrictEqual(said, { passed: false, out: [], err: ["kayra: false failed (exit 1)"] });
+  const said = await interpreted([run("never", ["true", { kind: "query", argv: ["false"], words: "one" }])]);
+  deepStrictEqual(said, { passed: false, out: [], err: ["    $(false) failed: exit 1"] });
+});
+
+test("a quiet step's stderr comes after it, so it cannot tear through a spinner", async () => {
+  const quiet: Plan = [{ ...run("quiet", ["sh", "-c", "echo hidden; echo said >&2"]), stdout: "discard" }];
+  deepStrictEqual(await interpreted(quiet), { passed: true, out: [], err: ["    said"] });
 });
 
 test("a confirmation ends the plan, without failing it, unless the expected answer is typed", async () => {
-  const plan: Plan = [{ kind: "confirm", prompt: "Type it: ", expect: "box" }, { kind: "note", text: "destroyed" }];
-  deepStrictEqual(await interpreted(plan, "box"), { passed: true, out: ["destroyed"], err: [] });
-  deepStrictEqual(await interpreted(plan, "no"), { passed: true, out: ["Aborted."], err: [] });
+  const plan: Plan = [{ kind: "confirm", warning: "This destroys box.", expect: "box" }, { kind: "note", text: "destroyed" }];
+  deepStrictEqual(await interpreted(plan, "box"), { passed: true, out: ["destroyed"], err: ["", "  ▲ This destroys box."] });
+  deepStrictEqual(await interpreted(plan, "no"), { passed: true, out: ["Aborted."], err: ["", "  ▲ This destroys box."] });
 });
 
-test("a program that does not exist fails instead of throwing", async () => {
-  strictEqual((await interpreted([run(["no-such-tool-here"])])).passed, false);
+test("an interrupted plan stops after the step that was running, and does not pass", async () => {
+  deepStrictEqual(await interpreted([run("ok", ["true"]), { kind: "note", text: "never" }], "", true), {
+    passed: false,
+    out: [],
+    err: [],
+  });
+});
+
+test("a program that does not exist fails instead of throwing, and says so", async () => {
+  const said = await interpreted([run("missing", ["no-such-tool-here"])]);
+  strictEqual(said.passed, false);
+  strictEqual(said.err.at(0)?.startsWith("    no-such-tool-here: spawn no-such-tool-here ENOENT"), true);
 });

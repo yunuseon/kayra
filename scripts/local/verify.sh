@@ -28,8 +28,8 @@ dir="${FLEET_ROOT}/servers/${name}"
 wait="${VERIFY_WAIT:-150}"
 failed=0
 
-fail() { echo "✗ $*"; failed=1; }
-pass() { echo "✓ $*"; }
+fail() { echo "    ✗ $*"; failed=1; }
+pass() { echo "    ✓ $*"; }
 
 domain="$(yq -r '.domain' "${dir}/server.yml")"
 inventory="${dir}/inventory.ini"

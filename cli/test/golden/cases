@@ -9,6 +9,7 @@ setup-shop-prod | | setup shop-prod
 setup-edge | | setup edge
 setup-box | | setup box
 setup-forge | | setup forge
+setup-shop-prod-verbose | | setup shop-prod --verbose
 plan-shop-prod | | plan shop-prod
 plan-box | | plan box
 apps-shop-test | | apps shop-test
@@ -17,6 +18,7 @@ apps-edge | | apps edge
 apps-forge | | apps forge
 deploy-shop-prod | | deploy shop-prod
 deploy-edge | | deploy edge
+deploy-shop-prod-verbose-dry-run | | deploy shop-prod -v --dry-run
 up-shop-test | | up shop-test
 up-forge | | up forge
 hosts-shop-test | | hosts shop-test

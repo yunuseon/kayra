@@ -37,6 +37,14 @@ const vaultEnv = (server: Server): Env => {
 
 const ansibleEnv = (engine: Engine, env: Env): Env => ({ ...env, ANSIBLE_CONFIG: ansiblePath(engine, "ansible.cfg") });
 
+/** --verbose: every playbook prints Ansible's own output, with -v, instead of kayra's summary of it (ansible.cfg's stdout_callback). */
+export const verbose = (plan: Plan): Plan =>
+  plan.map((step) =>
+    step.kind === "run" && step.argv[0] === "ansible-playbook"
+      ? { ...step, argv: ["ansible-playbook", "-v", ...step.argv.slice(1)], env: { ...step.env, ANSIBLE_STDOUT_CALLBACK: "default" } }
+      : step,
+  );
+
 /** Real servers change only from main as merged; a multipass one from anything. */
 const fromMain = (engine: Engine, server: Server): Step => ({
   kind: "check",

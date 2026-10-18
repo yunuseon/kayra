@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { absolutePath, fleetRoot, kayraRoot, within } from "./brand.ts";
 import { appCheck } from "./commands/app-check.ts";
-import { parser, type Command } from "./cli.ts";
+import { parser, runOptions, type Command } from "./cli.ts";
 import { doctor } from "./commands/doctor.ts";
 import * as server from "./commands/server.ts";
 import { status } from "./commands/status.ts";
@@ -16,7 +16,7 @@ import { serverNamed, type Fleet, type Server } from "./fleet.ts";
 import { interpret, type Io } from "./interpret.ts";
 import { findFleetRoot, loadFleet } from "./load.ts";
 import { render, type Plan } from "./plan.ts";
-import { flatMap, ok, type Result } from "./result.ts";
+import { flatMap, map, ok, type Result } from "./result.ts";
 import { explain } from "./ui/explain.ts";
 import { bad, paint } from "./ui/line.ts";
 import { framed, silent, type Invocation } from "./ui/progress.ts";
@@ -155,7 +155,7 @@ const found = flatMap(findFleetRoot(here.value), loadFleet);
 const fleet: Result<Fleet, string> = found.ok ? found : ok({ root: fleetRoot(here.value), servers: [] });
 if (!fleet.ok) fail(fleet.error);
 else {
-  const args = run(parser(fleet.value), { programName: "kayra", help: "both", completion: "both", version: { value: version, command: true, option: true } });
+  const args = run(parser(fleet.value), runOptions(version));
   if (!found.ok && args.command.name !== "app check") fail(found.error);
   const short = shortener([
     [kayra, "<kayra>"],
@@ -184,7 +184,7 @@ else {
     process.exitCode = reports.some((found) => found.some((each) => each.problem)) ? 1 : 0;
   } else {
     const { command } = args;
-    const steps = plan(fleet.value, command);
+    const steps = map(plan(fleet.value, command), (each) => (args.verbose ? server.verbose(each) : each));
     const target = "server" in command ? fleet.value.servers.find((each) => each.name === command.server) : undefined;
     // ssh and the deployer's answers are the output itself: nothing around them.
     const framing = command.name !== "ssh" && !isDeployer(command);

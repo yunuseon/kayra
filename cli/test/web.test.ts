@@ -1,5 +1,5 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,5 +156,81 @@ test("kayra ui: in only with this launch's token, a preview of any command, a re
     strictEqual(listed[0]?.id, id);
   } finally {
     await ui.close();
+  }
+});
+
+
+const followRun = (port: number, id: string, cookie: string, question: (secret: boolean) => Promise<unknown>): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const sent = request({ host: "127.0.0.1", port, path: `/api/runs/${id}/events`, headers: { cookie } }, (response) => {
+      // eslint-disable-next-line functional/prefer-immutable-types -- SSE chunks may split a JSON event anywhere
+      const received: { text: string; pending: string } = { text: "", pending: "" };
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => {
+        // eslint-disable-next-line functional/immutable-data -- collecting a streaming response
+        received.text += chunk;
+        const frames = (received.pending + chunk).split("\n\n");
+        // eslint-disable-next-line functional/immutable-data -- retain an incomplete frame for the next chunk
+        received.pending = frames.pop() ?? "";
+        frames.filter((frame) => frame.startsWith("data: ")).forEach((frame) => {
+          const event = z.object({ kind: z.string(), secret: z.boolean().optional() }).parse(JSON.parse(frame.slice(6)));
+          if (event.kind === "ask") void question(event.secret === true).catch(reject);
+        });
+      });
+      response.on("end", () => { resolve(received.text); });
+      response.on("error", reject);
+    });
+    sent.on("error", reject);
+    sent.end();
+  });
+
+test("API secret questions can be answered or cancelled; neither answers nor passwords enter the run record", { timeout: 10_000 }, async () => {
+  const temporary = mkdtempSync(join(tmpdir(), "kayra-api-secret-"));
+  const path = process.env["PATH"];
+  const engine = join(temporary, "engine");
+  const bin = join(temporary, "bin");
+  mkdirSync(join(engine, "scripts", "local"), { recursive: true });
+  mkdirSync(bin);
+  writeFileSync(join(engine, "scripts", "local", "require-main.sh"), "exit 0\n");
+  writeFileSync(join(bin, "ansible-galaxy"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  writeFileSync(join(bin, "ansible-playbook"), '#!/bin/sh\n[ "$("$ANSIBLE_VAULT_PASSWORD_FILE")" = test-api-password ] || exit 7\necho "vault opened"\n', { mode: 0o700 });
+  const askServer = server("ask", "kind: edge\ntarget: hetzner\ndomain: ask.example\nvault: true");
+  const fleet = { root: fleetRoot(must(absolutePath(temporary))), servers: [askServer] };
+  const ui = await serve({ kayra: kayraRoot(must(absolutePath(engine))), fleet, version: "test", short: (text) => text, network: quiet }, undefined, 0);
+  try {
+    // eslint-disable-next-line functional/immutable-data -- fake programs run in this test's temp directory only
+    process.env["PATH"] = `${bin}:${path ?? ""}`;
+    const token = new URL(ui.url).searchParams.get("token") ?? "";
+    const login = await call(ui.port, `/login?token=${token}`);
+    const cookie = String(login.headers["set-cookie"]).split(";")[0] ?? "";
+    const origin = `http://127.0.0.1:${String(ui.port)}`;
+    const start = async (): Promise<string> => {
+      const started = await call(ui.port, "/api/runs", { method: "POST", cookie, origin, body: { command: { name: "setup", server: "ask" }, confirm: "ask" } });
+      strictEqual(started.status, 201, started.body);
+      return z.object({ id: z.string() }).parse(JSON.parse(started.body)).id;
+    };
+    const first = await start();
+    const answered = await followRun(ui.port, first, cookie, async (secret) => {
+      strictEqual(secret, true);
+      strictEqual((await call(ui.port, `/api/runs/${first}/answer`, { method: "POST", cookie, origin, body: { text: "test-api-password" } })).status, 204);
+    });
+    strictEqual(answered.includes("vault opened"), true);
+    strictEqual(answered.includes('"kind":"ended","failures":0'), true);
+    strictEqual(answered.includes("test-api-password"), false);
+    const second = await start();
+    const cancelled = await followRun(ui.port, second, cookie, async () => {
+      strictEqual((await call(ui.port, `/api/runs/${second}/cancel`, { method: "POST", cookie, origin })).status, 202);
+    });
+    strictEqual(cancelled.includes('"why":"interrupted"'), true);
+    strictEqual((await call(ui.port, `/api/runs/${second}/answer`, { method: "POST", cookie, origin, body: { text: "late-secret" } })).status, 404);
+    const records = join(temporary, ".cache", "ui", "runs");
+    const recorded = readdirSync(records).map((file) => readFileSync(join(records, file), "utf8")).join("\n");
+    strictEqual(recorded.includes("test-api-password"), false);
+    strictEqual(recorded.includes("late-secret"), false);
+  } finally {
+    // eslint-disable-next-line functional/immutable-data -- restore the operator's path
+    if (path === undefined) delete process.env["PATH"]; else process.env["PATH"] = path;
+    await ui.close();
+    rmSync(temporary, { recursive: true, force: true });
   }
 });

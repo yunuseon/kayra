@@ -117,8 +117,8 @@ export type RunEvent =
   | { readonly kind: "output"; readonly stream: "stdout" | "stderr"; readonly chunk: string }
   /** What kayra itself says: a check's result, why a step stopped, a note. */
   | { readonly kind: "said"; readonly stream: "out" | "err"; readonly text: Text }
-  /** A confirmation: the run waits until the browser answers. */
-  | { readonly kind: "ask"; readonly prompt: Text }
+  /** A question: only its prompt, never the answer, is recorded. */
+  | { readonly kind: "ask"; readonly prompt: Text; readonly secret: boolean; readonly expect?: string }
   | { readonly kind: "answered" };
 
 export type RunState = "running" | "passed" | "failed" | "interrupted" | "declined";

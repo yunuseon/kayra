@@ -22,7 +22,7 @@ export type RunView = {
   readonly steps: readonly StepView[];
   /** The step that started last: what is printed belongs to it, also what kayra says right after it. */
   readonly current: number | undefined;
-  readonly asking: Text | undefined;
+  readonly asking: Extract<RunEvent, { readonly kind: "ask" }> | undefined;
   readonly ended: Ended | undefined;
 };
 
@@ -68,7 +68,7 @@ export const reduce = (view: RunView, event: RunEvent, now: number): RunView => 
     case "said":
       return said(view, { kind: "said", stream: event.stream, text: event.text });
     case "ask":
-      return { ...view, asking: event.prompt };
+      return { ...view, asking: event };
     case "answered":
       return { ...view, asking: undefined };
   }

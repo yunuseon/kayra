@@ -41,6 +41,8 @@ stub() {
     chmod +x "${tmp}/bin/$1"
 }
 for program in ansible ansible-playbook ansible-galaxy ssh docker; do echo 'record "$@"' | stub "$program"; done
+# Password readiness is part of the interpreter; never invoke the operator's sudo.
+echo 'exit 0' | stub sudo
 stub tofu <<'STUB'
 chdir="${1#-chdir=}"
 case "${2:-}" in
@@ -71,6 +73,6 @@ grep -v '^#' "${here}/cases" | while IFS='|' read -r case stdin arguments; do
     status=0
     stdout="$(cd "$fleet" && echo "$stdin" | PATH="${tmp}/bin:${PATH}" "${command[@]}" 2>/dev/null)" || status=$?
     { echo "--- stdout"; [ -z "$stdout" ] || echo "$stdout"; echo "--- exit ${status}"; } >> "$TRACE"
-    sed -i.bak -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" "$TRACE"
+    sed -i.bak -e 's|/[^" ]*/kayra-[^/" ]*/vault-password|<vault-password-helper>|g' -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" "$TRACE"
     rm "${TRACE}.bak"
 done

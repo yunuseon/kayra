@@ -45,6 +45,12 @@ A run started while one runs for the same app waits for it; of several waiting,
 only the newest runs. The runs and their logs are also at
 `https://deploy.<domain>/`, behind the staff login.
 
+## In an app's repository
+
+| Command | What it does |
+|---|---|
+| `kayra app check [dir]` | What the platform checks at deploy: `app.yml`, images, the compose policy. Needs no fleet; see [the app contract](../../concepts/app-contract/#check-before-you-push) |
+
 ## Fleet-wide
 
 | Command | What it does |

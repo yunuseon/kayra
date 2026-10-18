@@ -40,7 +40,7 @@ stub() {
     } > "${tmp}/bin/$1"
     chmod +x "${tmp}/bin/$1"
 }
-for program in ansible ansible-playbook ansible-galaxy ssh; do echo 'record "$@"' | stub "$program"; done
+for program in ansible ansible-playbook ansible-galaxy ssh docker; do echo 'record "$@"' | stub "$program"; done
 stub tofu <<'STUB'
 chdir="${1#-chdir=}"
 case "${2:-}" in
@@ -51,7 +51,7 @@ record "$@"
 STUB
 stub bash <<STUB
 case "\${1:-}" in
-    */scripts/local/require-main.sh|*/scripts/local/require-latest-state.sh|*/scripts/local/home-reach.sh|*/scripts/local/certs.sh|*/scripts/local/home-image.sh|*/scripts/local/setup-hosts.sh)
+    */scripts/local/require-main.sh|*/scripts/local/require-latest-state.sh|*/scripts/local/home-reach.sh|*/scripts/local/certs.sh|*/scripts/local/home-image.sh|*/scripts/local/setup-hosts.sh|*/scripts/local/app-check.sh)
         record "\$@"; exit 0 ;;
 esac
 exec "${real_bash}" "\$@"

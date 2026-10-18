@@ -70,5 +70,6 @@ const minting = <T extends string>(
 });
 
 export const appNameParser = minting("APP", appName, "app" as AppName);
+export const serverNameParser = minting("SERVER", serverName, "server" as ServerName);
 export const domainParser = minting("DOMAIN", domain, "example.com" as Domain);
 export const subdomainParser = minting("SUBDOMAIN", subdomain, "www" as Subdomain);

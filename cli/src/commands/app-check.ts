@@ -1,0 +1,44 @@
+import { appName, within, type AbsolutePath, type KayraRoot } from "../brand.ts";
+import { yamlOf } from "../fleet.ts";
+import { run, type Plan, type Step } from "../plan.ts";
+import { err, flatMap, map, type Result } from "../result.ts";
+import { appManifestSchema } from "../settings.ts";
+import { checkShape } from "../validate.ts";
+
+const mapError = <T>(result: Result<T, string>, f: (problem: string) => string): Result<T, string> =>
+  result.ok ? result : err(f(result.error));
+
+const tool = (program: string, hint: string): Step => ({
+  kind: "check",
+  label: `${program} is installed`,
+  probe: { kind: "on-path", program },
+  hint,
+  onFailure: "stop",
+});
+
+/**
+ * In an app's own repository, before a push: what the platform checks when it
+ * deploys the app — app.yml against its schema here, then app-check.sh (the
+ * image plan and the compose policy, the same scripts the builder and the
+ * deployer run). Needs no fleet and no server.
+ */
+export const appCheck = (kayra: KayraRoot, root: AbsolutePath, manifest: string | undefined): Result<Plan, string> => {
+  if (manifest === undefined) return err(`no app.yml in ${root}`);
+  const shaped = flatMap(
+    flatMap(
+      mapError(yamlOf(manifest), (problem) => `app.yml ${problem}`),
+      (values) => checkShape("app.yml", values, appManifestSchema),
+    ),
+    (values) => {
+      const parsed = appManifestSchema.safeParse(values);
+      return parsed.success ? appName(parsed.data.name) : err("app.yml: invalid");
+    },
+  );
+  return map(shaped, (): Plan => [
+    tool("git", "brew install git"),
+    tool("jq", "brew install jq"),
+    tool("yq", "brew install yq"),
+    tool("docker", "the docker CLI with Compose; no daemon is needed"),
+    run(["bash", within(kayra, "scripts", "local", "app-check.sh"), root]),
+  ]);
+};

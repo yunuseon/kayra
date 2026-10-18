@@ -2,12 +2,14 @@ import { command, constant, multiple, object, option, optional, or, type InferVa
 import { message, type Message } from "@optique/core/message";
 import { argument } from "@optique/core/primitives";
 import { choice, string } from "@optique/core/valueparser";
-import { appNameParser, domainParser, subdomainParser } from "./brand.ts";
+import { appNameParser, domainParser, serverNameParser, subdomainParser } from "./brand.ts";
 import type { Fleet } from "./fleet.ts";
 
 /** The arguments kayra takes; server names are the fleet's, so they complete and are checked while parsing. */
 export const parser = (fleet: Fleet) => {
-  const server = argument(choice(fleet.servers.map((each) => each.name), { metavar: "SERVER" }));
+  const [first, ...rest] = fleet.servers.map((each) => each.name);
+  // Outside a fleet there is no name to offer; main refuses every server command there.
+  const server = argument(first === undefined ? serverNameParser : choice([first, ...rest], { metavar: "SERVER" }));
   // eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message is readonly only at the top
   const onServer = <const N extends string>(name: N, brief: Message) =>
     command(name, object({ name: constant(name), server }), { brief });
@@ -36,6 +38,9 @@ export const parser = (fleet: Fleet) => {
         command(
           "app",
           or(
+            command("check", object({ name: constant("app check"), dir: optional(argument(string({ metavar: "DIR" }))) }), {
+              brief: message`In an app's repository: what the platform checks at deploy (app.yml, images, compose policy). No fleet needed.`,
+            }),
             command("purge", object({ name: constant("app purge"), server, app: argument(appNameParser) }), {
               brief: message`Delete a removed app's volumes: its data, irreversibly.`,
             }),
@@ -58,7 +63,7 @@ export const parser = (fleet: Fleet) => {
               { brief: message`List earlier releases, or deploy one of them again.` },
             ),
           ),
-          { brief: message`An app on a server: its runs, logs, deploys, rollbacks, and purging its data.` },
+          { brief: message`An app: check it before a push, or on a server its runs, logs, deploys, rollbacks, and purging its data.` },
         ),
         command(
           "job",

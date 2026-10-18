@@ -27,6 +27,23 @@ runs. Any other branch, tag or commit can be deployed on demand
 A service you remove from your compose files is removed from the server by the
 next deploy.
 
+## Check before you push
+
+In the app's repository, with Node 24, `git`, `jq`, `yq` and the Docker CLI
+with Compose (no daemon needed):
+
+```bash
+npx @yunuseon/kayra app check        # or: kayra app check [dir]
+```
+
+It checks what the platform checks when it deploys: `app.yml` against its
+schema, its compose files and subdomains, every `docker/image.json` (the
+image in the app's namespace, a commit touching its inputs), and the compose
+config they resolve to against the [policy](#compose-policy), with placeholder
+values for images, config and secrets, and hosts under `example.test`. The
+same scripts run on the server, so what passes here passes admission there.
+Run it in the app's CI too; it needs no fleet and no server.
+
 ## Your own repository
 
 An app usually lives in a repository of its own, with `app.yml` at its root.

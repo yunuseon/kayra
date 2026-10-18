@@ -37,3 +37,4 @@ app-rollback-forge | | app rollback forge shop
 job-gc-forge | | job forge gc
 job-renovate-forge | | job forge renovate --no-prs
 app-deploy-box | | app deploy box shop
+app-check-shop | | app check .cache/apps/shop

@@ -216,6 +216,10 @@ without the platform, and hiring or firing staff never needs an operator.
   overwriting them is the only thing making that safe.
 - Neither Authelia nor Traefik expands `${VAR}` in its own config file. Traefik's ACME email is substituted by the platform role on copy; Authelia uses the
   `template` config filter and Go templating (`{{ env "DOMAIN" }}`).
+- **Authelia reads `configuration.yml` once at startup**; the platform role
+  restarts it when the file changed (as it does Traefik and BuildKit for
+  theirs). A new access rule that never loads is Authelia's default deny: 403.
+  `users_database.yml` needs no restart — `file.watch` reloads it.
 
 ### CI: only the deployer touches the docker socket
 

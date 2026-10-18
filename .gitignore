@@ -12,8 +12,11 @@ node_modules/
 compose/authelia/secrets/
 compose/authelia/users_database.yml
 
-# The compiled CLI, built for the package (npm pack / publish)
+# The compiled CLI, built for the package (npm pack / publish), with the web interface in cli/dist/web
 cli/dist/
+
+# kayra ui's browser side, built in a checkout (web/: npm run build)
+web/dist/
 
 # The docs site: build output and Astro's cache
 site/dist/

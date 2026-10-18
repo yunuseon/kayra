@@ -27,6 +27,11 @@ model {
   cli = tool 'kayra CLI' {
     description 'On the operator machine: plans each command, then runs OpenTofu, Ansible and SSH'
     technology 'TypeScript, Node 24'
+
+    ui = tool 'kayra ui' {
+      description 'The web interface, on 127.0.0.1 with a launch token: the same plans and guards, each run live'
+      technology 'Preact, served by the CLI'
+    }
   }
 
   platform = server 'Platform server' {
@@ -76,6 +81,7 @@ model {
   // Operating the fleet
   operator -> fleet 'edits, through PRs'
   operator -> cli 'kayra up / setup / apps / app deploy'
+  operator -> cli.ui 'in the browser: the fleet, previews, runs as they happen'
   cli -> fleet 'reads and validates'
   cli -> hetzner 'provisions (OpenTofu)'
   cli -> platform 'sets up (Ansible over SSH)'

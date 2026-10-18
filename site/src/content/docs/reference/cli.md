@@ -10,6 +10,9 @@ confirmation, with its environment — and runs nothing. On a terminal each step
 is numbered under its title, paths named by their root (`<kayra>`, `<fleet>`,
 `~`); piped, it prints one plain, copyable line per step.
 
+The same commands, with each step live in the browser: `kayra ui`, the
+[web interface](../web-ui/).
+
 Every command also takes `-v`/`--verbose`: its playbooks print Ansible's own
 output (`ANSIBLE_STDOUT_CALLBACK=default`, with `-v`) instead of kayra's
 summary of it, for a failure the summary does not explain. It is part of the

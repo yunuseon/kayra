@@ -90,6 +90,17 @@ Also `provision`, `hosts`, `adopt`, `backup test`, `app purge|runs|logs|deploy|r
 - Strictest tsconfig, `typescript-eslint` strict + `eslint-plugin-functional` (no `let`, no mutation). An inline `eslint-disable` says why. Dependencies are pinned exactly (`.npmrc`).
 - The checks run `cli-typecheck`, `cli-lint`, `cli-test`. Locally: `npm run typecheck|lint|test` at the root.
 
+### Web interface (`kayra ui`)
+
+`kayra ui` is a view of the CLI in a browser on the operator's machine, never a second control plane: the Mac holds the fleet, the vault passwords, OpenTofu's state and the SSH keys, and nothing of that moves to a server for it.
+
+- **One engine:** `planFor` (`commands/index.ts`) builds the same plans as the command line; the interpreter runs them with `Io.output` (a step's output piped, no stdin) and `Io.signal` (Stop = SIGINT, SIGTERM after 10s); `reporting` (`ui/progress.ts`) is `framed` as events. Guards travel with the plans: `require-main`, `latest-state`, `down`'s typed name.
+- **The server** (`cli/src/web/`, node:http, no runtime dependency of its own): 127.0.0.1 only; admission (`auth.ts`) wants this listener's Host on every request (DNS rebinding), its Origin on every write, the launch token (a cookie named per port) on the API. A change to a server that is not multipass needs its name in the request, checked here, not only in the browser. One run per server; runs are recorded as JSON lines under the fleet's `.cache/ui/runs/`. A plan that would ask on a terminal (`needsTerminal`: the vault password) is refused.
+- **The contract** (`web/contract.ts`) is standalone: `web/` imports it and nothing else of the CLI. The server assigns its own values to its types (`statusJson`, `validateJson`, the progress events), so drift between the two does not compile.
+- **`web/`** is its own npm project (Preact, `@preact/signals`, Vite; exact pins), built at `prepack` into `cli/dist/web`, served from `web/dist` in a checkout. Same strictness as the CLI: its lint config reuses the CLI's rules from the root's `node_modules`, with signals' `.value` and the DOM's objects exempt. Pure modules (the router, the SGR parser, the run reducer, the palette's matching, the status cells) are vitest-tested; the one place a server answer takes a type is `api.ts`'s `trusted`. Dev: `kayra ui --port 7700 --no-open` beside `npm --prefix web run dev` (Vite proxies `/api` as if from kayra ui's own page).
+- **The agent guard asks before `kayra ui`**: what runs from the browser is out of its sight. Don't drive a real fleet's `kayra ui` from a browser tool either; test against a fixture fleet or a Multipass lab.
+- The checks run `web-typecheck`, `web-lint`, `web-test`, `web-build`.
+
 ---
 
 ## The fleet contract: one folder per server

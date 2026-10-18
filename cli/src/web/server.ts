@@ -76,10 +76,16 @@ const allRuns = (fleet: Fleet): readonly Run[] => {
 const coloured = (plan: Plan): Plan =>
   plan.map((step) => (step.kind === "run" ? { ...step, env: { ...step.env, ANSIBLE_FORCE_COLOR: "1" } } : step));
 
-const sse = (response: ServerResponse): ((data: unknown) => void) => {
+/** A server-sent stream; `end` says everything is said, so the browser closes instead of reconnecting. */
+const sse = (response: ServerResponse): { readonly say: (data: unknown) => void; readonly end: () => void } => {
   response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-  return (data) => {
-    response.write(`data: ${JSON.stringify(data)}\n\n`);
+  return {
+    say: (data) => {
+      response.write(`data: ${JSON.stringify(data)}\n\n`);
+    },
+    end: () => {
+      response.end("event: end\ndata: {}\n\n");
+    },
   };
 };
 
@@ -167,15 +173,15 @@ const watchRun = (ui: Ui, id: string, response: ServerResponse): void => {
     send(response, 404, `no run ${id}\n`);
     return;
   }
-  const say = sse(response);
+  const { say, end } = sse(response);
   run.events.forEach(say);
   if (live === undefined || stateOf(run.events) !== "running") {
-    response.end();
+    end();
     return;
   }
   const listener = (event: wire.RunEvent): void => {
     say(event);
-    if (event.kind === "ended") response.end();
+    if (event.kind === "ended") end();
   };
   swap(id, (current) => ({ ...current, listeners: [...current.listeners, listener] }));
   response.on("close", () => {
@@ -259,13 +265,13 @@ const route = async (ui: Ui, port: number, token: string, request: IncomingMessa
     const fleetFacts: wire.FleetFacts = { fleet: ui.fleet.root.split(sep).at(-1) ?? "", version: ui.version, servers: ui.fleet.servers.map(facts) };
     answerJson(response, 200, fleetFacts);
   } else if (method === "GET" && path === "/api/status") {
-    const say = sse(response);
+    const { say, end } = sse(response);
     const { initial, updates } = look(ui.fleet, opentofu, ui.network);
     await follow(initial, updates, (looks) => {
       const status: wire.Status = statusJson(looks);
       say(status);
     });
-    response.end();
+    end();
   } else if (method === "GET" && path === "/api/validate") {
     const reports = await Promise.all(ui.fleet.servers.map(async (server) => ({ server, findings: findings(await gather(ui.fleet.root, server)) })));
     const validation: wire.Validation = validateJson(reports);

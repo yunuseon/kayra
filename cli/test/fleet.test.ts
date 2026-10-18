@@ -63,8 +63,13 @@ test("an app's config is plaintext, its secrets vaulted wherever secrets.yml is"
 
 test("an app lives in its own repo, cloned over HTTPS, its root inside it", () => {
   const app = (entry: string) => refused(`target: multipass\ndomain: a.test\napps: [${entry}]`);
-  strictEqual(app("{name: shop, repo: git@x.test:s.git}"), "app shop: repo must be an https:// URL");
-  strictEqual(app("{name: shop, path: shop}"), "app shop: repo must be an https:// URL");
+  strictEqual(app("{name: shop, repo: git@x.test:s.git}"), "app shop: repo must be an https:// URL (or http:// on multipass)");
+  strictEqual(app("{name: shop, path: shop}"), "app shop: repo must be an https:// URL (or http:// on multipass)");
+  strictEqual(app("{name: shop, repo: http://192.0.2.1:8000/s.git}"), "accepted");
+  strictEqual(
+    refused("target: hetzner\ndomain: a.test\nvault: true\napps: [{name: shop, repo: http://x.test/s.git}]"),
+    "app shop: repo must be an https:// URL",
+  );
   strictEqual(app("{name: shop, repo: https://x.test/s.git, path: ../up}"), "app shop: path must stay inside its repo");
   deepStrictEqual(server("a", "target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, ref: main}]").apps, [
     { name: "shop", repo: "https://x.test/s.git", entry: '{"name":"shop","repo":"https://x.test/s.git","ref":"main"}' },

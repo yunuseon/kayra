@@ -1,0 +1,56 @@
+---
+# Every kind of result kayra's Ansible output shows, against localhost.
+- name: Output
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  roles:
+    - demo
+  tasks:
+    - name: An ok task is only counted
+      ansible.builtin.command: "true"
+      changed_when: false
+
+    - name: A skipped task is only counted
+      ansible.builtin.command: "true"
+      when: false
+
+    - name: Write a file
+      ansible.builtin.copy:
+        content: "first\nsecond\n"
+        dest: "{{ dir }}/file"
+        mode: "0644"
+      diff: true
+
+    - name: Change each item
+      ansible.builtin.command: "echo {{ item }}"
+      changed_when: true
+      loop: [one, two]
+
+    - name: Say something
+      ansible.builtin.debug:
+        msg: |
+          Ready.
+          Next: something else.
+
+    - name: Keep a secret
+      ansible.builtin.command: "echo hunter2"
+      changed_when: true
+      no_log: true
+
+    - name: Fail, ignored
+      ansible.builtin.command: "false"
+      ignore_errors: true
+
+    - name: Retry once
+      ansible.builtin.command: "true"
+      register: tried
+      until: tried.attempts | default(1) > 1
+      retries: 2
+      delay: 0
+      changed_when: false
+
+    - name: Fail with output
+      ansible.builtin.shell: "echo on stdout; echo on stderr >&2; exit 3"
+      changed_when: false

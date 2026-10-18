@@ -1,0 +1,1 @@
+{"image": "sample/web", "dockerfile": "web/Dockerfile", "context": "web", "inputs": ["web"]}

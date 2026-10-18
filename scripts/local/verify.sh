@@ -125,12 +125,14 @@ bad_platform="$(sed -n 's/^platform //p' <<< "$facts" | awk -F'|' '$2 != "runnin
 while IFS= read -r app; do
     [ -n "$app" ] || continue
     containers="$(sed -n "s/^container ${app} //p" <<< "$facts")"
+    run="$(sed -n "s/^run ${app} //p" <<< "$facts")"
     # One-shot containers (an init, a migration) exit 0 and stay exited.
     bad="$(awk -F'|' '$2 != "running" && $3 !~ /^Exited \(0\)/ || $3 ~ /unhealthy|health: starting/ {print $1 " " $3}' <<< "$containers")"
-    if [ -z "$containers" ]; then fail "${app}: no containers"
+    # Registered and never run: waiting for its first push, not broken.
+    if [ -z "$containers" ] && [ -z "$run" ]; then pass "${app}: not deployed yet"; continue
+    elif [ -z "$containers" ]; then fail "${app}: no containers"
     elif [ -n "$bad" ]; then fail "${app}: $(paste -sd',' - <<< "$bad")"
     else pass "${app}: $(grep -c . <<< "$containers") container(s) up"; fi
-    run="$(sed -n "s/^run ${app} //p" <<< "$facts")"
     case "$run" in
         failure*) fail "${app}: its last run failed ($(cut -d' ' -f2 <<< "$run"): kayra app logs ${name} ${app})" ;;
         "") pass "${app}: no runs yet" ;;

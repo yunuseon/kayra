@@ -116,15 +116,20 @@ const vault = (descriptor: Fields): Result<Vault, string> => {
     : err("vault_password_file must be a path");
 };
 
-/** Apps live in their own repo: the builder clones it over HTTPS, and the app root stays inside it. */
-const app = (value: unknown): Result<App, string> => {
+/**
+ * Apps live in their own repo: the builder clones it over HTTPS, and the app
+ * root stays inside it. A multipass server, a test machine by definition, may
+ * clone over plain HTTP too: the upgrade lab serves its fixture app that way.
+ */
+const app = (target: ServerTarget) => (value: unknown): Result<App, string> => {
   const entry = mapping(value);
   if (entry === undefined) return err("an app must be a mapping");
   const name = typeof entry["name"] === "string" ? appName(entry["name"]) : err("an app needs a name");
   if (!name.ok) return name;
   const repo = entry["repo"];
-  if (typeof repo !== "string" || !repo.startsWith("https://"))
-    return err(`app ${name.value}: repo must be an https:// URL`);
+  const schemes = target === "multipass" ? ["https://", "http://"] : ["https://"];
+  if (typeof repo !== "string" || !schemes.some((scheme) => repo.startsWith(scheme)))
+    return err(`app ${name.value}: repo must be an https:// URL${target === "multipass" ? " (or http:// on multipass)" : ""}`);
   const path = entry["path"] ?? ".";
   if (typeof path !== "string" || `/${path}/`.includes("/../"))
     return err(`app ${name.value}: path must stay inside its repo`);
@@ -179,7 +184,7 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
   const declaredApps: unknown = descriptor.value["apps"] ?? [];
   if (!Array.isArray(declaredApps)) return err("apps must be a list");
   if (kind.value !== "platform" && declaredApps.length > 0) return err("apps run on platform servers only");
-  const apps = all(declaredApps.map(app));
+  const apps = all(declaredApps.map(app(target.value)));
   if (!apps.ok) return apps;
   const shape = checkShape("server.yml", descriptor.value, serverSchema);
   if (!shape.ok) return shape;

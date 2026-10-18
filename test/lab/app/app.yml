@@ -1,0 +1,6 @@
+# The upgrade lab's app: one web page that says which version it is.
+name: sample
+compose: [deploy/compose.yml]
+subdomains: [www]
+secrets: [GREETING]
+config: [MODE]

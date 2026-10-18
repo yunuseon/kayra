@@ -92,5 +92,9 @@ healthy; sed -i.bak 's/^alerts.*$/alerts _gc/' "${tmp}/answers/facts"
 run_case alert-open "open alerts: _gc"
 healthy; sed -i.bak 's/^platform authelia|running|healthy$/platform authelia|exited|/' "${tmp}/answers/facts"
 run_case platform-container-down "platform containers: authelia exited"
+healthy; sed -i.bak '/^container shop /d; /^run shop /d' "${tmp}/answers/facts"
+run_case registered-not-deployed-yet nothing
+healthy; sed -i.bak '/^container shop /d' "${tmp}/answers/facts"
+run_case containers-gone-after-a-run "shop: no containers"
 
 exit "$failed"

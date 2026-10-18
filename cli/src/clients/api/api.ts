@@ -3,7 +3,6 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, sep } from "node:path";
 import { within, type KayraRoot } from "../../core/brand.ts";
-import { planFor } from "../../core/commands/index.ts";
 import { look, opentofu, statusJson, type Network } from "../../core/commands/status.ts";
 import { findings, validateJson } from "../../core/commands/validate.ts";
 import { json, send } from "../../deployer/http.ts";
@@ -15,7 +14,8 @@ import { err, flatMap, ok, type Result } from "../../result.ts";
 import { listed, reporting, type Invocation } from "../../core/present/progress.ts";
 import { follow } from "../../core/updates.ts";
 import { parsed, releasesSchema, runsSchema } from "../../core/present/views.ts";
-import { changes, commandInput, facts, targetOf, toPlanned, words } from "./commands.ts";
+import { invocation, isPlan, planOf as planOfCall, type Context } from "../../core/operations/run.ts";
+import { changes, commandInput, facts, targetOf, toInvocation, words } from "./commands.ts";
 import type * as wire from "./contract.ts";
 import { busy, readRecord, recordLine, runId, stateOf, summary, type Run } from "./runs.ts";
 
@@ -97,8 +97,19 @@ const invocationOf = (ui: Api, input: wire.CommandInput): Result<Invocation, str
     }),
   );
 
+/** The core's context for the fleet this server serves; paths start at the fleet. */
+const contextOf = (ui: Api): Context => ({
+  engine: { kayra: ui.kayra, fleet: ui.fleet.root },
+  fleet: ui.fleet,
+  version: ui.version,
+  here: ui.fleet.root,
+  read: (path) => (existsSync(path) ? readFileSync(path, "utf8") : undefined),
+  network: ui.network,
+  tofu: opentofu,
+});
+
 const planOf = (ui: Api, input: wire.CommandInput): Result<Plan, string> =>
-  flatMap(toPlanned(ui.fleet, input), (planned) => planFor({ kayra: ui.kayra, fleet: ui.fleet.root }, ui.fleet, planned));
+  flatMap(toInvocation(input), (call) => (isPlan(call) ? planOfCall(contextOf(ui), call) : err(`${call.name} runs no plan`)));
 
 const preview = (ui: Api, input: wire.CommandInput): Result<wire.Preview, string> =>
   flatMap(planOf(ui, input), (plan) =>
@@ -184,13 +195,11 @@ const watchRun = (ui: Api, id: string, response: ServerResponse): void => {
   });
 };
 
-/** What a deployer's ctl answers, captured over SSH as `kayra app …` asks it. */
-const ctl = async (ui: Api, input: { readonly name: "app runs" | "app logs" | "app rollback"; readonly server: string; readonly app: string; readonly more?: string }): Promise<Result<string, string>> => {
-  const server = ui.fleet.servers.find((each) => each.name === input.server);
-  if (server === undefined) return err(`no server '${input.server}'`);
-  const app = server.apps.find((each) => each.name === input.app);
-  if (app === undefined) return err(`'${input.app}' is not an app of ${server.name}`);
-  const plan = planFor({ kayra: ui.kayra, fleet: ui.fleet.root }, ui.fleet, { name: input.name, server: server.name, app: app.name, more: input.more });
+/** What a deployer's ctl answers, captured over SSH as the command line asks it. */
+const ctl = async (ui: Api, name: "app.runs" | "app.log" | "app.releases", input: Readonly<Record<string, string>>): Promise<Result<string, string>> => {
+  const call = invocation(name, input);
+  if (!call.ok) return call;
+  const plan = isPlan(call.value) ? planOfCall(contextOf(ui), call.value) : err(`${name} runs no plan`);
   if (!plan.ok) return plan;
   const [step] = plan.value;
   if (step?.kind !== "run") return err("the deployer's plan has no step");
@@ -224,10 +233,9 @@ export const handleApi = async (ui: Api, request: IncomingMessage, response: Ser
   } else if (method === "GET" && app !== null) {
     const [, server = "", name = "", what, more] = app;
     const asked = { server: decodeURIComponent(server), app: decodeURIComponent(name) };
-    const answer = await ctl(ui, {
+    const answer = await ctl(ui, what === "runs" ? "app.runs" : what === "releases" ? "app.releases" : "app.log", {
       ...asked,
-      name: what === "runs" ? "app runs" : what === "releases" ? "app rollback" : "app logs",
-      ...(more === undefined ? {} : { more: decodeURIComponent(more) }),
+      ...(more === undefined ? {} : { run: decodeURIComponent(more) }),
     });
     if (!answer.ok) send(response, 502, `${answer.error}\n`);
     else if (what === "logs") send(response, 200, answer.value);

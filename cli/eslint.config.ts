@@ -27,14 +27,14 @@ export default defineConfig(
         "error",
         // Zod's schemas are immutable once built (every method returns a new
         // one), but its types are classes the rule cannot see into.
-        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true, ignoreTypePattern: ["^z\\.", "ZodType", "Setting"] },
+        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true, ignoreTypePattern: ["^z\\.", "ZodType", "Setting", "^Operation$"] },
       ],
       "functional/type-declaration-immutability": [
         "error",
         {
           rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }],
           // Setting holds a Zod schema: immutable, but a class the rule cannot see into.
-          ignoreIdentifierPattern: ["^Setting$"],
+          ignoreIdentifierPattern: ["^Setting$", "^Operation$"],
         },
       ],
     },

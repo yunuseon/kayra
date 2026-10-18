@@ -46,7 +46,7 @@ export const parser = (fleet: Fleet) => {
               brief: message`Delete a removed app's volumes: its data, irreversibly.`,
             }),
             command("runs", object({ name: constant("app runs"), server, app: argument(appNameParser) }), {
-              brief: message`The app's latest runs: id, result, commit, why.`,
+              brief: message`What runs now, and the app's latest runs: state, commit, why, when, how long.`,
             }),
             command(
               "logs",
@@ -61,7 +61,7 @@ export const parser = (fleet: Fleet) => {
             command(
               "rollback",
               object({ name: constant("app rollback"), server, app: argument(appNameParser), more: optional(argument(string({ metavar: "SHA" }))) }),
-              { brief: message`List earlier releases, or deploy one of them again.` },
+              { brief: message`The releases, the live one marked, or deploy an earlier one again.` },
             ),
           ),
           { brief: message`An app: check it before a push, or on a server its runs, logs, deploys, rollbacks, and purging its data.` },

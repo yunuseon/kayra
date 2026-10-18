@@ -2,6 +2,7 @@ import { commandOf, kindOf, titleOf, type Plan, type Step } from "../plan.ts";
 import { accent, active, bad, muted, strong, warn, type Line, type Span } from "./line.ts";
 import { position, steps as count, type Invocation } from "./progress.ts";
 import { wrap } from "./text.ts";
+import { drawnAs } from "./views.ts";
 
 const kinds: Readonly<Record<string, (text: string) => Span>> = { guard: warn, check: active, run: active, confirm: bad, note: muted };
 
@@ -35,6 +36,7 @@ export const explain = (
         : wrap(short(command).split(" "), Math.max(40, Math.min(columns, 120) - indent.length - 2)).map(
             (line, at): Line => [indent, muted(at === 0 ? line : `  ${line}`)],
           )),
+      ...(step.kind === "run" && typeof step.stdout === "object" ? [[indent, muted(`→ ${drawnAs(step.stdout)}`)]] : []),
     ];
   });
   return [

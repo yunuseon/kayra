@@ -2,7 +2,9 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { interpret } from "../src/interpret.ts";
 import { run, type Plan } from "../src/plan.ts";
+import { appName, serverName } from "../src/brand.ts";
 import { flat } from "../src/ui/line.ts";
+import { must } from "./support.ts";
 
 type Said = { readonly passed: boolean; readonly out: readonly string[]; readonly err: readonly string[] };
 
@@ -105,4 +107,13 @@ test("a program that does not exist fails instead of throwing, and says so", asy
   const said = await interpreted([run("missing", ["no-such-tool-here"])]);
   strictEqual(said.passed, false);
   strictEqual(said.err.at(0)?.startsWith("    no-such-tool-here: spawn no-such-tool-here ENOENT"), true);
+});
+
+const forge = { app: must(appName("shop")), server: must(serverName("forge")) };
+
+test("a drawn step's answer is read whole and drawn once it is done, even when it failed", async () => {
+  const drawn = { ...run("Log", ["sh", "-c", "printf '09:00:00 fine\\n09:00:01 it failed\\n'; exit 2"]), stdout: { view: "log", ...forge } } as const;
+  deepStrictEqual(await interpreted([drawn]), { passed: false, out: ["09:00:00 fine", "09:00:01 it failed"], err: [] });
+  const old = { ...run("Runs", ["printf", "an older ctl's text\\n"]), stdout: { view: "runs", ...forge } } as const;
+  deepStrictEqual(await interpreted([old]), { passed: true, out: ["an older ctl's text"], err: [] });
 });

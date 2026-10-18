@@ -32,6 +32,12 @@ setup
   and the footer go to stderr, so `kayra doctor > report` keeps only the
   report. `ssh` and the `app` and `job` commands print the server's answer and
   nothing else.
+- **The deployer's answers are drawn**, not passed through: `app runs` as a
+  table, `app rollback` without a commit as the releases with the live one
+  marked, `app logs` with errors and warnings marked on a terminal (piped, the
+  log byte for byte). A server not yet deployed with the kayra you run answers
+  `app runs` the old way, printed as it came, and refuses `app rollback`'s list
+  (`--json is not an earlier release`) until its `kayra deploy`.
 - **Colors** follow `FORCE_COLOR`, then `NO_COLOR`, then whether the output is a
   terminal. On one, quiet steps (guards, checks) show a spinner and a running
   time, the window title follows the step, and a run longer than 30 seconds
@@ -66,12 +72,33 @@ with the kayra release the fleet pins (not a linked checkout): `provision`,
 
 Through the server's deployer, over SSH; platform servers only.
 
+```
+$ kayra app runs shop-prod shop
+shop on shop-prod · live a1b2c3d since 2h ago
+
+  STATE      COMMIT   WHY     WHEN     TOOK   RUN
+  ◆ running  —        deploy  12s ago  12s…   20261018T115948Z-77aa00
+  ✓ success  a1b2c3d  push    2h ago   1m12s  20261018T095848Z-0f9e8d
+  ✗ failure  9f8e7d6  poll    26h ago  48s    20261017T091700Z-ab12cd
+
+  → kayra app logs shop-prod shop [RUN] shows a run's log, the newest by default
+
+$ kayra app rollback shop-prod shop
+shop on shop-prod · 2 releases
+
+    COMMIT   DEPLOYED
+  ● a1b2c3d  2h ago    live
+    9f8e7d6  2d ago
+
+  → kayra app rollback shop-prod shop 9f8e7d6 deploys that one again
+```
+
 | Command | What it does |
 |---|---|
-| `kayra app runs <server> <app>` | The app's latest runs: id, result, commit, why |
-| `kayra app logs <server> <app> [run]` | A run's log, the newest unless named (`gc` or `renovate` for the jobs' runs) |
+| `kayra app runs <server> <app>` | What runs now, and the latest runs: state, commit, why, when, how long, run id |
+| `kayra app logs <server> <app> [run]` | A run's log, the newest unless named (`gc` or `renovate` for the jobs' runs); errors and warnings marked on a terminal |
 | `kayra app deploy <server> <app> [ref]` | Build and deploy a branch, tag or commit; the app's ref by default |
-| `kayra app rollback <server> <app> [sha]` | Without a commit: what runs now and the earlier releases. With one (12 characters are enough): deploy it again |
+| `kayra app rollback <server> <app> [sha]` | Without a commit: every release, the live one marked, each with its age. With one (the 7 characters the list shows are enough): deploy it again |
 | `kayra job <server> gc` | The registry GC now (nightly at 03:00 otherwise) |
 | `kayra job <server> renovate [--no-prs]` | Renovate now; `--no-prs` logs what would change |
 

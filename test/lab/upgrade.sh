@@ -155,7 +155,9 @@ if ! kayra_cmd validate "$server" >> "$log" 2>&1; then
 fi
 
 # ── Waiting on runs, and asking the app what it serves ──────────────────────
-newest_run() { kayra_cmd app runs "$server" sample 2>/dev/null | head -1; }
+# The deployer's ctl as text, which every kayra the lab runs has: what `kayra app …` draws from it may change.
+ctl() { kayra_cmd ssh "$server" -- cd /opt/platform '&&' docker compose exec -T deployer kayra-deployer ctl "$@"; }
+newest_run() { ctl runs sample 2>/dev/null | head -1; }
 # Waits for a run newer than $1 to end; prints its line (id state sha why what).
 await_run() {
     local before="$1" line
@@ -218,6 +220,8 @@ push_hook
 run="$(await_run "$before")"
 [ "$(state_of "$run")" = success ] || die "the v2 deploy: ${run}"
 expect_serves v2
+kayra_cmd app runs "$server" sample | grep -q "^  STATE  *COMMIT" || die "kayra app runs prints the deployer's answer undrawn"
+echo "✓ kayra app runs draws the runs"
 before="$run"
 kayra_cmd app deploy "$server" sample >> "$log" 2>&1
 run="$(await_run "$before")"
@@ -239,8 +243,10 @@ expect_serves v2
 
 # ── 5: rollback, GC, verify ─────────────────────────────────────────────────
 step "5  rollback to the first release, the registry GC, kayra verify"
-first="$(kayra_cmd app rollback "$server" sample | awk 'NR > 1 {print $1}' | tail -1)"
-[ -n "$first" ] || die "kayra app rollback lists no earlier release"
+first="$(ctl rollback sample | awk 'NR > 1 {print $1}' | tail -1)"
+[ -n "$first" ] || die "the deployer lists no earlier release"
+kayra_cmd app rollback "$server" sample | grep -q " live$" || die "kayra app rollback prints the releases undrawn"
+echo "✓ kayra app rollback draws the releases"
 before="$run"
 kayra_cmd app rollback "$server" sample "${first:0:12}" >> "$log" 2>&1
 run="$(await_run "$before")"

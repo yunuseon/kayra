@@ -4,6 +4,7 @@ import type { Arg, Argv, Env, Plan, Probe, Step } from "./plan.ts";
 import { all, err, flatMap, ok, type Result } from "./result.ts";
 import { active, bad, muted, ok as fine, strong, type Line, type Text } from "./ui/line.ts";
 import { position, silent, type Done, type Ended, type Progress } from "./ui/progress.ts";
+import { draw } from "./ui/views.ts";
 
 /** Where the interpreter talks to the operator. */
 export type Io = {
@@ -97,12 +98,15 @@ const check = async (step: Extract<Step, { kind: "check" }>): Promise<Outcome> =
 const runStep = async (step: Extract<Step, { kind: "run" }>): Promise<Outcome> => {
   const argv = await resolve(step.argv);
   if (!argv.ok) return { failed: true, stopped: true, why: "a query failed", out: [], err: [detail(argv.error)] };
+  const { stdout } = step;
   // A quiet step's stderr waits until it is done, so it cannot tear through a spinner.
-  const quiet = step.stdout === "discard";
-  const exit = await spawned(argv.value, { stdout: step.stdout, stderr: quiet ? "capture" : "show" }, step.env);
+  const quiet = stdout === "discard";
+  const exit = await spawned(argv.value, { stdout: typeof stdout === "string" ? stdout : "capture", stderr: quiet ? "capture" : "show" }, step.env);
   if (!exit.started) return { failed: true, stopped: true, why: "not started", out: [], err: [detail(`${argv.value[0]}: ${exit.stderr}`)] };
-  if (exit.code === 0) return { ...goOn, err: lines(exit.stderr).map(aside) };
-  return { failed: true, stopped: true, why: `exit ${String(exit.code)}`, out: [], err: lines(exit.stderr).map(detail) };
+  // Whatever it answered is shown, even when it failed: it may say why.
+  const out = typeof stdout === "string" ? [] : draw(stdout, exit.stdout, Date.now());
+  if (exit.code === 0) return { ...goOn, out, err: lines(exit.stderr).map(aside) };
+  return { failed: true, stopped: true, why: `exit ${String(exit.code)}`, out, err: lines(exit.stderr).map(detail) };
 };
 
 const perform = async (step: Step, io: Io): Promise<Outcome> => {

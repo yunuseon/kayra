@@ -2,10 +2,10 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { appName, serverName } from "../src/brand.ts";
 import { interpret } from "../src/interpret.ts";
-import { partOf, run, type Plan } from "../src/plan.ts";
+import { needsTerminal, partOf, run, type Plan } from "../src/plan.ts";
 import { explain } from "../src/ui/explain.ts";
 import { bad, flat, link, paint, strong, width } from "../src/ui/line.ts";
-import { footer, framed, position, type Invocation } from "../src/ui/progress.ts";
+import { footer, framed, listed, position, reporting, type Event, type Invocation } from "../src/ui/progress.ts";
 import { colors, escapes, screen, settle, watch } from "../src/ui/terminal.ts";
 import { duration, fit, spread, table, truncate, wrap } from "../src/ui/text.ts";
 import { must } from "./support.ts";
@@ -197,4 +197,28 @@ test("--dry-run says how a drawn answer is shown, below its command", () => {
     "              ssh box ctl runs shop --json",
     "              → its answer drawn as a table of runs",
   ]);
+});
+
+test("reporting: the plan, each step started and done, then how it ended, as events", async () => {
+  // eslint-disable-next-line functional/prefer-immutable-types -- capturing what is emitted
+  const events: Event[] = [];
+  const silentIo = { out: () => undefined, err: () => undefined, ask: () => Promise.resolve("") };
+  // eslint-disable-next-line functional/immutable-data -- capturing
+  strictEqual(await interpret(deploy, silentIo, reporting((event) => events.push(event), invocation, (text) => text)), false);
+  deepStrictEqual(
+    events.map((event) => (event.kind === "plan" ? `plan ${String(event.steps.length)}` : event.kind === "ended" ? `ended ${event.stop?.why ?? ""}` : `${event.kind} ${String(event.index)}`)),
+    ["plan 4", "started 0", "done 0", "started 1", "done 1", "started 2", "done 2", "started 3", "done 3", "ended failed"],
+  );
+  const ended = events.at(-1);
+  strictEqual(ended?.kind === "ended" ? flat(ended.footer[1] ?? []) : "", "  → kayra verify box runs just this part");
+});
+
+test("listed: each step's kind, title, command with its paths named by their root, and the part it opens", () => {
+  deepStrictEqual(listed(deploy.slice(0, 3), (text) => text.replaceAll("/kayra", "<kayra>")), [
+    { index: 0, kind: "guard", title: "box may be changed", command: "sh -c 'exit 0'", part: "setup", opens: "setup" },
+    { index: 1, kind: "run", title: "Host layer · platform.yml", command: "true", part: "setup" },
+    { index: 2, kind: "run", title: "Remove apps not in server.yml", command: "true", part: "apps", opens: "apps" },
+  ]);
+  strictEqual(needsTerminal(deploy), false);
+  strictEqual(needsTerminal([run("asks", ["ansible-playbook"], { ANSIBLE_ASK_VAULT_PASS: "True" })]), true);
 });

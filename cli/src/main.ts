@@ -6,13 +6,13 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { absolutePath, fleetRoot, kayraRoot, within } from "./brand.ts";
 import { appCheck } from "./commands/app-check.ts";
-import { parser, runOptions, type Command } from "./cli.ts";
-import { doctor } from "./commands/doctor.ts";
-import * as server from "./commands/server.ts";
+import { parser, runOptions } from "./cli.ts";
+import { isDeployer, planFor } from "./commands/index.ts";
+import { verbose } from "./commands/server.ts";
 import { look, opentofu, statusJson, statusView, type Look } from "./commands/status.ts";
 import { findings, overall, validateJson, validateView } from "./commands/validate.ts";
 import { gather } from "./gather.ts";
-import { serverNamed, type Fleet, type Server } from "./fleet.ts";
+import type { Fleet, Server } from "./fleet.ts";
 import { interpret, type Io } from "./interpret.ts";
 import { findFleetRoot, loadFleet } from "./load.ts";
 import { network } from "./net.ts";
@@ -22,7 +22,7 @@ import { explain } from "./ui/explain.ts";
 import { bad, paint } from "./ui/line.ts";
 import { framed, silent, type Invocation } from "./ui/progress.ts";
 import { screen, settle, watch } from "./ui/terminal.ts";
-import { truncate } from "./ui/text.ts";
+import { shortener, truncate } from "./ui/text.ts";
 import { z } from "zod";
 
 const here = absolutePath(process.cwd());
@@ -30,60 +30,6 @@ const engine = absolutePath(import.meta.dirname);
 if (!here.ok || !engine.ok) throw new Error("node reported a relative path");
 const kayra = kayraRoot(within(engine.value, "..", ".."));
 const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(kayra, "package.json"), "utf8"))).version;
-
-type Deployer = Extract<Command, { readonly name: "app runs" | "app logs" | "app deploy" | "app rollback" | "job" }>;
-type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" | "app check" }>;
-
-const appKinds = { "app runs": "runs", "app logs": "logs", "app deploy": "deploy", "app rollback": "rollback" } as const;
-
-const isDeployer = (command: Command): command is Deployer => command.name === "job" || command.name in appKinds;
-
-const deployerCommand = (command: Deployer): server.DeployerCommand =>
-  command.name === "job"
-    ? { kind: "job", job: command.job, noPrs: command.noPrs }
-    : { kind: appKinds[command.name], app: command.app, more: "more" in command ? command.more : undefined };
-
-const onServer = (on: server.Engine, target: Server, command: OnServer): Result<Plan, string> => {
-  switch (command.name) {
-    case "up":
-      return server.up(on, target);
-    case "provision":
-      return server.provision(on, target);
-    case "deploy":
-      return server.deploy(on, target);
-    case "setup":
-      return server.setup(on, target);
-    case "plan":
-      return server.preview(on, target);
-    case "verify":
-      return server.verify(on, target);
-    case "apps":
-      return server.apps(on, target);
-    case "hosts":
-      return server.hosts(on, target);
-    case "ssh":
-      return server.ssh(target, command.remote);
-    case "down":
-      return server.down(on, target);
-    case "adopt":
-      return server.adopt(on, target);
-    case "backup test":
-      return server.backupTest(on, target);
-  }
-};
-
-const plan = (fleet: Fleet, command: Exclude<Command, { readonly name: "status" | "validate" | "app check" }>): Result<Plan, string> => {
-  const on = { kayra, fleet: fleet.root };
-  if (command.name === "doctor") return ok(doctor(fleet, kayra));
-  if (command.name === "certs") return server.certsFor(on, command.domain, command.subdomains);
-  if (command.name === "app purge")
-    return flatMap(serverNamed(fleet, command.server), (target) => server.appPurge(on, target, command.app));
-  if (isDeployer(command)) {
-    const deployerArgs = deployerCommand(command);
-    return flatMap(serverNamed(fleet, command.server), (target) => server.deployer(target, deployerArgs));
-  }
-  return flatMap(serverNamed(fleet, command.server), (target) => onServer(on, target, command));
-};
 
 const screens = { out: screen(process.stdout, process.env), err: screen(process.stderr, process.env) };
 
@@ -124,12 +70,6 @@ const invocation = (target: Server | undefined): Invocation => ({
   ...(target === undefined ? {} : { server: target.name }),
   about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${version}`],
 });
-
-/** Paths by the root they are under, the longest first: the engine may live inside the fleet. */
-const shortener =
-  (roots: readonly (readonly [string, string])[]) =>
-  (text: string): string =>
-    roots.toSorted(([a], [b]) => b.length - a.length).reduce((short, [path, name]) => short.replaceAll(path, name), text);
 
 /** --dry-run: the plan as data, styled on a terminal, plain and copyable for a program. */
 const show = (steps: Plan, about: Invocation, short: (text: string) => string): void => {
@@ -198,7 +138,7 @@ else {
     process.exitCode = reports.some((each) => overall(each.findings) === "problem") ? 1 : 0;
   } else {
     const { command } = args;
-    const steps = map(plan(fleet.value, command), (each) => (args.verbose ? server.verbose(each) : each));
+    const steps = map(planFor({ kayra, fleet: fleet.value.root }, fleet.value, command), (each) => (args.verbose ? verbose(each) : each));
     const target = "server" in command ? fleet.value.servers.find((each) => each.name === command.server) : undefined;
     // ssh and the deployer's answers are the output itself: nothing around them.
     const framing = command.name !== "ssh" && !isDeployer(command);

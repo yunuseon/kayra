@@ -84,3 +84,9 @@ export const fit = (rows: readonly (readonly Line[])[], room: number, shrink: re
   ).widths;
   return rows.map((row) => row.map((cell, at) => truncate(cell, cut[at] ?? width(cell))));
 };
+
+/** Paths by the root they are under, the longest first: the engine may live inside the fleet. */
+export const shortener =
+  (roots: readonly (readonly [string, string])[]) =>
+  (text: string): string =>
+    roots.toSorted(([a], [b]) => b.length - a.length).reduce((short, [path, name]) => short.replaceAll(path, name), text);

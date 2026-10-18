@@ -127,3 +127,7 @@ const describe = (step: Step): string => {
 
 /** The plan as plain lines: --dry-run's output where it is read by a program. */
 export const render = (plan: Plan): readonly string[] => plan.map(describe);
+
+/** A plan with a step that asks on the terminal (the vault password, typed): it cannot run without one. */
+export const needsTerminal = (plan: Plan): boolean =>
+  plan.some((step) => step.kind === "run" && step.env["ANSIBLE_ASK_VAULT_PASS"] === "True");

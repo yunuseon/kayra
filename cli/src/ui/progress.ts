@@ -1,5 +1,5 @@
 import type { Part, Plan, Step } from "../plan.ts";
-import { titleOf } from "../plan.ts";
+import { commandOf, kindOf, titleOf } from "../plan.ts";
 import { accent, active, bad, muted, ok, paint, strong, warn, type Line, type Text } from "./line.ts";
 import { escapes, spinner, type Screen } from "./terminal.ts";
 import { duration, spread, truncate } from "./text.ts";
@@ -141,3 +141,80 @@ export const framed = (screen: Screen, write: (raw: string) => void, invocation:
     },
   };
 };
+
+/** A step as listed before it runs: --dry-run's facts, as data. */
+export type Listed = {
+  readonly index: number;
+  readonly kind: string;
+  readonly title: string;
+  readonly command?: string;
+  readonly part?: Part;
+  readonly opens?: Part;
+};
+
+/** Every step of a plan, its command's paths named by their root. */
+export const listed = (plan: Plan, short: (text: string) => string): readonly Listed[] =>
+  plan.map((step, index) => {
+    const command = commandOf(step);
+    const { opens } = position(plan, index);
+    return {
+      index,
+      kind: kindOf(step),
+      title: titleOf(step),
+      ...(command === undefined ? {} : { command: short(command) }),
+      ...(step.part === undefined ? {} : { part: step.part }),
+      ...(opens === undefined ? {} : { opens }),
+    };
+  });
+
+/** A plan's run as events, for a viewer that is not a terminal. */
+export type Event =
+  | { readonly kind: "plan"; readonly invocation: Invocation; readonly steps: readonly Listed[] }
+  | { readonly kind: "started"; readonly index: number }
+  | {
+      readonly kind: "done";
+      readonly index: number;
+      readonly failed: boolean;
+      readonly stopped: boolean;
+      readonly why?: string;
+      readonly ms: number;
+    }
+  | {
+      readonly kind: "ended";
+      readonly failures: number;
+      readonly stop?: { readonly index: number; readonly why: "failed" | "declined" | "interrupted" };
+      readonly ms: number;
+      readonly footer: readonly Line[];
+    };
+
+/** The plan and each step as events: what framed draws on a terminal, as data. */
+export const reporting = (emit: (event: Event) => void, invocation: Invocation, short: (text: string) => string): Progress => ({
+  plan: async (plan, work) => {
+    const started = performance.now();
+    emit({ kind: "plan", invocation, steps: listed(plan, short) });
+    const ended = await work();
+    const ms = performance.now() - started;
+    emit({
+      kind: "ended",
+      failures: ended.failures,
+      ...(ended.stop === undefined ? {} : { stop: { index: ended.stop.index, why: ended.stop.why } }),
+      ms,
+      footer: footer(invocation, plan, ended, ms),
+    });
+    return ended;
+  },
+  step: async (_step, at, work) => {
+    const started = performance.now();
+    emit({ kind: "started", index: at.index });
+    const done = await work();
+    emit({
+      kind: "done",
+      index: at.index,
+      failed: done.failed,
+      stopped: done.stopped,
+      ...(done.why === undefined ? {} : { why: done.why }),
+      ms: performance.now() - started,
+    });
+    return done;
+  },
+});

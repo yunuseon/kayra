@@ -117,3 +117,41 @@ test("a drawn step's answer is read whole and drawn once it is done, even when i
   const old = { ...run("Runs", ["printf", "an older ctl's text\\n"]), stdout: { view: "runs", ...forge } } as const;
   deepStrictEqual(await interpreted([old]), { passed: true, out: ["an older ctl's text"], err: [] });
 });
+
+// eslint-disable-next-line functional/prefer-immutable-types -- a real AbortSignal, a class the rule cannot see into
+const piped = async (plan: Plan, signal?: AbortSignal) => {
+  // eslint-disable-next-line functional/prefer-immutable-types -- capturing what the interpreter says
+  const chunks: string[] = [];
+  const passed = await interpret(
+    plan,
+    {
+      out: () => undefined,
+      err: () => undefined,
+      ask: () => Promise.resolve(""),
+      // eslint-disable-next-line functional/immutable-data -- capturing
+      output: (chunk, stream) => chunks.push(`${stream}:${chunk}`),
+      ...(signal === undefined ? {} : { signal }),
+    },
+    undefined,
+    () => signal?.aborted === true,
+  );
+  return { passed, chunks };
+};
+
+test("without a terminal, what a step shows reaches the sink, and no step reads stdin", async () => {
+  const said = await piped([run("both", ["sh", "-c", "echo out; echo err >&2"]), run("reads stdin", ["cat"])]);
+  strictEqual(said.passed, true);
+  deepStrictEqual(said.chunks.toSorted(), ["stderr:err\n", "stdout:out\n"]);
+});
+
+test("an abort stops the running step's program and the plan, quickly", async () => {
+  const stop = new AbortController();
+  setTimeout(() => {
+    stop.abort();
+  }, 200);
+  const started = performance.now();
+  const said = await piped([run("waits", ["sleep", "30"]), run("never", ["sh", "-c", "echo never"])], stop.signal);
+  strictEqual(said.passed, false);
+  deepStrictEqual(said.chunks, []);
+  strictEqual(performance.now() - started < 5_000, true);
+});

@@ -16,11 +16,13 @@ import { interpret, type Io } from "./interpret.ts";
 import { findFleetRoot, loadFleet } from "./load.ts";
 import { render, type Plan } from "./plan.ts";
 import { flatMap, ok, type Result } from "./result.ts";
+import { z } from "zod";
 
 const here = absolutePath(process.cwd());
 const engine = absolutePath(import.meta.dirname);
 if (!here.ok || !engine.ok) throw new Error("node reported a relative path");
 const kayra = kayraRoot(within(engine.value, "..", ".."));
+const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(kayra, "package.json"), "utf8"))).version;
 
 type Deployer = Extract<Command, { readonly name: "app runs" | "app logs" | "app deploy" | "app rollback" | "job" }>;
 type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" | "app check" }>;
@@ -101,7 +103,7 @@ const found = flatMap(findFleetRoot(here.value), loadFleet);
 const fleet: Result<Fleet, string> = found.ok ? found : ok({ root: fleetRoot(here.value), servers: [] });
 if (!fleet.ok) fail(fleet.error);
 else {
-  const args = run(parser(fleet.value), { programName: "kayra", help: "both", completion: "both" });
+  const args = run(parser(fleet.value), { programName: "kayra", help: "both", completion: "both", version: { value: version, command: true, option: true } });
   if (!found.ok && args.command.name !== "app check") fail(found.error);
   if (args.command.name === "app check") {
     const root = absolutePath(resolve(here.value, args.command.dir ?? "."));

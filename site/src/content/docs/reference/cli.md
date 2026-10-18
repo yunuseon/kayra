@@ -60,6 +60,7 @@ only the newest runs. The runs and their logs are also at
 | `kayra validate [server]` | The fleet beyond its schemas: secrets (unknown keys must be helpers `vars.yml` uses), each app's `app.yml` against the fleet's values, `compose_stacks` against `stacks/`, `edge_routes` |
 | `kayra doctor` | Check that this machine can run every command on every server: tools, vault passwords, app repositories, home servers' SSH |
 | `kayra certs <domain> [subdomain…]` | mkcert certificates for local development |
+| `kayra version`, `kayra --version` | The version of the kayra that runs: in a fleet, the one it pins. Needs no fleet |
 
 ## When to run what
 

@@ -1,5 +1,5 @@
 import { signal } from "@preact/signals";
-import type { FleetFacts, Status, Validation } from "../../cli/src/clients/api/contract.gen.ts";
+import type { FleetFacts, OperationInfo, Status, Validation } from "../../cli/src/clients/api/contract.gen.ts";
 import { get, operation, stream, type Failure } from "./api.ts";
 import { href, parse, type Route } from "./router.ts";
 
@@ -19,6 +19,11 @@ addEventListener("popstate", () => {
 export type Loaded<T> = { readonly state: "loading" } | { readonly state: "failed"; readonly failure: Failure } | { readonly state: "ready"; readonly value: T };
 
 export const fleet = signal<Loaded<FleetFacts>>({ state: "loading" });
+export const catalog = signal<Loaded<readonly OperationInfo[]>>({ state: "loading" });
+export const loadCatalog = async (): Promise<void> => {
+  const answer = await get<readonly OperationInfo[]>("/api/operations");
+  catalog.value = answer.ok ? { state: "ready", value: answer.value } : { state: "failed", failure: answer.failure };
+};
 export const status = signal<{ readonly value: Status | undefined; readonly live: boolean }>({ value: undefined, live: false });
 export const validation = signal<Loaded<Validation>>({ state: "loading" });
 

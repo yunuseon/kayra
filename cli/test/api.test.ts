@@ -1,5 +1,5 @@
 import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,6 +165,25 @@ test("discovery is private, removed on close, refuses a second API owner, and UI
   strictEqual(existsSync(api.discovery), false);
   const browser = await serve(api.config, undefined, 0, { api: false, ui: true });
   try { strictEqual(browser.discovery, undefined); strictEqual(existsSync(api.discovery), false); } finally { await browser.close(); }
+});
+
+test("the authenticated directory picker returns local directories, follows directory links and never returns file contents", async (t) => {
+  const api = await fixture(); t.after(api.cleanup);
+  const repo = join(api.dir, "repository with spaces");
+  mkdirSync(repo);
+  symlinkSync(repo, join(api.dir, "linked-repo"));
+  writeFileSync(join(api.dir, "secret.txt"), "private-value");
+  strictEqual((await call(api.port, "/api/directories")).status, 401);
+  const result = await call(api.port, "/api/directories", { token: api.token });
+  const listing = schemas.DirectoryListing.parse(JSON.parse(result.body));
+  strictEqual(listing.directories.some((entry) => entry.name === "secret.txt"), false);
+  strictEqual(listing.directories.some((entry) => entry.name === "linked-repo"), true);
+  strictEqual(result.body.includes("private-value"), false);
+  const chosen = schemas.DirectoryListing.parse(JSON.parse((await call(api.port, `/api/directories?path=${encodeURIComponent(repo)}`, { token: api.token })).body));
+  strictEqual(chosen.path.endsWith("/repository with spaces"), true);
+  strictEqual(chosen.parent, listing.path);
+  strictEqual((await call(api.port, "/api/directories?path=secret.txt", { token: api.token })).status, 400);
+  strictEqual((await call(api.port, "/api/directories?path=missing", { token: api.token })).status, 400);
 });
 
 test("HTTP auth refuses missing/wrong tokens, rebinding and cookie CSRF; API-only mode serves no browser", async (t) => {

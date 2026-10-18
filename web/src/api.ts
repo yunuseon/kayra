@@ -1,6 +1,5 @@
-import type { Preview, RunSummary } from "../../cli/src/clients/api/contract.gen.ts";
-
-import type { CommandInput } from "./commands.ts";
+import type { Preview, RunOptions, RunSummary } from "../../cli/src/clients/api/contract.gen.ts";
+import type { Draft } from "./operations.ts";
 
 /** What went wrong asking kayra: its own words, as it said them. */
 export type Failure = { readonly status: number; readonly message: string };
@@ -18,31 +17,48 @@ const answer = async <T>(response: Response, read: (response: Response) => Promi
     ? { ok: true, value: trusted<T>(await read(response)) }
     : { ok: false, failure: { status: response.status, message: (await response.text()).trim() } };
 
-export const get = async <T>(path: string): Promise<Answer<T>> => answer<T>(await fetch(path), (response) => response.json());
+const attempt = async <T>(work: () => Promise<Answer<T>>): Promise<Answer<T>> => {
+  try {
+    return await work();
+  } catch {
+    return { ok: false, failure: { status: 0, message: "Cannot reach kayra. Check that kayra serve is still running." } };
+  }
+};
 
-export const getText = async (path: string): Promise<Answer<string>> => answer<string>(await fetch(path), (response) => response.text());
+export const get = <T>(path: string): Promise<Answer<T>> =>
+  attempt(() => fetch(path).then((response) => answer<T>(response, (response) => response.json())));
 
-const post = async <T>(path: string, body: unknown): Promise<Answer<T>> =>
-  answer<T>(
-    await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
-    async (response) => (response.status === 204 ? undefined : response.json()),
+const post = <T>(path: string, body: unknown): Promise<Answer<T>> =>
+  attempt(async () =>
+    answer<T>(
+      await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      async (response) => (response.status === 204 ? undefined : response.json()),
+    ),
   );
 
-const inputOf = (command: CommandInput) => {
-  return { input: Object.fromEntries(Object.entries(command).filter(([key]) => key !== "name")) };
-};
-export const preview = (command: CommandInput): Promise<Answer<Preview>> => post(`/api/operations/${command.name}/preview`, inputOf(command));
+export const preview = (command: Draft, options: RunOptions): Promise<Answer<Preview>> =>
+  post(`/api/operations/${command.name}/preview`, { input: command.input, options });
 
-export const startRun = async (command: CommandInput, confirm?: string): Promise<Answer<{ readonly id: string }>> => {
-  const started = await post<{ readonly run: string }>(`/api/operations/${command.name}`, { ...inputOf(command), ...(confirm === undefined ? {} : { confirm }) });
-  return started.ok ? { ok: true, value: { id: started.value.run } } : started;
-};
+export const start = (
+  command: Draft,
+  options: RunOptions,
+  confirm?: string,
+): Promise<Answer<{ readonly run: string } | { readonly session: string }>> =>
+  post(`/api/operations/${command.name}`, { input: command.input, options, ...(confirm === undefined ? {} : { confirm }) });
 
 export const operation = <T>(name: string, input: unknown = {}): Promise<Answer<T>> => post(`/api/operations/${name}`, { input });
 
-export const answerRun = (id: string, text: string): Promise<Answer<undefined>> => post(`/api/runs/${encodeURIComponent(id)}/answers`, { text });
+export const answerRun = (id: string, text: string): Promise<Answer<undefined>> =>
+  post(`/api/runs/${encodeURIComponent(id)}/answers`, { text });
 
 export const cancelRun = (id: string): Promise<Answer<undefined>> => post(`/api/runs/${encodeURIComponent(id)}/cancel`, {});
+
+export const sessionInput = (id: string, text: string): Promise<Answer<undefined>> =>
+  post(`/api/sessions/${encodeURIComponent(id)}/input`, { text });
+export const closeSession = (id: string): Promise<Answer<undefined>> =>
+  attempt(async () =>
+    answer<undefined>(await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }), () => Promise.resolve(undefined)),
+  );
 
 export const runs = (): Promise<Answer<readonly RunSummary[]>> => get("/api/runs");
 
@@ -51,11 +67,24 @@ export const runs = (): Promise<Answer<readonly RunSummary[]>> => get("/api/runs
  * it has said everything (its `end` event), never reconnecting by itself.
  */
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names what the stream carries, as the contract has it
-export const stream = <T>(path: string, each: (value: T) => void, done: () => void, body?: unknown): (() => void) => {
+export const stream = <T>(
+  path: string,
+  each: (value: T) => void,
+  done: () => void,
+  body?: unknown,
+  failed?: (failure: Failure) => void,
+): (() => void) => {
   const stop = new AbortController();
   const follow = async (): Promise<void> => {
-    const response = await fetch(path, { signal: stop.signal, ...(body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
-    if (!response.ok || response.body === null) return;
+    const response = await fetch(path, {
+      signal: stop.signal,
+      ...(body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    });
+    if (!response.ok) {
+      failed?.({ status: response.status, message: (await response.text()).trim() });
+      return;
+    }
+    if (response.body === null) throw new Error("No stream");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     // eslint-disable-next-line functional/prefer-immutable-types -- retain partial SSE frames between reads
@@ -73,6 +102,12 @@ export const stream = <T>(path: string, each: (value: T) => void, done: () => vo
     };
     await read();
   };
-  void follow().catch(() => undefined).finally(done);
-  return () => { stop.abort(); };
+  void follow()
+    .catch(() => {
+      if (!stop.signal.aborted) failed?.({ status: 0, message: "The connection to kayra was interrupted." });
+    })
+    .finally(done);
+  return () => {
+    stop.abort();
+  };
 };

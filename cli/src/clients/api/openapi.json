@@ -70,6 +70,36 @@
         }
       }
     },
+    "/directories": {
+      "get": {
+        "summary": "Browse local directories for app.check",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directories only, relative paths resolved from the fleet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryListing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Directory cannot be read"
+          }
+        }
+      }
+    },
     "/operations/up": {
       "post": {
         "summary": "Provision, set up everything, point /etc/hosts at it.",
@@ -6009,6 +6039,42 @@
           "fleet",
           "version",
           "servers"
+        ],
+        "additionalProperties": false
+      },
+      "DirectoryListing": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "directories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "path",
+          "parent",
+          "directories"
         ],
         "additionalProperties": false
       },

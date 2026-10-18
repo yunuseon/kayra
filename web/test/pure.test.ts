@@ -14,6 +14,7 @@ describe("routes", () => {
       { page: "app", server: "alaz", app: "shop" },
       { page: "runs" },
       { page: "run", id: "20261018T201502Z-a1b2c3" },
+      { page: "session", id: "20261018T201502Z-a1b2c3" },
       { page: "validate" },
     ];
     routes.forEach((route) => {

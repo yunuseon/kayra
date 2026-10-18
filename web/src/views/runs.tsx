@@ -40,7 +40,7 @@ export const RunTable = ({ server }: { readonly server?: string }) => {
               <Dot tone={tone[run.state]} label={run.state} />
             </td>
             <td>
-              <Link to={{ page: "run", id: run.id }}>
+              <Link to={{ page: run.session ? "session" : "run", id: run.id }}>
                 <code>{run.command}</code>
               </Link>
             </td>

@@ -5,6 +5,7 @@ export type Route =
   | { readonly page: "app"; readonly server: string; readonly app: string }
   | { readonly page: "runs" }
   | { readonly page: "run"; readonly id: string }
+  | { readonly page: "session"; readonly id: string }
   | { readonly page: "validate" }
   | { readonly page: "missing"; readonly path: string };
 
@@ -17,6 +18,7 @@ export const parse = (path: string): Route => {
   if (first === undefined) return { page: "fleet" };
   if (first === "runs" && second === undefined) return { page: "runs" };
   if (first === "runs" && second !== undefined && third === undefined) return { page: "run", id: second };
+  if (first === "sessions" && second !== undefined && third === undefined) return { page: "session", id: second };
   if (first === "validate" && second === undefined) return { page: "validate" };
   if (first === "servers" && second !== undefined && third === undefined) return { page: "server", server: second };
   if (first === "servers" && second !== undefined && third === "apps" && fourth !== undefined && parts.length === 4)
@@ -36,6 +38,8 @@ export const href = (route: Route): string => {
       return "/runs";
     case "run":
       return `/runs/${encodeURIComponent(route.id)}`;
+    case "session":
+      return `/sessions/${encodeURIComponent(route.id)}`;
     case "validate":
       return "/validate";
     case "missing":

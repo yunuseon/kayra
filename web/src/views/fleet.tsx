@@ -1,4 +1,5 @@
 import type { ServerFacts } from "../../../cli/src/clients/api/contract.gen.ts";
+import { OperationActions } from "../components/operations.tsx";
 import { Link } from "../components/shell.tsx";
 import { Dot, Fact, Header, Pill, Problem, Waiting } from "../components/ui.tsx";
 import { health, login, machine, ssh, type Server } from "../reach.ts";
@@ -49,7 +50,13 @@ export const FleetView = () => {
           </>
         }
       >
-        <button class="button" onClick={refreshStatus} disabled={live}>
+        <button
+          class="button"
+          onClick={() => {
+            refreshStatus();
+          }}
+          disabled={live}
+        >
           {live ? "Asking…" : "Ask again"}
         </button>
       </Header>
@@ -58,6 +65,10 @@ export const FleetView = () => {
           <Card key={server.name} facts={server} seen={seen?.servers.find((each) => each.name === server.name)} />
         ))}
       </div>
+      <section class="card">
+        <h2>Fleet and local commands</h2>
+        <OperationActions />
+      </section>
     </>
   );
 };

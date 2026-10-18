@@ -1,9 +1,9 @@
 import { render } from "preact";
 import { useEffect } from "preact/hooks";
 import { Palette, openPalette } from "./components/palette.tsx";
-import { PreviewSheet, show } from "./components/preview.tsx";
+import { OperationSheet, show } from "./components/operation.tsx";
 import { Shell } from "./components/shell.tsx";
-import { loadFleet, refreshStatus, route } from "./state.ts";
+import { loadCatalog, loadFleet, refreshStatus, route } from "./state.ts";
 import "./styles.css";
 import { AppView } from "./views/app.tsx";
 import { FleetView } from "./views/fleet.tsx";
@@ -11,6 +11,7 @@ import { RunView } from "./views/run.tsx";
 import { RunsView } from "./views/runs.tsx";
 import { ServerView } from "./views/server.tsx";
 import { ValidateView } from "./views/validate.tsx";
+import { SessionView } from "./views/session.tsx";
 
 const Page = () => {
   const current = route.value;
@@ -24,7 +25,9 @@ const Page = () => {
     case "runs":
       return <RunsView />;
     case "run":
-      return <RunView id={current.id} />;
+      return <RunView key={current.id} id={current.id} />;
+    case "session":
+      return <SessionView key={current.id} id={current.id} />;
     case "validate":
       return <ValidateView />;
     case "missing":
@@ -35,6 +38,7 @@ const Page = () => {
 const App = () => {
   useEffect(() => {
     void loadFleet();
+    void loadCatalog();
     refreshStatus();
   }, []);
   return (
@@ -51,7 +55,7 @@ const App = () => {
         </div>
         <Page />
       </Shell>
-      <PreviewSheet />
+      <OperationSheet />
       <Palette />
     </>
   );

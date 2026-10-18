@@ -27,12 +27,23 @@ kayra serve --port 7700 --no-open   # prints the URL instead
   `kayra doctor`'s checks as a run.
 - **⌘K:** go to any page, server or app, or run any command, by typing a few
   letters.
+- **SSH terminal:** an interactive SSH session with terminal input and output.
+  The Runs page links back to open and finished sessions.
 
 ## Running a command
 
-Every command opens as its plan first: each step under its part, with the
-command it runs, as `--dry-run` shows it. **Run** starts it. Then the run's
-page shows:
+Commands open a form generated from the operation catalog. Server and app
+pickers use the fleet; removed app names can still be entered. For `app check`,
+enter a repository path or browse local directories. Paths resolve on the
+machine running `kayra serve`, relative to the fleet.
+
+Plans and SSH sessions show their steps before starting. **Verbose output**
+enables Ansible's full output; **Dry run** shows the plan without running it.
+Status offers **offline**, and the Renovate job offers **noPrs**. Array inputs,
+including SSH command arguments, take one item per line and preserve spaces
+within each item. Queries show their answers in the form.
+
+**Run** starts a plan. Then the run's page shows:
 - each step as it runs, with its time
 - its output, Ansible's colours included
 - a failed step opened, with what it said
@@ -46,10 +57,15 @@ page shows:
   confirmation comes on top.
 - Hetzner and home servers still change only from a clean `main` with the
   pinned kayra: the plans carry the same guards.
-- A server whose vault password is asked on a terminal (no
-  `vault_password_file`) runs nothing that opens its secrets from the browser.
+- Vault and sudo passwords use password fields. Answers are cleared after
+  submission and never enter the run record.
 - Each run is recorded as JSON lines in the fleet's `.cache/ui/runs/`; the
   Runs page lists them after a restart too.
+
+SSH opens a terminal with 120 columns and 32 rows. Leaving its page keeps the
+session open; **Close session** disconnects it. A reload reconnects to an open
+session and replays its output. Terminal input is sent in order and is never
+recorded.
 
 ## Who gets in
 

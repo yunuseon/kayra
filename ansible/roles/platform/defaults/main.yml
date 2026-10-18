@@ -27,6 +27,10 @@ acme_dns_token: ""
 git_token: ""
 # The secret forges sign webhooks with (deploy.<domain>/hook/<app>).
 webhook_secret: ""
+# Where the deployer raises alerts: {} for nowhere, or {kind: github-issue,
+# repository: owner/name, app_id: …} with notifier_github_app_key in secrets.yml.
+notifier: {}
+notifier_github_app_key: ""
 
 # owner/repo of the repos this server's Renovate job keeps up to date
 # (weekly version-bump PRs); the job runs only where the list is not empty.

@@ -128,12 +128,18 @@ services:
       - RENOVATE_GITHUB_COM_TOKEN=${RENOVATE_GITHUB_COM_TOKEN:-}
       - RENOVATE_HOST_RULES=${RENOVATE_HOST_RULES:-}
       - RENOVATE_REPOSITORIES=${RENOVATE_REPOSITORIES:-}
+      - SERVER=${SERVER:-}
+      - NOTIFIER=${NOTIFIER:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${APPS_DIR:?}:${APPS_DIR:?}:ro
       - ./apps:/opt/platform/apps:ro
       - ./runs:/opt/platform/runs
       - ./releases:/opt/platform/releases
+      # The alerts open now: one file per key, holding where it is open.
+      - ./alerts:/opt/platform/alerts
+      # The notifier's key; mounted nowhere else.
+      - ./deployer-secrets:/run/deployer-secrets:ro
       # One directory per app, one file per secret. Written by bin/app-apply.
       - ./app-secrets:/run/app-secrets:ro
       # GIT_TOKEN (commit statuses) and RENOVATE_TOKEN.

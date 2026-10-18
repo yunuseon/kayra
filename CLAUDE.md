@@ -271,6 +271,7 @@ the app secrets, and Traefik never routes to it.
   server's own Forgejo hosts the repos, `forgejo_config.tokens` mints them
   instead — checked every setup, minted again when missing or revoked, never in
   the vault.
+- **Alerts go through a notifier** (`notify.ts`: `raise` / `resolve` per key, `decide()` pure). A failed deploy of an app's own ref (a push or the poll) or a failed job raises; a failed `kayra app deploy|rollback` does not, since whoever started it is watching; any success resolves. The one notifier today is `github-issue` (`github-issues.ts`): an issue in the `notifier.repository` opened by a GitHub App (GitHub notifies no one about their own actions), commented on and closed when resolved; open ones are kept in `/opt/platform/alerts/<key>`. Its key lives in `deployer-secrets/`, which only the deployer mounts. A notifier's failure lands in the run's log, never fails the run. A new notifier is a new `kind` in the `notifier` setting and an adapter for `Notifier`.
 - **Releases are the source of truth for GC and rollback.** Every successful
   deploy writes `releases/<app>/<time>-<sha>.env`. The nightly registry GC
   (03:00, `scripts/platform/registry-gc.sh`) keeps what the newest 10 of those
@@ -371,6 +372,7 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 - No comments unless WHY is non-obvious. Names narrate the code.
 - No defensive code for impossible cases. Validate at boundaries.
 - No speculative abstractions. No backwards-compat shims.
+- Except at the edge: an external dependency (GitHub, a forge, a notifier, a registry API) goes behind an interface with an adapter, even with one implementation today; the decision stays pure, the service is an adapter. Skip it only when that is far more hassle than it is worth, and lean towards the interface.
 - Match scope. Bug fix ≠ surrounding cleanup.
 
 ## Communication style

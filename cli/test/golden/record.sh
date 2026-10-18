@@ -51,7 +51,7 @@ record "$@"
 STUB
 stub bash <<STUB
 case "\${1:-}" in
-    */scripts/local/require-main.sh|*/scripts/local/require-latest-state.sh|*/scripts/local/home-reach.sh|*/scripts/local/certs.sh|*/scripts/local/home-image.sh|*/scripts/local/setup-hosts.sh|*/scripts/local/app-check.sh)
+    */scripts/local/require-main.sh|*/scripts/local/require-latest-state.sh|*/scripts/local/home-reach.sh|*/scripts/local/certs.sh|*/scripts/local/home-image.sh|*/scripts/local/setup-hosts.sh|*/scripts/local/app-check.sh|*/scripts/local/verify.sh)
         record "\$@"; exit 0 ;;
 esac
 exec "${real_bash}" "\$@"

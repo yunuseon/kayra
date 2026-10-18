@@ -14,6 +14,8 @@ import { json, send } from "./http.ts";
 import { spawnLines } from "./process.ts";
 import { empty, enqueue, finish, type Queue, type Request, type Why } from "./queue.ts";
 import { expired, moved, releaseName, releases, type RunMeta } from "./records.ts";
+import { githubIssues } from "./github-issues.ts";
+import { decide, parseNotify, silent, type Notifier, type NotifyConfig, type RunEnd } from "./notify.ts";
 import { deploy, renovate, type Effects, type Env, type Outcome } from "./run.ts";
 import { runsOf } from "./store.ts";
 
@@ -38,6 +40,9 @@ type Settings = {
   readonly gc: Cron;
   readonly poll: Cron;
   readonly env: Env;
+  /** The server's name in the fleet, for alerts that may come from several. */
+  readonly server: string;
+  readonly notifier: Notifier;
 };
 
 const token = (name: string): string => {
@@ -65,7 +70,46 @@ const settings = (env: NodeJS.ProcessEnv): Settings => {
     gc: must(parseCron("0 3 * * *")),
     poll: must(parseCron("17 * * * *")),
     env: strings,
+    server: env["SERVER"] ?? env["DOMAIN"] ?? "this server",
+    notifier: notifierFor(must(parseNotify(env["NOTIFIER"])), env["PLATFORM_DIR"] ?? "/opt/platform"),
   };
+};
+
+/** The configured notifier; its open alerts are kept in <platformDir>/alerts/<key>. */
+const notifierFor = (config: NotifyConfig, platformDir: string): Notifier => {
+  if (config.kind === "none") return silent;
+  const alerts = join(platformDir, "alerts");
+  const keyFile = "/run/deployer-secrets/NOTIFIER_GITHUB_APP_KEY";
+  return githubIssues(config.repository, config.appId, {
+    fetch: async (url, init) => {
+      const response = await fetch(url, init);
+      return { status: response.status, json: await response.json().catch(() => undefined) };
+    },
+    privateKey: () => (existsSync(keyFile) ? ok(readFileSync(keyFile, "utf8")) : err(`${keyFile} is missing: notifier_github_app_key in secrets.yml`)),
+    now: () => Date.now(),
+    openIssue: (key) => {
+      const path = join(alerts, key);
+      const number = existsSync(path) ? Number(readFileSync(path, "utf8")) : Number.NaN;
+      return Number.isInteger(number) ? number : undefined;
+    },
+    remember: (key, issue) => {
+      mkdirSync(alerts, { recursive: true });
+      if (issue === undefined) rmSync(join(alerts, key), { force: true });
+      else writeFileSync(join(alerts, key), String(issue));
+    },
+  });
+};
+
+/** Raises or resolves what the finished run means; a notifier's failure is logged, never the run's. */
+const notify = async (s: Settings, end: RunEnd, log: (line: string) => void): Promise<void> => {
+  const decision = decide(end);
+  const done =
+    decision.kind === "raise"
+      ? await s.notifier.raise(decision.alert)
+      : decision.kind === "resolve"
+        ? await s.notifier.resolve(decision.key, decision.note)
+        : ok(undefined);
+  if (!done.ok) log(`(alert not sent: ${done.error})`);
 };
 
 const runsDir = (s: Settings): string => join(s.platformDir, "runs");
@@ -214,6 +258,11 @@ const start = async (s: Settings, request: Request): Promise<void> => {
     finished: new Date().toISOString(),
   };
   writeFileSync(join(dir, "meta.json"), JSON.stringify(ended));
+  await notify(
+    s,
+    { server: s.server, request, ok: outcome.ok, ...(outcome.sha === undefined ? {} : { sha: outcome.sha }), page: target(s, request.owner, id) },
+    log,
+  );
   expired(readdirSync(join(runsDir(s), request.owner)), keepRuns).forEach((old) => {
     rmSync(join(runsDir(s), request.owner, old), { recursive: true, force: true });
   });

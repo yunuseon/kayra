@@ -120,6 +120,14 @@ export const settings: readonly Setting[] = [
     "Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to.",
   ),
   setting(
+    "notifier",
+    platform,
+    z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("github-issue"), repository: text, app_id: z.union([text, z.number()]) }),
+    ]),
+    "Where the deployer raises alerts (a failed deploy of an app's ref, a failed job) and resolves them: kind github-issue, an issue in repository (owner/name) opened by the GitHub App app_id; the key in notifier_github_app_key.",
+  ),
+  setting(
     "backup_check",
     edge,
     record({
@@ -132,6 +140,7 @@ export const settings: readonly Setting[] = [
   ),
 
   // Secrets
+  secret("notifier_github_app_key", platform, text, "With notifier kind github-issue: the GitHub App's private key (PEM) the deployer opens issues with."),
   secret("git_token", platform, text, "Token the builder clones app repos with and the deployer posts commit statuses with."),
   secret("webhook_secret", platform, text, "HMAC secret the apps' push webhooks (deploy.<domain>/hook/<app>) are signed with."),
   secret("renovate_token", platform, text, "Token the Renovate job opens PRs with."),

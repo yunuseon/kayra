@@ -100,6 +100,9 @@ Also `provision`, `hosts`, `adopt`, `backup test`, `app purge|runs|logs|deploy|r
 
 Every client offers kayra's full feature set: a new operation reaches all three.
 
+- **The catalog** (`core/operations/catalog.ts`) declares each operation once: its summary (every client's one line), scope, effect (`reads`, `changes`, `destroys`), kind (`plan`, `query`, `stream`) and input schema (plain JSON, zod). `core/operations/run.ts` is the one way in: `invocation(name, input)` checks the input; `planOf`, `query` and `stream` run it, each a table typed over every operation of its kind, so one without an implementation does not compile.
+- **Coverage is compiled in:** each client maps its own input onto invocations and holds a table `satisfies Record<OperationName, …>`; the command line's is `reaches` in `clients/cli/invocation.ts`. `test/parity.test.ts` parses each and checks it lands on its operation. A new operation: its catalog entry, its implementation, then every client's table, or nothing compiles.
+
 ### Web interface (`kayra ui`)
 
 `kayra ui` is a view of the CLI in a browser on the operator's machine, never a second control plane: the Mac holds the fleet, the vault passwords, OpenTofu's state and the SSH keys, and nothing of that moves to a server for it.

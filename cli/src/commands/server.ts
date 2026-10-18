@@ -203,8 +203,20 @@ export const hosts = (engine: Engine, server: Server): Result<Plan, string> =>
 const sequence = (plans: readonly Result<Plan, string>[]): Result<Plan, string> =>
   map(all(plans), (each) => each.flat());
 
+/** Whether a platform server works as its users see it (scripts/local/verify.sh); other kinds have nothing to check yet. */
+const verifyStep = (engine: Engine, server: Server): Step =>
+  run(["bash", script(engine, "verify.sh"), server.name], fleetEnv(engine));
+
+export const verify = (engine: Engine, server: Server): Result<Plan, string> =>
+  server.kind === "platform"
+    ? ok([verifyStep(engine, server)])
+    : err(`'${server.name}' is of kind ${server.kind}: kayra verify checks platform servers only.`);
+
+/** Host setup, then the apps; a platform server is verified at the end, so a deploy that leaves it broken fails. */
 export const deploy = (engine: Engine, server: Server): Result<Plan, string> =>
-  sequence([setup(engine, server), apps(engine, server)]);
+  map(sequence([setup(engine, server), apps(engine, server)]), (plan) =>
+    server.kind === "platform" ? [...plan, verifyStep(engine, server)] : plan,
+  );
 
 export const up = (engine: Engine, server: Server): Result<Plan, string> =>
   sequence([provision(engine, server), deploy(engine, server), hosts(engine, server)]);

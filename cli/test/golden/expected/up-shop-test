@@ -11,6 +11,7 @@
 {"argv":["ansible-playbook","-i","<fleet>/servers/shop-test/inventory.ini","<kayra>/ansible/playbooks/app.yml","-e","server=shop-test","-e","server_dir=<fleet>/servers/shop-test","-e","domain=shop.test","-e","{\"app\": {\"name\":\"shop\",\"repo\":\"https://git.example.com/shop.git\",\"ref\":\"main\",\"path\":\".\"}}"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
 {"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
 {"argv":["ansible-playbook","-i","<fleet>/servers/shop-test/inventory.ini","<kayra>/ansible/playbooks/apps-prune.yml","-e","{\"keep\": [\"shop\"]}"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
+{"argv":["bash","<kayra>/scripts/local/verify.sh","shop-test"],"env":{"FLEET_ROOT":"<fleet>"}}
 {"argv":["bash","<kayra>/scripts/local/setup-hosts.sh","shop.test","203.0.113.10","www","api"]}
 --- stdout
 --- exit 0

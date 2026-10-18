@@ -15,6 +15,7 @@ confirmation, with its environment — and runs nothing.
 | `kayra provision <server>` | Create or update the machine (target home: build the image to import) |
 | `kayra deploy <server>` | Host setup and every app, no provisioning |
 | `kayra setup <server>` | The host layer only: the playbook for the server's kind |
+| `kayra verify <server>` | Whether a platform server works as its users see it: logins, real certificates, a refused unsigned webhook, every app hostname, the registrations, containers, last runs and open alerts. `deploy` and `up` run it at the end |
 | `kayra plan <server>` | What `provision` and `setup` would change, changing nothing: OpenTofu's plan and the playbook in check mode with diffs (files holding secrets only say that they would change). Works from any branch |
 | `kayra apps <server>` | Make the server's apps match `server.yml`: register each, remove the rest (data kept) |
 | `kayra hosts <server>` | Point the domain at a multipass VM in `/etc/hosts` (sudo) |

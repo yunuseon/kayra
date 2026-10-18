@@ -23,6 +23,7 @@ export const parser = (fleet: Fleet) => {
         onServer("deploy", message`Host setup and every app, no provisioning.`),
         onServer("setup", message`The host layer only: the playbook for the server's kind.`),
         onServer("plan", message`What provision and setup would change, changing nothing (OpenTofu plan, Ansible check mode).`),
+        onServer("verify", message`Whether a platform server works as its users see it: logins, certificates, webhooks, apps, runs, alerts.`),
         onServer("apps", message`Make the server's apps match server.yml: register each, remove the rest (data kept).`),
         onServer("hosts", message`Point the domain at a multipass VM in /etc/hosts (sudo).`),
         command(

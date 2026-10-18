@@ -38,3 +38,5 @@ job-gc-forge | | job forge gc
 job-renovate-forge | | job forge renovate --no-prs
 app-deploy-box | | app deploy box shop
 app-check-shop | | app check .cache/apps/shop
+verify-forge | | verify forge
+verify-edge | | verify edge

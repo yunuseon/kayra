@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { run } from "@optique/run";
 import { createInterface } from "node:readline/promises";
-import { absolutePath, kayraRoot, within } from "./brand.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { absolutePath, fleetRoot, kayraRoot, within } from "./brand.ts";
+import { appCheck } from "./commands/app-check.ts";
 import { parser, type Command } from "./cli.ts";
 import { doctor } from "./commands/doctor.ts";
 import * as server from "./commands/server.ts";
@@ -20,7 +23,7 @@ if (!here.ok || !engine.ok) throw new Error("node reported a relative path");
 const kayra = kayraRoot(within(engine.value, "..", ".."));
 
 type Deployer = Extract<Command, { readonly name: "app runs" | "app logs" | "app deploy" | "app rollback" | "job" }>;
-type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" }>;
+type OnServer = Exclude<Command, Deployer | { readonly name: "status" | "validate" | "doctor" | "certs" | "app purge" | "app check" }>;
 
 const appKinds = { "app runs": "runs", "app logs": "logs", "app deploy": "deploy", "app rollback": "rollback" } as const;
 
@@ -58,7 +61,7 @@ const onServer = (on: server.Engine, target: Server, command: OnServer): Result<
   }
 };
 
-const plan = (fleet: Fleet, command: Exclude<Command, { readonly name: "status" | "validate" }>): Result<Plan, string> => {
+const plan = (fleet: Fleet, command: Exclude<Command, { readonly name: "status" | "validate" | "app check" }>): Result<Plan, string> => {
   const on = { kayra, fleet: fleet.root };
   if (command.name === "doctor") return ok(doctor(fleet, kayra));
   if (command.name === "certs") return server.certsFor(on, command.domain, command.subdomains);
@@ -91,11 +94,22 @@ const fail = (message: string): never => {
   process.exit(1);
 };
 
-const fleet = flatMap(findFleetRoot(here.value), loadFleet);
+const found = flatMap(findFleetRoot(here.value), loadFleet);
+// Outside a fleet only `app check` runs: it works in an app's repository.
+const fleet: Result<Fleet, string> = found.ok ? found : ok({ root: fleetRoot(here.value), servers: [] });
 if (!fleet.ok) fail(fleet.error);
 else {
   const args = run(parser(fleet.value), { programName: "kayra", help: "both", completion: "both" });
-  if (args.command.name === "status") {
+  if (!found.ok && args.command.name !== "app check") fail(found.error);
+  if (args.command.name === "app check") {
+    const root = absolutePath(resolve(here.value, args.command.dir ?? "."));
+    const manifestPath = root.ok ? join(root.value, "app.yml") : "";
+    const steps = flatMap(root, (dir) => appCheck(kayra, dir, existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : undefined));
+    if (!steps.ok) fail(steps.error);
+    else if (args.dryRun) render(steps.value).forEach(io.out);
+    // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
+    else process.exitCode = (await interpret(steps.value, io)) ? 0 : 1;
+  } else if (args.command.name === "status") {
     (await status(fleet.value)).forEach(io.out);
   } else if (args.command.name === "validate") {
     const chosen = args.command.server;

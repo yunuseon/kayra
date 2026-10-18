@@ -65,7 +65,7 @@ kayra status                 # all servers + status
 kayra setup shop-prod --dry-run   # any command: print the plan, run nothing
 ```
 
-Also `provision`, `hosts`, `adopt`, `backup test`, `app purge|runs|logs|deploy|rollback`, `job`, `certs`. App repos are cloned locally (`.cache/apps`) with the operator's own git credentials (`gh auth setup-git`). App development happens in each app's own repository.
+Also `provision`, `hosts`, `adopt`, `backup test`, `app purge|runs|logs|deploy|rollback`, `job`, `certs`, and `app check [dir]`, the one command that runs outside a fleet: in an app's repository, it runs the image plan and the compose policy as the builder and the deployer do (`scripts/local/app-check.sh`, bash 3.2-safe), so a refusal shows before a push. App repos are cloned locally (`.cache/apps`) with the operator's own git credentials (`gh auth setup-git`). App development happens in each app's own repository.
 
 - **A fleet pins its kayra:** `@yunuseon/kayra` as an exact dev dependency in the fleet's `package.json`. Whatever `kayra` is on PATH hands over to the fleet's `node_modules/@yunuseon/kayra` (`bin/kayra.js`), so the version the fleet pins is the one that runs. To try a kayra checkout against a fleet: `npm link @yunuseon/kayra` in the fleet.
 - **One version for the Mac and the servers:** the server runs what the Mac's kayra copies to it — compose files, Ansible, the deployer's code and its scripts — so the version the fleet pins is the one the server runs. Nothing on the server loads kayra from git. Releases: bump `version` in `package.json`, merge, tag `v<version>` (release.yml publishes to npmjs.org).

@@ -1,0 +1,3 @@
+{"argv":["bash","<kayra>/scripts/local/app-check.sh","<fleet>/.cache/apps/shop"]}
+--- stdout
+--- exit 0

@@ -20,12 +20,18 @@ const distance = (a: string, b: string): number =>
     )
     .at(-1) ?? 0;
 
-const suggestion = (key: string, known: readonly string[]): string => {
-  const closest = known
+/** The known name a key is most likely a typo of, if one is close enough. */
+export const closest = (key: string, known: readonly string[]): string | undefined => {
+  const nearest = known
     .map((name) => ({ name, cost: distance(key, name) }))
     .toSorted((x, y) => x.cost - y.cost)
     .at(0);
-  return closest !== undefined && closest.cost <= Math.max(2, Math.floor(key.length / 4)) ? ` — did you mean '${closest.name}'?` : "";
+  return nearest !== undefined && nearest.cost <= Math.max(2, Math.floor(key.length / 4)) ? nearest.name : undefined;
+};
+
+const suggestion = (key: string, known: readonly string[]): string => {
+  const name = closest(key, known);
+  return name === undefined ? "" : ` — did you mean '${name}'?`;
 };
 
 /** The first problem Zod found, said for the file it is in. */

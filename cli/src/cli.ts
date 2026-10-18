@@ -79,17 +79,29 @@ export const parser = (fleet: Fleet) => {
       ),
       // On the whole fleet
       or(
-        command("status", object({ name: constant("status") }), {
-          brief: message`Every server and whether a machine exists for it.`,
-        }),
+        command(
+          "status",
+          object({
+            name: constant("status"),
+            json: option("--json", { description: message`The table as JSON on stdout, nothing on stderr.` }),
+            offline: option("--offline", { description: message`Only what the fleet and OpenTofu's state say: reach no server.` }),
+          }),
+          { brief: message`Every server: where it is, whether SSH and its login answer.` },
+        ),
         command(
           "certs",
           object({ name: constant("certs"), domain: argument(domainParser), subdomains: multiple(argument(subdomainParser)) }),
           { brief: message`mkcert certs for a domain and its subdomains (local dev, multipass).` },
         ),
-        command("validate", object({ name: constant("validate"), server: optional(server) }), {
-          brief: message`Check the fleet beyond its schemas: secrets, apps against their contract, stacks, routes.`,
-        }),
+        command(
+          "validate",
+          object({
+            name: constant("validate"),
+            server: optional(server),
+            json: option("--json", { description: message`The findings as JSON on stdout, nothing on stderr.` }),
+          }),
+          { brief: message`Check the fleet beyond its schemas: secrets, apps against their contract, stacks, routes.` },
+        ),
         command("doctor", object({ name: constant("doctor") }), {
           brief: message`Check that this Mac can run every command on every server.`,
         }),

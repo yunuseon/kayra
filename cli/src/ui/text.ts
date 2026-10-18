@@ -25,7 +25,7 @@ export const truncate = (line: Line, columns: number): Line => {
       const text = typeof span === "string" ? span : span.text;
       const chars = characters(text);
       const kept = chars.slice(0, Math.max(0, so.room)).join("");
-      const piece: Span = typeof span === "string" ? kept : { tone: span.tone, text: kept };
+      const piece: Span = typeof span === "string" ? kept : { ...span, text: kept };
       return { kept: kept === "" ? so.kept : [...so.kept, piece], room: so.room - chars.length };
     },
     { kept: [], room: columns - 1 },
@@ -61,4 +61,26 @@ export const table = (rows: readonly (readonly Line[])[]): readonly Line[] => {
   return filled.map((row) =>
     row.flatMap((cell, at): Line => (at === row.length - 1 ? cell : [...cell, " ".repeat((widths[at] ?? 0) - width(cell) + 2)])),
   );
+};
+
+/**
+ * Rows for table() that fit `room` columns: the cells of the columns in
+ * `shrink` cut, in that order, each to no less than its first row's (the
+ * heading's) width.
+ */
+export const fit = (rows: readonly (readonly Line[])[], room: number, shrink: readonly number[]): typeof rows => {
+  const widths = rows.reduce<readonly number[]>(
+    (most, row) => Array.from({ length: Math.max(most.length, row.length) }, (_, at) => Math.max(most[at] ?? 0, width(row[at] ?? []))),
+    [],
+  );
+  const over = widths.reduce((sum, each) => sum + each, 0) + 2 * Math.max(0, widths.length - 1) - room;
+  const cut = shrink.reduce<{ readonly widths: readonly number[]; readonly over: number }>(
+    (so, at) => {
+      const now = so.widths[at] ?? 0;
+      const less = Math.min(Math.max(0, so.over), Math.max(0, now - width(rows[0]?.[at] ?? [])));
+      return { widths: so.widths.with(at, now - less), over: so.over - less };
+    },
+    { widths, over },
+  ).widths;
+  return rows.map((row) => row.map((cell, at) => truncate(cell, cut[at] ?? width(cell))));
 };

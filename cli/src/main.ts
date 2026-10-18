@@ -130,8 +130,8 @@ else {
       : statusView(looks, { frame: "", room: screens.out.live ? screens.out.columns : Infinity, offline })
     ).forEach(io.out);
   } else if (args.command.name === "ui") {
-    // The browser side: web/dist in a checkout, cli/dist/web in the package.
-    const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "web")].find((dir) => existsSync(join(dir, "index.html")));
+    // The browser side: web/dist in a checkout, cli/dist/browser in the package.
+    const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "browser")].find((dir) => existsSync(join(dir, "index.html")));
     const { port, noOpen } = args.command;
     const listening = await serveUi({ kayra, fleet: fleet.value, version, assets, short, network: network(2_000) }, port);
     io.err([strong("kayra ui"), muted(` · ${fleet.value.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);

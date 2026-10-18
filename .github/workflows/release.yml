@@ -36,5 +36,10 @@ jobs:
           fi
       - if: steps.new.outputs.publish == 'true'
         run: npm ci
+      # The package as a fleet installs it must start: 0.16.0 was published
+      # without the server's modules (the browser build emptied their directory).
+      - name: The packed CLI runs
+        if: steps.new.outputs.publish == 'true'
+        run: bash scripts/local/packed-runs.sh
       - if: steps.new.outputs.publish == 'true'
         run: npm publish

@@ -79,9 +79,14 @@ ensure() {
     [ -n "$manifest" ] || { echo "ERROR: no artifact $1 under ${root}" >&2; return 1; }
     read_manifest "$manifest"
 
+    # Every manifest type a push may leave, as registry-gc.sh asks: BuildKit
+    # pushes OCI manifests, and registry:2 answers 404 to a request that does
+    # not accept the type it holds — every image would look missing.
     local status
     status=$(curl -s -o /dev/null -w '%{http_code}' \
         -H 'Accept: application/vnd.oci.image.index.v1+json' \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
         -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
         "http://${REGISTRY_PUSH_HOST}/v2/${image}/manifests/${tag}" || echo 000)
     if [ "$status" = "200" ]; then

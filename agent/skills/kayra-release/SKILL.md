@@ -27,6 +27,12 @@ user's checkout (it rarely does here), stop and ask.
 - Check that every PR you count is really on `main`: a PR stacked on another
   branch merges into **that** branch (`gh pr view <n> --json baseRefName`).
   It happened once: the PR was merged, its work never reached `main`.
+- **Stop when there is nothing to release.** If the log since the last tag is
+  empty, or a PR you were told is merged is still open (`gh pr view <n> --json
+  state`), the release would be empty: stop and say so, even when asked to
+  release. Make the script fail here (`test -n "$(git log …)"`, `test "$state"
+  = MERGED`), not print and go on: once a run printed `#41 OPEN` and went on to
+  open an empty release PR.
 - Pick the version (0.x):
   - **patch** for fixes;
   - **minor** for a new command, a new setting, a behaviour change (for example

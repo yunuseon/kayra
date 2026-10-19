@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { operationNames, type QueryName } from "../../core/operations/catalog.ts";
-import { releasesSchema, runsSchema } from "../../core/present/views.ts";
+import { releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
 
 const tone = z.enum(["ok", "bad", "warn", "active", "muted", "strong", "accent"]);
 const span = z.union([z.string(), z.object({ tone: tone.exactOptional(), text: z.string(), href: z.string().exactOptional() })]);

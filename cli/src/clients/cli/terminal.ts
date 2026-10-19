@@ -1,4 +1,4 @@
-type Env = Readonly<Record<string, string | undefined>>;
+type Environment = Readonly<Record<string, string | undefined>>;
 
 /** What kayra may do on one output stream, decided once from the stream and the environment. */
 export type Screen = {
@@ -15,7 +15,7 @@ export type Screen = {
 };
 
 /** Optique's rule too, so help and kayra agree: a nonempty FORCE_COLOR, else no NO_COLOR, then a terminal. */
-export const colors = (tty: boolean, env: Env): boolean => {
+export const colors = (tty: boolean, env: Environment): boolean => {
   if ((env["FORCE_COLOR"] ?? "") !== "") return true;
   if ((env["NO_COLOR"] ?? "") !== "" || env["NODE_DISABLE_COLORS"] !== undefined) return false;
   return tty && env["TERM"] !== "dumb";
@@ -26,7 +26,7 @@ const notifying = ["iTerm.app", "WezTerm", "ghostty"];
 const showingProgress = ["WezTerm", "ghostty"];
 const linking = ["iTerm.app", "WezTerm", "ghostty", "vscode"];
 
-export const screen = (stream: { readonly isTTY?: boolean; readonly columns?: number }, env: Env): Screen => {
+export const screen = (stream: { readonly isTTY?: boolean; readonly columns?: number }, env: Environment): Screen => {
   const tty = stream.isTTY === true;
   const live = tty && env["TERM"] !== "dumb" && (env["CI"] ?? "") === "";
   const program = env["TERM_PROGRAM"] ?? "";
@@ -62,7 +62,7 @@ export const escapes = {
   clearDown: "\u001b[J",
 } as const;
 
-import type { Update } from "../../core/updates.ts";
+import type { Update } from "../../core/status/updates.ts";
 
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

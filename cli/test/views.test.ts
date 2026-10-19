@@ -1,15 +1,15 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { appName, serverName } from "../src/core/brand.ts";
-import type { View } from "../src/core/plan.ts";
-import { flat } from "../src/core/present/line.ts";
+import { appName, serverName } from "../src/core/fleet/brand.ts";
+import type { DeployerAnswer } from "../src/core/plan/model.ts";
+import { flat } from "../src/core/text/spans.ts";
 import { paint } from "../src/clients/cli/paint.ts";
 import { ago, table } from "../src/core/present/text.ts";
 import { draw, logView, releasesView, runsView } from "../src/core/present/views.ts";
 import { must } from "./support.ts";
 
 const about = { app: must(appName("shop")), server: must(serverName("forge")) };
-const runs: View = { view: "runs", ...about };
+const runs: DeployerAnswer = { view: "runs", ...about };
 const now = Date.parse("2026-10-18T12:00:00Z");
 const a = "a".repeat(40);
 const b = "b".repeat(40);
@@ -64,7 +64,7 @@ test("runs of an app never deployed", () => {
 });
 
 test("releases: the live one marked, each with its age, and the command that goes back to the newest earlier one", () => {
-  const releases: View = { view: "releases", ...about };
+  const releases: DeployerAnswer = { view: "releases", ...about };
   const both = { app: "shop", releases: [{ sha: a, time: "2026-10-18T10:00:00Z", live: true }, { sha: b, time: "2026-10-16T08:00:00Z", live: false }] };
   deepStrictEqual(plain(releasesView(releases, both, now)), [
     "shop on forge · 2 releases",

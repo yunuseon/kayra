@@ -2,7 +2,8 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseServer, type ServerFiles } from "../src/core/fleet.ts";
+import { parseServer } from "../src/core/fleet/parse.ts";
+import type { ServerFiles } from "../src/core/fleet/model.ts";
 import { files, server } from "./support.ts";
 
 const refused = (descriptor: string, overrides: Partial<ServerFiles> = {}) => {
@@ -27,7 +28,7 @@ test("a server is refused for what would break a command later", () => {
     refused("target: home\ndomain: a.test\nvault: true", { inventory: undefined }),
     "target home needs a hand-written inventory.ini next to it",
   );
-  strictEqual(refused("target: hetzner\ndomain: a.test\nvault: true", { terraform: false }), "no terraform/ next to it");
+  strictEqual(refused("target: hetzner\ndomain: a.test\nvault: true", { hasTerraform: false }), "no terraform/ next to it");
   strictEqual(refused("target: multipass\ndomain: a.test", { secrets: undefined }), "no secrets.yml next to it");
   strictEqual(
     refused("target: multipass\ndomain: a.test", { vars: "$ANSIBLE_VAULT;1.1;AES256\n" }),
@@ -91,9 +92,9 @@ test("the vault: none, asked for, or a password file under ~", () => {
 
 test("only a home server builds a VM image, and only when vars.yml has a vm", () => {
   const home = "target: home\ndomain: a.test\nvault: true";
-  strictEqual(server("a", home, { vars: "vm:\n  address: 10.0.0.2/24\n  gateway: 10.0.0.1\n  disk: 40G\n" }).vm, true);
-  strictEqual(server("a", home).vm, false);
-  strictEqual(server("a", "target: hetzner\ndomain: a.test\nvault: true", { vars: "vm:\n  address: 10.0.0.2/24\n  gateway: 10.0.0.1\n  disk: 40G\n" }).vm, false);
+  strictEqual(server("a", home, { vars: "vm:\n  address: 10.0.0.2/24\n  gateway: 10.0.0.1\n  disk: 40G\n" }).buildsVm, true);
+  strictEqual(server("a", home).buildsVm, false);
+  strictEqual(server("a", "target: hetzner\ndomain: a.test\nvault: true", { vars: "vm:\n  address: 10.0.0.2/24\n  gateway: 10.0.0.1\n  disk: 40G\n" }).buildsVm, false);
 });
 
 test("the hosts a server's stacks route, relative to its domain where they are under it", () => {
@@ -107,9 +108,9 @@ test("the hosts a server's stacks route, relative to its domain where they are u
 
 test("DNS-01 is a server whose vars.yml names a provider", () => {
   const home = "target: home\ndomain: a.test\nvault: true";
-  strictEqual(server("a", home, { vars: "acme_dns: hetzner\n" }).acmeDns, true);
-  strictEqual(server("a", home, { vars: "acme_dns: ''\n" }).acmeDns, false);
-  strictEqual(server("a", home).acmeDns, false);
+  strictEqual(server("a", home, { vars: "acme_dns: hetzner\n" }).usesAcmeDns, true);
+  strictEqual(server("a", home, { vars: "acme_dns: ''\n" }).usesAcmeDns, false);
+  strictEqual(server("a", home).usesAcmeDns, false);
 });
 
 test("vars.yml holds the kind's settings and nothing else", () => {

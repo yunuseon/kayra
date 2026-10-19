@@ -1,8 +1,8 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { absolutePath, kayraRoot } from "../src/core/brand.ts";
-import { doctor } from "../src/core/commands/doctor.ts";
-import { render } from "../src/core/plan.ts";
+import { absolutePath, kayraRoot } from "../src/core/fleet/brand.ts";
+import { doctor } from "../src/core/recipes/doctor.ts";
+import { render } from "../src/core/plan/describe.ts";
 import { fleet, must, server } from "./support.ts";
 
 const kayra = kayraRoot(must(absolutePath("/kayra")));
@@ -12,7 +12,7 @@ test("doctor checks the tools the fleet needs, every vault, every app repository
   const plan = doctor(
     fleet(
       server("box", "kind: nas\ntarget: home\ndomain: home.test\nvault: true\nvault_password_file: /pass", {
-        terraform: false,
+        hasTerraform: false,
       }),
       server("shop-prod", `target: hetzner\ndomain: shop.example\nvault: true\n${shop}`),
       // Its one secret vaulted inline: ansible-vault cannot open the file, setup does.

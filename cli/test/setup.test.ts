@@ -1,8 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { absolutePath, kayraRoot } from "../src/core/brand.ts";
-import { setup, verbose } from "../src/core/commands/server.ts";
-import { render } from "../src/core/plan.ts";
+import { absolutePath, kayraRoot } from "../src/core/fleet/brand.ts";
+import { setup } from "../src/core/recipes/host.ts";
+import { verbose } from "../src/core/recipes/steps.ts";
+import { render } from "../src/core/plan/describe.ts";
 import { must, root, server } from "./support.ts";
 
 const engine = { kayra: kayraRoot(must(absolutePath("/kayra"))), fleet: root };

@@ -5,9 +5,11 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { serverName } from "../src/core/brand.ts";
-import { interpret, type Io, type Question } from "../src/core/interpret.ts";
-import { render, run } from "../src/core/plan.ts";
+import { serverName } from "../src/core/fleet/brand.ts";
+import { interpret } from "../src/core/interpreter/loop.ts";
+import type { Io, Question } from "../src/core/interpreter/io.ts";
+import { render } from "../src/core/plan/describe.ts";
+import { run } from "../src/core/plan/model.ts";
 import { reporting, type Event } from "../src/core/present/progress.ts";
 import { must } from "./support.ts";
 

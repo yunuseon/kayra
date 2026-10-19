@@ -1,5 +1,5 @@
 import { styleText } from "node:util";
-import { spans, type Text, type Tone } from "../../core/present/line.ts";
+import { spans, type Text, type Tone } from "../../core/text/spans.ts";
 import { escapes } from "./terminal.ts";
 
 type Format = Exclude<Parameters<typeof styleText>[0], readonly unknown[]>;

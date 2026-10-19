@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
-import type { Io } from "../../core/interpret.ts";
-import type { Text } from "../../core/present/line.ts";
+import type { Io } from "../../core/interpreter/io.ts";
+import type { Text } from "../../core/text/spans.ts";
 
 /** The command line's questions: secret typing stays unseen, piped answers keep their order. */
 export const questions = (render: (text: Text) => string): Pick<Io, "ask"> & { readonly close: () => void } => {

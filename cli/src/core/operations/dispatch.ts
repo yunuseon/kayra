@@ -1,22 +1,30 @@
 import { resolve } from "node:path";
 import { z } from "zod";
-import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName } from "../brand.ts";
-import { appCheck } from "../commands/app-check.ts";
-import { doctor } from "../commands/doctor.ts";
-import * as server from "../commands/server.ts";
-import { look, type Network, type Tofu, type Watched } from "../commands/status.ts";
-import { findings, type Report } from "../commands/validate.ts";
-import type { Fleet, Server } from "../fleet.ts";
-import { gather } from "../gather.ts";
-import { interpret, type Io } from "../interpret.ts";
-import { flat } from "../present/line.ts";
-import type { Plan } from "../plan.ts";
+import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName } from "../fleet/brand.ts";
+import { appCheck } from "../recipes/app-check.ts";
+import { doctor } from "../recipes/doctor.ts";
+import { appPurge, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
+import type { Engine } from "../recipes/steps.ts";
+import { adopt, deploy, down, hosts, preview, provision, setup, up, verify } from "../recipes/host.ts";
+import { backupTest } from "../recipes/backup.ts";
+import { certsFor } from "../recipes/certs.ts";
+import { ssh } from "../recipes/ssh.ts";
+import { look } from "../status/look.ts";
+import type { Network, Tofu } from "../status/ports.ts";
+import type { Watched } from "../status/model.ts";
+import { findings, type Report } from "../validation/findings.ts";
+import type { Fleet, Server } from "../fleet/model.ts";
+import { gather } from "../validation/facts.ts";
+import { interpret } from "../interpreter/loop.ts";
+import type { Io } from "../interpreter/io.ts";
+import { flat } from "../text/spans.ts";
+import type { Plan } from "../plan/model.ts";
 import { all, err, flatMap, map, ok, type Result } from "../../result.ts";
-import { operations, type InputOf, type Invocation, type PlanName, type QueryName, type StreamName, type SessionName } from "./catalog.ts";
+import { operations, type InputOf, type Invocation, type PlanName, type QueryName, type SessionName, type StreamName } from "./catalog.ts";
 
 /** What the core runs an operation with: the engine, the fleet, and the world as the client's machine sees it. */
 export type Context = {
-  readonly engine: server.Engine;
+  readonly engine: Engine;
   readonly fleet: Fleet;
   readonly version: string;
   /** Where a relative path starts: the directory kayra was started in. */
@@ -83,45 +91,45 @@ type RecipeName = PlanName | SessionName | "app.runs" | "app.log" | "app.release
 type Plans = { readonly [N in RecipeName]: (ctx: Context, input: InputOf<N>) => Result<Plan, string> };
 
 const withServer =
-  (make: (engine: server.Engine, target: Server) => Result<Plan, string>) =>
+  (make: (engine: Engine, target: Server) => Result<Plan, string>) =>
   (ctx: Context, input: { readonly server: string }): Result<Plan, string> =>
     flatMap(onServer(ctx, input.server), (target) => make(ctx.engine, target));
 
 const onDeployer =
-  (command: (app: AppName, input: Readonly<Record<string, unknown>>) => server.DeployerCommand) =>
+  (command: (app: AppName, input: Readonly<Record<string, unknown>>) => DeployerCommand) =>
   (ctx: Context, input: { readonly server: string; readonly app: string }): Result<Plan, string> =>
-    flatMap(onApp(ctx, input), ([target, app]) => server.deployer(target, command(app, input)));
+    flatMap(onApp(ctx, input), ([target, app]) => deployer(target, command(app, input)));
 
 const optional = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 /** Each plan operation, as the plan that does it: the compiler refuses one that has none. */
 const plans: Plans = {
-  up: withServer(server.up),
-  provision: withServer(server.provision),
-  deploy: withServer(server.deploy),
-  setup: withServer(server.setup),
-  plan: withServer(server.preview),
-  verify: withServer(server.verify),
-  apps: withServer(server.apps),
-  hosts: withServer(server.hosts),
-  down: withServer(server.down),
-  adopt: withServer(server.adopt),
-  "backup.test": withServer(server.backupTest),
-  ssh: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => server.ssh(target, [])),
-  "ssh.exec": (ctx, input) => flatMap(onServer(ctx, input.server), (target) => server.ssh(target, input.command)),
+  up: withServer(up),
+  provision: withServer(provision),
+  deploy: withServer(deploy),
+  setup: withServer(setup),
+  plan: withServer(preview),
+  verify: withServer(verify),
+  apps: withServer(apps),
+  hosts: withServer(hosts),
+  down: withServer(down),
+  adopt: withServer(adopt),
+  "backup.test": withServer(backupTest),
+  ssh: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => ssh(target, [])),
+  "ssh.exec": (ctx, input) => flatMap(onServer(ctx, input.server), (target) => ssh(target, input.command)),
   "app.check": (ctx, input) =>
     flatMap(absolutePath(resolve(ctx.here, input.dir)), (dir) => appCheck(ctx.engine.kayra, dir, ctx.read(within(dir, "app.yml")))),
-  "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => server.appPurge(ctx.engine, target, app)),
+  "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),
   "app.runs": onDeployer((app) => ({ kind: "runs", app, more: undefined })),
   "app.log": onDeployer((app, input) => ({ kind: "logs", app, more: optional(input["run"]) })),
   "app.deploy": onDeployer((app, input) => ({ kind: "deploy", app, more: optional(input["ref"]) })),
   "app.releases": onDeployer((app) => ({ kind: "rollback", app, more: undefined })),
   "app.rollback": onDeployer((app, input) => ({ kind: "rollback", app, more: optional(input["sha"]) })),
-  job: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => server.deployer(target, { kind: "job", job: input.job, noPrs: input.noPrs })),
+  job: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => deployer(target, { kind: "job", job: input.job, noPrs: input.noPrs })),
   doctor: (ctx) => ok(doctor(ctx.fleet, ctx.engine.kayra)),
   certs: (ctx, input) =>
     flatMap(domain(input.domain), (named) =>
-      flatMap(all(input.subdomains.map(subdomain)), (subdomains) => server.certsFor(ctx.engine, named, subdomains)),
+      flatMap(all(input.subdomains.map(subdomain)), (subdomains) => certsFor(ctx.engine, named, subdomains)),
     ),
 };
 

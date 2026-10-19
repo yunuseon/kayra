@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 /** What admission reads of a request. */
-export type Asked = {
+type Arrival = {
   readonly method: string;
   readonly path: string;
   readonly host: string | undefined;
@@ -32,7 +32,7 @@ const cookieValue = (header: string | undefined, name: string): string | undefin
 const refuse = (status: 401 | 403, why: string): Admission => ({ admitted: false, status, why });
 
 /** Host always, the launch token on API calls, and the exact Origin on cookie writes. */
-export const admit = (asked: Asked, port: number, token: string, enabled = { ui: true, api: false }): Admission => {
+export const admit = (asked: Arrival, port: number, token: string, enabled = { ui: true, api: false }): Admission => {
   if (asked.host === undefined || !origins(port).includes(asked.host)) return refuse(403, "not this listener's host");
   if (asked.authorization !== undefined) {
     const bearer = asked.authorization.startsWith("Bearer ") ? asked.authorization.slice(7) : "";

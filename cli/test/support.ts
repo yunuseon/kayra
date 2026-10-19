@@ -1,5 +1,6 @@
-import { absolutePath, fleetRoot, serverDir, serverName } from "../src/core/brand.ts";
-import { parseServer, type Fleet, type Server, type ServerFiles } from "../src/core/fleet.ts";
+import { absolutePath, fleetRoot, serverDir, serverName } from "../src/core/fleet/brand.ts";
+import { parseServer } from "../src/core/fleet/parse.ts";
+import type { Fleet, Server, ServerFiles } from "../src/core/fleet/model.ts";
 import type { Result } from "../src/result.ts";
 
 export const must = <T>(result: Result<T, string>): T => {
@@ -19,7 +20,7 @@ export const files = (name: string, descriptor: string, overrides: Partial<Serve
     vars: "",
     secrets: "$ANSIBLE_VAULT;1.1;AES256\n",
     inventory: `[servers]\n${name} ansible_host=192.0.2.9 ansible_user=deploy ansible_ssh_private_key_file=/keys/${name}\n`,
-    terraform: true,
+    hasTerraform: true,
     stacks: [],
     appValues: [],
     ...overrides,

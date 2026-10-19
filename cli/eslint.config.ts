@@ -102,7 +102,7 @@ export default defineConfig(
   })),
   {
     // Brands are minted here, and only here: the one place `as` may appear.
-    files: ["src/core/brand.ts", "src/deployer/brand.ts"],
+    files: ["src/core/fleet/brand.ts", "src/deployer/brand.ts"],
     rules: { "@typescript-eslint/consistent-type-assertions": "off" },
   },
 );

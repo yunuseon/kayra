@@ -1,48 +1,11 @@
-import type { Part, Plan, Step } from "../plan.ts";
-import { commandOf, kindOf, titleOf } from "../plan.ts";
-import { active, bad, muted, ok, strong, warn, type Line } from "./line.ts";
+import type { Part, Plan } from "../plan/model.ts";
+import { commandOf, kindOf, titleOf } from "../plan/describe.ts";
+import { active, bad, muted, ok, strong, warn, type Line } from "../text/spans.ts";
 import { duration } from "./text.ts";
-
-/** How a step went, as far as showing it goes. */
-export type Done = {
-  readonly failed: boolean;
-  readonly stopped: boolean;
-  /** A few words on why it failed, after its time: "exit 2". */
-  readonly why?: string;
-};
-
-/** Where a step is in its plan; `opens` names the part it begins, in a plan of several. */
-export type At = { readonly index: number; readonly total: number; readonly opens?: Part };
-
-/** How a plan ended: every step run, or stopped at one. */
-export type Ended = {
-  readonly failures: number;
-  readonly stop?: { readonly index: number; readonly step: Step; readonly why: "failed" | "declined" | "interrupted" };
-};
-
-/** What the operator sees of a plan while it runs: brackets around the plan and around each step. */
-export type Progress = {
-  readonly plan: (plan: Plan, work: () => Promise<Ended>) => Promise<Ended>;
-  readonly step: <T extends Done>(step: Step, at: At, work: () => Promise<T>) => Promise<T>;
-};
-
-/** Nothing around the steps: for commands whose output is the point (ssh, logs), and for tests. */
-export const silent: Progress = {
-  plan: (_plan, work) => work(),
-  step: (_step, _at, work) => work(),
-};
-
-const parts = (plan: Plan): readonly Part[] => [...new Set(plan.flatMap((step) => (step.part === undefined ? [] : [step.part])))];
-
-/** Where the step at `index` is, for a plan that may consist of several parts. */
-export const position = (plan: Plan, index: number): At => {
-  const part = plan[index]?.part;
-  const opens = part !== undefined && parts(plan).length > 1 && plan[index - 1]?.part !== part;
-  return { index, total: plan.length, ...(opens ? { opens: part } : {}) };
-};
+import { parts, position, type Ended, type Progress } from "../interpreter/progress.ts";
 
 /** The invocation, as the heading and the footer name it. */
-export type Invocation = {
+export type Heading = {
   /** `kayra deploy alaz`, as typed. */
   readonly command: string;
   /** The server it runs on, if one: the footer's hint names it. */
@@ -51,7 +14,6 @@ export type Invocation = {
   readonly about: readonly string[];
 };
 
-
 /** "8 steps", or "15 checks" for a plan of nothing else (doctor). */
 export const steps = (plan: Plan): string => {
   const noun = plan.every((step) => step.kind === "check") ? "check" : "step";
@@ -59,7 +21,7 @@ export const steps = (plan: Plan): string => {
 };
 
 /** The footer: how it went, how long it took, and what reruns a failed part alone. */
-export const footer = (invocation: Invocation, plan: Plan, ended: Ended, ms: number): readonly Line[] => {
+export const footer = (invocation: Heading, plan: Plan, ended: Ended, ms: number): readonly Line[] => {
   const took = duration(ms);
   const { command } = invocation;
   const { stop } = ended;
@@ -105,7 +67,7 @@ export const listed = (plan: Plan, short: (text: string) => string): readonly Li
 
 /** A plan's run as events, for a viewer that is not a terminal. */
 export type Event =
-  | { readonly kind: "plan"; readonly invocation: Invocation; readonly steps: readonly Listed[] }
+  | { readonly kind: "plan"; readonly invocation: Heading; readonly steps: readonly Listed[] }
   | { readonly kind: "started"; readonly index: number }
   | {
       readonly kind: "done";
@@ -124,7 +86,7 @@ export type Event =
     };
 
 /** The plan and each step as events: what framed draws on a terminal, as data. */
-export const reporting = (emit: (event: Event) => void, invocation: Invocation, short: (text: string) => string): Progress => ({
+export const reporting = (emit: (event: Event) => void, invocation: Heading, short: (text: string) => string): Progress => ({
   plan: async (plan, work) => {
     const started = performance.now();
     emit({ kind: "plan", invocation, steps: listed(plan, short) });

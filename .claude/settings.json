@@ -20,5 +20,8 @@
       "Edit(scripts/agent/**)",
       "Edit(.github/CODEOWNERS)"
     ]
+  },
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": true
   }
 }

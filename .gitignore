@@ -18,6 +18,9 @@ cli/dist/
 # kayra ui's browser side, built in a checkout (web/: npm run build)
 web/dist/
 
+# What tools derive from the code, kept for reading: npm run signatures
+.cache/
+
 # The docs site: build output and Astro's cache
 site/dist/
 site/.astro/

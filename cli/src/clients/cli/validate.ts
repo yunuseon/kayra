@@ -1,15 +1,7 @@
-import { active, bad, muted, ok, strong, type Line, type Span } from "../text/spans.ts";
-import { count, overall, type Report, type Verdict } from "../validation/findings.ts";
+import { active, bad, type Line, muted, ok, type Span, strong } from "../../core/text/spans.ts";
+import { count, overall, type Report, tally, type Verdict } from "../../core/validation/findings.ts";
 
 const marks: Readonly<Record<Verdict, Span>> = { problem: bad("✗"), unchecked: muted("·"), passed: ok("✓") };
-
-const tally = (reports: readonly Report[]): { readonly problems: number; readonly unchecked: number } => {
-  const all = reports.flatMap((report) => report.findings);
-  return {
-    problems: all.filter((each) => each.result === "problem").length,
-    unchecked: all.filter((each) => each.result === "unchecked").length,
-  };
-};
 
 /** "✗ 3 servers · 1 problem · 2 not checked" */
 export const summary = (reports: readonly Report[]): Line => {
@@ -39,16 +31,3 @@ export const validateView = (reports: readonly Report[]): readonly Line[] => {
     summary(reports),
   ];
 };
-
-/** `kayra validate --json`: the shape cli.md documents. */
-export const validateJson = (reports: readonly Report[]) => ({
-  result: overall(reports.flatMap((report) => report.findings)),
-  ...tally(reports),
-  servers: reports.map((report) => ({
-    name: report.server.name,
-    kind: report.server.kind,
-    target: report.server.target,
-    result: overall(report.findings),
-    findings: report.findings.map((each) => ({ result: each.result, text: each.text, hint: each.hint ?? null })),
-  })),
-});

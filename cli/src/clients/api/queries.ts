@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { InputOf, QueryName } from "../../core/operations/catalog.ts";
 import { query, type Context } from "../../core/operations/dispatch.ts";
-import { validateJson } from "../../core/present/validate.ts";
+import { validateJson } from "./validate.ts";
 import { parsed, releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
 import { err, map, ok, type Result } from "../../result.ts";
 import type * as wire from "./contract.gen.ts";

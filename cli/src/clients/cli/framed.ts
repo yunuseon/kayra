@@ -1,8 +1,9 @@
 import { titleOf } from "../../core/plan/describe.ts";
 import { accent, active, bad, muted, ok, strong, type Text } from "../../core/text/spans.ts";
-import { footer, steps, type Heading } from "../../core/present/progress.ts";
+import { footer, steps, type Heading } from "../../core/interpreter/events.ts";
 import type { Progress } from "../../core/interpreter/progress.ts";
-import { duration, spread, truncate } from "../../core/present/text.ts";
+import { duration } from "../../core/text/time.ts";
+import { spread, truncate } from "./text.ts";
 import { paint } from "./paint.ts";
 import { escapes, spinner, type Screen } from "./terminal.ts";
 

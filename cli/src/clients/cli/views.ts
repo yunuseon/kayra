@@ -1,8 +1,9 @@
 import type { Deployed, ReleasesAnswer, RunAnswer, RunsAnswer } from "../../deployer/answers.ts";
-import type { DeployerAnswer } from "../plan/model.ts";
-import { accent, active, bad, muted, ok, strong, warn, type Line, type Span, type Text } from "../text/spans.ts";
-import { ago, duration, table } from "./text.ts";
-import { parsed, releasesSchema, runsSchema } from "../ctl/answers.ts";
+import type { DeployerAnswer } from "../../core/plan/model.ts";
+import { accent, active, bad, muted, ok, strong, warn, type Line, type Span, type Text } from "../../core/text/spans.ts";
+import { ago, table } from "./text.ts";
+import { duration } from "../../core/text/time.ts";
+import { parsed, releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
 
 /** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
 const linesOf = (text: string): readonly string[] => (text === "" ? [] : text.replace(/\n$/, "").split("\n"));

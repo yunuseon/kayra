@@ -1,8 +1,8 @@
 import type { Part, Plan } from "../plan/model.ts";
 import { commandOf, kindOf, titleOf } from "../plan/describe.ts";
 import { active, bad, muted, ok, strong, warn, type Line } from "../text/spans.ts";
-import { duration } from "./text.ts";
-import { parts, position, type Ended, type Progress } from "../interpreter/progress.ts";
+import { duration } from "../text/time.ts";
+import { parts, position, type Ended, type Progress } from "./progress.ts";
 
 /** The invocation, as the heading and the footer name it. */
 export type Heading = {

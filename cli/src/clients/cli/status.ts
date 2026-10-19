@@ -1,7 +1,7 @@
-import { active, bad, ok as fine, link, muted, strong, warn, type Line, type Span } from "../text/spans.ts";
+import { active, bad, ok as fine, type Line, link, muted, type Span, strong, warn } from "../../core/text/spans.ts";
 import { fit, table } from "./text.ts";
-import type { Look, Machine, Pending, Reach } from "../status/model.ts";
-import { authUrl, sshPort } from "../status/look.ts";
+import type { Look, Machine, Pending, Reach } from "../../core/status/model.ts";
+import { authUrl } from "../../core/status/look.ts";
 
 /** A spinner as wide as most answers, so the columns hardly move when they come. */
 const waiting = (frame: string, width: number): Line => [active(frame), " ".repeat(width - 1)];
@@ -93,35 +93,3 @@ export const statusView = (looks: readonly Look[], drawing: Drawing): readonly L
   );
   return [...table(fit(rows, drawing.room, [shown.length - 1, shown.indexOf(3)])), ...(notes.length === 0 ? [] : [[], ...notes])];
 };
-
-const ms = (reach: Reach | Pending): number | null => ("ms" in reach ? reach.ms : null);
-
-const error = (reach: Reach | Pending): string | null => ("code" in reach ? reach.code : null);
-
-/** `kayra status --json`: the shape cli.md documents. */
-export const statusJson = (looks: readonly Look[]) => ({
-  servers: looks.map(({ server, machine, ssh, https }) => ({
-    name: server.name,
-    kind: server.kind,
-    target: server.target,
-    domain: server.domain,
-    apps: server.apps.map((app) => app.name),
-    machine: {
-      state: machine.kind,
-      address: machine.kind === "found" ? (machine.address ?? null) : null,
-      from: machine.kind === "found" ? machine.from : null,
-      reason: machine.kind === "unreadable" ? machine.reason : null,
-    },
-    ssh: { port: sshPort(server), state: ssh.kind, ms: ms(ssh), error: error(ssh) },
-    https:
-      https === undefined
-        ? null
-        : {
-            url: `${authUrl(server)}api/health`,
-            state: https.kind,
-            status: https.kind === "answered" ? https.status : null,
-            ms: ms(https),
-            error: error(https),
-          },
-  })),
-});

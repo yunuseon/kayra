@@ -1,3 +1,4 @@
+import type { DeployerAnswer } from "../plan/model.ts";
 import type { Text } from "../text/spans.ts";
 
 /**
@@ -29,6 +30,8 @@ export type Io = {
   readonly size?: { readonly columns: number; readonly rows: number };
   /** Stops the running step: SIGINT to its program, SIGTERM if it is still there after a while. */
   readonly signal?: Stopping;
+  /** How a deployer's answer is drawn once it is in; without it, as it came. */
+  readonly draw?: (answer: DeployerAnswer, said: string) => readonly Text[];
 };
 
 /** What kayra uses of an AbortSignal. */

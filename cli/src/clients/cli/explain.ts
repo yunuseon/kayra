@@ -2,9 +2,9 @@ import { commandOf, kindOf, titleOf } from "../../core/plan/describe.ts";
 import type { Plan, Step } from "../../core/plan/model.ts";
 import { accent, active, bad, muted, strong, warn, type Line, type Span } from "../../core/text/spans.ts";
 import { position } from "../../core/interpreter/progress.ts";
-import { steps as count, type Heading } from "../../core/present/progress.ts";
-import { wrap } from "../../core/present/text.ts";
-import { drawnAs } from "../../core/present/views.ts";
+import { steps as count, type Heading } from "../../core/interpreter/events.ts";
+import { wrap } from "./text.ts";
+import { drawnAs } from "./views.ts";
 
 const kinds: Readonly<Record<string, (text: string) => Span>> = { guard: warn, check: active, run: active, confirm: bad, note: muted };
 

@@ -9,10 +9,12 @@ import { fromCommand } from "./clients/cli/invocation.ts";
 import { parser, runOptions } from "./clients/cli/parser.ts";
 import { verbose } from "./core/recipes/steps.ts";
 import { opentofu } from "./core/adapters/opentofu.ts";
-import { statusJson, statusView } from "./core/present/status.ts";
+import { statusJson } from "./clients/api/status.ts";
+import { statusView } from "./clients/cli/status.ts";
 import type { Look } from "./core/status/model.ts";
 import { overall } from "./core/validation/findings.ts";
-import { validateJson, validateView } from "./core/present/validate.ts";
+import { validateJson } from "./clients/api/validate.ts";
+import { validateView } from "./clients/cli/validate.ts";
 import type { Fleet, Server } from "./core/fleet/model.ts";
 import { interpret } from "./core/interpreter/loop.ts";
 import type { Io } from "./core/interpreter/io.ts";
@@ -26,14 +28,15 @@ import { render } from "./core/plan/describe.ts";
 import type { Plan } from "./core/plan/model.ts";
 import { flatMap, map, ok, type Result } from "./result.ts";
 import { explain } from "./clients/cli/explain.ts";
+import { draw } from "./clients/cli/views.ts";
 import { bad, muted, strong } from "./core/text/spans.ts";
 import { silent } from "./core/interpreter/progress.ts";
-import type { Heading } from "./core/present/progress.ts";
+import type { Heading } from "./core/interpreter/events.ts";
 import { settle } from "./core/status/updates.ts";
 import { framed } from "./clients/cli/framed.ts";
 import { paint } from "./clients/cli/paint.ts";
 import { screen, watch } from "./clients/cli/terminal.ts";
-import { shortener, truncate } from "./core/present/text.ts";
+import { shortener, truncate } from "./clients/cli/text.ts";
 import { z } from "zod";
 
 const here = absolutePath(process.cwd());
@@ -54,6 +57,7 @@ const io: Io = {
     console.error(paint(text, screens.err.colors, screens.err.links));
   },
   ask: (question) => input.ask(question),
+  draw: (answer, said) => draw(answer, said, Date.now()),
 };
 
 const fail = (message: string): never => {

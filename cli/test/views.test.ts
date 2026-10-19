@@ -4,8 +4,8 @@ import { appName, serverName } from "../src/core/fleet/brand.ts";
 import type { DeployerAnswer } from "../src/core/plan/model.ts";
 import { flat } from "../src/core/text/spans.ts";
 import { paint } from "../src/clients/cli/paint.ts";
-import { ago, table } from "../src/core/present/text.ts";
-import { draw, logView, releasesView, runsView } from "../src/core/present/views.ts";
+import { ago, table } from "../src/clients/cli/text.ts";
+import { draw, logView, releasesView, runsView } from "../src/clients/cli/views.ts";
 import { must } from "./support.ts";
 
 const about = { app: must(appName("shop")), server: must(serverName("forge")) };

@@ -1,4 +1,4 @@
-import { characters, width, type Line, type Span } from "./line.ts";
+import { characters, width, type Line, type Span } from "../text/spans.ts";
 
 /** 0.4s, 12s, 2m03s, 1h04m: never more precise than it is worth reading. */
 export const duration = (ms: number): string => {

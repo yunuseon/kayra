@@ -1,81 +1,9 @@
 import { parseDocument } from "yaml";
-import {
-  absolutePath,
-  appName,
-  domain,
-  vaultPasswordFile,
-  type AppName,
-  type Domain,
-  type FleetRoot,
-  type ServerDir,
-  type ServerName,
-  type VaultPasswordFile,
-} from "./brand.ts";
-import { all, err, map, ok, type Result } from "../result.ts";
-import { serverKinds, serverSchema, varsSchema, type ServerKind } from "./settings.ts";
-import { checkSettings, checkShape, knownSettings } from "./validate.ts";
-
-export { serverKinds, type ServerKind };
-export const serverTargets = ["multipass", "hetzner", "home"] as const;
-export type ServerTarget = (typeof serverTargets)[number];
-
-export type Vault =
-  | { readonly kind: "none" }
-  | { readonly kind: "ask" }
-  | { readonly kind: "file"; readonly file: VaultPasswordFile };
-
-export type App = {
-  readonly name: AppName;
-  readonly repo: string;
-  /** The server.yml entry as compact JSON, the form the app playbook takes it in. */
-  readonly entry: string;
-};
-
-/** How to reach a server, as its inventory.ini says. */
-export type Inventory = { readonly host: string; readonly port: string; readonly user: string; readonly key: string };
-
-export type Server = {
-  readonly name: ServerName;
-  readonly dir: ServerDir;
-  readonly kind: ServerKind;
-  readonly target: ServerTarget;
-  readonly domain: Domain;
-  readonly vault: Vault;
-  /** The whole secrets.yml is a vault, rather than plaintext with values vaulted inline. */
-  readonly secretsVaulted: boolean;
-  readonly apps: readonly App[];
-  /** It has a terraform/ next to it, so OpenTofu provisions something. */
-  readonly terraform: boolean;
-  /** target home: its vars.yml describes a VM image to build. */
-  readonly vm: boolean;
-  /** Its certificates come by DNS-01 (acme_dns in vars.yml), not from mkcert. */
-  readonly acmeDns: boolean;
-  readonly inventory: Inventory | undefined;
-  /** vars.yml's restic_backup.dir, where the backup stack runs. */
-  readonly backupDir: string | undefined;
-  /** What the server's own stacks route (their Traefik Host rules), relative to its domain where under it. */
-  readonly stackHosts: readonly string[];
-};
-
-export type Fleet = {
-  readonly root: FleetRoot;
-  readonly servers: readonly Server[];
-};
-
-/** A server's files as text, read by the shell; undefined where a file is missing. */
-export type ServerFiles = {
-  readonly name: ServerName;
-  readonly dir: ServerDir;
-  readonly descriptor: string;
-  readonly vars: string | undefined;
-  readonly secrets: string | undefined;
-  readonly inventory: string | undefined;
-  readonly terraform: boolean;
-  /** Each stack's compose.yaml, in path order. */
-  readonly stacks: readonly string[];
-  /** apps/: each app's values, `<app>.yml` (config) and `<app>.secrets.yml`, by file name. */
-  readonly appValues: readonly { readonly file: string; readonly text: string }[];
-};
+import { absolutePath, appName, domain, vaultPasswordFile, type Domain } from "./brand.ts";
+import { all, err, map, ok, type Result } from "../../result.ts";
+import { serverKinds, serverSchema, varsSchema } from "./settings.ts";
+import { checkSettings, checkShape, knownSettings } from "./shape.ts";
+import { serverTargets, type App, type Inventory, type Server, type ServerFiles, type ServerTarget, type Vault } from "./model.ts";
 
 type Fields = Readonly<Record<string, unknown>>;
 
@@ -98,7 +26,7 @@ const fields = (text: string): Result<Fields, string> => {
   return result === undefined ? err("is not a YAML mapping") : ok(result);
 };
 
-const vaulted = (text: string): boolean => text.startsWith("$ANSIBLE_VAULT");
+const isVaulted = (text: string): boolean => text.startsWith("$ANSIBLE_VAULT");
 
 const oneOf = <T extends string>(allowed: readonly T[], value: unknown, field: string): Result<T, string> => {
   const match = allowed.find((candidate) => candidate === value);
@@ -159,10 +87,10 @@ const appValuesProblem = (
   appValues
     .map(({ file, text }) =>
       file.endsWith(".secrets.yml")
-        ? secretsMustBeVaulted && !vaulted(text)
+        ? secretsMustBeVaulted && !isVaulted(text)
           ? `apps/${file} must be vault-encrypted`
           : undefined
-        : vaulted(text)
+        : isVaulted(text)
           ? `apps/${file} is vault-encrypted; it holds config only — secrets go in apps/${file.replace(/\.yml$/, ".secrets.yml")}`
           : undefined,
     )
@@ -190,13 +118,13 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
   if (!shape.ok) return shape;
   if (target.value === "home" && files.inventory === undefined)
     return err("target home needs a hand-written inventory.ini next to it");
-  if (target.value !== "home" && !files.terraform) return err("no terraform/ next to it");
+  if (target.value !== "home" && !files.hasTerraform) return err("no terraform/ next to it");
   if (files.vars === undefined) return err("no vars.yml next to it");
   if (files.secrets === undefined) return err("no secrets.yml next to it");
-  if (vaulted(files.vars)) return err("vars.yml is vault-encrypted; it holds settings only — secrets go in secrets.yml");
+  if (isVaulted(files.vars)) return err("vars.yml is vault-encrypted; it holds settings only — secrets go in secrets.yml");
   if (target.value !== "multipass" && serverVault.value.kind === "none")
     return err(`target ${target.value} requires vault: true`);
-  if (target.value !== "multipass" && !vaulted(files.secrets))
+  if (target.value !== "multipass" && !isVaulted(files.secrets))
     return err(`target ${target.value} requires a vault-encrypted secrets.yml`);
   const appValues = appValuesProblem(files.appValues, target.value !== "multipass");
   if (appValues !== undefined) return err(appValues);
@@ -212,18 +140,13 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
     target: target.value,
     domain: serverDomain.value,
     vault: serverVault.value,
-    secretsVaulted: vaulted(files.secrets),
+    hasVaultedSecrets: isVaulted(files.secrets),
     apps: apps.value,
-    terraform: files.terraform,
-    vm: target.value === "home" && vars.value["vm"] !== undefined,
-    acmeDns: typeof vars.value["acme_dns"] === "string" && vars.value["acme_dns"] !== "",
+    hasTerraform: files.hasTerraform,
+    buildsVm: target.value === "home" && vars.value["vm"] !== undefined,
+    usesAcmeDns: typeof vars.value["acme_dns"] === "string" && vars.value["acme_dns"] !== "",
     inventory: files.inventory === undefined ? undefined : inventoryOf(files.inventory),
     backupDir: typeof backupDir === "string" ? backupDir : undefined,
     stackHosts: stackHosts(files.stacks, serverDomain.value),
   });
-};
-
-export const serverNamed = (fleet: Fleet, name: ServerName): Result<Server, string> => {
-  const server = fleet.servers.find((candidate) => candidate.name === name);
-  return server === undefined ? err(`no server '${name}'`) : ok(server);
 };

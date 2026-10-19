@@ -1,12 +1,13 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { appName, serverName } from "../src/core/brand.ts";
-import { interpret } from "../src/core/interpret.ts";
-import { needsTerminal, partOf, run, type Plan } from "../src/core/plan.ts";
+import { appName, serverName } from "../src/core/fleet/brand.ts";
+import { interpret } from "../src/core/interpreter/loop.ts";
+import { needsTerminal, partOf, run, type Plan } from "../src/core/plan/model.ts";
 import { explain } from "../src/clients/cli/explain.ts";
-import { bad, flat, link, strong, width } from "../src/core/present/line.ts";
-import { footer, listed, position, reporting, type Event, type Invocation } from "../src/core/present/progress.ts";
-import { settle } from "../src/core/updates.ts";
+import { bad, flat, link, strong, width } from "../src/core/text/spans.ts";
+import { footer, listed, reporting, type Event, type Heading } from "../src/core/present/progress.ts";
+import { position } from "../src/core/interpreter/progress.ts";
+import { settle } from "../src/core/status/updates.ts";
 import { framed } from "../src/clients/cli/framed.ts";
 import { paint } from "../src/clients/cli/paint.ts";
 import { colors, escapes, screen, watch } from "../src/clients/cli/terminal.ts";
@@ -22,7 +23,7 @@ const deploy: Plan = [
   { ...run("Verify", ["sh", "-c", "exit 1"]), part: "verify" },
 ];
 
-const invocation: Invocation = { command: "kayra deploy box", server: "box", about: ["platform on home", "box.test"] };
+const invocation: Heading = { command: "kayra deploy box", server: "box", about: ["platform on home", "box.test"] };
 
 test("durations read as much as is worth reading", () => {
   deepStrictEqual([40, 9_960, 12_400, 123_000, 3_840_000].map(duration), ["0.0s", "9.9s", "12s", "2m03s", "1h04m"]);

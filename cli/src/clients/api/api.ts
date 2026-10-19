@@ -3,16 +3,19 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, sep } from "node:path";
 import { z } from "zod";
-import { within, type KayraRoot } from "../../core/brand.ts";
-import { verbose } from "../../core/commands/server.ts";
-import { opentofu, statusJson, type Network, type Tofu } from "../../core/commands/status.ts";
-import type { Fleet } from "../../core/fleet.ts";
-import { interpret, type Io } from "../../core/interpret.ts";
-import { operation, isOperation, type Invocation as Call } from "../../core/operations/catalog.ts";
-import { invocation, hasPlan, isQuery, isStream, planOf, serverOf, stream, type Context } from "../../core/operations/run.ts";
-import type { Plan } from "../../core/plan.ts";
-import { listed, reporting, type Invocation } from "../../core/present/progress.ts";
-import { follow } from "../../core/updates.ts";
+import { within, type KayraRoot } from "../../core/fleet/brand.ts";
+import { verbose } from "../../core/recipes/steps.ts";
+import { opentofu } from "../../core/adapters/opentofu.ts";
+import { statusJson } from "../../core/present/status.ts";
+import type { Network, Tofu } from "../../core/status/ports.ts";
+import type { Fleet } from "../../core/fleet/model.ts";
+import { interpret } from "../../core/interpreter/loop.ts";
+import type { Io } from "../../core/interpreter/io.ts";
+import { isOperation, operation, type Invocation } from "../../core/operations/catalog.ts";
+import { hasPlan, invocation, isQuery, isStream, planOf, serverOf, stream, type Context } from "../../core/operations/dispatch.ts";
+import type { Plan } from "../../core/plan/model.ts";
+import { listed, reporting, type Heading } from "../../core/present/progress.ts";
+import { follow } from "../../core/status/updates.ts";
 import { err, ok, type Result } from "../../result.ts";
 import { json, send } from "../../deployer/http.ts";
 import { catalog, openapi } from "./contract.ts";
@@ -77,20 +80,20 @@ export const createApi = (api: Api) => {
     }) : [];
     return [...live, ...records].toSorted((a, b) => b.id.localeCompare(a.id));
   };
-  const about = (call: Call): Invocation => {
+  const about = (call: Invocation): Heading => {
     const target = serverOf(context, call);
     return { command: words(call), about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${api.version}`], ...(target === undefined ? {} : { server: target.name }) };
   };
-  const recipe = (call: Call, settings: Settings): Result<Plan, string> => {
+  const recipe = (call: Invocation, settings: Settings): Result<Plan, string> => {
     if (!hasPlan(call)) return err(`${call.name} has no plan`);
     const plan = planOf(context, call);
     return plan.ok && settings.verbose ? ok(verbose(plan.value)) : plan;
   };
-  const preview = (call: Call, settings: Settings): Result<wire.Preview, string> => {
+  const preview = (call: Invocation, settings: Settings): Result<wire.Preview, string> => {
     const plan = recipe(call, settings);
     return plan.ok ? ok({ invocation: about(call), steps: listed(plan.value, api.short), changes: operation(call.name).effect !== "reads" }) : plan;
   };
-  const start = (call: Call, settings: Settings, confirm: string | undefined): Result<string, Refusal> => {
+  const start = (call: Invocation, settings: Settings, confirm: string | undefined): Result<string, Refusal> => {
     if (shutdown.signal.aborted) return err([503, "kayra is stopping"]);
     const plan = recipe(call, settings);
     if (!plan.ok) return err([400, plan.error]);

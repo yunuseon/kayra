@@ -1,9 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { interpret } from "../src/core/interpret.ts";
-import { run, type Plan } from "../src/core/plan.ts";
-import { appName, serverName } from "../src/core/brand.ts";
-import { flat } from "../src/core/present/line.ts";
+import { interpret } from "../src/core/interpreter/loop.ts";
+import { run, type Plan } from "../src/core/plan/model.ts";
+import { appName, serverName } from "../src/core/fleet/brand.ts";
+import { flat } from "../src/core/text/spans.ts";
 import { must } from "./support.ts";
 
 type Said = { readonly passed: boolean; readonly out: readonly string[]; readonly err: readonly string[] };
@@ -72,15 +72,15 @@ test("a query's answer takes its place: one word, or many", async () => {
       "-c",
       'test "$1" = "a b" && test "$2" = c && test "$3" = d',
       "sh",
-      { kind: "query", argv: ["echo", "a b"], words: "one" },
-      { kind: "query", argv: ["printf", "c\\n d\\n"], words: "many" },
+      { kind: "substitution", argv: ["echo", "a b"], words: "one" },
+      { kind: "substitution", argv: ["printf", "c\\n d\\n"], words: "many" },
     ]),
   ]);
   strictEqual(said.passed, true);
 });
 
 test("a failing query stops the plan before its step runs", async () => {
-  const said = await interpreted([run("never", ["true", { kind: "query", argv: ["false"], words: "one" }])]);
+  const said = await interpreted([run("never", ["true", { kind: "substitution", argv: ["false"], words: "one" }])]);
   deepStrictEqual(said, { passed: false, out: [], err: ["    $(false) failed: exit 1"] });
 });
 

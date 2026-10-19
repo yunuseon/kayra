@@ -5,9 +5,9 @@ import { argument } from "@optique/core/primitives";
 import type { Usage } from "@optique/core/usage";
 import { choice, integer, string } from "@optique/core/valueparser";
 import type { RunOptions } from "@optique/run";
-import { appNameParser, domainParser, serverNameParser, subdomainParser } from "../../core/brand.ts";
+import { appNameParser, domainParser, serverNameParser, subdomainParser } from "../../core/fleet/brand.ts";
 import { operation, type OperationName } from "../../core/operations/catalog.ts";
-import type { Fleet } from "../../core/fleet.ts";
+import type { Fleet } from "../../core/fleet/model.ts";
 
 /** A command's one line, as the catalog says it: the same words in every client. */
 // eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message is readonly only at the top

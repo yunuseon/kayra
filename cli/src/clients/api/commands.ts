@@ -1,4 +1,4 @@
-import type { Server } from "../../core/fleet.ts";
+import type { Server } from "../../core/fleet/model.ts";
 import type { Invocation } from "../../core/operations/catalog.ts";
 import type { ServerCommand, ServerFacts } from "./contract.gen.ts";
 
@@ -6,11 +6,11 @@ export const offered = (server: Server): readonly (ServerCommand | "job")[] => [
   ...(server.kind === "platform" ? (["deploy", "apps", "verify"] as const) : []),
   "setup", "plan",
   ...(server.target === "multipass" && server.kind === "platform" ? (["up"] as const) : []),
-  ...(server.terraform || server.vm ? (["provision"] as const) : []),
+  ...(server.hasTerraform || server.buildsVm ? (["provision"] as const) : []),
   ...(server.backupDir === undefined ? [] : (["backup.test"] as const)),
   ...(server.kind === "platform" ? (["job"] as const) : []),
   ...(server.target === "multipass" ? [] : (["adopt"] as const)),
-  ...(server.terraform ? (["down"] as const) : []),
+  ...(server.hasTerraform ? (["down"] as const) : []),
 ];
 
 export const facts = (server: Server): ServerFacts => ({

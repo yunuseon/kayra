@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { within } from "./core/brand.ts";
+import { within } from "./core/fleet/brand.ts";
 import { createApi, type Api } from "./clients/api/api.ts";
 import { admit, cookieName, tokenIn } from "./clients/api/auth.ts";
 import { discover } from "./clients/api/discovery.ts";

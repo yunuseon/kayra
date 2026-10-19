@@ -3,27 +3,33 @@ import { run } from "@optique/run";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { absolutePath, fleetRoot, kayraRoot, within } from "./core/brand.ts";
+import { absolutePath, fleetRoot, kayraRoot, within } from "./core/fleet/brand.ts";
 import { questions } from "./clients/cli/questions.ts";
 import { fromCommand } from "./clients/cli/invocation.ts";
 import { parser, runOptions } from "./clients/cli/parser.ts";
-import { verbose } from "./core/commands/server.ts";
-import { opentofu, statusJson, statusView, type Look } from "./core/commands/status.ts";
-import { overall, validateJson, validateView } from "./core/commands/validate.ts";
-import type { Fleet, Server } from "./core/fleet.ts";
-import { interpret, type Io } from "./core/interpret.ts";
-import { findFleetRoot, loadFleet } from "./core/load.ts";
+import { verbose } from "./core/recipes/steps.ts";
+import { opentofu } from "./core/adapters/opentofu.ts";
+import { statusJson, statusView } from "./core/present/status.ts";
+import type { Look } from "./core/status/model.ts";
+import { overall } from "./core/validation/findings.ts";
+import { validateJson, validateView } from "./core/present/validate.ts";
+import type { Fleet, Server } from "./core/fleet/model.ts";
+import { interpret } from "./core/interpreter/loop.ts";
+import type { Io } from "./core/interpreter/io.ts";
+import { findFleetRoot, loadFleet } from "./core/fleet/load.ts";
 import { operation as describe } from "./core/operations/catalog.ts";
-import { hasPlan, planOf, query, serverOf, stream, type Context } from "./core/operations/run.ts";
+import { hasPlan, planOf, query, serverOf, stream, type Context } from "./core/operations/dispatch.ts";
 import { systemBrowser } from "./clients/ui/opener.ts";
 import { serve } from "./serve.ts";
-import { network } from "./core/net.ts";
-import { render, type Plan } from "./core/plan.ts";
+import { network } from "./core/adapters/network.ts";
+import { render } from "./core/plan/describe.ts";
+import type { Plan } from "./core/plan/model.ts";
 import { flatMap, map, ok, type Result } from "./result.ts";
 import { explain } from "./clients/cli/explain.ts";
-import { bad, muted, strong } from "./core/present/line.ts";
-import { silent, type Invocation } from "./core/present/progress.ts";
-import { settle } from "./core/updates.ts";
+import { bad, muted, strong } from "./core/text/spans.ts";
+import { silent } from "./core/interpreter/progress.ts";
+import type { Heading } from "./core/present/progress.ts";
+import { settle } from "./core/status/updates.ts";
 import { framed } from "./clients/cli/framed.ts";
 import { paint } from "./clients/cli/paint.ts";
 import { screen, watch } from "./clients/cli/terminal.ts";
@@ -56,19 +62,19 @@ const fail = (message: string): never => {
 };
 
 /** The heading's facts: what the server is, and which kayra runs. */
-const invocation = (target: Server | undefined): Invocation => ({
+const invocation = (target: Server | undefined): Heading => ({
   command: ["kayra", ...process.argv.slice(2).filter((word) => word !== "--dry-run")].join(" "),
   ...(target === undefined ? {} : { server: target.name }),
   about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${version}`],
 });
 
 /** --dry-run: the plan as data, styled on a terminal, plain and copyable for a program. */
-const show = (steps: Plan, about: Invocation, short: (text: string) => string): void => {
+const show = (steps: Plan, about: Heading, short: (text: string) => string): void => {
   (screens.out.live ? explain(about, steps, short, screens.out.columns) : render(steps)).forEach(io.out);
 };
 
 /** Runs a plan, framed on stderr unless its output is the point; the exit status says how it went. */
-const execute = async (steps: Plan, about: Invocation, framing: boolean): Promise<void> => {
+const execute = async (steps: Plan, about: Heading, framing: boolean): Promise<void> => {
   const interrupt = new AbortController();
   // Ctrl-C reaches the step's program too; the plan stops once it gives up. A second one does not wait.
   process.once("SIGINT", () => {

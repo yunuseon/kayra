@@ -1,6 +1,6 @@
-import { within, type KayraRoot } from "../brand.ts";
-import type { Fleet, Server } from "../fleet.ts";
-import type { Plan, Step } from "../plan.ts";
+import { within, type KayraRoot } from "../fleet/brand.ts";
+import type { Fleet, Server } from "../fleet/model.ts";
+import type { Plan, Step } from "../plan/model.ts";
 
 type Tool = {
   readonly program: string;
@@ -18,7 +18,7 @@ const tools: readonly Tool[] = [
   { program: "ansible-playbook", install: "brew install ansible", neededBy: everyServer },
   { program: "ansible-galaxy", install: "brew install ansible", neededBy: everyServer },
   { program: "ansible-vault", install: "brew install ansible", neededBy: (server) => server.vault.kind !== "none" },
-  { program: "tofu", install: "brew install opentofu", neededBy: (server) => server.terraform },
+  { program: "tofu", install: "brew install opentofu", neededBy: (server) => server.hasTerraform },
   {
     program: "mkcert",
     install: "brew install mkcert && mkcert -install",
@@ -29,7 +29,7 @@ const tools: readonly Tool[] = [
     install: "brew install --cask multipass",
     neededBy: (server) => server.target === "multipass",
   },
-  { program: "qemu-img", install: "brew install qemu", neededBy: (server) => server.vm },
+  { program: "qemu-img", install: "brew install qemu", neededBy: (server) => server.buildsVm },
 ];
 
 const toolChecks = (fleet: Fleet): readonly Step[] =>
@@ -51,7 +51,7 @@ const toolChecks = (fleet: Fleet): readonly Step[] =>
 // ansible-vault opens whole-file vaults only; values vaulted inline are opened by setup.
 const vaultChecks = (fleet: Fleet): readonly Step[] =>
   fleet.servers.flatMap((server) =>
-    server.vault.kind === "file" && server.secretsVaulted
+    server.vault.kind === "file" && server.hasVaultedSecrets
       ? [
           {
             kind: "check",

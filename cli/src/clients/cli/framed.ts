@@ -1,6 +1,7 @@
-import { titleOf } from "../../core/plan.ts";
-import { accent, active, bad, muted, ok, strong, type Text } from "../../core/present/line.ts";
-import { footer, steps, type Invocation, type Progress } from "../../core/present/progress.ts";
+import { titleOf } from "../../core/plan/describe.ts";
+import { accent, active, bad, muted, ok, strong, type Text } from "../../core/text/spans.ts";
+import { footer, steps, type Heading } from "../../core/present/progress.ts";
+import type { Progress } from "../../core/interpreter/progress.ts";
 import { duration, spread, truncate } from "../../core/present/text.ts";
 import { paint } from "./paint.ts";
 import { escapes, spinner, type Screen } from "./terminal.ts";
@@ -9,7 +10,7 @@ import { escapes, spinner, type Screen } from "./terminal.ts";
 const worthNotifying = 30_000;
 
 /** Frames on stderr: a heading, each step as it runs and how it went, a footer; on a terminal also spinners, the window title, a notification. */
-export const framed = (screen: Screen, write: (raw: string) => void, invocation: Invocation): Progress => {
+export const framed = (screen: Screen, write: (raw: string) => void, invocation: Heading): Progress => {
   const columns = Math.min(screen.columns, 80);
   const say = (text: Text): void => {
     write(`${paint(text, screen.colors)}\n`);

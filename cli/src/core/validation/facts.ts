@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { FleetRoot } from "./brand.ts";
-import type { Facts, Secrets } from "./commands/validate.ts";
-import { yamlOf, type Server } from "./fleet.ts";
-import { capture } from "./interpret.ts";
+import type { FleetRoot } from "../fleet/brand.ts";
+import type { Facts, Secrets } from "./findings.ts";
+import { yamlOf } from "../fleet/parse.ts";
+import type { Server } from "../fleet/model.ts";
+import { capture } from "../interpreter/process.ts";
 
 const text = (path: string): string | undefined => (existsSync(path) ? readFileSync(path, "utf8") : undefined);
 
@@ -16,13 +17,13 @@ const mappingOf = (source: string | undefined): Readonly<Record<string, unknown>
     : {};
 };
 
-const vaulted = (source: string): boolean => source.startsWith("$ANSIBLE_VAULT");
+const isVaulted = (source: string): boolean => source.startsWith("$ANSIBLE_VAULT");
 
 /** A secrets file's values: plaintext as is, a vault only with the server's password file; a missing file has none. */
 const secretsOf = async (server: Server, path: string): Promise<Secrets> => {
   const source = text(path);
   if (source === undefined) return { kind: "readable", values: {} };
-  if (!vaulted(source)) return { kind: "readable", values: mappingOf(source) };
+  if (!isVaulted(source)) return { kind: "readable", values: mappingOf(source) };
   if (server.vault.kind !== "file")
     return { kind: "locked", reason: "vaulted, and server.yml names no vault_password_file", hint: "vault_password_file in server.yml lets kayra open it" };
   const file = server.vault.file.replace(homedir(), "~");

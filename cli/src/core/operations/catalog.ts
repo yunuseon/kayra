@@ -32,8 +32,8 @@ export type Operation = {
 
 const server = z.string().min(1).describe("A server of the fleet (servers/<name>/)");
 const app = z.string().min(1).describe("An app name, including a removed app whose records or data remain");
-const onServer = z.strictObject({ server });
-const onApp = z.strictObject({ server, app });
+const serverInput = z.strictObject({ server });
+const appInput = z.strictObject({ server, app });
 
 export const operations = {
   up: {
@@ -41,58 +41,58 @@ export const operations = {
     scope: "server",
     effect: "changes",
     kind: "plan",
-    input: onServer,
+    input: serverInput,
   },
   provision: {
     summary: "Create or update the machine (target home: build the image to import).",
     scope: "server",
     effect: "changes",
     kind: "plan",
-    input: onServer,
+    input: serverInput,
   },
-  deploy: { summary: "Host setup and every app, no provisioning.", scope: "server", effect: "changes", kind: "plan", input: onServer },
-  setup: { summary: "The host layer only: the playbook for the server's kind.", scope: "server", effect: "changes", kind: "plan", input: onServer },
+  deploy: { summary: "Host setup and every app, no provisioning.", scope: "server", effect: "changes", kind: "plan", input: serverInput },
+  setup: { summary: "The host layer only: the playbook for the server's kind.", scope: "server", effect: "changes", kind: "plan", input: serverInput },
   plan: {
     summary: "What provision and setup would change, changing nothing (OpenTofu plan, Ansible check mode).",
     scope: "server",
     effect: "reads",
     kind: "plan",
-    input: onServer,
+    input: serverInput,
   },
   verify: {
     summary: "Whether a platform server works as its users see it: logins, certificates, webhooks, apps, runs, alerts.",
     scope: "server",
     effect: "reads",
     kind: "plan",
-    input: onServer,
+    input: serverInput,
   },
   apps: {
     summary: "Make the server's apps match server.yml: register each, remove the rest (data kept).",
     scope: "server",
     effect: "changes",
     kind: "plan",
-    input: onServer,
+    input: serverInput,
   },
-  hosts: { summary: "Point the domain at a multipass VM in /etc/hosts (sudo).", scope: "server", effect: "changes", kind: "plan", input: onServer },
-  ssh: { summary: "Open an interactive SSH session.", scope: "server", effect: "changes", kind: "session", bare: true, input: onServer },
+  hosts: { summary: "Point the domain at a multipass VM in /etc/hosts (sudo).", scope: "server", effect: "changes", kind: "plan", input: serverInput },
+  ssh: { summary: "Open an interactive SSH session.", scope: "server", effect: "changes", kind: "session", bare: true, input: serverInput },
   "ssh.exec": {
     summary: "Run a command over SSH.", scope: "server", effect: "changes", kind: "plan", bare: true,
     input: z.strictObject({ server, command: z.array(z.string()).min(1).describe("The remote command and arguments") }),
   },
-  down: { summary: "Destroy the machine.", scope: "server", effect: "destroys", kind: "plan", input: onServer },
+  down: { summary: "Destroy the machine.", scope: "server", effect: "destroys", kind: "plan", input: serverInput },
   adopt: {
     summary: "Once, for a server we did not create: add the deploy user as root.",
     scope: "server",
     effect: "changes",
     kind: "plan",
-    input: onServer,
+    input: serverInput,
   },
   "backup.test": {
     summary: "Restore the latest backup to a scratch dir, check it, delete it.",
     scope: "server",
     effect: "changes",
     kind: "plan",
-    input: onServer,
+    input: serverInput,
   },
   "app.check": {
     summary: "What the platform checks at deploy (app.yml, images, compose policy), in an app's repository. No fleet needed.",
@@ -101,14 +101,14 @@ export const operations = {
     kind: "plan",
     input: z.strictObject({ dir: z.string().min(1).default(".").describe("The app's repository") }),
   },
-  "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: onApp },
+  "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
   "app.runs": {
     summary: "What runs now, and the app's latest runs: state, commit, why, when, how long.",
     scope: "app",
     effect: "reads",
     kind: "query",
     bare: true,
-    input: onApp,
+    input: appInput,
   },
   "app.log": {
     summary: "A run's log, the newest unless named; its errors and warnings marked.",
@@ -132,7 +132,7 @@ export const operations = {
     effect: "reads",
     kind: "query",
     bare: true,
-    input: onApp,
+    input: appInput,
   },
   "app.rollback": {
     summary: "Deploy an earlier release again.",

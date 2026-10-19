@@ -1,7 +1,6 @@
-import { appManifestSchema, secretsSchema, settings, type ServerKind } from "../settings.ts";
-import type { Server } from "../fleet.ts";
-import { active, bad, muted, ok, strong, type Line, type Span } from "../present/line.ts";
-import { closest } from "../validate.ts";
+import { appManifestSchema, secretsSchema, settings, type ServerKind } from "../fleet/settings.ts";
+import type { Server } from "../fleet/model.ts";
+import { closest } from "../fleet/shape.ts";
 
 /** A secrets file as validate could read it; a missing one holds no values. */
 export type Secrets =
@@ -32,14 +31,17 @@ export type Verdict = "problem" | "unchecked" | "passed";
 export type Finding = { readonly result: Verdict; readonly text: string; readonly hint?: string };
 
 const finding = (result: Verdict, text: string, hint?: string): Finding => ({ result, text, ...(hint === undefined ? {} : { hint }) });
+
 const problem = (text: string, hint?: string): Finding => finding("problem", text, hint);
+
 const unchecked = (text: string, hint?: string): Finding => finding("unchecked", text, hint);
+
 const passed = (text: string): Finding => finding("passed", text);
 
 /** A check's findings, or one line saying it holds when it found nothing to say. */
 const holds = (found: readonly Finding[], text: string): readonly Finding[] => (found.length === 0 ? [passed(text)] : found);
 
-const count = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? "" : "s"}`;
+export const count = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? "" : "s"}`;
 
 const mapping = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {};
@@ -161,55 +163,3 @@ export type Report = { readonly server: Server; readonly findings: readonly Find
 /** How a set of findings went as a whole: its worst. */
 export const overall = (found: readonly Finding[]): Verdict =>
   found.some((each) => each.result === "problem") ? "problem" : found.some((each) => each.result === "unchecked") ? "unchecked" : "passed";
-
-const marks: Readonly<Record<Verdict, Span>> = { problem: bad("✗"), unchecked: muted("·"), passed: ok("✓") };
-
-const tally = (reports: readonly Report[]): { readonly problems: number; readonly unchecked: number } => {
-  const all = reports.flatMap((report) => report.findings);
-  return {
-    problems: all.filter((each) => each.result === "problem").length,
-    unchecked: all.filter((each) => each.result === "unchecked").length,
-  };
-};
-
-/** "✗ 3 servers · 1 problem · 2 not checked" */
-export const summary = (reports: readonly Report[]): Line => {
-  const { problems, unchecked: notChecked } = tally(reports);
-  return [
-    marks[overall(reports.flatMap((report) => report.findings))],
-    " ",
-    count(reports.length, "server"),
-    muted(" · "),
-    problems === 0 ? ok("no problems") : bad(count(problems, "problem")),
-    ...(notChecked === 0 ? [] : [muted(" · "), `${String(notChecked)} not checked`]),
-  ];
-};
-
-/** Each server with its mark, its findings under it with what to do about them, then the summary. */
-export const validateView = (reports: readonly Report[]): readonly Line[] => {
-  const names = Math.max(0, ...reports.map((report) => report.server.name.length));
-  return [
-    ...reports.flatMap((report): readonly Line[] => [
-      [marks[overall(report.findings)], " ", strong(report.server.name.padEnd(names)), muted(`  ${report.server.kind} on ${report.server.target}`)],
-      ...report.findings.flatMap((each): readonly Line[] => [
-        ["    ", marks[each.result], " ", each.result === "passed" ? muted(each.text) : each.text],
-        ...(each.hint === undefined ? [] : [["      ", active("→"), " ", each.hint]]),
-      ]),
-      [],
-    ]),
-    summary(reports),
-  ];
-};
-
-/** `kayra validate --json`: the shape cli.md documents. */
-export const validateJson = (reports: readonly Report[]) => ({
-  result: overall(reports.flatMap((report) => report.findings)),
-  ...tally(reports),
-  servers: reports.map((report) => ({
-    name: report.server.name,
-    kind: report.server.kind,
-    target: report.server.target,
-    result: overall(report.findings),
-    findings: report.findings.map((each) => ({ result: each.result, text: each.text, hint: each.hint ?? null })),
-  })),
-});

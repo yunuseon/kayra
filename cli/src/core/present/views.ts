@@ -1,52 +1,17 @@
-import { z } from "zod";
 import type { Deployed, ReleasesAnswer, RunAnswer, RunsAnswer } from "../../deployer/answers.ts";
-import type { View } from "../plan.ts";
-import { accent, active, bad, muted, ok, strong, warn, type Line, type Span, type Text } from "./line.ts";
+import type { DeployerAnswer } from "../plan/model.ts";
+import { accent, active, bad, muted, ok, strong, warn, type Line, type Span, type Text } from "../text/spans.ts";
 import { ago, duration, table } from "./text.ts";
-
-const deployed = z.object({ sha: z.string(), time: z.iso.datetime() });
-
-/** `ctl runs <app> --json`, as this kayra reads it. */
-export const runsSchema = z.object({
-  app: z.string(),
-  live: deployed.exactOptional(),
-  runs: z.array(
-    z.object({
-      id: z.string(),
-      state: z.enum(["running", "success", "failure"]),
-      why: z.string(),
-      what: z.string(),
-      sha: z.string().exactOptional(),
-      started: z.iso.datetime(),
-      finished: z.iso.datetime().exactOptional(),
-    }),
-  ),
-}) satisfies z.ZodType<RunsAnswer>;
-
-/** `ctl rollback <app> --json`, as this kayra reads it. */
-export const releasesSchema = z.object({
-  app: z.string(),
-  releases: z.array(deployed.extend({ live: z.boolean() })),
-}) satisfies z.ZodType<ReleasesAnswer>;
-
-/** The answer as the schema has it, or nothing: then it is not the answer this kayra expects. */
-export const parsed = <T>(schema: z.ZodType<T>, answer: string): T | undefined => {
-  try {
-    const json: unknown = JSON.parse(answer);
-    const result = schema.safeParse(json);
-    return result.success ? result.data : undefined;
-  } catch {
-    return undefined;
-  }
-};
+import { parsed, releasesSchema, runsSchema } from "../ctl/answers.ts";
 
 /** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
 const linesOf = (text: string): readonly string[] => (text === "" ? [] : text.replace(/\n$/, "").split("\n"));
 
 const short = (sha: string): string => sha.slice(0, 7);
+
 const since = (time: string, now: number): string => ago(now - Date.parse(time));
 
-const heading = (view: View, ...more: readonly Span[]): Line => [strong(view.app), muted(` on ${view.server}`), ...more];
+const heading = (view: DeployerAnswer, ...more: readonly Span[]): Line => [strong(view.app), muted(` on ${view.server}`), ...more];
 
 const live = (release: Deployed | undefined, now: number): readonly Span[] =>
   release === undefined
@@ -72,7 +37,7 @@ const commit = (run: RunAnswer, release: Deployed | undefined): Line => {
 };
 
 /** `kayra app runs`: what runs now, then a table of the newest runs. */
-export const runsView = (view: View, answer: RunsAnswer, now: number): readonly Line[] => {
+export const runsView = (view: DeployerAnswer, answer: RunsAnswer, now: number): readonly Line[] => {
   const rows = table([
     ["STATE", "COMMIT", "WHY", "WHEN", "TOOK", "RUN"].map((title) => [muted(title)]),
     ...answer.runs.map((run) => [states[run.state], commit(run, answer.live), [run.why], [since(run.started, now)], took(run, now), [muted(run.id)]]),
@@ -87,7 +52,7 @@ export const runsView = (view: View, answer: RunsAnswer, now: number): readonly 
 };
 
 /** `kayra app rollback` without a commit: every release, the live one marked, and how to go back to one. */
-export const releasesView = (view: View, answer: ReleasesAnswer, now: number): readonly Line[] => {
+export const releasesView = (view: DeployerAnswer, answer: ReleasesAnswer, now: number): readonly Line[] => {
   const earlier = answer.releases.find((release) => !release.live);
   const rows = table([
     [[muted("  COMMIT")], [muted("DEPLOYED")]],
@@ -110,7 +75,9 @@ export const releasesView = (view: View, answer: ReleasesAnswer, now: number): r
 };
 
 const errors = /\b(error|fatal|failed|failure|panic|refused|denied|unhealthy)\b/i;
+
 const warnings = /\b(warn|warning|deprecated)\b/i;
+
 /** The deployer's time, before each line it logs. */
 const stamped = /^(\d{2}:\d{2}:\d{2} )(.*)$/s;
 
@@ -124,7 +91,7 @@ const logLine = (line: string): Line => {
 export const logView = (log: string): readonly Line[] => linesOf(log).map(logLine);
 
 /** A deployer's answer as its view draws it, or as it came if it is not what the view reads (an older ctl). */
-export const draw = (view: View, answer: string, now: number): readonly Text[] => {
+export const draw = (view: DeployerAnswer, answer: string, now: number): readonly Text[] => {
   switch (view.view) {
     case "runs": {
       const runs = parsed(runsSchema, answer);
@@ -140,7 +107,7 @@ export const draw = (view: View, answer: string, now: number): readonly Text[] =
 };
 
 /** What --dry-run says about a drawn answer. */
-export const drawnAs = (view: View): string => {
+export const drawnAs = (view: DeployerAnswer): string => {
   switch (view.view) {
     case "runs":
       return "its answer drawn as a table of runs";

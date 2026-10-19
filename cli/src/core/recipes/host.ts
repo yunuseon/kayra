@@ -1,0 +1,144 @@
+import type { Server } from "../fleet/model.ts";
+import { partOf, run, type Plan, type Step } from "../plan/model.ts";
+import { err, map, ok, type Result } from "../../result.ts";
+import { ansibleEnv, ansiblePath, appSubdomains, certs, collections, fleetEnv, fromMain, inventory, latestState, needing, reachable, script, sequence, terraform, vault, vaulted, type Engine } from "./steps.ts";
+import { apps } from "./apps.ts";
+
+export const provision = (engine: Engine, server: Server): Result<Plan, string> =>
+  ok(
+    partOf("provision", [
+      fromMain(engine, server),
+      ...(server.buildsVm ? [run("VM image and seed ISO", ["bash", script(engine, "home-image.sh"), server.name], fleetEnv(engine))] : []),
+      ...(server.hasTerraform
+        ? [
+            latestState(engine, server),
+            run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]),
+            run("OpenTofu apply", ["tofu", terraform(server), "apply", "-auto-approve"]),
+          ]
+        : []),
+    ]),
+  );
+
+/** The playbook for the server's kind, as setup runs it; plan adds check mode. */
+const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []): Step =>
+  vaulted(run(
+    `Host layer · ${server.kind}.yml${extra.includes("--check") ? ", check mode" : ""}`,
+    [
+      "ansible-playbook",
+      "-i",
+      inventory(server),
+      ansiblePath(engine, "playbooks", `${server.kind}.yml`),
+      "-e",
+      `server=${server.name}`,
+      "-e",
+      `server_dir=${server.dir}`,
+      "-e",
+      `domain=${server.domain}`,
+      "-e",
+      `target=${server.target}`,
+      ...extra,
+    ],
+    ansibleEnv(engine, {}),
+  ), server);
+
+/** The host layer: the playbook for the server's kind. */
+export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
+  ok(
+    partOf("setup", [
+      fromMain(engine, server),
+      // mkcert where Let's Encrypt cannot reach: test VMs, and home servers without DNS-01.
+      ...(server.kind === "platform" && server.target !== "hetzner" && !server.usesAcmeDns
+        ? [certs(engine, server.domain, [appSubdomains(engine, server), ...server.stackHosts])]
+        : []),
+      ...reachable(engine, server),
+      collections(engine, vault(server).env),
+      hostPlaybook(engine, server),
+    ]),
+  );
+
+/**
+ * What provision and setup would change, changing nothing: OpenTofu's plan and
+ * the playbook in check mode, with diffs (files holding secrets say only that
+ * they would change). From any checkout: it previews a branch against a server.
+ */
+export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
+  ok([
+    ...reachable(engine, server),
+    ...(server.hasTerraform
+      ? [
+          latestState(engine, server),
+          run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]),
+          run("OpenTofu plan", ["tofu", terraform(server), "plan", "-input=false", "-lock=false"]),
+        ]
+      : []),
+    collections(engine, vault(server).env),
+    hostPlaybook(engine, server, ["--check", "--diff"]),
+    { kind: "note", text: `kayra plan changed nothing on ${server.name}: the changed tasks above are what kayra setup would do.` },
+  ]);
+
+export const hosts = (engine: Engine, server: Server): Result<Plan, string> =>
+  ok(
+    partOf(
+      "hosts",
+      server.target === "multipass"
+        ? [
+            needing(run("/etc/hosts", [
+              "bash",
+              script(engine, "setup-hosts.sh"),
+              server.domain,
+              { kind: "substitution", argv: ["tofu", terraform(server), "output", "-raw", "server_ip"], words: "one" },
+              appSubdomains(engine, server),
+            ]), [{ kind: "sudo" }])
+          ]
+        : [{ kind: "note", text: `hosts: ${server.target} uses real DNS, nothing to do.` }],
+    ),
+  );
+
+/** Whether a platform server works as its users see it (scripts/local/verify.sh); other kinds have nothing to check yet. */
+const verifyStep = (engine: Engine, server: Server): Step => ({
+  ...run("Verify", ["bash", script(engine, "verify.sh"), server.name], fleetEnv(engine)),
+  part: "verify",
+});
+
+export const verify = (engine: Engine, server: Server): Result<Plan, string> =>
+  server.kind === "platform"
+    ? ok([verifyStep(engine, server)])
+    : err(`'${server.name}' is of kind ${server.kind}: kayra verify checks platform servers only.`);
+
+/** Host setup, then the apps; a platform server is verified at the end, so a deploy that leaves it broken fails. */
+export const deploy = (engine: Engine, server: Server): Result<Plan, string> =>
+  map(sequence([setup(engine, server), apps(engine, server)]), (plan) =>
+    server.kind === "platform" ? [...plan, verifyStep(engine, server)] : plan,
+  );
+
+export const up = (engine: Engine, server: Server): Result<Plan, string> =>
+  sequence([provision(engine, server), deploy(engine, server), hosts(engine, server)]);
+
+export const down = (engine: Engine, server: Server): Result<Plan, string> =>
+  server.hasTerraform
+    ? ok([
+        latestState(engine, server),
+        ...(server.target === "hetzner"
+          ? [
+              {
+                kind: "confirm",
+                warning: `This destroys the Hetzner server '${server.name}' (${server.domain}) and everything on it.`,
+                expect: server.name,
+              } satisfies Step,
+            ]
+          : []),
+        run("OpenTofu destroy", ["tofu", terraform(server), "destroy", "-auto-approve"]),
+      ])
+    : err(`${server.name} has no terraform/: nothing here creates it, so nothing destroys it`);
+
+/** Once, for a server we did not create: the deploy user, added as root. */
+export const adopt = (engine: Engine, server: Server): Result<Plan, string> =>
+  ok([
+    fromMain(engine, server),
+    collections(engine, {}),
+    run(
+      "Deploy user, added as root",
+      ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", "adopt.yml")],
+      ansibleEnv(engine, {}),
+    ),
+  ]);

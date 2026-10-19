@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fleetRoot, serverDir, serverName, within, type AbsolutePath, type FleetRoot } from "./brand.ts";
-import { parseServer, yamlOf, type Fleet, type Server, type ServerFiles } from "./fleet.ts";
-import { all, err, flatMap, map, ok, type Result } from "../result.ts";
+import { parseServer, yamlOf } from "./parse.ts";
+import type { Fleet, Server, ServerFiles } from "./model.ts";
+import { all, err, flatMap, map, ok, type Result } from "../../result.ts";
 import { defaultsSchema } from "./settings.ts";
-import { checkSettings, knownSettings } from "./validate.ts";
+import { checkSettings, knownSettings } from "./shape.ts";
 
 /** The fleet is the nearest directory, from `from` upwards, with a servers/defaults.yml. */
 export const findFleetRoot = (from: AbsolutePath): Result<FleetRoot, string> => {
@@ -43,7 +44,7 @@ const readServer = (root: FleetRoot, entry: string): Result<Server, string> => {
     vars: text(join(dir, "vars.yml")),
     secrets: text(join(dir, "secrets.yml")),
     inventory: text(join(dir, "inventory.ini")),
-    terraform: existsSync(join(dir, "terraform")),
+    hasTerraform: existsSync(join(dir, "terraform")),
     stacks: stacks(dir),
     appValues: appValues(dir),
   });

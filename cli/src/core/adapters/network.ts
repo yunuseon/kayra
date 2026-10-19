@@ -1,7 +1,18 @@
 import { Agent, request } from "node:https";
 import { connect } from "node:net";
 import { getCACertificates } from "node:tls";
-import { failure, type Network } from "./commands/status.ts";
+import type { Network } from "../status/ports.ts";
+import type { Reach } from "../status/model.ts";
+
+/** Why a connection failed, by Node's error code. */
+export const failure = (code: string): Reach => {
+  if (code === "ECONNREFUSED") return { kind: "refused" };
+  if (code === "ETIMEDOUT") return { kind: "no-answer" };
+  if (["EHOSTUNREACH", "ENETUNREACH", "EHOSTDOWN", "EADDRNOTAVAIL"].includes(code)) return { kind: "unreachable" };
+  if (["ENOTFOUND", "EAI_AGAIN", "EAI_NONAME", "EAI_NODATA"].includes(code)) return { kind: "unknown-host" };
+  if (/CERT|SELF_SIGNED|UNABLE_TO_(GET|VERIFY)/.test(code)) return { kind: "bad-certificate", code };
+  return { kind: "failed", code };
+};
 
 const codeOf = (error: unknown): string =>
   typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : "ERROR";

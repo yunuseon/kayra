@@ -1,0 +1,38 @@
+import { z } from "zod";
+import type { ReleasesAnswer, RunsAnswer } from "../../deployer/answers.ts";
+
+const deployed = z.object({ sha: z.string(), time: z.iso.datetime() });
+
+/** `ctl runs <app> --json`, as this kayra reads it. */
+export const runsSchema = z.object({
+  app: z.string(),
+  live: deployed.exactOptional(),
+  runs: z.array(
+    z.object({
+      id: z.string(),
+      state: z.enum(["running", "success", "failure"]),
+      why: z.string(),
+      what: z.string(),
+      sha: z.string().exactOptional(),
+      started: z.iso.datetime(),
+      finished: z.iso.datetime().exactOptional(),
+    }),
+  ),
+}) satisfies z.ZodType<RunsAnswer>;
+
+/** `ctl rollback <app> --json`, as this kayra reads it. */
+export const releasesSchema = z.object({
+  app: z.string(),
+  releases: z.array(deployed.extend({ live: z.boolean() })),
+}) satisfies z.ZodType<ReleasesAnswer>;
+
+/** The answer as the schema has it, or nothing: then it is not the answer this kayra expects. */
+export const parsed = <T>(schema: z.ZodType<T>, answer: string): T | undefined => {
+  try {
+    const json: unknown = JSON.parse(answer);
+    const result = schema.safeParse(json);
+    return result.success ? result.data : undefined;
+  } catch {
+    return undefined;
+  }
+};

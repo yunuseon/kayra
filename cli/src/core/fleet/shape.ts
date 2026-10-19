@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { err, ok, type Result } from "../result.ts";
+import { err, ok, type Result } from "../../result.ts";
 import { isAnsibleVariable, settings, type ServerKind } from "./settings.ts";
 
 /** Edit distance, for "did you mean". */

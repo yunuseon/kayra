@@ -1,20 +1,14 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import {
-  failure,
-  isMachine,
-  look,
-  statusJson,
-  statusView,
-  unreadable,
-  type Look,
-  type Network,
-  type Reach,
-  type Tofu,
-} from "../src/core/commands/status.ts";
+import { failure } from "../src/core/adapters/network.ts";
+import { isMachine, type Look, type Reach } from "../src/core/status/model.ts";
+import { look } from "../src/core/status/look.ts";
+import { statusJson, statusView } from "../src/core/present/status.ts";
+import { unreadable } from "../src/core/adapters/opentofu.ts";
+import type { Network, Tofu } from "../src/core/status/ports.ts";
 import { err, ok } from "../src/result.ts";
-import { flat } from "../src/core/present/line.ts";
-import { settle } from "../src/core/updates.ts";
+import { flat } from "../src/core/text/spans.ts";
+import { settle } from "../src/core/status/updates.ts";
 import { fleet, server } from "./support.ts";
 
 const hetzner = (name: string, apps = "") =>
@@ -23,7 +17,7 @@ const hetzner = (name: string, apps = "") =>
 // A NAS at home: a hand-written inventory, and a terraform/ holding its backup's storage box.
 const nas = server("nas", "kind: nas\ntarget: home\ndomain: home.example\nvault: true");
 const forge = server("forge", "target: home\ndomain: forge.example\nvault: true", {
-  terraform: false,
+  hasTerraform: false,
   inventory: "[servers]\nforge ansible_host=192.0.2.3 ansible_port=2222 ansible_user=deploy\n",
 });
 const shop = hetzner("shop", "\napps: [{name: shop, repo: https://x.test/s.git}, {name: blog, repo: https://x.test/b.git}]");
@@ -81,7 +75,7 @@ test("the address comes from the inventory where there is one, else from OpenTof
 
 test("a machine is a server OpenTofu created, not a storage box or a data source", () => {
   deepStrictEqual(
-    ["hcloud_server.this", "module.vm.multipass_instance.this", "module.s.hcloud_server.this[0]", "hcloud_storage_box.backup", "data.hcloud_server.x"].map(
+    ["hcloud_server.this", "module.buildsVm.multipass_instance.this", "module.s.hcloud_server.this[0]", "hcloud_storage_box.backup", "data.hcloud_server.x"].map(
       isMachine,
     ),
     [true, true, true, false, false],

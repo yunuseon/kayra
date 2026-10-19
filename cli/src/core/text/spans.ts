@@ -24,7 +24,7 @@ export const link = (text: string, href: string, tone?: Tone): Span => ({ text, 
 
 export const spans = (text: Text): Line => (typeof text === "string" ? [text] : text);
 
-export const textOf = (span: Span): string => (typeof span === "string" ? span : span.text);
+const textOf = (span: Span): string => (typeof span === "string" ? span : span.text);
 
 export const flat = (text: Text): string => spans(text).map(textOf).join("");
 

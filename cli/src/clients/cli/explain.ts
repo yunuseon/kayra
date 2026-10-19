@@ -1,6 +1,8 @@
-import { commandOf, kindOf, titleOf, type Plan, type Step } from "../../core/plan.ts";
-import { accent, active, bad, muted, strong, warn, type Line, type Span } from "../../core/present/line.ts";
-import { position, steps as count, type Invocation } from "../../core/present/progress.ts";
+import { commandOf, kindOf, titleOf } from "../../core/plan/describe.ts";
+import type { Plan, Step } from "../../core/plan/model.ts";
+import { accent, active, bad, muted, strong, warn, type Line, type Span } from "../../core/text/spans.ts";
+import { position } from "../../core/interpreter/progress.ts";
+import { steps as count, type Heading } from "../../core/present/progress.ts";
 import { wrap } from "../../core/present/text.ts";
 import { drawnAs } from "../../core/present/views.ts";
 
@@ -17,7 +19,7 @@ const tag = (step: Step): Span => {
  * command fits on a line or two; render() is the plain, copyable form.
  */
 export const explain = (
-  invocation: Invocation,
+  invocation: Heading,
   plan: Plan,
   short: (text: string) => string,
   columns: number,

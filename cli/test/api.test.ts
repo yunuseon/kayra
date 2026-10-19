@@ -1,11 +1,11 @@
-import { deepStrictEqual, strictEqual, rejects } from "node:assert/strict";
+import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
-import { absolutePath, fleetRoot, kayraRoot } from "../src/core/brand.ts";
+import { absolutePath, fleetRoot, kayraRoot } from "../src/core/fleet/brand.ts";
 import { operation, operationNames, type OperationName } from "../src/core/operations/catalog.ts";
 import { ok } from "../src/result.ts";
 import { admit, cookieName } from "../src/clients/api/auth.ts";

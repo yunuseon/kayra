@@ -95,17 +95,17 @@ Also `provision`, `hosts`, `adopt`, `backup test`, `app purge|runs|logs|deploy|r
 `cli/src/` is one engine and the clients around it; lint (`no-restricted-imports` in `cli/eslint.config.ts`) keeps them apart:
 
 - **`core/`**, by domain: `fleet/` (brands, the model, parsing and loading the fleet, the settings registry, schemas and their docs), `plan/` (steps as data, and how --dry-run says them), `recipes/` (each command's plan), `interpreter/` (runs a plan: processes, questions and secrets, ptys), `operations/` (the catalog and the one way in), `status/` and `validation/` (what those two find), `ctl/` (the deployer's answers as kayra reads them), `adapters/` (OpenTofu, the network), and `text/` (spans of meaning, durations). The core returns data and its own messages as spans; drawing is the clients': views, tables and the status and validate reports in `clients/cli/`, their JSON in `clients/wire/` (the API answers it, the CLI's `--json` prints it), a deployer's answer drawn through `Io.draw`. It imports no client; of `deployer/` only types (ctl's answers are its wire format).
-- **`clients/cli/`**, **`clients/api/`**, **`clients/ui/`**: the command line (Optique, the terminal's painting, frames, spinners), the HTTP API, the browser side's assets. No client imports another.
+- **`clients/cli/`**, **`clients/api/`**, **`clients/ui/`**, **`clients/mcp/`**: the command line (Optique, the terminal's painting, frames, spinners), the HTTP API, the browser side's assets, the MCP server for agents. No client imports another.
 - **`clients/wire/`**: the JSON every machine client speaks: its zod schemas (`schemas.ts`), the generated contract, the status and validate shapes, the queries' answers. Any client may import it; it imports no client.
-- **`main.ts`** and **`serve.ts`** compose them; **`deployer/`** runs on servers and imports neither.
+- **`main.ts`** and **`serve.ts`** compose them (`kayra mcp` in `main.ts`); **`deployer/`** runs on servers and imports neither.
 - **`lib/`** is what any TypeScript project could use, knowing nothing of kayra: `Result`, `typed`, the `Brand` type, a schema as a constructor (`minting`), YAML as values, "did you mean". Everything may import it; it imports none of the above. Ansible copies it next to the deployer, whose image installs no packages: the deployer may not import the modules that use one (`schema.ts`, `yaml.ts`; lint says so).
 - **A fleet file's schema is its parser:** `server.yml` and `app.yml` are parsed by their Zod schemas in `core/fleet/settings.ts`, built from the brands' schemas in `core/fleet/brand.ts` (`appNameSchema`, `domainSchema`, …), so the rule a name follows is written once and reaches the editors' JSON Schemas (`io: "input"`) as a pattern. A brand's constructor is minted from its schema (`appName = minting(appNameSchema)`). What only the server's other files can say (an inventory, a vaulted secrets.yml) stays in `parseServer`.
 
-Every client offers kayra's full feature set: a new operation reaches all three.
+Every client offers kayra's full feature set: a new operation reaches every one.
 
 - **The catalog** (`core/operations/catalog.ts`) declares each operation once: its summary (every client's one line), scope, effect (`reads`, `changes`, `destroys`), kind (`plan`, `query`, `stream`, `session`) and input schema (plain JSON, zod). `core/operations/dispatch.ts` is the one way in: `invocation(name, input)` checks the input; `planOf`, `query` and `stream` run it, each a table typed over every operation of its kind, so one without an implementation does not compile.
 - **Interactions** (`core/interpreter/`): questions distinguish confirmations from secrets; the CLI hides secret typing and the API records only the question. A run asks once per server for its vault password, given to Ansible by an executable helper in a private temporary directory; the helper reads the password from the child environment, and its directory is removed when the run ends. Sudo passwords reach `setup-hosts.sh` through stdin. Interactive SSH is a `session` step: the CLI inherits its terminal; other clients supply input and receive a pty through `script`. Cancellation also releases questions and terminates child process groups.
-- **Coverage is compiled in:** each client maps its own input onto invocations and holds a table `satisfies Record<OperationName, …>`; the command line's is `reaches` in `clients/cli/invocation.ts`. `test/parity.test.ts` parses each and checks it lands on its operation. A new operation: its catalog entry, its implementation, then every client's table, or nothing compiles.
+- **Coverage is compiled in:** each client maps its own input onto invocations and holds a table `satisfies Record<OperationName, …>`; the command line's is `reaches` in `clients/cli/invocation.ts`, MCP's `reaches` in `clients/mcp/tools.ts` (a tool, or refused with a reason: only the interactive `ssh`). `test/parity.test.ts` parses each and checks it lands on its operation. A new operation: its catalog entry, its implementation, then every client's table, or nothing compiles.
 
 ### Local server (`kayra serve`)
 
@@ -121,6 +121,17 @@ Every client offers kayra's full feature set: a new operation reaches all three.
 - **`web/`** is its own npm project (Preact, `@preact/signals`, Vite; exact pins), built at `prepack` into `cli/dist/browser` (never `cli/dist/web`: that is where tsc puts the server's own modules, and the build empties its directory; 0.16.0 shipped that way and did not start), served from `web/dist` in a checkout. Same strictness as the CLI: its lint config reuses the CLI's rules from the root's `node_modules`, with signals' `.value` and the DOM's objects exempt. Pure modules (the router, the SGR parser, the run reducer, the palette's matching, the status cells) are vitest-tested; the one place a server answer takes a type is `api.ts`'s `trusted`. Dev: `kayra serve --port 7700 --no-open` beside `npm --prefix web run dev` (Vite proxies `/api` as if from kayra serve's own page).
 - **The agent guard asks before `kayra serve` and local API writes**: what runs from the browser is out of its sight. Don't drive a real fleet's `kayra serve` from a browser tool either; test against a fixture fleet or a Multipass lab.
 - The checks run `web-typecheck`, `web-lint`, `web-test`, `web-build`.
+
+### MCP (`kayra mcp`)
+
+`kayra mcp` serves the catalog to an agent (Claude Code) as MCP tools over stdin and stdout: `clients/mcp/`, on the official SDK's low-level `Server` (`@modelcontextprotocol/server`), so tools/list and tools/call stay kayra's and go through `invocation()`. A fleet's `.mcp.json` starts it (`{"kayra": {"command": "kayra", "args": ["mcp"]}}`); nothing listens on a port. The site's MCP reference says what an operator sees.
+
+- **stdout is the protocol.** Nothing in the `mcp` branch of `main.ts` writes there; every step runs with `Io.output`, so no program inherits kayra's stdio.
+- **A tool per operation**, named after it with `.` spelled `_` (Claude's API takes no dots). Its input is the catalog's, `server` narrowed to the fleet's names (the CLI's `choice()`), plus `dryRun`/`verbose` on plans. Annotations from the effect (`readOnlyHint`, `destructiveHint`); `destroys` also carries `_meta["anthropic/requiresUserInteraction"]`, so Claude Code asks on every call, in every mode.
+- **Results:** a plan's run as plain text (each step, its output, the footer; `render` for `dryRun`), a tool error when it failed *or stopped* (for an agent, declined is not done); queries and `status` in `clients/wire/`'s shapes as structured content; a progress notification as each step begins.
+- **Questions:** a plan's `confirm` steps (the typed name before `down` on Hetzner) are asked up front, as MCP's multi-round-trip `inputRequired` form elicitations, answered in Claude Code's dialog by the operator and never seen by the model; the SDK's shim serves the same code to 2025-era clients. **Secrets are never asked:** a vault or sudo need stops the step and says how else to give it (`vault_password_file`, a cached sudo, a terminal).
+- **One change per server at a time** in the process (Claude calls tools in parallel); cancelling a call aborts the plan as Ctrl-C does.
+- `test/mcp.test.ts` drives it with the SDK's client, in memory in both protocol eras and spawned over stdio.
 
 ---
 
@@ -419,7 +430,7 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 
 kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude Code) in its `.claude/settings.json`:
 
-- **`scripts/agent/guard.sh`**, a PreToolUse hook on Bash, makes a command that changes something real **ask** the operator first, every time — or, in a mode that approves by itself (`auto`, `dontAsk`, `bypassPermissions`), **refuse** it, since an ask there goes through unseen; the agent stops and says so, and the operator runs the command or switches the session to Manual for it:
+- **`scripts/agent/guard.sh`**, a PreToolUse hook on Bash and on kayra's MCP tools (`mcp__kayra__*`), makes a command that changes something real **ask** the operator first, every time — or, in a mode that approves by itself (`auto`, `dontAsk`, `bypassPermissions`), **refuse** it, since an ask there goes through unseen; the agent stops and says so, and the operator runs the command or switches the session to Manual for it:
   - kayra changing a server that is not multipass (`up`, `provision`, `setup`, `deploy`, `apps`, `adopt`, `down`, `app purge|deploy|rollback`, `job`; not with `--dry-run`);
   - `ansible`/`ansible-playbook` against an inventory, and `ansible-vault` opening or writing a vault;
   - merging a PR, forge API writes, changing or deleting a repository, releases, `npm publish`;
@@ -427,6 +438,7 @@ kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude 
   - `tofu apply|destroy|import|state …`;
   - destructive commands over SSH.
   Building, testing, reading, `kayra verify|plan|validate|app check|app runs|app logs`, and pushing a feature branch run without asking.
+  An MCP tool is read from its JSON input, exactly: one that changes nothing (`mcp_reads`, held to the catalog's `reads` by `test/mcp.test.ts`) or `dryRun: true` passes; a change to a multipass server passes; any other asks. A fleet's hook matcher is `Bash|mcp__kayra__.*`, its `.mcp.json` names the server `kayra`, and editing `.mcp.json` asks.
 - **It fails closed** in kayra (`onFailure: block`); a fleet without its kayra installed lets only `npm ci` through until then: everything else asks, or is refused in a mode that approves by itself.
 - **Editing the guardrails asks too:** `.claude/**`, `scripts/agent/**`, `.github/CODEOWNERS`.
 - **It reads the command's text.** It stops mistakes and instructions smuggled in through a file, an issue or a web page, not an adversary: a script it does not read runs whatever it contains. Each case is in `ci/tests/guard/run.sh` (in the checks as `platform:guard`); a new guard gets a case.

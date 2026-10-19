@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# guard.sh — Claude Code's PreToolUse hook on Bash, in kayra and every fleet
+# guard.sh — Claude Code's PreToolUse hook on Bash and kayra's MCP tools, in kayra and every fleet
 # (.claude/settings.json): an AI agent may build, test and read freely, but a
 # command that changes something real waits for the operator to approve it,
 # in that moment.
@@ -21,6 +21,10 @@
 #   - git push of main or a tag, a force push, deleting a remote branch
 #   - tofu / terraform apply, destroy, import, state changes
 #   - destructive commands over SSH (rm, docker rm/stop/prune/down, systemctl…)
+# kayra's MCP tools (mcp__kayra__<tool>, the fleet's .mcp.json naming the
+# server kayra) the same way, read from their JSON input: a tool that changes
+# a server asks unless dryRun is set or the server is a multipass one; one
+# that changes nothing passes.
 # Anything else: no output, the normal permission flow.
 #
 # It reads the command's text, so it stops mistakes and instructions smuggled
@@ -30,8 +34,6 @@
 set -uo pipefail
 
 input="$(cat)"
-command="$(jq -r '.tool_input.command // empty' <<< "$input" 2>/dev/null)"
-[ -n "$command" ] || exit 0
 mode="$(jq -r '.permission_mode // empty' <<< "$input" 2>/dev/null)"
 project="${CLAUDE_PROJECT_DIR:-$PWD}"
 
@@ -44,6 +46,28 @@ ask() {
         '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $decision, permissionDecisionReason: $reason}}'
     exit 0
 }
+# The target a server's server.yml names, if the server is one of this project's.
+target_of() {
+    [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -f "${project}/servers/$1/server.yml" ] || return 0
+    sed -n 's/^target: *\([a-z]*\).*/\1/p' "${project}/servers/$1/server.yml"
+}
+
+# ── kayra's MCP tools ───────────────────────────────────────────────────────
+# The tools that change nothing (the catalog's effect "reads"; a test holds this list to it).
+mcp_reads='status|validate|verify|plan|doctor|version|app_check|app_runs|app_log|app_releases'
+tool="$(jq -r '.tool_name // empty' <<< "$input" 2>/dev/null)"
+if [[ "$tool" == mcp__kayra__* ]]; then
+    name="${tool#mcp__kayra__}"
+    [[ "$name" =~ ^(${mcp_reads})$ ]] && exit 0
+    [ "$(jq -r '.tool_input.dryRun // false' <<< "$input" 2>/dev/null)" = true ] && exit 0
+    server="$(jq -r '.tool_input.server // empty | strings' <<< "$input" 2>/dev/null)"
+    target="$(target_of "$server")"
+    [ "$target" = multipass ] || ask "kayra (MCP) ${name} changes ${server:-this machine}${target:+ (target ${target})}"
+    exit 0
+fi
+
+command="$(jq -r '.tool_input.command // empty' <<< "$input" 2>/dev/null)"
+[ -n "$command" ] || exit 0
 has() { grep -qE -- "$1" <<< "$command"; }
 
 # ── kayra changing a server ─────────────────────────────────────────────────
@@ -52,9 +76,7 @@ verbs='(up|provision|setup|deploy|apps|adopt|down|hosts|job|app (purge|deploy|ro
 if has "${kayra} +(--[a-z-]+ +)*${verbs}( |$)" && ! has '--dry-run'; then
     # The server: the word after the verb (after the app subcommand for app …).
     server="$(grep -oE -- "${kayra} +(--[a-z-]+ +)*${verbs} +[a-z0-9][a-z0-9-]*" <<< "$command" | head -1 | awk '{print $NF}')"
-    target=""
-    [ -z "$server" ] || [ ! -f "${project}/servers/${server}/server.yml" ] \
-        || target="$(sed -n 's/^target: *\([a-z]*\).*/\1/p' "${project}/servers/${server}/server.yml")"
+    target="$(target_of "$server")"
     [ "$target" = multipass ] || ask "kayra changes ${server:-a server}${target:+ (target ${target})}"
 fi
 # kayra serve runs any command on any server from a browser, where this guard sees none of them.

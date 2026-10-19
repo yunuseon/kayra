@@ -27,8 +27,12 @@ model {
   localProgram = tool 'Local program' {
     description 'A script or client on the operator machine, authenticated by the private discovery token'
   }
+  agent = tool 'Agent' {
+    description "An AI agent such as Claude Code, in the fleet; kayra's guard asks the operator before it changes a real server"
+    technology 'Claude Code'
+  }
   kayra = tool 'Local kayra' {
-    description 'One package pinned by the fleet, with a core and three clients on the operator machine'
+    description 'One package pinned by the fleet, with a core and four clients on the operator machine'
     technology 'TypeScript, Node 24'
 
     core = tool 'Core' {
@@ -46,6 +50,10 @@ model {
     api = tool 'Local API' {
       description 'The catalog, plans, queries, runs and terminal sessions at /api on 127.0.0.1; compatibility follows the pinned kayra version'
       technology 'HTTP, SSE or NDJSON, kayra serve --api'
+    }
+    mcp = tool 'MCP server' {
+      description 'Every operation as a tool, with progress and cancellation; no password passes through it'
+      technology 'MCP over stdio, kayra mcp'
     }
   }
 
@@ -101,6 +109,9 @@ model {
   kayra.ui -> kayra.api 'same-origin cookie: catalog operations and live events'
   localProgram -> kayra.api 'bearer token: /api operations and events'
   kayra.api -> kayra.core 'typed catalog invocations; streamed output, questions and session input'
+  operator -> agent 'asks; approves changes to real servers'
+  agent -> kayra.mcp 'tool calls over stdio; the typed name before destroying, from the operator'
+  kayra.mcp -> kayra.core 'typed catalog invocations; step progress, confirmations asked up front'
   kayra.core -> fleet 'reads and validates'
   kayra.core -> hetzner 'provisions (OpenTofu)'
   kayra.core -> platform 'sets up and operates (Ansible and SSH)'

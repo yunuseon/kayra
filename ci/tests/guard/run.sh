@@ -27,8 +27,10 @@ while IFS='|' read -r expect command; do
     for mode in default acceptEdits plan auto dontAsk bypassPermissions ""; do
         want="$expect"
         case "${expect}/${mode}" in ask/default|ask/acceptEdits|ask/plan) ;; ask/*) want=deny ;; esac
-        out="$(cd "$repo" && jq -n --arg c "$command" --arg m "$mode" \
-            '{tool_name: "Bash", tool_input: {command: $c}} + (if $m == "" then {} else {permission_mode: $m} end)' \
+        # An MCP case is the tool's name, then its input as JSON; any other is a Bash command.
+        if [[ "$command" == mcp__* ]]; then call="$(jq -n --arg t "${command%% *}" --argjson i "${command#* }" '{tool_name: $t, tool_input: $i}')"
+        else call="$(jq -n --arg c "$command" '{tool_name: "Bash", tool_input: {command: $c}}')"; fi
+        out="$(cd "$repo" && jq --arg m "$mode" '. + (if $m == "" then {} else {permission_mode: $m} end)' <<< "$call" \
             | CLAUDE_PROJECT_DIR="$project" bash "$guard")"
         got=pass
         [ -z "$out" ] || got="$(jq -r '.hookSpecificOutput.permissionDecision' <<< "$out")"
@@ -77,6 +79,27 @@ ask  | node -e "fetch('http://127.0.0.1:7700/api/operations/deploy', {method: 'P
 pass | curl http://127.0.0.1:7700/api/operations
 pass | node -e "fetch('http://127.0.0.1:7700/api/fleet')"
 pass | curl -X POST https://example.com/api/operations/deploy
+# The MCP tools of kayra: the same rules, read from their JSON input
+ask  | mcp__kayra__deploy {"server": "prod"}
+ask  | mcp__kayra__setup {"server": "prod", "dryRun": false}
+ask  | mcp__kayra__down {"server": "prod"}
+ask  | mcp__kayra__app_deploy {"server": "prod", "app": "shop"}
+ask  | mcp__kayra__ssh_exec {"server": "prod", "command": ["uptime"]}
+ask  | mcp__kayra__deploy {"server": "unknown-server"}
+ask  | mcp__kayra__deploy {"server": "../lab"}
+ask  | mcp__kayra__deploy {}
+ask  | mcp__kayra__certs {"domain": "shop.test"}
+ask  | mcp__kayra__something_new {"server": "prod"}
+pass | mcp__kayra__deploy {"server": "lab"}
+pass | mcp__kayra__down {"server": "lab"}
+pass | mcp__kayra__deploy {"server": "prod", "dryRun": true}
+pass | mcp__kayra__verify {"server": "prod"}
+pass | mcp__kayra__plan {"server": "prod"}
+pass | mcp__kayra__status {}
+pass | mcp__kayra__validate {}
+pass | mcp__kayra__app_runs {"server": "prod", "app": "shop"}
+pass | mcp__kayra__app_log {"server": "prod", "app": "shop"}
+pass | mcp__other__deploy {"server": "prod"}
 # Ansible and the vaults
 ask  | ansible-vault decrypt --output - servers/prod/secrets.yml
 ask  | ansible-vault view servers/prod/secrets.yml

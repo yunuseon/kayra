@@ -292,6 +292,11 @@ export const parser = (fleet: Fleet) => {
                 footer: footer(["kayra serve", "open it in the browser"], ["kayra serve --port 7700 --no-open", "for web/'s dev server"]),
               },
             ),
+            command("mcp", object({ name: constant("mcp") }), {
+              brief: message`An MCP server on stdin and stdout: every operation as a tool, for an agent such as Claude Code.`,
+              description: message`Started by the agent from the fleet's .mcp.json, not by hand. Runs the same plans as the command line, with the same guards; asks for no password, and has the operator type a server's name before destroying it.`,
+              footer: footer(["kayra mcp", "what the fleet's .mcp.json starts: {\"command\": \"kayra\", \"args\": [\"mcp\"]}"]),
+            }),
             command(
               "certs",
               object({

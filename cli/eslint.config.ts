@@ -66,8 +66,8 @@ export default defineConfig(
   {
     // The local server (the API, the browser side, serve.ts) works with Node's I/O objects too (requests, responses,
     // the abort controller that stops a run; Live and Served hold them): classes the rule cannot make readonly. Its inferred returns are those
-    // objects, or JSON on its way out (the wire's shapes): they are not checked.
-    files: ["src/clients/api/**/*.ts", "src/clients/ui/**/*.ts", "src/clients/wire/**/*.ts", "src/serve.ts"],
+    // objects, or JSON on its way out (the wire's shapes, MCP's results): they are not checked.
+    files: ["src/clients/api/**/*.ts", "src/clients/ui/**/*.ts", "src/clients/wire/**/*.ts", "src/clients/mcp/**/*.ts", "src/serve.ts"],
     rules: {
       "functional/prefer-immutable-types": [
         "error",
@@ -75,7 +75,7 @@ export default defineConfig(
           enforcement: "ReadonlyDeep",
           ignoreInferredTypes: true,
           ignoreClasses: true,
-          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "^URL$", "URLSearchParams", "^Live$", "^Served$"],
+          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "^URL$", "URLSearchParams", "^Live$", "^Served$", "^Operation$"],
         },
       ],
       "functional/type-declaration-immutability": [
@@ -101,10 +101,11 @@ export default defineConfig(
   ...(
     [
       ["src/core/**/*.ts", ["**/clients/**", "**/main.ts", "**/serve.ts"], true],
-      ["src/clients/cli/**/*.ts", ["**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/clients/api/**/*.ts", ["**/clients/cli/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/clients/wire/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/cli/**/*.ts", ["**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/api/**/*.ts", ["**/clients/cli/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/mcp/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/wire/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
       // The deployer's image installs no packages: of lib/, only what imports none.
       ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"], false],
       // lib/ is what any TypeScript project could use: it knows nothing of kayra.

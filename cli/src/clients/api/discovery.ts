@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
-import { err, ok } from "../../result.ts";
+import { err, ok } from "../../lib/result.ts";
 
 const entry = z.object({ url: z.string(), token: z.string(), pid: z.number().int().positive() });
 const alive = (pid: number) => {

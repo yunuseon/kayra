@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { textAt } from "../adapters/fs.ts";
 import type { FleetRoot } from "../fleet/brand.ts";
 import type { Facts, Secrets } from "./findings.ts";
-import { fields, isVaulted } from "../fleet/parse.ts";
+import { isVaulted } from "../fleet/parse.ts";
+import { fields } from "../../lib/yaml.ts";
 import type { Server } from "../fleet/model.ts";
 import { capture } from "../interpreter/process.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** YAML as validate reads it: what it cannot read holds no values. */
 const valuesOf = (text: string | undefined) => {

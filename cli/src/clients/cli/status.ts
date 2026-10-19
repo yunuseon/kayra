@@ -2,7 +2,7 @@ import { active, bad, ok as fine, type Line, link, muted, pointing, strong, warn
 import { fit, table } from "./text.ts";
 import type { Look, Machine, Pending, Reach } from "../../core/status/model.ts";
 import { authUrl } from "../../core/status/look.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A spinner as wide as most answers, so the columns hardly move when they come. */
 const waiting = (frame: string, width: number) => typed<Line>([active(frame), " ".repeat(width - 1)]);

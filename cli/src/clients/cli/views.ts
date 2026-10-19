@@ -6,7 +6,7 @@ import { duration } from "../../core/text/time.ts";
 import { parsed, releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
 import { count } from "../../core/text/plural.ts";
 import { milliseconds } from "../../core/fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
 const linesOf = (text: string) => (text === "" ? typed<readonly string[]>([]) : text.replace(/\n$/, "").split("\n"));

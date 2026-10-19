@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
+import { appNameSchema, domainSchema, repoPathSchema, repoUrlSchema, subdomainSchema } from "./brand.ts";
+import { serverTargets } from "./model.ts";
 
 /** The server kinds, each with its playbook; settings say which kinds read them. */
 export const serverKinds = ["platform", "edge", "nas"] as const;
@@ -189,31 +191,55 @@ export const defaultsSchema = z.strictObject(shape(settings.filter((each) => !ea
 // eslint-disable-next-line functional/prefer-immutable-types -- a Zod schema: immutable once built, but a class the rule cannot see into
 export const secretsSchema = (kind: ServerKind) => z.looseObject(shape(settingsFor(kind, true)));
 
-/** server.yml: topology only. */
-export const serverSchema = z.strictObject({
-  kind: z.enum(serverKinds).optional().describe("Which playbook: platform (default; Traefik, Authelia, the deployer, apps), edge or nas."),
-  target: z.enum(["hetzner", "multipass", "home"]).describe("Where it runs: hetzner, multipass (a local VM) or home (a machine nothing creates)."),
-  domain: z.string().describe("The server's domain; platform subdomains and the apps' hang off it."),
-  vault: z.boolean().optional().describe("secrets.yml is vault-encrypted (required outside multipass)."),
-  vault_password_file: z.string().optional().describe("The vault password file; without it, Ansible asks."),
-  apps: z
-    .array(
-      z.strictObject({
-        name: z.string(),
-        repo: z.string().describe("The app's repository, https://."),
-        ref: z.string().optional().describe("The branch to build and deploy (default main)."),
-        path: z.string().optional().describe("The app's root inside the repository (default .)."),
-      }),
-    )
-    .optional()
-    .describe("The apps this server runs (platform only)."),
-});
+/**
+ * A multipass server, a test machine by definition, may clone an app over
+ * plain HTTP too: the upgrade lab serves its fixture app that way.
+ */
+const schemes = (target: (typeof serverTargets)[number]) => typed<readonly string[]>(target === "multipass" ? ["https://", "http://"] : ["https://"]);
+
+/** server.yml: topology only. What it says is checked here, once: the parser, the editors' schema and the docs read it. */
+export const serverSchema = z
+  .strictObject({
+    kind: z
+      .enum(serverKinds, { error: (issue) => `kind must be ${serverKinds.join(", ")}, not '${String(issue.input)}'` })
+      .default("platform")
+      .describe("Which playbook: platform (default; Traefik, Authelia, the deployer, apps), edge or nas."),
+    target: z
+      .enum(serverTargets, { error: (issue) => `target must be ${serverTargets.join(", ")}, not '${String(issue.input)}'` })
+      .describe("Where it runs: hetzner, multipass (a local VM) or home (a machine nothing creates)."),
+    domain: domainSchema.describe("The server's domain; platform subdomains and the apps' hang off it."),
+    vault: z.boolean().default(false).describe("secrets.yml is vault-encrypted (required outside multipass)."),
+    vault_password_file: z.string().optional().describe("The vault password file; without it, Ansible asks."),
+    apps: z
+      .array(
+        z.strictObject({
+          name: appNameSchema,
+          repo: repoUrlSchema.describe("The app's repository, https://."),
+          ref: z.string().optional().describe("The branch to build and deploy (default main)."),
+          path: repoPathSchema.prefault(".").describe("The app's root inside the repository (default .)."),
+        }),
+      )
+      .default([])
+      .describe("The apps this server runs (platform only)."),
+  })
+  .superRefine((server, context) => {
+    if (server.kind !== "platform" && server.apps.length > 0)
+      context.addIssue({ code: "custom", path: ["apps"], message: "apps run on platform servers only" });
+    server.apps.forEach((app, index) => {
+      if (!schemes(server.target).some((scheme) => app.repo.startsWith(scheme)))
+        context.addIssue({
+          code: "custom",
+          path: ["apps", index, "repo"],
+          message: `repo must be an https:// URL${server.target === "multipass" ? " (or http:// on multipass)" : ""}`,
+        });
+    });
+  });
 
 /** app.yml, at the root of an app's repository: the app contract. */
 export const appManifestSchema = z.strictObject({
-  name: z.string().describe("The app's name, as in the server.yml entry."),
+  name: appNameSchema.describe("The app's name, as in the server.yml entry."),
   compose: z.array(z.string()).describe("Compose files, relative to the app root, in order."),
-  subdomains: z.array(z.string()).describe("Hostnames the app claims: <sub>.<domain>."),
+  subdomains: z.array(subdomainSchema).describe("Hostnames the app claims: <sub>.<domain>."),
   secrets: z.array(z.string()).optional().describe("Secret keys; their values come from the fleet's apps/<app>.secrets.yml."),
   config: z.array(z.string()).optional().describe("Config keys; their values come from the fleet's apps/<app>.yml."),
 });

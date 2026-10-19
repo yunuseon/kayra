@@ -17,10 +17,10 @@ import type { Fleet, Server } from "../fleet/model.ts";
 import { gather } from "../validation/facts.ts";
 import type { Io } from "../interpreter/io.ts";
 import type { Plan } from "../plan/model.ts";
-import { all, err, flatMap, map, ok, type Result } from "../../result.ts";
+import { all, err, flatMap, map, ok, type Result } from "../../lib/result.ts";
 import { operations, type InputOf, type Invocation, type PlanName, type QueryName, type SessionName, type StreamName } from "./catalog.ts";
 import { textAt } from "../adapters/fs.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 import { resolve as substitute, spawned } from "../interpreter/process.ts";
 
 /** What the core runs an operation with: the engine, the fleet, and the world as the client's machine sees it. */

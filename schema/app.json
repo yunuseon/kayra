@@ -3,8 +3,9 @@
   "type": "object",
   "properties": {
     "name": {
+      "description": "The app's name, as in the server.yml entry.",
       "type": "string",
-      "description": "The app's name, as in the server.yml entry."
+      "pattern": "^[a-z][a-z0-9-]*$"
     },
     "compose": {
       "type": "array",
@@ -16,7 +17,8 @@
     "subdomains": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
       },
       "description": "Hostnames the app claims: <sub>.<domain>."
     },

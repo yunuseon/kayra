@@ -1,6 +1,6 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { all, err, flatMap, map, ok } from "../src/result.ts";
+import { all, err, flatMap, map, ok } from "../src/lib/result.ts";
 
 test("map and flatMap pass errors through untouched", () => {
   deepStrictEqual(map(ok(2), (n) => n * 2), ok(4));

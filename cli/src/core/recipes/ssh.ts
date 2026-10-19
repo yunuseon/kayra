@@ -1,7 +1,7 @@
 import type { Inventory, Server } from "../fleet/model.ts";
 import { run, type Argv, type Plan } from "../plan/model.ts";
-import { err, map, ok } from "../../result.ts";
-import { typed } from "../../typed.ts";
+import { err, map, ok } from "../../lib/result.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** ssh to a server as its inventory says, its host key trusted as `hostKeys` say. */
 export const sshArgv = (inventory: Inventory, hostKeys: readonly string[], remote: readonly string[]) => typed<Argv>([

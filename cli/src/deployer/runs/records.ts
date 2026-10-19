@@ -1,7 +1,7 @@
 import type { Why } from "./queue.ts";
 import { runId, sha, type RunId, type Sha } from "../brand.ts";
 import { field } from "../app.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A release record's name: releases/<app>/<UTC time>-<sha>.env. registry-gc.sh reads the same files. */
 export const releaseName = (at: Date, commit: Sha) =>

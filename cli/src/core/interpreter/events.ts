@@ -6,7 +6,7 @@ import { parts, position, type Ended, type Progress, type StopReason } from "./p
 import { count } from "../text/plural.ts";
 import type { Server } from "../fleet/model.ts";
 import { milliseconds, type KayraVersion, type Milliseconds } from "../fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** The invocation, as the heading and the footer name it. */
 export type Heading = {

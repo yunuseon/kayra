@@ -1,6 +1,6 @@
 import type { AppName } from "../brand.ts";
 import type { Release, RunMeta, RunState } from "../runs/records.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /**
  * What `ctl … --json` answers, for kayra on the operator's machine to draw:

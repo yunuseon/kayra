@@ -1,10 +1,10 @@
 import type { IncomingHttpHeaders } from "node:http";
-import type { Result } from "../../result.ts";
+import type { Result } from "../../lib/result.ts";
 import type { Sha } from "../brand.ts";
 import { forgejo } from "./forgejo.ts";
 import { github } from "./github.ts";
 import { gitlab } from "./gitlab.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 export type State = "pending" | "success" | "failure" | "error";
 export type Context = "kayra/build" | "kayra/deploy";

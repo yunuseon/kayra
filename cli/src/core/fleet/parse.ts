@@ -1,68 +1,52 @@
-import { parseDocument } from "yaml";
-import { absolutePath, appName, domain, host, sshDefaultPort, keyFile, port, remotePath, repoPath, repoUrl, sshUser, vaultPasswordFile, type Domain } from "./brand.ts";
-import { all, err, map, ok, type Result } from "../../result.ts";
-import { serverKinds, serverSchema, varsSchema } from "./settings.ts";
-import { checkSettings, checkShape, knownSettings } from "./shape.ts";
-import { serverTargets, type App, type Inventory, type Server, type ServerFiles, type ServerTarget, type Vault } from "./model.ts";
-import { typed } from "../../typed.ts";
-
-type Fields = Readonly<Record<string, unknown>>;
-
-export const mapping = (value: unknown) =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? typed<Fields>(Object.fromEntries(Object.entries(value))) : undefined;
-
-/** YAML text as a value; a syntax error is a value too, not an exception. */
-export const yamlOf = (text: string) => {
-  const document = parseDocument(text);
-  const problem = document.errors.at(0);
-  return problem === undefined ? ok<unknown>(document.toJS()) : err(`is not valid YAML: ${problem.message.split("\n")[0] ?? ""}`);
-};
-
-/** YAML text as a mapping; empty for an empty file. */
-export const fields = (text: string) => {
-  const parsed = yamlOf(text);
-  if (!parsed.ok) return parsed;
-  const value = parsed.value;
-  if (value === null || value === undefined) return ok<Fields>({});
-  const result = mapping(value);
-  return result === undefined ? err("is not a YAML mapping") : ok<Fields>(result);
-};
+import type { z } from "zod";
+import { absolutePath, host, sshDefaultPort, keyFile, port, remotePath, sshUser, vaultPasswordFile, type Domain } from "./brand.ts";
+import { err, map, ok, type Result } from "../../lib/result.ts";
+import { serverSchema, varsSchema } from "./settings.ts";
+import { checkSettings, knownSettings } from "./shape.ts";
+import type { App, Inventory, Server, ServerFiles, Vault } from "./model.ts";
+import { typed } from "../../lib/typed.ts";
+import { fields, mapping, type Fields } from "../../lib/yaml.ts";
 
 export const isVaulted = (text: string) => text.startsWith("$ANSIBLE_VAULT");
 
-const oneOf = <T extends string>(allowed: readonly T[], value: unknown, field: string) => {
-  const match = allowed.find((candidate) => candidate === value);
-  return match === undefined
-    ? err(`${field} must be ${allowed.join(", ")}, not '${String(value)}'`)
-    : ok<T>(match);
+const vault = (descriptor: z.output<typeof serverSchema>) => {
+  const file = descriptor.vault_password_file;
+  if (!descriptor.vault) return ok<Vault>({ kind: "none" });
+  if (file === undefined) return ok<Vault>({ kind: "ask" });
+  return map(absolutePath(file), (path) => typed<Vault>({ kind: "file", file: vaultPasswordFile(path) }));
 };
 
-const vault = (descriptor: Fields) => {
-  const file = descriptor["vault_password_file"];
-  if (descriptor["vault"] !== true) return ok<Vault>({ kind: "none" });
-  if (file === undefined) return ok<Vault>({ kind: "ask" });
-  return typeof file === "string"
-    ? map(absolutePath(file), (path) => typed<Vault>({ kind: "file", file: vaultPasswordFile(path) }))
-    : err("vault_password_file must be a path");
+/** What Zod's expected types are called in a fleet's YAML. */
+const expected: Readonly<Record<string, string>> = { string: "a string", boolean: "true or false", array: "a list", object: "a mapping" };
+
+/** What the file says at a path Zod reports: Zod's issues leave the input out. */
+const written = (value: unknown, path: readonly PropertyKey[]): unknown => {
+  // Recursive: a path one key at a time.
+  const [key, ...rest] = path;
+  if (key === undefined) return value;
+  const next: unknown = Array.isArray(value) && typeof key === "number" ? value[key] : mapping(value)?.[String(key)];
+  return written(next, rest);
 };
 
 /**
- * Apps live in their own repo: the builder clones it over HTTPS, and the app
- * root stays inside it. A multipass server, a test machine by definition, may
- * clone over plain HTTP too: the upgrade lab serves its fixture app that way.
+ * The first thing wrong with server.yml, said as the operator wrote it: an
+ * app by its name, a missing key as required. The schema's own messages are
+ * whole sentences already.
  */
-const app = (target: ServerTarget) => (value: unknown) => {
-  const entry = mapping(value);
-  if (entry === undefined) return err("an app must be a mapping");
-  const name = typeof entry["name"] === "string" ? appName(entry["name"]) : err("an app needs a name");
-  if (!name.ok) return name;
-  const declared = entry["repo"];
-  const repo = typeof declared === "string" ? repoUrl(declared, target === "multipass" ? ["https://", "http://"] : ["https://"]) : undefined;
-  if (repo?.ok !== true) return err(`app ${name.value}: repo must be an https:// URL${target === "multipass" ? " (or http:// on multipass)" : ""}`);
-  const within = entry["path"] ?? ".";
-  const path = typeof within === "string" ? repoPath(within) : undefined;
-  if (path?.ok !== true) return err(`app ${name.value}: path must stay inside its repo`);
-  return ok<App>({ name: name.value, repo: repo.value, path: path.value, entry });
+const serverProblem = (error: z.ZodError, descriptor: Fields) => {
+  const issue = error.issues.at(0);
+  if (issue === undefined) return "server.yml is invalid";
+  const [first, index] = issue.path;
+  const name = index === undefined ? undefined : written(descriptor, ["apps", index, "name"]);
+  const app = first === "apps" && typeof index === "number" ? `app ${typeof name === "string" ? name : `#${String(index + 1)}`}: ` : "";
+  const key = String(issue.path.at(-1) ?? "");
+  if (issue.code === "unrecognized_keys") {
+    const where = issue.path.length === 0 ? "" : ` (in ${issue.path.join(".")})`;
+    return `server.yml: '${issue.keys.at(0) ?? ""}' is not a key it knows${where}`;
+  }
+  if (issue.code === "invalid_type")
+    return `${app}${key} ${written(descriptor, issue.path) === undefined ? "is required" : `must be ${expected[issue.expected] ?? issue.expected}`}`;
+  return `${app}${issue.message}`;
 };
 
 const inventoryField = (inventory: string, key: string) =>
@@ -113,58 +97,49 @@ const appValuesProblem = (
 export const parseServer = (files: ServerFiles) => {
   const descriptor = fields(files.descriptor);
   if (!descriptor.ok) return descriptor;
-  const kind = oneOf(serverKinds, descriptor.value["kind"] ?? "platform", "kind");
-  if (!kind.ok) return kind;
-  const target = oneOf(serverTargets, descriptor.value["target"], "target");
-  if (!target.ok) return target;
-  const declared = descriptor.value["domain"];
-  const serverDomain = typeof declared === "string" ? domain(declared) : err("domain is required");
-  if (!serverDomain.ok) return serverDomain;
-  const serverVault = vault(descriptor.value);
+  const parsed = serverSchema.safeParse(descriptor.value);
+  if (!parsed.success) return err(serverProblem(parsed.error, descriptor.value));
+  const { kind, target, domain, apps } = parsed.data;
+  const serverVault = vault(parsed.data);
   if (!serverVault.ok) return serverVault;
-  const declaredApps: unknown = descriptor.value["apps"] ?? [];
-  if (!Array.isArray(declaredApps)) return err("apps must be a list");
-  if (kind.value !== "platform" && declaredApps.length > 0) return err("apps run on platform servers only");
-  const apps = all(declaredApps.map(app(target.value)));
-  if (!apps.ok) return apps;
-  const shape = checkShape("server.yml", descriptor.value, serverSchema);
-  if (!shape.ok) return shape;
-  if (target.value === "home" && files.inventory === undefined)
+  if (target === "home" && files.inventory === undefined)
     return err("target home needs a hand-written inventory.ini next to it");
-  if (target.value !== "home" && !files.hasTerraform) return err("no terraform/ next to it");
+  if (target !== "home" && !files.hasTerraform) return err("no terraform/ next to it");
   if (files.vars === undefined) return err("no vars.yml next to it");
   if (files.secrets === undefined) return err("no secrets.yml next to it");
   if (isVaulted(files.vars)) return err("vars.yml is vault-encrypted; it holds settings only — secrets go in secrets.yml");
-  if (target.value !== "multipass" && serverVault.value.kind === "none")
-    return err(`target ${target.value} requires vault: true`);
-  if (target.value !== "multipass" && !isVaulted(files.secrets))
-    return err(`target ${target.value} requires a vault-encrypted secrets.yml`);
-  const appValues = appValuesProblem(files.appValues, target.value !== "multipass");
+  if (target !== "multipass" && serverVault.value.kind === "none")
+    return err(`target ${target} requires vault: true`);
+  if (target !== "multipass" && !isVaulted(files.secrets))
+    return err(`target ${target} requires a vault-encrypted secrets.yml`);
+  const appValues = appValuesProblem(files.appValues, target !== "multipass");
   if (appValues !== undefined) return err(appValues);
   const vars = fields(files.vars);
   if (!vars.ok) return err(`vars.yml ${vars.error}`);
-  const varsChecked = checkSettings("vars.yml", vars.value, varsSchema(kind.value), knownSettings(kind.value));
+  const varsChecked = checkSettings("vars.yml", vars.value, varsSchema(kind), knownSettings(kind));
   if (!varsChecked.ok) return varsChecked;
   const backup = mapping(vars.value["restic_backup"])?.["dir"];
   const backupDir = typeof backup === "string" ? remotePath(backup) : ok(undefined);
   if (!backupDir.ok) return err(`vars.yml: restic_backup.dir ${backupDir.error}`);
   const inventory = files.inventory === undefined ? ok(undefined) : inventoryOf(files.inventory);
   if (!inventory.ok) return inventory;
+  const declared: unknown = descriptor.value["apps"];
+  const entries = Array.isArray(declared) ? declared : [];
   return ok<Server>({
     name: files.name,
     dir: files.dir,
-    kind: kind.value,
-    target: target.value,
-    domain: serverDomain.value,
+    kind,
+    target,
+    domain,
     vault: serverVault.value,
     hasVaultedSecrets: isVaulted(files.secrets),
-    apps: apps.value,
+    apps: apps.map((app, index) => typed<App>({ name: app.name, repo: app.repo, path: app.path, entry: mapping(entries[index]) ?? {} })),
     hasTerraform: files.hasTerraform,
-    buildsVm: target.value === "home" && vars.value["vm"] !== undefined,
+    buildsVm: target === "home" && vars.value["vm"] !== undefined,
     usesAcmeDns: typeof vars.value["acme_dns"] === "string" && vars.value["acme_dns"] !== "",
     inventory: inventory.value,
     backupDir: backupDir.value,
-    stackHosts: stackHosts(files.stacks.flatMap((stack) => Object.freeze(stack.compose ?? [])), serverDomain.value),
+    stackHosts: stackHosts(files.stacks.flatMap((stack) => Object.freeze(stack.compose ?? [])), domain),
     vars: vars.value,
     files: { vars: files.vars, secrets: files.secrets, stacks: files.stacks.map((stack) => stack.name), appValues: files.appValues },
   });

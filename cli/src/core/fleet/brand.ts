@@ -1,15 +1,32 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
-import { err, ok } from "../../result.ts";
+import { z } from "zod";
+import { branded, type Brand } from "../../lib/brand.ts";
+import { err, ok } from "../../lib/result.ts";
+import { minting } from "../../lib/schema.ts";
 
-declare const brands: unique symbol;
-/** A T that only the matching constructor below can produce. */
-export type Brand<T, B extends string> = T & { readonly [brands]: Readonly<Record<B, true>> };
+/** A string matching `regex`: brand it, and it is the schema the fleet's files are parsed with and the constructor everything else mints with. */
+// eslint-disable-next-line functional/prefer-immutable-types -- a RegExp, and a Zod schema: immutable once built, but classes the rule cannot see into
+const pattern = (regex: RegExp, what: string) => z.string().regex(regex, { error: (issue) => `'${String(issue.input)}' is not ${what}` });
 
-export type ServerName = Brand<string, "ServerName">;
-export type AppName = Brand<string, "AppName">;
-export type Subdomain = Brand<string, "Subdomain">;
-export type Domain = Brand<string, "Domain">;
+export const serverNameSchema = pattern(/^[a-z0-9][a-z0-9-]*$/, "a server name (lowercase letters, digits, dashes)").transform(branded<"ServerName">());
+export const appNameSchema = pattern(/^[a-z][a-z0-9-]*$/, "an app name (lowercase letters, digits, dashes)").transform(branded<"AppName">());
+export const subdomainSchema = pattern(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "a subdomain").transform(branded<"Subdomain">());
+export const domainSchema = pattern(/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/, "a domain").transform(branded<"Domain">());
+/** A path inside a repository, never above it. */
+export const repoPathSchema = z
+  .string()
+  .refine((value) => !`/${value}/`.includes("/../"), { error: "path must stay inside its repo" })
+  .transform(branded<"RepoPath">());
+/** Where an app's repository is cloned from: which schemes, the server's target says. */
+export const repoUrlSchema = z.string().transform(branded<"RepoUrl">());
+
+export type ServerName = z.output<typeof serverNameSchema>;
+export type AppName = z.output<typeof appNameSchema>;
+export type Subdomain = z.output<typeof subdomainSchema>;
+export type Domain = z.output<typeof domainSchema>;
+export type RepoPath = z.output<typeof repoPathSchema>;
+export type RepoUrl = z.output<typeof repoUrlSchema>;
 export type AbsolutePath = Brand<string, "AbsolutePath">;
 /** The engine: a kayra checkout, or the package a fleet installed. */
 export type KayraRoot = Brand<AbsolutePath, "KayraRoot">;
@@ -24,10 +41,6 @@ export type Port = Brand<string, "Port">;
 export type SshUser = Brand<string, "SshUser">;
 /** An ssh private key, as the inventory names it. */
 export type KeyFile = Brand<string, "KeyFile">;
-/** Where an app's repository is cloned from. */
-export type RepoUrl = Brand<string, "RepoUrl">;
-/** A path inside a repository, never above it. */
-export type RepoPath = Brand<string, "RepoPath">;
 /** A path on a server. */
 export type RemotePath = Brand<string, "RemotePath">;
 export type Milliseconds = Brand<number, "Milliseconds">;
@@ -36,23 +49,11 @@ export type ExitCode = Brand<number, "ExitCode">;
 /** Which kayra runs: its package's version. */
 export type KayraVersion = Brand<string, "KayraVersion">;
 
-export const serverName = (value: string) =>
-  /^[a-z0-9][a-z0-9-]*$/.test(value)
-    ? ok<ServerName>(value as ServerName)
-    : err(`'${value}' is not a server name (lowercase letters, digits, dashes)`);
-
-export const appName = (value: string) =>
-  /^[a-z][a-z0-9-]*$/.test(value)
-    ? ok<AppName>(value as AppName)
-    : err(`'${value}' is not an app name (lowercase letters, digits, dashes)`);
-
-export const subdomain = (value: string) =>
-  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(value) ? ok<Subdomain>(value as Subdomain) : err(`'${value}' is not a subdomain`);
-
-export const domain = (value: string) =>
-  /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/.test(value)
-    ? ok<Domain>(value as Domain)
-    : err(`'${value}' is not a domain`);
+export const serverName = minting(serverNameSchema);
+export const appName = minting(appNameSchema);
+export const subdomain = minting(subdomainSchema);
+export const domain = minting(domainSchema);
+export const repoPath = minting(repoPathSchema);
 
 /** `~/…` is the operator's home, as Ansible reads it in vault_password_file. */
 export const absolutePath = (value: string) => {
@@ -90,13 +91,6 @@ export const sshDefaultPort = "22" as Port;
 
 export const port = (value: string) =>
   /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? ok<Port>(value as Port) : err(`'${value}' is not a port`);
-
-/** HTTPS, or also plain HTTP where `schemes` allow it (a multipass server, a test machine by definition). */
-export const repoUrl = (value: string, schemes: readonly string[]) =>
-  schemes.some((scheme) => value.startsWith(scheme)) ? ok<RepoUrl>(value as RepoUrl) : err(`'${value}' is not a ${schemes.join(" or ")} URL`);
-
-export const repoPath = (value: string) =>
-  `/${value}/`.includes("/../") ? err(`'${value}' leaves its repository`) : ok<RepoPath>(value as RepoPath);
 
 export const remotePath = (value: string) =>
   value.startsWith("/") ? ok<RemotePath>(value as RemotePath) : err(`'${value}' is not an absolute path`);

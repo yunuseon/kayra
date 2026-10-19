@@ -3,6 +3,7 @@
   "type": "object",
   "properties": {
     "kind": {
+      "default": "platform",
       "description": "Which playbook: platform (default; Traefik, Authelia, the deployer, apps), edge or nas.",
       "type": "string",
       "enum": [
@@ -14,17 +15,19 @@
     "target": {
       "type": "string",
       "enum": [
-        "hetzner",
         "multipass",
+        "hetzner",
         "home"
       ],
       "description": "Where it runs: hetzner, multipass (a local VM) or home (a machine nothing creates)."
     },
     "domain": {
+      "description": "The server's domain; platform subdomains and the apps' hang off it.",
       "type": "string",
-      "description": "The server's domain; platform subdomains and the apps' hang off it."
+      "pattern": "^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z][a-z0-9-]*$"
     },
     "vault": {
+      "default": false,
       "description": "secrets.yml is vault-encrypted (required outside multipass).",
       "type": "boolean"
     },
@@ -39,11 +42,12 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
           },
           "repo": {
-            "type": "string",
-            "description": "The app's repository, https://."
+            "description": "The app's repository, https://.",
+            "type": "string"
           },
           "ref": {
             "description": "The branch to build and deploy (default main).",
@@ -51,6 +55,7 @@
           },
           "path": {
             "description": "The app's root inside the repository (default .).",
+            "default": ".",
             "type": "string"
           }
         },

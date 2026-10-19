@@ -1,6 +1,6 @@
 import { parseDocument } from "yaml";
-import { absolutePath, appName, domain, vaultPasswordFile, type Domain } from "./brand.ts";
-import { all, err, map, ok, type Result } from "../../result.ts";
+import { absolutePath, appName, domain, host, sshDefaultPort, keyFile, port, remotePath, repoPath, repoUrl, sshUser, vaultPasswordFile, type Domain } from "./brand.ts";
+import { all, err, map, mapError, ok, type Result } from "../../result.ts";
 import { serverKinds, serverSchema, varsSchema } from "./settings.ts";
 import { checkSettings, checkShape, knownSettings } from "./shape.ts";
 import { serverTargets, type App, type Inventory, type Server, type ServerFiles, type ServerTarget, type Vault } from "./model.ts";
@@ -55,25 +55,36 @@ const app = (target: ServerTarget) => (value: unknown): Result<App, string> => {
   if (entry === undefined) return err("an app must be a mapping");
   const name = typeof entry["name"] === "string" ? appName(entry["name"]) : err("an app needs a name");
   if (!name.ok) return name;
-  const repo = entry["repo"];
-  const schemes = target === "multipass" ? ["https://", "http://"] : ["https://"];
-  if (typeof repo !== "string" || !schemes.some((scheme) => repo.startsWith(scheme)))
-    return err(`app ${name.value}: repo must be an https:// URL${target === "multipass" ? " (or http:// on multipass)" : ""}`);
-  const path = entry["path"] ?? ".";
-  if (typeof path !== "string" || `/${path}/`.includes("/../"))
-    return err(`app ${name.value}: path must stay inside its repo`);
-  return ok({ name: name.value, repo, path, entry });
+  const declared = entry["repo"];
+  const repo = typeof declared === "string" ? repoUrl(declared, target === "multipass" ? ["https://", "http://"] : ["https://"]) : undefined;
+  if (repo?.ok !== true) return err(`app ${name.value}: repo must be an https:// URL${target === "multipass" ? " (or http:// on multipass)" : ""}`);
+  const within = entry["path"] ?? ".";
+  const path = typeof within === "string" ? repoPath(within) : undefined;
+  if (path?.ok !== true) return err(`app ${name.value}: path must stay inside its repo`);
+  return ok({ name: name.value, repo: repo.value, path: path.value, entry });
 };
 
 const inventoryField = (inventory: string, key: string): string =>
   new RegExp(`${key}=([^ \\n]*)`).exec(inventory)?.[1] ?? "";
 
-const inventoryOf = (text: string): Inventory => ({
-  host: inventoryField(text, "ansible_host"),
-  port: inventoryField(text, "ansible_port") || "22",
-  user: inventoryField(text, "ansible_user"),
-  key: inventoryField(text, "ansible_ssh_private_key_file"),
-});
+/** A field the inventory may leave out: undefined where it does. */
+const optional = <T>(value: string, mint: (value: string) => Result<T, string>): Result<T | undefined, string> =>
+  value === "" ? ok(undefined) : mint(value);
+
+const inventoryOf = (text: string): Result<Inventory, string> => {
+  const fields = [
+    optional(inventoryField(text, "ansible_host"), host),
+    port(inventoryField(text, "ansible_port") || sshDefaultPort),
+    optional(inventoryField(text, "ansible_user"), sshUser),
+    optional(inventoryField(text, "ansible_ssh_private_key_file"), keyFile),
+  ] as const;
+  const [address, sshPort, user, key] = fields;
+  if (!address.ok) return mapError(address, (why) => `inventory.ini: ansible_host ${why}`);
+  if (!sshPort.ok) return mapError(sshPort, (why) => `inventory.ini: ansible_port ${why}`);
+  if (!user.ok) return mapError(user, (why) => `inventory.ini: ansible_user ${why}`);
+  if (!key.ok) return mapError(key, (why) => `inventory.ini: ansible_ssh_private_key_file ${why}`);
+  return ok({ host: address.value, port: sshPort.value, user: user.value, key: key.value });
+};
 
 const stackHosts = (stacks: readonly string[], serverDomain: Domain): readonly string[] =>
   stacks
@@ -133,7 +144,11 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
   if (!vars.ok) return err(`vars.yml ${vars.error}`);
   const varsChecked = checkSettings("vars.yml", vars.value, varsSchema(kind.value), knownSettings(kind.value));
   if (!varsChecked.ok) return varsChecked;
-  const backupDir = mapping(vars.value["restic_backup"])?.["dir"];
+  const backup = mapping(vars.value["restic_backup"])?.["dir"];
+  const backupDir = typeof backup === "string" ? remotePath(backup) : ok(undefined);
+  if (!backupDir.ok) return err(`vars.yml: restic_backup.dir ${backupDir.error}`);
+  const inventory = files.inventory === undefined ? ok(undefined) : inventoryOf(files.inventory);
+  if (!inventory.ok) return inventory;
   return ok({
     name: files.name,
     dir: files.dir,
@@ -146,8 +161,8 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
     hasTerraform: files.hasTerraform,
     buildsVm: target.value === "home" && vars.value["vm"] !== undefined,
     usesAcmeDns: typeof vars.value["acme_dns"] === "string" && vars.value["acme_dns"] !== "",
-    inventory: files.inventory === undefined ? undefined : inventoryOf(files.inventory),
-    backupDir: typeof backupDir === "string" ? backupDir : undefined,
+    inventory: inventory.value,
+    backupDir: backupDir.value,
     stackHosts: stackHosts(files.stacks.flatMap((stack) => stack.compose ?? []), serverDomain.value),
     vars: vars.value,
     files: { vars: files.vars, secrets: files.secrets, stacks: files.stacks.map((stack) => stack.name), appValues: files.appValues },

@@ -1,4 +1,4 @@
-import type { AppName, Domain, FleetRoot, ServerDir, ServerName, VaultPasswordFile } from "./brand.ts";
+import type { AppName, Domain, FleetRoot, Host, KeyFile, Port, RemotePath, RepoPath, RepoUrl, ServerDir, ServerName, SshUser, VaultPasswordFile } from "./brand.ts";
 import type { ServerKind } from "./settings.ts";
 
 export const serverTargets = ["multipass", "hetzner", "home"] as const;
@@ -12,15 +12,15 @@ export type Vault =
 
 export type App = {
   readonly name: AppName;
-  readonly repo: string;
+  readonly repo: RepoUrl;
   /** Where in its repository the app lives. */
-  readonly path: string;
+  readonly path: RepoPath;
   /** The server.yml entry as written: the app playbook takes it whole. */
   readonly entry: Readonly<Record<string, unknown>>;
 };
 
 /** How to reach a server, as its inventory.ini says. */
-export type Inventory = { readonly host: string; readonly port: string; readonly user: string; readonly key: string };
+export type Inventory = { readonly host: Host | undefined; readonly port: Port; readonly user: SshUser | undefined; readonly key: KeyFile | undefined };
 
 export type Server = {
   readonly name: ServerName;
@@ -40,7 +40,7 @@ export type Server = {
   readonly usesAcmeDns: boolean;
   readonly inventory: Inventory | undefined;
   /** vars.yml's restic_backup.dir, where the backup stack runs. */
-  readonly backupDir: string | undefined;
+  readonly backupDir: RemotePath | undefined;
   /** What the server's own stacks route (their Traefik Host rules), relative to its domain where under it. */
   readonly stackHosts: readonly string[];
   /** vars.yml, parsed. */

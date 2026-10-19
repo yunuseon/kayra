@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { z } from "zod";
-import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName, type KayraRoot } from "../fleet/brand.ts";
+import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName, type KayraRoot, type KayraVersion } from "../fleet/brand.ts";
 import { appCheck } from "../recipes/app-check.ts";
 import { doctor } from "../recipes/doctor.ts";
 import { appPurge, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
@@ -27,7 +27,7 @@ import { textAt } from "../adapters/fs.ts";
 export type Context = {
   readonly engine: Engine;
   readonly fleet: Fleet;
-  readonly version: string;
+  readonly version: KayraVersion;
   /** Where a relative path starts: the directory kayra was started in. */
   readonly here: AbsolutePath;
   /** A file's text, or undefined where there is none. */
@@ -149,7 +149,7 @@ export const planOf = <N extends RecipeName>(ctx: Context, call: { readonly name
 export const hasPlan = (call: Invocation): call is RecipeCall => Object.hasOwn(plans, call.name);
 
 /** What each query answers. */
-export type Answers = { readonly validate: readonly Report[]; readonly version: string; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
+export type Answers = { readonly validate: readonly Report[]; readonly version: KayraVersion; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
 
 type Queries = { readonly [N in QueryName]: (ctx: Context, input: InputOf<N>) => Promise<Result<Answers[N], string>> };
 

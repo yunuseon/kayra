@@ -3,7 +3,7 @@ import { run } from "@optique/run";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { absolutePath, fleetRoot, kayraRoot, within } from "./core/fleet/brand.ts";
+import { absolutePath, fleetRoot, kayraRoot, kayraVersion, within } from "./core/fleet/brand.ts";
 import { questions } from "./clients/cli/questions.ts";
 import { fromCommand } from "./clients/cli/invocation.ts";
 import { parser, runOptions } from "./clients/cli/parser.ts";
@@ -43,7 +43,9 @@ const here = absolutePath(process.cwd());
 const engine = absolutePath(import.meta.dirname);
 if (!here.ok || !engine.ok) throw new Error("node reported a relative path");
 const kayra = kayraRoot(within(engine.value, "..", ".."));
-const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(kayra, "package.json"), "utf8"))).version;
+const declared = kayraVersion(z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(kayra, "package.json"), "utf8"))).version);
+if (!declared.ok) throw new Error(`kayra's package.json: version ${declared.error}`);
+const version = declared.value;
 
 const screens = { out: screen(process.stdout, process.env), err: screen(process.stderr, process.env) };
 

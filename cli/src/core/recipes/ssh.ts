@@ -8,9 +8,9 @@ export const sshArgv = (inventory: Inventory, hostKeys: readonly string[], remot
   "-p",
   inventory.port,
   "-i",
-  inventory.key,
+  inventory.key ?? "",
   ...hostKeys,
-  `${inventory.user}@${inventory.host}`,
+  `${inventory.user ?? ""}@${inventory.host ?? ""}`,
   ...remote,
 ];
 

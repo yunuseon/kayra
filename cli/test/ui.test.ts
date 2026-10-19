@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { appName, serverName } from "../src/core/fleet/brand.ts";
+import { appName, milliseconds, serverName } from "../src/core/fleet/brand.ts";
 import { interpret } from "../src/core/interpreter/loop.ts";
 import { needsTerminal, partOf, run, type Plan } from "../src/core/plan/model.ts";
 import { explain } from "../src/clients/cli/explain.ts";
@@ -27,7 +27,7 @@ const deploy: Plan = [
 const invocation: Heading = { command: "kayra deploy box", server: "box", about: ["platform on home", "box.test"] };
 
 test("durations read as much as is worth reading", () => {
-  deepStrictEqual([40, 9_960, 12_400, 123_000, 3_840_000].map(duration), ["0.0s", "9.9s", "12s", "2m03s", "1h04m"]);
+  deepStrictEqual([40, 9_960, 12_400, 123_000, 3_840_000].map((ms) => duration(milliseconds(ms))), ["0.0s", "9.9s", "12s", "2m03s", "1h04m"]);
 });
 
 test("a line spread over the columns, cut to fit, words wrapped", () => {
@@ -123,18 +123,18 @@ test("a step opens a part only in a plan of several", () => {
 test("the footer: how it went, and for a failed part the command that reruns it alone", () => {
   const verify = deploy[3];
   if (verify === undefined) throw new Error("no verify step");
-  deepStrictEqual(footer(invocation, deploy, { failures: 0 }, 2_000).map(flat), ["✓ kayra deploy box · 4 steps · 2.0s"]);
-  deepStrictEqual(footer(invocation, deploy, { failures: 1, stop: { index: 3, step: verify, why: "failed" } }, 65_000).map(flat), [
+  deepStrictEqual(footer(invocation, deploy, { failures: 0 }, milliseconds(2_000)).map(flat), ["✓ kayra deploy box · 4 steps · 2.0s"]);
+  deepStrictEqual(footer(invocation, deploy, { failures: 1, stop: { index: 3, step: verify, why: "failed" } }, milliseconds(65_000)).map(flat), [
     "✗ kayra deploy box failed at Verify · step 4 of 4 · 1m05s",
     "  → kayra verify box runs just this part",
   ]);
-  deepStrictEqual(footer({ ...invocation, command: "kayra doctor" }, [guard("a"), guard("b")], { failures: 1 }, 100).map(flat), [
+  deepStrictEqual(footer({ ...invocation, command: "kayra doctor" }, [guard("a"), guard("b")], { failures: 1 }, milliseconds(100)).map(flat), [
     "✗ kayra doctor · 1 of 2 checks failed · 0.1s",
   ]);
-  deepStrictEqual(footer(invocation, deploy, { failures: 0, stop: { index: 0, step: guard("a"), why: "declined" } }, 0).map(flat), [
+  deepStrictEqual(footer(invocation, deploy, { failures: 0, stop: { index: 0, step: guard("a"), why: "declined" } }, milliseconds(0)).map(flat), [
     "■ kayra deploy box stopped at step 1 of 4: not confirmed",
   ]);
-  deepStrictEqual(footer(invocation, deploy, { failures: 0, stop: { index: 1, step: guard("a"), why: "interrupted" } }, 0).map(flat), [
+  deepStrictEqual(footer(invocation, deploy, { failures: 0, stop: { index: 1, step: guard("a"), why: "interrupted" } }, milliseconds(0)).map(flat), [
     "■ kayra deploy box interrupted at step 2 of 4 · 0.0s",
   ]);
 });

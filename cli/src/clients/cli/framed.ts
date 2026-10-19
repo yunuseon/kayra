@@ -6,6 +6,7 @@ import { duration } from "../../core/text/time.ts";
 import { spread, truncate } from "./text.ts";
 import { paint } from "./paint.ts";
 import { escapes, spinner, type Screen } from "./terminal.ts";
+import { milliseconds } from "../../core/fleet/brand.ts";
 
 /** A run of this long earns a notification when it ends: the operator has looked away. */
 const worthNotifying = 30_000;
@@ -26,7 +27,7 @@ export const framed = (screen: Screen, write: (raw: string) => void, invocation:
       say([strong(invocation.command), muted([...invocation.about, steps(plan)].map((each) => ` · ${each}`).join(""))]);
       say("");
       const ended = await work();
-      const ms = performance.now() - started;
+      const ms = milliseconds(performance.now() - started);
       say("");
       footer(invocation, plan, ended, ms).forEach(say);
       tell(escapes.popTitle, screen.title);
@@ -50,7 +51,7 @@ export const framed = (screen: Screen, write: (raw: string) => void, invocation:
       const stop =
         !shown && screen.live
           ? spinner(write, (frame, ms) =>
-              paint(spread(truncate(["  ", active(frame), " ", title], columns - 8), [muted(duration(ms))], columns), screen.colors),
+              paint(spread(truncate(["  ", active(frame), " ", title], columns - 8), [muted(duration(milliseconds(ms)))], columns), screen.colors),
             )
           : () => undefined;
       const started = performance.now();
@@ -58,7 +59,7 @@ export const framed = (screen: Screen, write: (raw: string) => void, invocation:
       stop();
       // A diagnosis reports itself on stdout: that line is doctor's output.
       if (step.kind === "check" && step.onFailure === "continue") return done;
-      const took = duration(performance.now() - started);
+      const took = duration(milliseconds(performance.now() - started));
       say(
         spread(
           ["  ", done.failed ? bad("✗") : ok("✓"), " ", title],

@@ -1,4 +1,4 @@
-import { within } from "../fleet/brand.ts";
+import { host, within, sshDefaultPort, type Port } from "../fleet/brand.ts";
 import type { Fleet, Server } from "../fleet/model.ts";
 import type { Update } from "./updates.ts";
 import { isMachine, type Look, type Machine, type Pending, type Reach, type Watched } from "./model.ts";
@@ -16,10 +16,12 @@ const provisioned = async (server: Server, tofu: Tofu): Promise<Machine> => {
   if (!state.ok) return { kind: "unreadable", reason: state.error };
   if (state.value.length === 0) return { kind: "not-provisioned" };
   if (!state.value.some(isMachine)) return { kind: "no-machine" };
-  return { kind: "found", address: await tofu.output(dir, "server_ip"), from: "opentofu" };
+  const output = await tofu.output(dir, "server_ip");
+  const address = output === undefined ? undefined : host(output);
+  return { kind: "found", address: address?.ok === true ? address.value : undefined, from: "opentofu" };
 };
 
-export const sshPort = (server: Server): number => Number(server.inventory?.port ?? "22");
+export const sshPort = (server: Server): Port => server.inventory?.port ?? sshDefaultPort;
 
 export const authUrl = (server: Server): string => `https://auth.${server.domain}/`;
 

@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, sep } from "node:path";
 import { z } from "zod";
-import { within, type KayraRoot } from "../../core/fleet/brand.ts";
+import { milliseconds, within, type KayraRoot, type KayraVersion } from "../../core/fleet/brand.ts";
 import { verbose } from "../../core/recipes/steps.ts";
 import { opentofu } from "../../core/adapters/opentofu.ts";
 import { statusJson } from "./status.ts";
@@ -29,7 +29,7 @@ import { busy, readRecord, recordLine, runId, stateOf, summary, type Run } from 
 export type Api = {
   readonly kayra: KayraRoot;
   readonly fleet: Fleet;
-  readonly version: string;
+  readonly version: KayraVersion;
   readonly short: (text: string) => string;
   readonly network: Network;
   readonly tofu?: Tofu;
@@ -129,7 +129,7 @@ export const createApi = (api: Api) => {
     const coloured = plan.value.map((step) => step.kind === "run" ? { ...step, env: { ...step.env, ANSIBLE_FORCE_COLOR: "1" } } : step);
     const done = interpret(coloured, io, reporting(emit, about(call), api.short)).catch(() => {
       emit({ kind: "said", stream: "err", text: "The run could not finish; check the local kayra process." });
-      emit({ kind: "ended", failures: 1, ms: Date.now() - Date.parse(started), footer: [] });
+      emit({ kind: "ended", failures: 1, ms: milliseconds(Date.now() - Date.parse(started)), footer: [] });
     }).finally(() => { swap(id, (live) => ({ ...live, answer: undefined, input: undefined })); });
     swap(id, (live) => ({ ...live, done }));
     return ok(id);

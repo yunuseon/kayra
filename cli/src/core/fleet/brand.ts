@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
-import { err, ok, type Result } from "../../result.ts";
+import { err, ok } from "../../result.ts";
 
 declare const brands: unique symbol;
 /** A T that only the matching constructor below can produce. */
@@ -36,37 +36,37 @@ export type ExitCode = Brand<number, "ExitCode">;
 /** Which kayra runs: its package's version. */
 export type KayraVersion = Brand<string, "KayraVersion">;
 
-export const serverName = (value: string): Result<ServerName, string> =>
+export const serverName = (value: string) =>
   /^[a-z0-9][a-z0-9-]*$/.test(value)
-    ? ok(value as ServerName)
+    ? ok<ServerName>(value as ServerName)
     : err(`'${value}' is not a server name (lowercase letters, digits, dashes)`);
 
-export const appName = (value: string): Result<AppName, string> =>
+export const appName = (value: string) =>
   /^[a-z][a-z0-9-]*$/.test(value)
-    ? ok(value as AppName)
+    ? ok<AppName>(value as AppName)
     : err(`'${value}' is not an app name (lowercase letters, digits, dashes)`);
 
-export const subdomain = (value: string): Result<Subdomain, string> =>
-  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(value) ? ok(value as Subdomain) : err(`'${value}' is not a subdomain`);
+export const subdomain = (value: string) =>
+  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(value) ? ok<Subdomain>(value as Subdomain) : err(`'${value}' is not a subdomain`);
 
-export const domain = (value: string): Result<Domain, string> =>
+export const domain = (value: string) =>
   /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/.test(value)
-    ? ok(value as Domain)
+    ? ok<Domain>(value as Domain)
     : err(`'${value}' is not a domain`);
 
 /** `~/…` is the operator's home, as Ansible reads it in vault_password_file. */
-export const absolutePath = (value: string): Result<AbsolutePath, string> => {
+export const absolutePath = (value: string) => {
   const expanded = value === "~" || value.startsWith("~/") ? join(homedir(), value.slice(1)) : value;
-  return isAbsolute(expanded) ? ok(normalize(expanded) as AbsolutePath) : err(`'${value}' is not an absolute path`);
+  return isAbsolute(expanded) ? ok<AbsolutePath>(normalize(expanded) as AbsolutePath) : err(`'${value}' is not an absolute path`);
 };
 
-export const kayraRoot = (path: AbsolutePath): KayraRoot => path as KayraRoot;
-export const fleetRoot = (path: AbsolutePath): FleetRoot => path as FleetRoot;
-export const serverDir = (root: FleetRoot, name: ServerName): ServerDir =>
+export const kayraRoot = (path: AbsolutePath) => path as KayraRoot;
+export const fleetRoot = (path: AbsolutePath) => path as FleetRoot;
+export const serverDir = (root: FleetRoot, name: ServerName) =>
   join(root, "servers", name) as ServerDir;
-export const vaultPasswordFile = (path: AbsolutePath): VaultPasswordFile => path as VaultPasswordFile;
+export const vaultPasswordFile = (path: AbsolutePath) => path as VaultPasswordFile;
 
-export const within = (base: AbsolutePath, ...segments: readonly string[]): AbsolutePath =>
+export const within = (base: AbsolutePath, ...segments: readonly string[]) =>
   join(base, ...segments) as AbsolutePath;
 
 /** One of each, as help shows a value: what a command-line parser offers before the operator types one. */
@@ -78,8 +78,8 @@ export const examples = {
 };
 
 /** A word without whitespace: what an inventory gives for a host, a user or a key. */
-const word = <T extends string>(what: string, mint: (value: string) => T) => (value: string): Result<T, string> =>
-  /^\S+$/.test(value) ? ok(mint(value)) : err(`'${value}' is not ${what}`);
+const word = <T extends string>(what: string, mint: (value: string) => T) => (value: string) =>
+  /^\S+$/.test(value) ? ok<T>(mint(value)) : err(`'${value}' is not ${what}`);
 
 export const host = word("a host", (value) => value as Host);
 export const sshUser = word("an ssh user", (value) => value as SshUser);
@@ -88,22 +88,22 @@ export const keyFile = word("a key file", (value) => value as KeyFile);
 /** Where ssh listens unless the inventory says otherwise. */
 export const sshDefaultPort = "22" as Port;
 
-export const port = (value: string): Result<Port, string> =>
-  /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? ok(value as Port) : err(`'${value}' is not a port`);
+export const port = (value: string) =>
+  /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? ok<Port>(value as Port) : err(`'${value}' is not a port`);
 
 /** HTTPS, or also plain HTTP where `schemes` allow it (a multipass server, a test machine by definition). */
-export const repoUrl = (value: string, schemes: readonly string[]): Result<RepoUrl, string> =>
-  schemes.some((scheme) => value.startsWith(scheme)) ? ok(value as RepoUrl) : err(`'${value}' is not a ${schemes.join(" or ")} URL`);
+export const repoUrl = (value: string, schemes: readonly string[]) =>
+  schemes.some((scheme) => value.startsWith(scheme)) ? ok<RepoUrl>(value as RepoUrl) : err(`'${value}' is not a ${schemes.join(" or ")} URL`);
 
-export const repoPath = (value: string): Result<RepoPath, string> =>
-  `/${value}/`.includes("/../") ? err(`'${value}' leaves its repository`) : ok(value as RepoPath);
+export const repoPath = (value: string) =>
+  `/${value}/`.includes("/../") ? err(`'${value}' leaves its repository`) : ok<RepoPath>(value as RepoPath);
 
-export const remotePath = (value: string): Result<RemotePath, string> =>
-  value.startsWith("/") ? ok(value as RemotePath) : err(`'${value}' is not an absolute path`);
+export const remotePath = (value: string) =>
+  value.startsWith("/") ? ok<RemotePath>(value as RemotePath) : err(`'${value}' is not an absolute path`);
 
-export const milliseconds = (value: number): Milliseconds => Math.max(0, value) as Milliseconds;
+export const milliseconds = (value: number) => Math.max(0, value) as Milliseconds;
 
-export const exitCode = (value: number): ExitCode => value as ExitCode;
+export const exitCode = (value: number) => value as ExitCode;
 
-export const kayraVersion = (value: string): Result<KayraVersion, string> =>
-  /^\d+\.\d+\.\d+/.test(value) ? ok(value as KayraVersion) : err(`'${value}' is not a version`);
+export const kayraVersion = (value: string) =>
+  /^\d+\.\d+\.\d+/.test(value) ? ok<KayraVersion>(value as KayraVersion) : err(`'${value}' is not a version`);

@@ -3,7 +3,7 @@ import { err, ok } from "../../result.ts";
 import type { Tofu } from "../status/ports.ts";
 
 /** Why tofu could not read the state, in a few words: the first line of its error. */
-export const unreadable = (stderr: string): string => {
+export const unreadable = (stderr: string) => {
   if (stderr.includes("tofu init")) return "tofu init needed";
   const line = stderr
     .split("\n")

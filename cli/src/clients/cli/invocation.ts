@@ -1,5 +1,6 @@
 import type { Invocation, OperationName } from "../../core/operations/catalog.ts";
 import type { Command } from "./parser.ts";
+import { typed } from "../../typed.ts";
 
 /** What the command line asks besides the operation: how its answer is printed. */
 export type Asked = { readonly invocation: Invocation; readonly json: boolean };
@@ -8,8 +9,8 @@ export type Asked = { readonly invocation: Invocation; readonly json: boolean };
  * The parsed command line as the operation it names. `app rollback` without a
  * commit lists the releases (`app.releases`), with one it rolls back.
  */
-export const fromCommand = (command: Exclude<Command, { readonly name: "serve" }>): Asked => {
-  const plainly = (invocation: Invocation): Asked => ({ invocation, json: false });
+export const fromCommand = (command: Exclude<Command, { readonly name: "serve" }>) => {
+  const plainly = (invocation: Invocation) => typed<Asked>({ invocation, json: false });
   switch (command.name) {
     case "up":
     case "provision":
@@ -45,9 +46,9 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" }
     case "job":
       return plainly({ name: "job", input: { server: command.server, job: command.job, noPrs: command.noPrs } });
     case "status":
-      return { invocation: { name: "status", input: { offline: command.offline } }, json: command.json };
+      return typed<Asked>({ invocation: { name: "status", input: { offline: command.offline } }, json: command.json });
     case "validate":
-      return { invocation: { name: "validate", input: command.server === undefined ? {} : { server: command.server } }, json: command.json };
+      return typed<Asked>({ invocation: { name: "validate", input: command.server === undefined ? {} : { server: command.server } }, json: command.json });
     case "doctor":
       return plainly({ name: "doctor", input: {} });
     case "certs":

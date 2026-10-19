@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { typed } from "../../typed.ts";
 
 /** The server kinds, each with its playbook; settings say which kinds read them. */
 export const serverKinds = ["platform", "edge", "nas"] as const;
@@ -16,19 +17,21 @@ export type Setting = {
   readonly description: string;
 };
 
+// eslint-disable-next-line functional/prefer-immutable-types -- holds a Zod schema: immutable once built, but a class the rule cannot see into
 const setting = (
   name: string,
   kinds: readonly ServerKind[],
   schema: z.ZodType,
   description: string,
-): Setting => ({ name, kinds, secret: false, schema: schema.describe(description), description });
+) => typed<Setting>({ name, kinds, secret: false, schema: schema.describe(description), description });
 
+// eslint-disable-next-line functional/prefer-immutable-types -- holds a Zod schema: immutable once built, but a class the rule cannot see into
 const secret = (
   name: string,
   kinds: readonly ServerKind[],
   schema: z.ZodType,
   description: string,
-): Setting => ({ name, kinds, secret: true, schema: schema.describe(description), description });
+) => typed<Setting>({ name, kinds, secret: true, schema: schema.describe(description), description });
 
 const text = z.string();
 const texts = z.array(z.string());
@@ -37,6 +40,7 @@ const edge: readonly ServerKind[] = ["edge"];
 const nas: readonly ServerKind[] = ["nas"];
 
 /** Nested settings check the fields they know and allow others: a typo is caught at the top. */
+// eslint-disable-next-line functional/prefer-immutable-types -- a Zod schema: immutable once built, but a class the rule cannot see into
 const record = (fields: Readonly<Record<string, z.ZodType>>) => z.looseObject(fields);
 
 export const settings: readonly Setting[] = [
@@ -166,21 +170,23 @@ export const settings: readonly Setting[] = [
 ];
 
 /** Ansible's own variables (connection, privilege escalation) are always allowed. */
-export const isAnsibleVariable = (key: string): boolean => key.startsWith("ansible_");
+export const isAnsibleVariable = (key: string) => key.startsWith("ansible_");
 
-export const settingsFor = (kind: ServerKind, secrets: boolean): readonly Setting[] =>
-  settings.filter((each) => each.secret === secrets && each.kinds.includes(kind));
+export const settingsFor = (kind: ServerKind, secrets: boolean) =>
+  Object.freeze(settings.filter((each) => each.secret === secrets && each.kinds.includes(kind)));
 
-const shape = (chosen: readonly Setting[]): Readonly<Record<string, z.ZodType>> =>
-  Object.fromEntries(chosen.map((each) => [each.name, each.schema.optional()]));
+// eslint-disable-next-line functional/prefer-immutable-types -- Zod schemas: immutable once built, but classes the rule cannot see into
+const shape = (chosen: readonly Setting[]) => Object.fromEntries(chosen.map((each) => [each.name, each.schema.optional()] as const));
 
 /** vars.yml for a kind: its settings and nothing else (Ansible's own variables apart). */
+// eslint-disable-next-line functional/prefer-immutable-types -- a Zod schema: immutable once built, but a class the rule cannot see into
 export const varsSchema = (kind: ServerKind) => z.strictObject(shape(settingsFor(kind, false)));
 
 /** defaults.yml: settings shared by every server, so any kind's. */
 export const defaultsSchema = z.strictObject(shape(settings.filter((each) => !each.secret)));
 
 /** secrets.yml: the known secrets typed; other keys may be helpers that vars.yml references. */
+// eslint-disable-next-line functional/prefer-immutable-types -- a Zod schema: immutable once built, but a class the rule cannot see into
 export const secretsSchema = (kind: ServerKind) => z.looseObject(shape(settingsFor(kind, true)));
 
 /** server.yml: topology only. */

@@ -26,7 +26,7 @@ import { serve } from "./serve.ts";
 import { network } from "./core/adapters/network.ts";
 import { render } from "./core/plan/describe.ts";
 import type { Plan } from "./core/plan/model.ts";
-import { flatMap, map, ok, type Result } from "./result.ts";
+import { flatMap, map } from "./result.ts";
 import { explain } from "./clients/cli/explain.ts";
 import { draw } from "./clients/cli/views.ts";
 import { bad, muted, strong } from "./core/text/spans.ts";
@@ -62,22 +62,22 @@ const io: Io = {
   draw: (answer, said) => draw(answer, said, Date.now()),
 };
 
-const fail = (message: string): never => {
+const fail = (message: string) => {
   io.err(screens.err.live ? [bad("✗"), " ", message] : `kayra: ${message}`);
   process.exit(1);
 };
 
 /** The heading: the command as typed, what it runs on, which kayra. */
-const invocation = (target: Server | undefined): Heading =>
+const invocation = (target: Server | undefined) =>
   heading(["kayra", ...process.argv.slice(2).filter((word) => word !== "--dry-run")].join(" "), target, version);
 
 /** --dry-run: the plan as data, styled on a terminal, plain and copyable for a program. */
-const show = (steps: Plan, about: Heading, short: (text: string) => string): void => {
+const show = (steps: Plan, about: Heading, short: (text: string) => string) => {
   (screens.out.live ? explain(about, steps, short, screens.out.columns) : render(steps)).forEach(io.out);
 };
 
 /** Runs a plan, framed on stderr unless its output is the point; the exit status says how it went. */
-const execute = async (steps: Plan, about: Heading, framing: boolean): Promise<void> => {
+const execute = async (steps: Plan, about: Heading, framing: boolean) => {
   const interrupt = new AbortController();
   // Ctrl-C reaches the step's program too; the plan stops once it gives up. A second one does not wait.
   process.once("SIGINT", () => {
@@ -94,68 +94,65 @@ const execute = async (steps: Plan, about: Heading, framing: boolean): Promise<v
 
 const found = flatMap(findFleetRoot(here.value), loadFleet);
 // Outside a fleet only what works in an app's repository runs (app check).
-const fleet: Result<Fleet, string> = found.ok ? found : ok({ root: fleetRoot(here.value), servers: [] });
-if (!fleet.ok) fail(fleet.error);
-else {
-  const args = run(parser(fleet.value), runOptions(version));
-  const short = shortener([
-    [kayra, "<kayra>"],
-    ...(found.ok ? [[fleet.value.root, "<fleet>"] as const] : []),
-    [homedir(), "~"],
-  ]);
-  const context = contextFor({ kayra, fleet: fleet.value, version, here: here.value, network: network(2_000), tofu: opentofu });
-  if (args.command.name === "serve") {
-    if (!found.ok) fail(found.error);
-    // The browser side: web/dist in a checkout, cli/dist/browser in the package.
-    const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "browser")].find((dir) => existsSync(join(dir, "index.html")));
-    const { port, noOpen } = args.command;
-    const clients = { ui: args.command.ui || !args.command.api, api: args.command.api };
-    const listening = await serve({ kayra, fleet: fleet.value, version, short, network: context.network }, assets, port, clients);
-    io.err([strong("kayra serve"), muted(` · ${fleet.value.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);
-    io.out(listening.url);
-    if (listening.discovery !== undefined) io.err([muted(`API credentials: ${listening.discovery}`)]);
-    if (clients.ui && !noOpen) systemBrowser.open(listening.url);
-    const stop = (): void => { void listening.close().then(() => process.exit(0)); };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
-  } else {
-    const { invocation: call, json } = fromCommand(args.command);
-    const operation = describe(call.name);
-    if (!found.ok && operation.scope !== "repo") fail(found.error);
-    const target = serverOf(context, call);
-    if (hasPlan(call)) {
-      const steps = map(planOf(context, call), (each) => (args.verbose ? verbose(each) : each));
-      // An operation whose output is its answer (ssh, the deployer's) gets nothing drawn around it.
-      if (!steps.ok) fail(steps.error);
-      else if (args.dryRun) show(steps.value, invocation(target), short);
-      else await execute(steps.value, invocation(target), operation.bare !== true);
-    } else if (call.name === "status") {
-      const { offline } = call.input;
-      const { initial, updates } = stream(context, "status", call.input);
-      // On a terminal the table is there at once, its cells filled in as the answers arrive; the report itself goes to stdout.
-      const draw = (looks: readonly Look[], frame: string): readonly string[] =>
-        statusView(looks, { frame, room: screens.err.columns - 1, offline }).map((line) =>
-          paint(truncate(line, screens.err.columns - 1), screens.err.colors),
-        );
-      const looks =
-        !json && screens.out.live && screens.err.live
-          ? await watch((raw) => process.stderr.write(raw), initial, updates, draw)
-          : await settle(initial, updates);
-      (json
-        ? [JSON.stringify(statusJson(looks), null, 2)]
-        : statusView(looks, { frame: "", room: screens.out.live ? screens.out.columns : Infinity, offline })
-      ).forEach(io.out);
-    } else if (call.name === "validate") {
-      const reports = await query(context, "validate", call.input);
-      if (!reports.ok) fail(reports.error);
-      else {
-        (json ? [JSON.stringify(validateJson(reports.value), null, 2)] : validateView(reports.value)).forEach(io.out);
-        // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
-        process.exitCode = reports.value.some((each) => overall(each.findings) === "problem") ? 1 : 0;
-      }
-    } else {
-      // version: Optique answers `kayra version` and `--version` itself, before this.
-      io.out(version);
+const fleet: Fleet = found.ok ? found.value : { root: fleetRoot(here.value), servers: [] };
+const args = run(parser(fleet), runOptions(version));
+const short = shortener([
+  [kayra, "<kayra>"],
+  ...(found.ok ? [[fleet.root, "<fleet>"] as const] : []),
+  [homedir(), "~"],
+]);
+const context = contextFor({ kayra, fleet: fleet, version, here: here.value, network: network(2_000), tofu: opentofu });
+if (args.command.name === "serve") {
+  if (!found.ok) fail(found.error);
+  // The browser side: web/dist in a checkout, cli/dist/browser in the package.
+  const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "browser")].find((dir) => existsSync(join(dir, "index.html")));
+  const { port, noOpen } = args.command;
+  const clients = { ui: args.command.ui || !args.command.api, api: args.command.api };
+  const listening = await serve({ kayra, fleet: fleet, version, short, network: context.network }, assets, port, clients);
+  io.err([strong("kayra serve"), muted(` · ${fleet.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);
+  io.out(listening.url);
+  if (listening.discovery !== undefined) io.err([muted(`API credentials: ${listening.discovery}`)]);
+  if (clients.ui && !noOpen) systemBrowser.open(listening.url);
+  const stop = () => { void listening.close().then(() => process.exit(0)); };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+} else {
+  const { invocation: call, json } = fromCommand(args.command);
+  const operation = describe(call.name);
+  if (!found.ok && operation.scope !== "repo") fail(found.error);
+  const target = serverOf(context, call);
+  if (hasPlan(call)) {
+    const steps = map(planOf(context, call), (each) => (args.verbose ? verbose(each) : each));
+    // An operation whose output is its answer (ssh, the deployer's) gets nothing drawn around it.
+    if (!steps.ok) fail(steps.error);
+    else if (args.dryRun) show(steps.value, invocation(target), short);
+    else await execute(steps.value, invocation(target), operation.bare !== true);
+  } else if (call.name === "status") {
+    const { offline } = call.input;
+    const { initial, updates } = stream(context, "status", call.input);
+    // On a terminal the table is there at once, its cells filled in as the answers arrive; the report itself goes to stdout.
+    const draw = (looks: readonly Look[], frame: string) =>
+      Object.freeze(statusView(looks, { frame, room: screens.err.columns - 1, offline }).map((line) =>
+        paint(truncate(line, screens.err.columns - 1), screens.err.colors),
+      ));
+    const looks =
+      !json && screens.out.live && screens.err.live
+        ? await watch((raw) => process.stderr.write(raw), initial, updates, draw)
+        : await settle(initial, updates);
+    (json
+      ? [JSON.stringify(statusJson(looks), null, 2)]
+      : statusView(looks, { frame: "", room: screens.out.live ? screens.out.columns : Infinity, offline })
+    ).forEach(io.out);
+  } else if (call.name === "validate") {
+    const reports = await query(context, "validate", call.input);
+    if (!reports.ok) fail(reports.error);
+    else {
+      (json ? [JSON.stringify(validateJson(reports.value), null, 2)] : validateView(reports.value)).forEach(io.out);
+      // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
+      process.exitCode = reports.value.some((each) => overall(each.findings) === "problem") ? 1 : 0;
     }
+  } else {
+    // version: Optique answers `kayra version` and `--version` itself, before this.
+    io.out(version);
   }
 }

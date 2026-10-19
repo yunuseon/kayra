@@ -1,12 +1,13 @@
 import { createInterface } from "node:readline/promises";
 import type { Io } from "../../core/interpreter/io.ts";
 import type { Text } from "../../core/text/spans.ts";
+import { typed } from "../../typed.ts";
 
 /** The command line's questions: secret typing stays unseen, piped answers keep their order. */
-export const questions = (render: (text: Text) => string): Pick<Io, "ask"> & { readonly close: () => void } => {
+export const questions = (render: (text: Text) => string) => {
   // eslint-disable-next-line functional/prefer-immutable-types -- resources belong to this reader and close with the plan
   const reading: { lines?: AsyncIterator<string>; close?: () => void } = {};
-  const piped = async (): Promise<string> => {
+  const piped = async () => {
     if (reading.lines === undefined) {
       const terminal = createInterface({ input: process.stdin });
       // eslint-disable-next-line functional/immutable-data -- keep buffered lines across questions
@@ -17,12 +18,12 @@ export const questions = (render: (text: Text) => string): Pick<Io, "ask"> & { r
     const next = await reading.lines.next();
     return next.done === true ? "" : next.value;
   };
-  const typed = (prompt: string, secret: boolean): Promise<string> => {
+  const prompted = (prompt: string, secret: boolean) => {
     const { stdin } = process;
     if (!secret) {
       const terminal = createInterface({ input: stdin, output: process.stderr });
-      return new Promise((resolve) => {
-        const done = (answer: string): void => {
+      return new Promise<string>((resolve) => {
+        const done = (answer: string) => {
           resolve(answer);
           terminal.close();
         };
@@ -37,10 +38,10 @@ export const questions = (render: (text: Text) => string): Pick<Io, "ask"> & { r
     stdin.setRawMode(true);
     stdin.setEncoding("utf8");
     stdin.resume();
-    return new Promise((resolve) => {
+    return new Promise<string>((resolve) => {
       // eslint-disable-next-line functional/prefer-immutable-types -- typed characters until Enter or cancellation
       const state: { text: string; ended: boolean } = { text: "", ended: false };
-      const done = (answer: string): void => {
+      const done = (answer: string) => {
         if (state.ended) return;
         // eslint-disable-next-line functional/immutable-data -- finish once, even when a paste includes several lines
         state.ended = true;
@@ -51,8 +52,8 @@ export const questions = (render: (text: Text) => string): Pick<Io, "ask"> & { r
         process.stderr.write("\n");
         resolve(answer);
       };
-      const ended = (): void => { done(""); };
-      const key = (chunk: string): void => {
+      const ended = () => { done(""); };
+      const key = (chunk: string) => {
         Array.from(chunk).forEach((char) => {
           if (state.ended) return;
           if (char === "\r" || char === "\n") done(state.text);
@@ -73,13 +74,13 @@ export const questions = (render: (text: Text) => string): Pick<Io, "ask"> & { r
       process.stderr.write(prompt);
     });
   };
-  return {
+  return typed<Pick<Io, "ask"> & { readonly close: () => void }>({
     ask: async (question) => {
       const prompt = render(question.text);
-      if (process.stdin.isTTY) return typed(prompt, question.kind === "secret");
+      if (process.stdin.isTTY) return prompted(prompt, question.kind === "secret");
       process.stderr.write(prompt);
       return piped();
     },
     close: () => { reading.close?.(); },
-  };
+  });
 };

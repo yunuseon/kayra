@@ -11,32 +11,32 @@ import type { Fleet } from "../../core/fleet/model.ts";
 
 /** A command's one line, as the catalog says it: the same words in every client. */
 // eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message is readonly only at the top
-const summary = (name: OperationName): Message => message`${text(operation(name).summary)}`;
+const summary = (name: OperationName) => message`${text(operation(name).summary)}`;
 
 type Example = readonly [line: string, what: string];
 
 /** Command lines, each with what it is for, aligned. Plain text: Optique folds an indent that stands alone before a command line. */
 const examples = (indent: string, rows: readonly Example[]) => {
   const width = Math.max(...rows.map(([line]) => line.length));
-  return rows.flatMap(([line, what], index) => [...(index === 0 ? [] : [lineBreak()]), text(`${indent}${line.padEnd(width)}  ${what}`)]);
+  return Object.freeze(rows.flatMap(([line, what], index) => Object.freeze([...(index === 0 ? [] : [lineBreak()]), text(`${indent}${line.padEnd(width)}  ${what}`)])));
 };
 
 const docs = message`Docs: ${url("https://yunuseon.github.io/kayra/")}`;
 
 /** A command's examples; Optique shows a command's footer instead of the program's, so the docs follow. */
-const footer = (...rows: readonly Example[]) => [
+const footer = (...rows: readonly Example[]) => Object.freeze([
   ...message`Examples:`,
   lineBreak(),
   ...examples("  ", rows),
   lineBreak(),
   lineBreak(),
   ...docs,
-];
+]);
 
 const sections = ["On a server", "Apps on a server", "In an app's repository", "The whole fleet", "Options", "Help"];
 
 /** Arguments (the untitled section) first, then the sections in the order above. */
-const sectionOrder = (a: DocSection, b: DocSection): number => sections.indexOf(a.title ?? "") - sections.indexOf(b.title ?? "");
+const sectionOrder = (a: DocSection, b: DocSection) => sections.indexOf(a.title ?? "") - sections.indexOf(b.title ?? "");
 
 const usageLine: Usage = [
   { type: "argument", metavar: "COMMAND" },
@@ -47,7 +47,7 @@ const usageLine: Usage = [
 
 /** How kayra presents itself: help in sections, examples, the docs; errors without the full usage above them. */
 export const runOptions = (version: string) =>
-  ({
+  Object.freeze(({
     programName: "kayra",
     // `kayra help deploy` and `kayra version` work too; listed once, as options.
     help: { option: { names: ["-h", "--help"], group: "Help" }, command: { hidden: "doc" } },
@@ -72,7 +72,7 @@ export const runOptions = (version: string) =>
     termWidth: "auto",
     showChoices: true,
     aboveError: "none",
-  }) satisfies RunOptions;
+  }) as const satisfies RunOptions);
 
 /** The arguments kayra takes; server names are the fleet's, so they complete and are checked while parsing. */
 export const parser = (fleet: Fleet) => {
@@ -87,7 +87,7 @@ export const parser = (fleet: Fleet) => {
   // eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message is readonly only at the top
   const onServer = <const N extends string>(name: N, brief: Message, more: { readonly description?: Message; readonly footer?: Message } = {}) =>
     command(name, object({ name: constant(name), server }), { brief, ...more });
-  return merge(
+  return Object.freeze(merge(
     group(
       "Options",
       object({
@@ -307,9 +307,9 @@ export const parser = (fleet: Fleet) => {
           ),
         ),
       ),
-      (chosen): { readonly command: typeof chosen } => ({ command: chosen }),
+      (chosen) => ({ command: chosen }) as const,
     ),
-  );
+  ));
 };
 
 export type Args = InferValue<ReturnType<typeof parser>>;

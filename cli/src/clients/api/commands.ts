@@ -1,8 +1,9 @@
 import type { Server } from "../../core/fleet/model.ts";
 import type { Invocation } from "../../core/operations/catalog.ts";
 import type { ServerCommand, ServerFacts } from "./contract.gen.ts";
+import { typed } from "../../typed.ts";
 
-export const offered = (server: Server): readonly (ServerCommand | "job")[] => [
+export const offered = (server: Server) => typed<readonly (ServerCommand | "job")[]>([
   ...(server.kind === "platform" ? (["deploy", "apps", "verify"] as const) : []),
   "setup", "plan",
   ...(server.target === "multipass" && server.kind === "platform" ? (["up"] as const) : []),
@@ -11,14 +12,14 @@ export const offered = (server: Server): readonly (ServerCommand | "job")[] => [
   ...(server.kind === "platform" ? (["job"] as const) : []),
   ...(server.target === "multipass" ? [] : (["adopt"] as const)),
   ...(server.hasTerraform ? (["down"] as const) : []),
-];
+]);
 
-export const facts = (server: Server): ServerFacts => ({
+export const facts = (server: Server) => typed<ServerFacts>({
   name: server.name, kind: server.kind, target: server.target, domain: server.domain,
   apps: server.apps.map((app) => app.name), commands: offered(server),
 });
 
-export const words = (call: Invocation): string => {
+export const words = (call: Invocation) => {
   const { input } = call;
   const scope = ["server" in input ? input.server : undefined, "app" in input ? input.app : undefined];
   const more = "command" in input ? ["--", ...input.command]

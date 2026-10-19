@@ -23,7 +23,7 @@ const unbuilt = `<!doctype html><meta charset="utf-8"><title>kayra</title>
  * package); a path that is no file is the app's own route, answered by its
  * index; without a build, a page saying how to make one.
  */
-export const serveAsset = (assets: string | undefined, path: string, response: ServerResponse): void => {
+export const serveAsset = (assets: string | undefined, path: string, response: ServerResponse) => {
   if (assets === undefined) {
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     response.end(unbuilt);

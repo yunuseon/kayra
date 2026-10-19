@@ -14,9 +14,9 @@ import type { Io } from "../../core/interpreter/io.ts";
 import { isOperation, operation, type Invocation } from "../../core/operations/catalog.ts";
 import { contextFor, hasPlan, invocation, isQuery, isStream, planOf, serverOf, stream } from "../../core/operations/dispatch.ts";
 import type { Plan } from "../../core/plan/model.ts";
-import { heading, listed, reporting, type Heading } from "../../core/interpreter/events.ts";
+import { heading, listed, reporting } from "../../core/interpreter/events.ts";
 import { follow } from "../../core/status/updates.ts";
-import { err, ok, type Result } from "../../result.ts";
+import { err, ok } from "../../result.ts";
 import { json, send } from "../../deployer/http.ts";
 import { catalog, openapi } from "./contract.ts";
 import { directories } from "./directories.ts";
@@ -25,6 +25,7 @@ import { facts, words } from "./commands.ts";
 import { answer as queryAnswer } from "./queries.ts";
 import { options, requestBody } from "./protocol.ts";
 import { busy, readRecord, recordLine, runId, stateOf, summary, type Run } from "./runs.ts";
+import { typed } from "../../typed.ts";
 
 export type Api = {
   readonly kayra: KayraRoot;
@@ -46,53 +47,53 @@ type Live = {
 type Settings = Readonly<z.infer<typeof options>>;
 type Refusal = readonly [number, string];
 
-const answerJson = (response: ServerResponse, status: number, value: unknown): void => {
+const answerJson = (response: ServerResponse, status: number, value: unknown) => {
   send(response, status, JSON.stringify(value), "application/json; charset=utf-8");
 };
 const events = (response: ServerResponse, ndjson = false) => {
   response.writeHead(200, { "Content-Type": ndjson ? "application/x-ndjson" : "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
   return {
-    say: (value: unknown): void => { if (!response.destroyed) response.write(ndjson ? `${JSON.stringify(value)}\n` : `data: ${JSON.stringify(value)}\n\n`); },
-    end: (): void => { response.end(ndjson ? "" : "event: end\ndata: {}\n\n"); },
-  };
+    say: (value: unknown) => { if (!response.destroyed) response.write(ndjson ? `${JSON.stringify(value)}\n` : `data: ${JSON.stringify(value)}\n\n`); },
+    end: () => { response.end(ndjson ? "" : "event: end\ndata: {}\n\n"); },
+  } as const;
 };
 
 export const createApi = (api: Api) => {
   // eslint-disable-next-line functional/prefer-immutable-types -- per-listener state; no launch shares locks, credentials or sessions
   const cell: { live: Readonly<Record<string, Live>>; pending: readonly Promise<void>[] } = { live: {}, pending: [] };
   const shutdown = new AbortController();
-  const swap = (id: string, change: (live: Live) => Live): void => {
+  const swap = (id: string, change: (live: Live) => Live) => {
     const current = cell.live[id];
     // eslint-disable-next-line functional/immutable-data -- replace the one state cell whole
     if (current !== undefined) cell.live = { ...cell.live, [id]: change(current) };
   };
   const context = contextFor({ kayra: api.kayra, fleet: api.fleet, version: api.version, here: api.fleet.root, network: api.network, tofu: api.tofu ?? opentofu, signal: shutdown.signal });
   const dir = within(api.fleet.root, ".cache", "ui", "runs");
-  const allRuns = (): readonly Run[] => {
+  const allRuns = () => {
     const live = Object.values(cell.live).map((each) => each.run);
     const records = existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".jsonl")).flatMap((name) => {
       const run = readRecord(readFileSync(join(dir, name), "utf8"));
       return run === undefined || live.some((each) => each.id === run.id) ? [] : [run];
     }) : [];
-    return [...live, ...records].toSorted((a, b) => b.id.localeCompare(a.id));
+    return Object.freeze([...live, ...records].toSorted((a, b) => b.id.localeCompare(a.id)));
   };
-  const about = (call: Invocation): Heading => heading(words(call), serverOf(context, call), api.version);
-  const recipe = (call: Invocation, settings: Settings): Result<Plan, string> => {
+  const about = (call: Invocation) => heading(words(call), serverOf(context, call), api.version);
+  const recipe = (call: Invocation, settings: Settings) => {
     if (!hasPlan(call)) return err(`${call.name} has no plan`);
     const plan = planOf(context, call);
-    return plan.ok && settings.verbose ? ok(verbose(plan.value)) : plan;
+    return plan.ok && settings.verbose ? ok<Plan>(verbose(plan.value)) : plan;
   };
-  const preview = (call: Invocation, settings: Settings): Result<wire.Preview, string> => {
+  const preview = (call: Invocation, settings: Settings) => {
     const plan = recipe(call, settings);
-    return plan.ok ? ok({ invocation: about(call), steps: listed(plan.value, api.short), changes: operation(call.name).effect !== "reads" }) : plan;
+    return plan.ok ? ok<wire.Preview>({ invocation: about(call), steps: listed(plan.value, api.short), changes: operation(call.name).effect !== "reads" }) : plan;
   };
-  const start = (call: Invocation, settings: Settings, confirm: string | undefined): Result<string, Refusal> => {
-    if (shutdown.signal.aborted) return err([503, "kayra is stopping"]);
+  const start = (call: Invocation, settings: Settings, confirm: string | undefined) => {
+    if (shutdown.signal.aborted) return err(typed<Refusal>([503, "kayra is stopping"]));
     const plan = recipe(call, settings);
-    if (!plan.ok) return err([400, plan.error]);
+    if (!plan.ok) return err(typed<Refusal>([400, plan.error]));
     const server = serverOf(context, call);
-    if (busy(Object.values(cell.live).map((live) => live.run), server?.name)) return err([409, `a run on ${server?.name ?? ""} has not ended`]);
-    if (operation(call.name).effect !== "reads" && server !== undefined && server.target !== "multipass" && confirm !== server.name) return err([403, `this changes ${server.name}: confirm with its name`]);
+    if (busy(Object.values(cell.live).map((live) => live.run), server?.name)) return err(typed<Refusal>([409, `a run on ${server?.name ?? ""} has not ended`]));
+    if (operation(call.name).effect !== "reads" && server !== undefined && server.target !== "multipass" && confirm !== server.name) return err(typed<Refusal>([403, `this changes ${server.name}: confirm with its name`]));
     const started = new Date().toISOString();
     const id = runId(started, randomBytes(6).toString("hex"));
     const session = operation(call.name).kind === "session";
@@ -103,26 +104,26 @@ export const createApi = (api: Api) => {
     const stop = new AbortController();
     // eslint-disable-next-line functional/immutable-data -- install the lock before any asynchronous work
     cell.live = { ...cell.live, [id]: { run, stop, listeners: [], answer: undefined, input: undefined, done: Promise.resolve() } };
-    const emit = (event: wire.RunEvent): void => {
+    const emit = (event: wire.RunEvent) => {
       appendFileSync(file, recordLine(event));
-      swap(id, (live) => ({ ...live, run: { ...live.run, events: [...live.run.events, event] } }));
+      swap(id, (live) => ({ ...live, run: { ...live.run, events: [...live.run.events, event] } } as const));
       cell.live[id]?.listeners.forEach((listener) => { listener(event); });
     };
     const io: Io = {
       out: (text) => { emit({ kind: "said", stream: "out", text }); },
       err: (text) => { emit({ kind: "said", stream: "err", text }); },
-      ask: (question) => new Promise((resolve) => {
+      ask: (question) => new Promise<string>((resolve) => {
         swap(id, (live) => ({ ...live, answer: (text) => {
           swap(id, (after) => ({ ...after, answer: undefined }));
           emit({ kind: "answered" });
           resolve(text);
-        } }));
+        } } as const));
         emit({ kind: "ask", prompt: question.text, secret: question.kind === "secret", ...(question.kind === "confirm" ? { expect: question.expect } : {}) });
       }),
       output: (chunk, stream) => { emit({ kind: "output", stream, chunk }); },
       input: (deliver) => {
-        swap(id, (live) => ({ ...live, input: deliver }));
-        return () => { swap(id, (live) => ({ ...live, input: undefined })); };
+        swap(id, (live) => ({ ...live, input: deliver } as const));
+        return () => { swap(id, (live) => ({ ...live, input: undefined } as const)); };
       },
       size: { columns: settings.columns, rows: settings.rows }, signal: stop.signal,
     };
@@ -130,22 +131,22 @@ export const createApi = (api: Api) => {
     const done = interpret(coloured, io, reporting(emit, about(call), api.short)).catch(() => {
       emit({ kind: "said", stream: "err", text: "The run could not finish; check the local kayra process." });
       emit({ kind: "ended", failures: 1, ms: milliseconds(Date.now() - Date.parse(started)), footer: [] });
-    }).finally(() => { swap(id, (live) => ({ ...live, answer: undefined, input: undefined })); });
-    swap(id, (live) => ({ ...live, done }));
-    return ok(id);
+    }).finally(() => { swap(id, (live) => ({ ...live, answer: undefined, input: undefined } as const)); });
+    swap(id, (live) => ({ ...live, done } as const));
+    return ok<string>(id);
   };
-  const watch = (id: string, response: ServerResponse, ndjson: boolean, session = false): void => {
+  const watch = (id: string, response: ServerResponse, ndjson: boolean, session = false) => {
     const live = cell.live[id];
     const run = live?.run ?? allRuns().find((each) => each.id === id);
     if (run === undefined || (session && !run.session)) { send(response, 404, "no run or session\n"); return; }
     const { say, end } = events(response, ndjson);
     run.events.forEach(say);
     if (live === undefined || stateOf(run.events) !== "running") { end(); return; }
-    const listener = (event: wire.RunEvent): void => { say(event); if (event.kind === "ended") end(); };
-    swap(id, (current) => ({ ...current, listeners: [...current.listeners, listener] }));
-    response.on("close", () => { swap(id, (current) => ({ ...current, listeners: current.listeners.filter((each) => each !== listener) })); });
+    const listener = (event: wire.RunEvent) => { say(event); if (event.kind === "ended") end(); };
+    swap(id, (current) => ({ ...current, listeners: [...current.listeners, listener] } as const));
+    response.on("close", () => { swap(id, (current) => ({ ...current, listeners: current.listeners.filter((each) => each !== listener) } as const)); });
   };
-  const dispatch = async (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
+  const dispatch = async (request: IncomingMessage, response: ServerResponse, url: URL) => {
     const method = request.method ?? "GET";
     const path = url.pathname;
     const named = /^\/api\/operations\/([^/]+)(\/preview)?$/.exec(path);
@@ -211,7 +212,7 @@ export const createApi = (api: Api) => {
       } else send(response, 404, "no active resource\n");
     } else send(response, 404, "not found\n");
   };
-  const handle = (request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> => {
+  const handle = (request: IncomingMessage, response: ServerResponse, url: URL) => {
     const work = dispatch(request, response, url).finally(() => {
       // eslint-disable-next-line functional/immutable-data -- release this request after its response completes
       cell.pending = cell.pending.filter((pending) => pending !== work);
@@ -220,9 +221,9 @@ export const createApi = (api: Api) => {
     cell.pending = [...cell.pending, work];
     return work;
   };
-  return { handle, stop: async (): Promise<void> => {
+  return { handle, stop: async () => {
     shutdown.abort();
     Object.values(cell.live).forEach((live) => { live.stop.abort(); });
     await Promise.allSettled([...cell.pending, ...Object.values(cell.live).map((live) => live.done)]);
-  } };
+  } } as const;
 };

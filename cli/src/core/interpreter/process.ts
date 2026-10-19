@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { text } from "node:stream/consumers";
 import type { Arg, Argv, Env, Probe } from "../plan/model.ts";
-import { all, err, flatMap, ok, type Result } from "../../result.ts";
+import { all, err, flatMap, ok } from "../../result.ts";
 import { isStopped, type Io } from "./io.ts";
 import { exitCode, type ExitCode } from "../fleet/brand.ts";
+import { typed } from "../../typed.ts";
 
 /** Where a program's streams go: kayra's terminal, or the sink and signal of an Io without one. */
 export type Plumbing = Pick<Io, "output" | "signal">;
@@ -28,19 +29,19 @@ export type Stdin =
 
 type Wiring = { readonly stdout: "show" | "capture" | "discard"; readonly stderr: "show" | "capture"; readonly stdin?: Stdin };
 
-export const spawned = async (argv: Argv, streams: Wiring, env: Env = {}, plumbing: Plumbing = terminal): Promise<Exit> => {
+export const spawned = async (argv: Argv, streams: Wiring, env: Env = {}, plumbing: Plumbing = terminal) => {
   const [program, ...args] = argv;
   const { output, signal } = plumbing;
-  if (isStopped(signal)) return { code: exitCode(130), stdout: "", stderr: "", started: false };
-  const shown = (stream: "show" | "capture" | "discard"): "inherit" | "pipe" | "ignore" =>
-    stream === "show" ? (output === undefined ? "inherit" : "pipe") : stream === "capture" ? "pipe" : "ignore";
+  if (isStopped(signal)) return typed<Exit>({ code: exitCode(130), stdout: "", stderr: "", started: false });
+  const shown = (stream: "show" | "capture" | "discard") =>
+    stream === "show" ? (typed<"inherit" | "pipe" | "ignore">(output === undefined ? "inherit" : "pipe")) : typed<"inherit" | "pipe" | "ignore">(stream === "capture" ? "pipe" : "ignore");
   const stdin = streams.stdin ?? (output === undefined ? { kind: "inherit" } : { kind: "none" });
   const child = spawn(program, args, {
     env: { ...process.env, ...env },
     detached: output !== undefined,
     stdio: [stdin.kind === "inherit" ? "inherit" : stdin.kind === "none" ? "ignore" : "pipe", shown(streams.stdout), shown(streams.stderr)],
   });
-  const forward = (from: "stdout" | "stderr", sink: (chunk: string, stream: "stdout" | "stderr") => void): void => {
+  const forward = (from: "stdout" | "stderr", sink: (chunk: string, stream: "stdout" | "stderr") => void) => {
     child[from]?.setEncoding("utf8").on("data", (chunk: string) => {
       sink(chunk, from);
     });
@@ -56,13 +57,13 @@ export const spawned = async (argv: Argv, streams: Wiring, env: Env = {}, plumbi
           child.stdin?.write(chunk);
         })
       : () => undefined;
-  const read = (from: "stdout" | "stderr", stream: "show" | "capture" | "discard"): Promise<string> => {
+  const read = (from: "stdout" | "stderr", stream: "show" | "capture" | "discard") => {
     const piped = child[from];
     return piped === null || stream !== "capture" ? Promise.resolve("") : text(piped);
   };
   const stdout = read("stdout", streams.stdout);
   const stderr = read("stderr", streams.stderr);
-  const kill = (withSignal: "SIGINT" | "SIGTERM"): void => {
+  const kill = (withSignal: "SIGINT" | "SIGTERM") => {
     if (child.pid === undefined) return;
     try {
       if (output === undefined) child.kill(withSignal);
@@ -73,7 +74,7 @@ export const spawned = async (argv: Argv, streams: Wiring, env: Env = {}, plumbi
   };
   // eslint-disable-next-line functional/prefer-immutable-types -- the escalation belongs to this child, cleared when it exits
   const stopping: { timer?: ReturnType<typeof setTimeout> } = {};
-  const stop = (): void => {
+  const stop = () => {
     if (stopping.timer !== undefined) return;
     if (stdin.kind === "typed") child.stdin?.write("\u0003");
     kill("SIGINT");
@@ -95,16 +96,14 @@ export const spawned = async (argv: Argv, streams: Wiring, env: Env = {}, plumbi
   signal?.removeEventListener("abort", stop);
   clearTimeout(stopping.timer);
   unsubscribe();
-  return exit instanceof Error
-    ? { code: exitCode(127), stdout: "", stderr: exit.message, started: false }
-    : { code: exitCode(exit), stdout: await stdout, stderr: await stderr, started: true };
+  return typed<Exit>(exit instanceof Error ? { code: exitCode(127), stdout: "", stderr: exit.message, started: false } : { code: exitCode(exit), stdout: await stdout, stderr: await stderr, started: true });
 };
 
 /** A command's stdout, for kayra to read; its stderr reaches the operator unless captured too. */
-export const capture = (argv: Argv, stderr: "show" | "capture" = "show", env: Env = {}, plumbing: Plumbing = terminal): Promise<Exit> =>
+export const capture = (argv: Argv, stderr: "show" | "capture" = "show", env: Env = {}, plumbing: Plumbing = terminal) =>
   spawned(argv, { stdout: "capture", stderr }, env, plumbing);
 
-export const answer = (probe: Probe, plumbing: Plumbing): Promise<Exit> =>
+export const answer = (probe: Probe, plumbing: Plumbing) =>
   spawned(
     probe.kind === "on-path" ? ["sh", "-c", 'command -v "$1"', "sh", probe.program] : probe.argv,
     { stdout: "discard", stderr: "capture", stdin: { kind: "none" } },
@@ -113,18 +112,18 @@ export const answer = (probe: Probe, plumbing: Plumbing): Promise<Exit> =>
   );
 
 /** Each query's answer in place of it, as `$(…)` would: one word, or split into many. */
-export const resolve = async (argv: readonly [string, ...Arg[]], plumbing: Plumbing): Promise<Result<Argv, string>> => {
+export const resolve = async (argv: readonly [string, ...Arg[]], plumbing: Plumbing) => {
   const words = await Promise.all(
-    argv.map(async (value): Promise<Result<readonly string[], string>> => {
-      if (typeof value === "string") return ok([value]);
+    argv.map(async (value) => {
+      if (typeof value === "string") return ok<readonly string[]>([value]);
       const exit = await capture(value.argv, "show", value.env, plumbing);
       if (exit.code !== 0) return err(`$(${value.argv.join(" ")}) failed: exit ${String(exit.code)}`);
       const output = exit.stdout.replace(/\n+$/, "");
-      return ok(value.words === "one" ? [output] : output.split(/\s+/).filter((word) => word !== ""));
+      return ok<readonly string[]>(value.words === "one" ? [output] : output.split(/\s+/).filter((word) => word !== ""));
     }),
   );
-  return flatMap(all(words), (lists): Result<Argv, string> => {
+  return flatMap(all(words), (lists) => {
     const [program, ...rest] = lists.flat();
-    return program === undefined ? err("the command is empty") : ok([program, ...rest]);
+    return program === undefined ? err("the command is empty") : ok<Argv>([program, ...rest]);
   });
 };

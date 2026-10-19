@@ -11,4 +11,4 @@ export const validateJson = (reports: readonly Report[]) => ({
     result: overall(report.findings),
     findings: report.findings.map((each) => ({ result: each.result, text: each.text, hint: each.hint ?? null })),
   })),
-});
+} as const);

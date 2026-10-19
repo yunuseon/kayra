@@ -1,7 +1,7 @@
 import { within } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { run, type Plan } from "../plan/model.ts";
-import { err, ok, type Result } from "../../result.ts";
+import { err, ok } from "../../result.ts";
 import { ansibleEnv, inventory, reachable, vaulted, type Engine } from "./steps.ts";
 import { sshArgv } from "./ssh.ts";
 
@@ -10,10 +10,10 @@ import { sshArgv } from "./ssh.ts";
  * It runs on the server, detached; kayra follows its log over SSH. Stopping kayra stops only the
  * following, and running it again while a test runs follows that one instead of starting another.
  */
-export const backupTest = (engine: Engine, server: Server): Result<Plan, string> => {
+export const backupTest = (engine: Engine, server: Server) => {
   if (server.backupDir === undefined) return err(`${server.name} has no restic_backup.dir in its vars.yml`);
   if (server.inventory === undefined) return err(`no inventory for '${server.name}' — provision it first.`);
-  return ok([
+  return ok<Plan>([
     ...reachable(engine, server),
     vaulted(run(
       "Start the restore test",

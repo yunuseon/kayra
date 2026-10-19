@@ -27,7 +27,14 @@ export default defineConfig(
         "error",
         // Zod's schemas are immutable once built (every method returns a new
         // one), but its types are classes the rule cannot see into.
-        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true, ignoreTypePattern: ["^z\\.", "ZodType", "Setting", "^Operation$"] },
+        // Return types are inferred (see CLAUDE.md, Code style), and checked as inferred.
+        {
+          enforcement: "ReadonlyDeep",
+          ignoreInferredTypes: true,
+          ignoreClasses: true,
+          ignoreTypePattern: ["^z\\.", "ZodType", "Setting", "^Operation$"],
+          returnTypes: { enforcement: "ReadonlyDeep", ignoreInferredTypes: false, ignoreClasses: true },
+        },
       ],
       "functional/type-declaration-immutability": [
         "error",
@@ -57,7 +64,8 @@ export default defineConfig(
   },
   {
     // The local server (the API, the browser side, serve.ts) works with Node's I/O objects too (requests, responses,
-    // the abort controller that stops a run): classes the rule cannot make readonly.
+    // the abort controller that stops a run): classes the rule cannot make readonly. Its inferred returns are those
+    // objects, or JSON on its way out: they are not checked.
     files: ["src/clients/api/**/*.ts", "src/clients/ui/**/*.ts", "src/serve.ts"],
     rules: {
       "functional/prefer-immutable-types": [
@@ -72,6 +80,16 @@ export default defineConfig(
       "functional/type-declaration-immutability": [
         "error",
         { rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }], ignoreIdentifierPattern: ["^Live$"] },
+      ],
+    },
+  },
+  {
+    // Tests and scripts follow the convention (no return types), but their fixtures' inferred returns are not checked.
+    files: ["test/**/*.ts", "scripts/**/*.ts", "eslint.config.ts"],
+    rules: {
+      "functional/prefer-immutable-types": [
+        "error",
+        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true, ignoreTypePattern: ["^z\\.", "ZodType", "Setting", "^Operation$"] },
       ],
     },
   },

@@ -15,7 +15,7 @@ export type Screen = {
 };
 
 /** Optique's rule too, so help and kayra agree: a nonempty FORCE_COLOR, else no NO_COLOR, then a terminal. */
-export const colors = (tty: boolean, env: Environment): boolean => {
+export const colors = (tty: boolean, env: Environment) => {
   if ((env["FORCE_COLOR"] ?? "") !== "") return true;
   if ((env["NO_COLOR"] ?? "") !== "" || env["NODE_DISABLE_COLORS"] !== undefined) return false;
   return tty && env["TERM"] !== "dumb";
@@ -26,13 +26,13 @@ const notifying = ["iTerm.app", "WezTerm", "ghostty"];
 const showingProgress = ["WezTerm", "ghostty"];
 const linking = ["iTerm.app", "WezTerm", "ghostty", "vscode"];
 
-export const screen = (stream: { readonly isTTY?: boolean; readonly columns?: number }, env: Environment): Screen => {
+export const screen = (stream: { readonly isTTY?: boolean; readonly columns?: number }, env: Environment) => {
   const tty = stream.isTTY === true;
   const live = tty && env["TERM"] !== "dumb" && (env["CI"] ?? "") === "";
   const program = env["TERM_PROGRAM"] ?? "";
   // tmux and screen swallow what they do not know, or pass it to the wrong pane.
   const direct = live && env["TMUX"] === undefined && env["STY"] === undefined;
-  return {
+  return typed<Screen>({
     colors: colors(tty, env),
     live,
     // A pseudo-terminal may report 0.
@@ -41,37 +41,38 @@ export const screen = (stream: { readonly isTTY?: boolean; readonly columns?: nu
     notifications: direct && notifying.includes(program),
     progressBar: direct && (showingProgress.includes(program) || env["WT_SESSION"] !== undefined),
     links: direct && linking.includes(program),
-  };
+  });
 };
 
-const printable = (text: string): string => text.replace(/\p{Cc}/gu, " ");
-const osc = (body: string): string => `\u001b]${body}\u0007`;
+const printable = (text: string) => text.replace(/\p{Cc}/gu, " ");
+const osc = (body: string) => `\u001b]${body}\u0007`;
 
 export const escapes = {
   clearLine: "\r\u001b[2K",
   /** xterm's title stack: the shell's title comes back when kayra is done. */
   pushTitle: "\u001b[22;0t",
   popTitle: "\u001b[23;0t",
-  title: (text: string): string => osc(`0;${printable(text)}`),
-  notify: (text: string): string => osc(`9;${printable(text)}`),
-  progress: (percent: number): string => osc(`9;4;1;${String(Math.round(percent))}`),
+  title: (text: string) => osc(`0;${printable(text)}`),
+  notify: (text: string) => osc(`9;${printable(text)}`),
+  progress: (percent: number) => osc(`9;4;1;${String(Math.round(percent))}`),
   progressDone: osc("9;4;0;0"),
-  link: (text: string, href: string): string => `${osc(`8;;${printable(href)}`)}${text}${osc("8;;")}`,
+  link: (text: string, href: string) => `${osc(`8;;${printable(href)}`)}${text}${osc("8;;")}`,
   /** To the start of the line `count` lines up; nothing for none, since CSI 0 F still moves one. */
-  up: (count: number): string => (count > 0 ? `\u001b[${String(count)}F` : ""),
+  up: (count: number) => (count > 0 ? `\u001b[${String(count)}F` : ""),
   clearDown: "\u001b[J",
 } as const;
 
 import type { Update } from "../../core/status/updates.ts";
+import { typed } from "../../typed.ts";
 
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-const frameOf = (ms: number): string => frames[Math.floor(ms / 80) % frames.length] ?? "";
+const frameOf = (ms: number) => frames[Math.floor(ms / 80) % frames.length] ?? "";
 
 /** Draws a line in place, again every frame, until stopped; stopping clears it. */
-export const spinner = (write: (raw: string) => void, draw: (frame: string, ms: number) => string): (() => void) => {
+export const spinner = (write: (raw: string) => void, draw: (frame: string, ms: number) => string) => {
   const started = performance.now();
-  const frame = (): void => {
+  const frame = () => {
     const ms = performance.now() - started;
     write(`${escapes.clearLine}${draw(frameOf(ms), ms)}`);
   };
@@ -84,8 +85,8 @@ export const spinner = (write: (raw: string) => void, draw: (frame: string, ms: 
 };
 
 /** A state change, as an answer brings it. */
-const tick = (ms: number): Promise<undefined> =>
-  new Promise((resolve) => {
+const tick = (ms: number) =>
+  new Promise<undefined>((resolve) => {
     setTimeout(() => {
       resolve(undefined);
     }, ms);
@@ -101,14 +102,15 @@ export const watch = async <S>(
   initial: S,
   updates: readonly Promise<Update<S>>[],
   draw: (state: S, frame: string) => readonly string[],
-): Promise<S> => {
+) => {
   const started = performance.now();
-  const redraw = (state: S, drawn: number): number => {
+  const redraw = (state: S, drawn: number) => {
     const lines = draw(state, frameOf(performance.now() - started));
     write(`${escapes.up(drawn)}${lines.map((line) => `${escapes.clearLine}${line}\n`).join("")}${escapes.clearDown}`);
     return lines.length;
   };
   type Landed = { readonly id: number; readonly update: Update<S> };
+  // Recursive: TypeScript cannot infer what it returns.
   const go = async (state: S, waiting: readonly { readonly id: number; readonly landed: Promise<Landed> }[], drawn: number): Promise<S> => {
     const shown = redraw(state, drawn);
     if (waiting.length === 0) {
@@ -120,5 +122,5 @@ export const watch = async <S>(
       ? go(state, waiting, shown)
       : go(next.update(state), waiting.filter((each) => each.id !== next.id), shown);
   };
-  return go(initial, updates.map((update, id) => ({ id, landed: update.then((done) => ({ id, update: done })) })), 0);
+  return go(initial, updates.map((update, id) => ({ id, landed: update.then((done) => ({ id, update: done } as const)) } as const)), 0);
 };

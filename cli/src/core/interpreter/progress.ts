@@ -1,4 +1,5 @@
 import type { Part, Plan, Step } from "../plan/model.ts";
+import { typed } from "../../typed.ts";
 
 /** How a step went, as far as showing it goes. */
 export type Done = {
@@ -33,11 +34,11 @@ export const silent: Progress = {
   step: (_step, _at, work) => work(),
 };
 
-export const parts = (plan: Plan): readonly Part[] => [...new Set(plan.flatMap((step) => (step.part === undefined ? [] : [step.part])))];
+export const parts = (plan: Plan) => typed<readonly Part[]>([...new Set(plan.flatMap((step) => (step.part === undefined ? Object.freeze([]) : Object.freeze([step.part]))))]);
 
 /** Where the step at `index` is, for a plan that may consist of several parts. */
-export const position = (plan: Plan, index: number): At => {
+export const position = (plan: Plan, index: number) => {
   const part = plan[index]?.part;
   const opens = part !== undefined && parts(plan).length > 1 && plan[index - 1]?.part !== part;
-  return { index, total: plan.length, ...(opens ? { opens: part } : {}) };
+  return typed<At>({ index, total: plan.length, ...(opens ? { opens: part } : {}) });
 };

@@ -5,43 +5,42 @@ import { ask, isStopped, type Io } from "./io.ts";
 import { answer, resolve, spawned, type Plumbing } from "./process.ts";
 import { meet, scratch, type Given, type Met } from "./needs.ts";
 import { inPty } from "./pty.ts";
+import { typed } from "../../typed.ts";
 
 /** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
-const asItCame = (_answer: unknown, said: string): readonly string[] => (said === "" ? [] : said.replace(/\n$/, "").split("\n"));
+const asItCame = (_answer: unknown, said: string) => (said === "" ? typed<readonly string[]>([]) : said.replace(/\n$/, "").split("\n"));
 
-const lines = (text: string): readonly string[] =>
-  text
+const lines = (text: string) =>
+  Object.freeze(text
     .trimEnd()
     .split("\n")
-    .filter((line) => line !== "");
+    .filter((line) => line !== ""));
 
 /** Under the step's own line. */
-const detail = (line: string): Line => ["    ", line];
+const detail = (line: string) => typed<Line>(["    ", line]);
 
-const aside = (line: string): Line => ["    ", muted(line)];
+const aside = (line: string) => typed<Line>(["    ", muted(line)]);
 
-const hint = (text: string | undefined): readonly Line[] => (text === undefined ? [] : [pointing("    ", text)]);
+const hint = (text: string | undefined) => (typed<readonly Line[]>(text === undefined ? [] : [pointing("    ", text)]));
 
 /** How a step went, and what it has to say: printed once its spinner is gone. */
 type Outcome = Done & { readonly out: readonly Text[]; readonly err: readonly Text[] };
 
 const goOn: Outcome = { failed: false, stopped: false, out: [], err: [] };
 
-const check = async (step: Extract<Step, { kind: "check" }>, plumbing: Plumbing): Promise<Outcome> => {
+const check = async (step: Extract<Step, { kind: "check" }>, plumbing: Plumbing) => {
   const exit = await answer(step.probe, plumbing);
   const said = [...lines(exit.stderr).map(detail), ...hint(step.hint)];
-  if (step.onFailure === "stop") return exit.code === 0 ? goOn : { failed: true, stopped: true, out: [], err: said };
-  return exit.code === 0
-    ? { ...goOn, out: [[fine("✓"), " ", step.label]] }
-    : { failed: true, stopped: false, out: [[bad("✗"), " ", step.label], ...said], err: [] };
+  if (step.onFailure === "stop") return exit.code === 0 ? goOn : typed<Outcome>({ failed: true, stopped: true, out: [], err: said });
+  return typed<Outcome>(exit.code === 0 ? { ...goOn, out: [[fine("✓"), " ", step.label]] } : { failed: true, stopped: false, out: [[bad("✗"), " ", step.label], ...said], err: [] });
 };
 
-const runStep = async (step: Extract<Step, { kind: "run" | "session" }>, io: Io, met: Met): Promise<Outcome> => {
+const runStep = async (step: Extract<Step, { kind: "run" | "session" }>, io: Io, met: Met) => {
   const argv = await resolve(step.argv, io);
-  if (!argv.ok) return { failed: true, stopped: true, why: "a query failed", out: [], err: [detail(argv.error)] };
+  if (!argv.ok) return typed<Outcome>({ failed: true, stopped: true, why: "a query failed", out: [], err: [detail(argv.error)] });
   const { stdout } = step;
   const talks = step.kind === "session" && io.output !== undefined;
-  if (talks && io.input === undefined) return { failed: true, stopped: true, why: "no terminal", out: [], err: [detail("it talks with a person, and this client gives it no keys")] };
+  if (talks && io.input === undefined) return typed<Outcome>({ failed: true, stopped: true, why: "no terminal", out: [], err: [detail("it talks with a person, and this client gives it no keys")] });
   // A quiet step's stderr waits until it is done, so it cannot tear through a spinner.
   const quiet = stdout === "discard";
   const exit = await spawned(
@@ -54,14 +53,14 @@ const runStep = async (step: Extract<Step, { kind: "run" | "session" }>, io: Io,
     { ...step.env, ...met.env },
     io,
   );
-  if (!exit.started) return { failed: true, stopped: true, why: "not started", out: [], err: [detail(`${argv.value[0]}: ${exit.stderr}`)] };
+  if (!exit.started) return typed<Outcome>({ failed: true, stopped: true, why: "not started", out: [], err: [detail(`${argv.value[0]}: ${exit.stderr}`)] });
   // Whatever it answered is shown, even when it failed: it may say why.
   const out = typeof stdout === "string" ? [] : (io.draw ?? asItCame)(stdout, exit.stdout);
-  if (exit.code === 0) return { ...goOn, out, err: lines(exit.stderr).map(aside) };
-  return { failed: true, stopped: true, why: `exit ${String(exit.code)}`, out, err: lines(exit.stderr).map(detail) };
+  if (exit.code === 0) return typed<Outcome>({ ...goOn, out, err: lines(exit.stderr).map(aside) });
+  return typed<Outcome>({ failed: true, stopped: true, why: `exit ${String(exit.code)}`, out, err: lines(exit.stderr).map(detail) });
 };
 
-const perform = async (step: Step, io: Io, met: Met): Promise<Outcome> => {
+const perform = async (step: Step, io: Io, met: Met) => {
   switch (step.kind) {
     case "session":
     case "run":
@@ -71,11 +70,11 @@ const perform = async (step: Step, io: Io, met: Met): Promise<Outcome> => {
     case "confirm": {
       io.err("");
       io.err(["  ", bad("▲"), " ", strong(step.warning)]);
-      const typed = await ask(io, { kind: "confirm", text: ["    Type ", strong(step.expect), " to confirm: "], expect: step.expect });
-      return typed === step.expect ? goOn : { failed: false, stopped: true, out: ["Aborted."], err: [] };
+      const answered = await ask(io, { kind: "confirm", text: ["    Type ", strong(step.expect), " to confirm: "], expect: step.expect });
+      return answered === step.expect ? goOn : typed<Outcome>({ failed: false, stopped: true, out: ["Aborted."], err: [] });
     }
     case "note":
-      return { ...goOn, out: [step.text] };
+      return typed<Outcome>({ ...goOn, out: [step.text] });
   }
 };
 
@@ -90,7 +89,7 @@ export const interpret = async (
   io: Io,
   progress: Progress = silent,
   interrupted: () => boolean = () => false,
-): Promise<boolean> => {
+) => {
   const made = scratch();
   try {
     const ended = await progress.plan(plan, () =>

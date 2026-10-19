@@ -22,26 +22,26 @@ export const questions = (render: (text: Text) => string) => {
     const { stdin } = process;
     if (!secret) {
       const terminal = createInterface({ input: stdin, output: process.stderr });
-      return new Promise<string>((resolve) => {
-        const done = (answer: string) => {
+      return new Promise<string | undefined>((resolve) => {
+        const done = (answer: string | undefined) => {
           resolve(answer);
           terminal.close();
         };
         // eslint-disable-next-line functional/immutable-data -- cancellation closes the outstanding question
-        reading.close = () => { done(""); };
-        terminal.once("SIGINT", () => { done(""); });
-        terminal.once("close", () => { resolve(""); });
-        void terminal.question(prompt).then(done, () => { done(""); });
+        reading.close = () => { done(undefined); };
+        terminal.once("SIGINT", () => { done(undefined); });
+        terminal.once("close", () => { resolve(undefined); });
+        void terminal.question(prompt).then(done, () => { done(undefined); });
       });
     }
     const wasRaw = stdin.isRaw;
     stdin.setRawMode(true);
     stdin.setEncoding("utf8");
     stdin.resume();
-    return new Promise<string>((resolve) => {
+    return new Promise<string | undefined>((resolve) => {
       // eslint-disable-next-line functional/prefer-immutable-types -- typed characters until Enter or cancellation
       const state: { text: string; ended: boolean } = { text: "", ended: false };
-      const done = (answer: string) => {
+      const done = (answer: string | undefined) => {
         if (state.ended) return;
         // eslint-disable-next-line functional/immutable-data -- finish once, even when a paste includes several lines
         state.ended = true;
@@ -52,12 +52,12 @@ export const questions = (render: (text: Text) => string) => {
         process.stderr.write("\n");
         resolve(answer);
       };
-      const ended = () => { done(""); };
+      const ended = () => { done(undefined); };
       const key = (chunk: string) => {
         Array.from(chunk).forEach((char) => {
           if (state.ended) return;
           if (char === "\r" || char === "\n") done(state.text);
-          else if (char === "\u0003" || char === "\u0004") done("");
+          else if (char === "\u0003" || char === "\u0004") done(undefined);
           else if (char === "\u007f" || char === "\b") {
             // eslint-disable-next-line functional/immutable-data -- remove one Unicode character
             state.text = Array.from(state.text).slice(0, -1).join("");

@@ -16,8 +16,8 @@ export type Io = {
   readonly out: (text: Text) => void;
   /** Around it: why a step stopped the plan, what a quiet step said, a warning before a question. */
   readonly err: (text: Text) => void;
-  /** The operator's answer; "" for none (Ctrl-C, no more input), which stops what needed it. */
-  readonly ask: (question: Question) => Promise<string>;
+  /** The operator's answer; undefined for none (Ctrl-C, no more input), which stops what needed it. */
+  readonly ask: (question: Question) => Promise<string | undefined>;
   /**
    * Without a terminal (the web interface, the API): what a step shows arrives
    * here instead, and no step reads kayra's stdin. Without it, steps share
@@ -45,13 +45,13 @@ export const isStopped = (signal: Io["signal"]) => signal?.aborted === true;
 
 /** Cancellation also ends a question; a late answer cannot restart the plan. */
 export const ask = async (io: Io, question: Question) => {
-  if (isStopped(io.signal)) return "";
-  return new Promise<string>((resolve, reject) => {
-    const done = (answer: string) => {
+  if (isStopped(io.signal)) return undefined;
+  return new Promise<string | undefined>((resolve, reject) => {
+    const done = (answer: string | undefined) => {
       io.signal?.removeEventListener("abort", stopped);
       resolve(answer);
     };
-    const stopped = () => { done(""); };
+    const stopped = () => { done(undefined); };
     io.signal?.addEventListener("abort", stopped, { once: true });
     void io.ask(question).then(done, (error: unknown) => {
       io.signal?.removeEventListener("abort", stopped);

@@ -61,7 +61,8 @@ export const meet = async (needs: readonly Need[], asked: Given, io: Io, made: S
     if (need.kind === "sudo" && (await sudoReady(io))) return so;
     const key = keyOf(need);
     const given = so.asked[key] ?? (await ask(io, questionOf(need)));
-    if (given === "") return undefined;
+    // An empty password is none: Enter alone declines.
+    if (given === undefined || given === "") return undefined;
     const now = need.kind === "vault" ? { ...so.asked, [key]: given } : so.asked;
     return typed<Meeting>(need.kind === "vault" ? { asked: now, met: { ...so.met, env: { ...so.met.env, ANSIBLE_VAULT_PASSWORD_FILE: made.vaultScript(), KAYRA_VAULT_PASSWORD: given } } } : { asked: now, met: { env: { ...so.met.env, KAYRA_SUDO_STDIN: "1" }, stdin: { kind: "given", text: `${given}\n` } } });
   }, Promise.resolve({ met: { env: {} }, asked }));

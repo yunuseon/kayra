@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A file's text; undefined where there is none. */
 export const textAt = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : undefined);

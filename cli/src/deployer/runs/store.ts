@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { owner as mintOwner, runId, type Owner, type RunId } from "../brand.ts";
 import { parseMeta } from "./records.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** Reading runs/: <owner>/<id>/{meta.json,log}. Only the deployer writes there. */
 

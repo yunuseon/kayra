@@ -1,9 +1,9 @@
 import type { Server } from "../fleet/model.ts";
 import { partOf, run, type Plan, type Step } from "../plan/model.ts";
-import { err, map, ok } from "../../result.ts";
+import { err, map, ok } from "../../lib/result.ts";
 import { ansibleEnv, ansiblePath, appSubdomains, certs, collections, fleetEnv, fromMain, inventory, latestState, needing, reachable, script, sequence, terraform, vault, vaulted, type Engine } from "./steps.ts";
 import { apps } from "./apps.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 export const provision = (engine: Engine, server: Server) =>
   ok<Plan>(

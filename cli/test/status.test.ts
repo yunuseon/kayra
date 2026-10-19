@@ -7,7 +7,7 @@ import { statusJson } from "../src/clients/wire/status.ts";
 import { statusView } from "../src/clients/cli/status.ts";
 import { unreadable } from "../src/core/adapters/opentofu.ts";
 import type { Network, Tofu } from "../src/core/status/ports.ts";
-import { err, ok } from "../src/result.ts";
+import { err, ok } from "../src/lib/result.ts";
 import { flat } from "../src/core/text/spans.ts";
 import { settle } from "../src/core/status/updates.ts";
 import { fleet, server } from "./support.ts";

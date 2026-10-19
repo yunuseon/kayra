@@ -26,7 +26,7 @@ import { serve } from "./serve.ts";
 import { network } from "./core/adapters/network.ts";
 import { render } from "./core/plan/describe.ts";
 import type { Plan } from "./core/plan/model.ts";
-import { err, flatMap, map, ok } from "./result.ts";
+import { err, flatMap, map, ok } from "./lib/result.ts";
 import { explain } from "./clients/cli/explain.ts";
 import { draw } from "./clients/cli/views.ts";
 import { bad, muted, strong } from "./core/text/spans.ts";

@@ -1,10 +1,10 @@
 import type { AppName } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { partOf, type Plan, run, type RunStep } from "../plan/model.ts";
-import { err, map, ok } from "../../result.ts";
+import { err, map, ok } from "../../lib/result.ts";
 import { ansibleEnv, ansiblePath, collections, fromMain, inventory, vault, vaulted, type Engine } from "./steps.ts";
 import { sshTo } from "./ssh.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server) => {

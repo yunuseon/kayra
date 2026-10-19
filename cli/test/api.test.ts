@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { z } from "zod";
 import { absolutePath, fleetRoot, kayraRoot, kayraVersion, remotePath } from "../src/core/fleet/brand.ts";
 import { operation, operationNames, type OperationName } from "../src/core/operations/catalog.ts";
-import { ok } from "../src/result.ts";
+import { ok } from "../src/lib/result.ts";
 import { admit, cookieName } from "../src/clients/api/auth.ts";
 import { openapi } from "../src/clients/api/openapi.ts";
 import { contractTypes } from "../src/clients/wire/contract.ts";

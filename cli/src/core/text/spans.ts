@@ -1,6 +1,6 @@
 /** What a piece of text means, not how it looks: each client gives it a look (a terminal colour, a CSS class), or none. */
 export const tones = ["ok", "bad", "warn", "active", "muted", "strong", "accent"] as const;
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 export type Tone = (typeof tones)[number];
 
 /** `href`: where the text leads, on a terminal that makes links of it. */

@@ -65,7 +65,7 @@ test("an app's config is plaintext, its secrets vaulted wherever secrets.yml is"
 test("an app lives in its own repo, cloned over HTTPS, its root inside it", () => {
   const app = (entry: string) => refused(`target: multipass\ndomain: a.test\napps: [${entry}]`);
   strictEqual(app("{name: shop, repo: git@x.test:s.git}"), "app shop: repo must be an https:// URL (or http:// on multipass)");
-  strictEqual(app("{name: shop, path: shop}"), "app shop: repo must be an https:// URL (or http:// on multipass)");
+  strictEqual(app("{name: shop, path: shop}"), "app shop: repo is required");
   strictEqual(app("{name: shop, repo: http://192.0.2.1:8000/s.git}"), "accepted");
   strictEqual(
     refused("target: hetzner\ndomain: a.test\nvault: true\napps: [{name: shop, repo: http://x.test/s.git}]"),
@@ -75,6 +75,15 @@ test("an app lives in its own repo, cloned over HTTPS, its root inside it", () =
   const apps = server("a", "target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, ref: main}]").apps;
   deepStrictEqual(apps, [{ name: "shop", repo: "https://x.test/s.git", path: ".", entry: { name: "shop", repo: "https://x.test/s.git", ref: "main" } }]);
   strictEqual(JSON.stringify(apps[0]?.entry), '{"name":"shop","repo":"https://x.test/s.git","ref":"main"}');
+});
+
+test("server.yml is parsed by its schema, the one editors check it with", () => {
+  const app = (entry: string) => refused(`target: multipass\ndomain: a.test\napps: [${entry}]`);
+  strictEqual(app("{name: Shop, repo: https://x.test/s.git}"), "app Shop: 'Shop' is not an app name (lowercase letters, digits, dashes)");
+  strictEqual(app("{repo: https://x.test/s.git}"), "app #1: name is required");
+  strictEqual(app("{name: shop, repo: https://x.test/s.git, branch: main}"), "server.yml: 'branch' is not a key it knows (in apps.0)");
+  strictEqual(refused("target: multipass\ndomain: A.test"), "'A.test' is not a domain");
+  strictEqual(refused("target: multipass\ndomain: a.test\napps: shop"), "apps must be a list");
 });
 
 test("the vault: none, asked for, or a password file under ~", () => {

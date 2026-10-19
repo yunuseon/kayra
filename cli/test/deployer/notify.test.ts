@@ -5,7 +5,7 @@ import { appOwner, jobOwner } from "../../src/deployer/brand.ts";
 import { appJwt, githubIssues, type GithubIssueWorld } from "../../src/deployer/forges/issues.ts";
 import { decide, parseNotify, type RunEnd } from "../../src/deployer/forges/notify.ts";
 import type { Request, Why } from "../../src/deployer/runs/queue.ts";
-import { ok } from "../../src/result.ts";
+import { ok } from "../../src/lib/result.ts";
 import { commit, name } from "./support.ts";
 
 const deployOf = (why: Why): Request => ({ owner: appOwner(name("shop")), work: { kind: "deploy", app: name("shop"), ref: "main", why } });

@@ -5,7 +5,7 @@ import { position } from "../../core/interpreter/progress.ts";
 import { steps as count, type Heading } from "../../core/interpreter/events.ts";
 import { wrap } from "./text.ts";
 import { drawnAs } from "./views.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 const kinds: Readonly<Record<string, (text: string) => Span>> = { guard: warn, check: active, run: active, confirm: bad, note: muted };
 

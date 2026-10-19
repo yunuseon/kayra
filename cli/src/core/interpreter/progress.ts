@@ -1,5 +1,5 @@
 import type { Part, Plan, Step } from "../plan/model.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** How a step went, as far as showing it goes. */
 export type Done = {

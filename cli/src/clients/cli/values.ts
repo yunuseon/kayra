@@ -1,8 +1,8 @@
 import { text } from "@optique/core/message";
 import type { NonEmptyString, ValueParser } from "@optique/core/valueparser";
 import { appName, domain, examples, serverName, subdomain } from "../../core/fleet/brand.ts";
-import type { Result } from "../../result.ts";
-import { typed } from "../../typed.ts";
+import type { Result } from "../../lib/result.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** An Optique value parser that mints a brand: arguments arrive already validated. */
 const minting = <T extends string>(

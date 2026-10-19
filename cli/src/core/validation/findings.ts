@@ -1,10 +1,10 @@
 import { appManifestSchema, secretsSchema, settings, type ServerKind } from "../fleet/settings.ts";
 import type { Server } from "../fleet/model.ts";
-import { closest } from "../fleet/shape.ts";
+import { closest } from "../../lib/closest.ts";
 import { count } from "../text/plural.ts";
-import { mapping as fields } from "../fleet/parse.ts";
+import { mapping as fields } from "../../lib/yaml.ts";
 import { subdomain } from "../fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A secrets file as validate could read it; a missing one holds no values. */
 export type Secrets =

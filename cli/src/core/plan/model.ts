@@ -1,5 +1,5 @@
 import type { AppName, ServerName } from "../fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A value only known when the step runs: the stdout of a command, as `$(…)` would give it. */
 export type Substitution = {

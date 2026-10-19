@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { OperationName, QueryName } from "../../core/operations/catalog.ts";
 import { catalog } from "../wire/contract.ts";
 import { options, schemas, querySchemas } from "../wire/schemas.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 const response = (description: string, schema: unknown, media = "application/json") => ({ description, content: { [media]: { schema } } } as const);
 const ref = (name: keyof typeof schemas) => ({ $ref: `#/components/schemas/${name}` } as const);

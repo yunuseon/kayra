@@ -7,7 +7,7 @@ import { spread, truncate } from "./text.ts";
 import { paint } from "./paint.ts";
 import { escapes, spinner, type Screen } from "./terminal.ts";
 import { milliseconds } from "../../core/fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A run of this long earns a notification when it ends: the operator has looked away. */
 const worthNotifying = 30_000;

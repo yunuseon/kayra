@@ -1,6 +1,6 @@
 import type { App } from "../../src/deployer/app.ts";
 import { appName, sha, type AppName, type Sha } from "../../src/deployer/brand.ts";
-import type { Result } from "../../src/result.ts";
+import type { Result } from "../../src/lib/result.ts";
 
 export const must = <T>(result: Result<T, string>): T => {
   if (!result.ok) throw new Error(result.error);

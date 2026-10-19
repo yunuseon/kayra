@@ -1,8 +1,8 @@
 import { type FleetRoot, type KayraRoot, within } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { run, type Arg, type Env, type Need, type Plan, type RunStep, type Step, type Substitution } from "../plan/model.ts";
-import { all, map, type Result } from "../../result.ts";
-import { typed } from "../../typed.ts";
+import { all, map, type Result } from "../../lib/result.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** What every command works with besides the server: the engine's files and the fleet's. */
 export type Engine = { readonly kayra: KayraRoot; readonly fleet: FleetRoot };

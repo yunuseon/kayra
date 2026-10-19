@@ -1,5 +1,5 @@
 import { capture } from "../interpreter/process.ts";
-import { err, ok } from "../../result.ts";
+import { err, ok } from "../../lib/result.ts";
 import type { Tofu } from "../status/ports.ts";
 
 /** Why tofu could not read the state, in a few words: the first line of its error. */

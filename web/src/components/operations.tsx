@@ -1,4 +1,4 @@
-import type { ServerFacts } from "../../../cli/src/clients/api/contract.gen.ts";
+import type { ServerFacts } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { onServer, reaches } from "../operations.ts";
 import { catalog } from "../state.ts";
 import { openOperation } from "./operation.tsx";

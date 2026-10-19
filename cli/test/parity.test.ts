@@ -4,7 +4,7 @@ import { parseSync } from "@optique/core";
 import { fromCommand, reaches } from "../src/clients/cli/invocation.ts";
 import { parser } from "../src/clients/cli/parser.ts";
 import { operation, operationNames } from "../src/core/operations/catalog.ts";
-import { catalog } from "../src/clients/api/contract.ts";
+import { catalog } from "../src/clients/wire/contract.ts";
 import { defaults, fields, inputOf, onServer, reaches as uiReaches } from "../../web/src/operations.ts";
 import { fleet, server } from "./support.ts";
 

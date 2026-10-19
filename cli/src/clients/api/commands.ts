@@ -1,6 +1,6 @@
 import type { Server } from "../../core/fleet/model.ts";
 import type { Invocation } from "../../core/operations/catalog.ts";
-import type { ServerCommand, ServerFacts } from "./contract.gen.ts";
+import type { ServerCommand, ServerFacts } from "../wire/contract.gen.ts";
 import { typed } from "../../lib/typed.ts";
 
 export const offered = (server: Server) => typed<readonly (ServerCommand | "job")[]>([

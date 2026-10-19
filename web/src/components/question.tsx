@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { RunEvent } from "../../../cli/src/clients/api/contract.gen.ts";
+import type { RunEvent } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { answerRun, type Failure } from "../api.ts";
 import { Problem, Spans } from "./ui.tsx";
 

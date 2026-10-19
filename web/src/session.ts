@@ -1,4 +1,4 @@
-import type { RunEvent, Text } from "../../cli/src/clients/api/contract.gen.ts";
+import type { RunEvent, Text } from "../../cli/src/clients/wire/contract.gen.ts";
 import type { Answer, Failure } from "./api.ts";
 
 const plain = (text: Text) =>

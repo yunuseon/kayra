@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { failure } from "../src/core/adapters/network.ts";
 import { isMachine, type Look, type Reach } from "../src/core/status/model.ts";
 import { look } from "../src/core/status/look.ts";
-import { statusJson } from "../src/clients/api/status.ts";
+import { statusJson } from "../src/clients/wire/status.ts";
 import { statusView } from "../src/clients/cli/status.ts";
 import { unreadable } from "../src/core/adapters/opentofu.ts";
 import type { Network, Tofu } from "../src/core/status/ports.ts";

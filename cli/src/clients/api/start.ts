@@ -14,9 +14,9 @@ import { err, ok } from "../../lib/result.ts";
 import { typed } from "../../lib/typed.ts";
 import type { Api } from "./api.ts";
 import { words } from "./commands.ts";
-import type * as wire from "./contract.gen.ts";
+import type * as wire from "../wire/contract.gen.ts";
 import type { LiveRuns } from "./live.ts";
-import type { options } from "./protocol.ts";
+import type { options } from "../wire/schemas.ts";
 import { busy, readRecord, recordLine, runId, type Run } from "./runs.ts";
 
 /** What one listener serves with: its fleet, the core's context, its runs and where they are recorded. */

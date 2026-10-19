@@ -1,4 +1,4 @@
-import type * as wire from "./contract.gen.ts";
+import type * as wire from "../wire/contract.gen.ts";
 import type { Run } from "./runs.ts";
 
 /** A run this listener is running: its record so far, who follows it, and what it waits for. */

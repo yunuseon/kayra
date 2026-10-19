@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import type { DirectoryListing } from "../../../cli/src/clients/api/contract.gen.ts";
+import type { DirectoryListing } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { get, type Answer } from "../api.ts";
 import { Problem, Waiting } from "./ui.tsx";
 

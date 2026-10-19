@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from "preact/hooks";
-import type { RunEvent } from "../../../cli/src/clients/api/contract.gen.ts";
+import type { RunEvent } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { cancelRun, stream, type Failure } from "../api.ts";
 import { Question } from "../components/question.tsx";
 import { Header, Lines, Pill, Problem, Spans, Waiting } from "../components/ui.tsx";

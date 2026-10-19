@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { RunEvent } from "../../cli/src/clients/api/contract.gen.ts";
+import type { RunEvent } from "../../cli/src/clients/wire/contract.gen.ts";
 import { defaults, fields, inputOf } from "../src/operations.ts";
 import { orderedInput, terminalOutput } from "../src/session.ts";
 import type { Answer } from "../src/api.ts";

@@ -444,6 +444,7 @@ kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude 
 **TypeScript** (`cli/`, `web/`):
 
 - **A function is known by its arguments; its return type is inferred.** Never declare one. The exceptions are what inference cannot say: a type guard (`x is T`), an assertion signature (`asserts x`), and recursion TypeScript cannot infer (rewrite the recursion first). Where a value must meet a type, say it at the value: `satisfies T`, `as const`, a typed callback parameter, a type argument (`new Promise<T>(…)`, `reduce<T>(…)`).
+- **A string or number that means something is a brand** (`core/brand.ts`, `deployer/brand.ts`: the only `as`): server and app names, paths, hosts, ports, URLs, commits, run ids, durations, exit codes. A constructor checks the value where it enters (YAML, argv, HTTP, a program's output) and returns a `Result`; plain `string` is for free text only (titles, messages, log lines).
 - **Readonly lives in the value, not the signature:** an inferred return must still come out readonly. Build it readonly (`as const`, readonly parts) instead of annotating it as such.
 - **Ask the language server for a type, don't guess it** (see Working here as an AI agent). Never add a return type to find out what a function returns.
 

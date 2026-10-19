@@ -11,7 +11,8 @@ is numbered under its title, paths named by their root (`<kayra>`, `<fleet>`,
 `~`); piped, it prints one plain, copyable line per step.
 
 The same commands, with each step live in the browser: `kayra serve`, the
-[web interface](../web-ui/).
+[web interface](../web-ui/). Programs on the same machine can use the
+[local API](../api/) with `kayra serve --api`.
 
 Every command also takes `-v`/`--verbose`: its playbooks print Ansible's own
 output (`ANSIBLE_STDOUT_CALLBACK=default`, with `-v`) instead of kayra's
@@ -59,6 +60,33 @@ setup
   Ghostty; Ghostty and WezTerm also show a progress bar).
 - **Ctrl-C** reaches the step's program; kayra stops once it has given up and
   says where (exit status 130). A second Ctrl-C does not wait.
+
+## Local clients
+
+`kayra serve [--ui] [--api] [--port N] [--no-open]` starts a listener on
+127.0.0.1. The browser is enabled by default; `--api` alone enables only program
+access. Use both flags to serve both clients.
+
+```bash
+kayra serve                           # browser; opens the launch URL
+kayra serve --ui --api                 # browser and local program API
+kayra serve --api --no-open --port 0   # program API on a free port
+kayra serve --port 7700 --no-open       # fixed port, print the browser URL
+```
+
+The default is an available port (`--port 0`). With `--api`,
+read the actual API URL and bearer token from the fleet's `.cache/serve.json`
+(mode 0600); kayra removes it on shutdown. The browser uses a launch cookie.
+See the [API reference](../api/) for authentication, operation requests, run
+events and terminal sessions.
+
+Commands share the same plans and guards across clients. Vault and sudo
+questions use hidden terminal input on the CLI, password fields in the browser,
+and secret question events in the API. Interactive `kayra ssh` inherits the
+terminal; the browser/API use a terminal session.
+
+From 0.17.0, replace `kayra ui` with `kayra serve`; there is no alias. See the
+[0.17.0 upgrade notes](../upgrading-0-17/).
 
 ## Per server
 

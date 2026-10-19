@@ -13,11 +13,36 @@ underneath. Click an element to open its view; drag to pan, scroll to zoom.
 
 ## Landscape
 
-The operator describes servers in a fleet repository and runs them through the
-CLI; developers push to their app repositories; the platform server builds and
-serves the apps.
+The operator describes servers in a fleet repository and runs them through
+local kayra; developers push to their app repositories; the platform server
+builds and serves the apps.
 
 <LikeC4View viewId="index" client:only="react" />
+
+## One core, three clients
+
+The fleet pins one kayra package. Its core declares every operation once,
+validates the fleet and builds pure plans. The interpreter runs those plans;
+clients supply input and present the output. Guards and confirmations stay
+with the plans whichever client starts them.
+
+The command line calls the core directly. The browser and local programs use
+the same local API, which calls the core and streams events, secret questions
+and terminal sessions. `kayra serve --ui --api` runs both clients on the
+operator's machine, where the fleet, SSH keys, vault passwords and OpenTofu
+state already live.
+
+<LikeC4View viewId="clients" client:only="react" />
+
+The CLI, API and browser share the catalog's operations and input schemas;
+compiled coverage tables and parity tests reject a missing client entry.
+The browser imports only the generated API contract. Core code imports no
+client, clients import no other client, and the deployer remains separate.
+The API contract follows the fleet's pinned kayra version and lives under
+`/api` without a separate API version.
+
+See the [CLI](../../reference/cli/), [web interface](../../reference/web-ui/)
+and [local API reference](../../reference/api/) for each client.
 
 ## Inside a platform server
 

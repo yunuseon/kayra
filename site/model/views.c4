@@ -1,9 +1,18 @@
 views {
   view index {
     title 'kayra at a glance'
-    description 'Who works with what: the operator runs a fleet through the CLI, developers push apps, the platform server builds and serves them.'
+    description 'The operator uses local kayra to run a fleet; developers push apps, and the platform server builds and serves them.'
     include *
     exclude visitor
+  }
+
+  view clients of kayra {
+    title 'One core, three clients'
+    description 'The command line calls the core directly; the browser and local programs use the API. All operations share the catalog, plans, guards and interpreter.'
+    include *
+    include operator
+    include localProgram
+    include kayra.core ->
   }
 
   view platform of platform {

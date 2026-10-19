@@ -10,6 +10,7 @@ the same plans and guards. It is a view of the CLI, not a second control plane.
 ```bash
 kayra serve                         # opens the browser
 kayra serve --port 7700 --no-open   # prints the URL instead
+kayra serve --ui --api              # browser and local program API
 ```
 
 ## What it shows
@@ -64,16 +65,18 @@ within each item. Queries show their answers in the form.
 
 SSH opens a terminal with 120 columns and 32 rows. Leaving its page keeps the
 session open; **Close session** disconnects it. A reload reconnects to an open
-session and replays its output. Terminal input is sent in order and is never
-recorded.
+session and replays its output. Input requests are sent in order and are not
+stored separately; output, including anything echoed by the shell, is recorded.
 
 ## Who gets in
 
 It listens on 127.0.0.1 only. The URL it prints carries a token made for this
 launch, which the browser exchanges for a cookie. Every request must name this
 listener as its host, so no other site can reach it through DNS rebinding.
-Every write must come from its own origin, and every API call must carry the
-token. Stopping `kayra serve` stops whatever it runs.
+Cookie-authenticated writes must come from its own origin. With `--api`, local
+programs can use a bearer token from the private discovery file; these requests
+need no Origin. See the [local API reference](../api/). Stopping `kayra serve`
+stops whatever it runs.
 
 For an AI agent working in a fleet, starting `kayra serve` asks the operator
 first: commands run from the browser are out of the agent guard's sight.

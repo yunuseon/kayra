@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { err, ok, type Result } from "../../result.ts";
+import { err, ok, type Result } from "../../lib/result.ts";
 import { field, registered, type App } from "../app.ts";
 import { owner, runId, sha, type Sha } from "../brand.ts";
 import type { Argv } from "./compose.ts";
@@ -11,7 +11,7 @@ import { spawnLines } from "../process.ts";
 import type { Env } from "../runs/run.ts";
 import { forgeRepo, signed } from "../forges/forge.ts";
 import { pushedRef } from "../http/webhook.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /**
  * The builder: the half of the deployer that faces app code and the internet.

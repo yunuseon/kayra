@@ -1,4 +1,4 @@
-import { err, ok } from "../../result.ts";
+import { err, ok } from "../../lib/result.ts";
 import type { Adapter } from "./forge.ts";
 import { header, hmacMatches } from "../http/webhook.ts";
 

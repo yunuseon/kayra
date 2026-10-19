@@ -1,4 +1,4 @@
-import { all, err, map, ok } from "../result.ts";
+import { all, err, map, ok } from "../lib/result.ts";
 
 /** A standard five-field cron spec, in the server's local time. */
 export type Cron = {

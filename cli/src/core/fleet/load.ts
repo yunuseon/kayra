@@ -2,8 +2,9 @@ import { existsSync } from "node:fs";
 import { join, sep } from "node:path";
 import { filesIn, foldersIn, textAt } from "../adapters/fs.ts";
 import { fleetRoot, serverDir, serverName, within, type AbsolutePath, type FleetRoot } from "./brand.ts";
-import { fields, parseServer } from "./parse.ts";
-import { all, attempt, err, flatMap, map, ok } from "../../result.ts";
+import { parseServer } from "./parse.ts";
+import { fields } from "../../lib/yaml.ts";
+import { all, attempt, err, flatMap, map, ok } from "../../lib/result.ts";
 import { defaultsSchema } from "./settings.ts";
 import { checkSettings, knownSettings } from "./shape.ts";
 

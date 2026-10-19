@@ -5,7 +5,7 @@ import { ask, isStopped, type Io } from "./io.ts";
 import { answer, resolve, spawned, type Plumbing } from "./process.ts";
 import { meet, scratch, type Given, type Met } from "./needs.ts";
 import { inPty } from "./pty.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
 const asItCame = (_answer: unknown, said: string) => (said === "" ? typed<readonly string[]>([]) : said.replace(/\n$/, "").split("\n"));

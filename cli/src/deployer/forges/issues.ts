@@ -1,8 +1,8 @@
 import { createSign } from "node:crypto";
-import { err, ok, type Result } from "../../result.ts";
+import { err, ok, type Result } from "../../lib/result.ts";
 import { field } from "../app.ts";
 import type { Alert, Notifier } from "./notify.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /**
  * Alerts as GitHub issues in one repository, opened by a GitHub App: GitHub

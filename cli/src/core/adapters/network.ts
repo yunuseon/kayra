@@ -4,7 +4,7 @@ import { getCACertificates } from "node:tls";
 import type { Network } from "../status/ports.ts";
 import type { Reach } from "../status/model.ts";
 import { milliseconds } from "../fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** Why a connection failed, by Node's error code. */
 export const failure = (code: string) => {

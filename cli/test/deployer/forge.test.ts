@@ -2,7 +2,7 @@ import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { forge, forgeRepo, signed, type CommitStatus, type Fetch, type ForgeRepo } from "../../src/deployer/forges/forge.ts";
-import { err, ok } from "../../src/result.ts";
+import { err, ok } from "../../src/lib/result.ts";
 import { commit, shop } from "./support.ts";
 
 type Call = { readonly url: string; readonly headers: Readonly<Record<string, string>>; readonly body: unknown };

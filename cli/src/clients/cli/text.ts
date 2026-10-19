@@ -1,6 +1,6 @@
 import { characters, type Line, type Span, width } from "../../core/text/spans.ts";
 import type { Milliseconds } from "../../core/fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** `left`, then `right` flush with the last column, at least two spaces apart. */
 export const spread = (left: Line, right: Line, columns: number) => typed<Line>([

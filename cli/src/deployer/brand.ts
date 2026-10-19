@@ -1,8 +1,5 @@
-import { err, ok } from "../result.ts";
-
-declare const brands: unique symbol;
-/** A T that only the matching constructor below can produce. */
-export type Brand<T, B extends string> = T & { readonly [brands]: Readonly<Record<B, true>> };
+import type { Brand } from "../lib/brand.ts";
+import { err, ok } from "../lib/result.ts";
 
 export type AppName = Brand<string, "AppName">;
 /** A full commit id: what gets built, deployed and recorded. */

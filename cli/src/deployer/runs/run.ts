@@ -1,10 +1,10 @@
-import { err, ok, type Result } from "../../result.ts";
+import { err, ok, type Result } from "../../lib/result.ts";
 import type { App } from "../app.ts";
 import type { Sha } from "../brand.ts";
 import { imagesEnv, parseBundle, type Bundle } from "../build/bundle.ts";
 import { config, policy, up, type Argv } from "../build/compose.ts";
 import type { Context, State } from "../forges/forge.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 export type Env = Readonly<Record<string, string>>;
 export type Exit = { readonly code: number; readonly stdout: string };

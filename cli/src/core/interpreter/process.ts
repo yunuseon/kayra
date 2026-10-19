@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { text } from "node:stream/consumers";
 import type { Arg, Argv, Env, Probe } from "../plan/model.ts";
-import { all, err, flatMap, ok } from "../../result.ts";
+import { all, err, flatMap, ok } from "../../lib/result.ts";
 import { isStopped, type Io } from "./io.ts";
 import { exitCode, type ExitCode } from "../fleet/brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** Where a program's streams go: kayra's terminal, or the sink and signal of an Io without one. */
 export type Plumbing = Pick<Io, "output" | "signal">;

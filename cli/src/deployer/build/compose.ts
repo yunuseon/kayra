@@ -1,6 +1,6 @@
 import type { App } from "../app.ts";
 import type { Bundle } from "./bundle.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 export type Argv = readonly [string, ...string[]];
 

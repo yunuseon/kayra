@@ -1,34 +1,7 @@
 import type { z } from "zod";
-import { err, ok } from "../../result.ts";
+import { err, ok } from "../../lib/result.ts";
 import { isAnsibleVariable, settings, type ServerKind } from "./settings.ts";
-import { typed } from "../../typed.ts";
-
-/** Edit distance, for "did you mean". */
-const indices = (length: number) => typed<readonly number[]>([...Array(length).keys()]);
-
-const distance = (a: string, b: string) =>
-  indices(b.length)
-    .reduce<readonly number[]>(
-      (row, j) =>
-        indices(a.length).reduce<readonly number[]>(
-          (next, i) => Object.freeze([
-            ...next,
-            Math.min((row[i + 1] ?? 0) + 1, (next[i] ?? 0) + 1, (row[i] ?? 0) + (a.charAt(i) === b.charAt(j) ? 0 : 1)),
-          ]),
-          [j + 1],
-        ),
-      indices(a.length + 1),
-    )
-    .at(-1) ?? 0;
-
-/** The known name a key is most likely a typo of, if one is close enough. */
-export const closest = (key: string, known: readonly string[]) => {
-  const nearest = known
-    .map((name) => ({ name, cost: distance(key, name) } as const))
-    .toSorted((x, y) => x.cost - y.cost)
-    .at(0);
-  return nearest !== undefined && nearest.cost <= Math.max(2, Math.floor(key.length / 4)) ? nearest.name : undefined;
-};
+import { closest } from "../../lib/closest.ts";
 
 const suggestion = (key: string, known: readonly string[]) => {
   const name = closest(key, known);
@@ -71,8 +44,9 @@ export const checkSettings = (
 export const knownSettings = (kind: ServerKind | undefined) =>
   Object.freeze(settings.filter((each) => !each.secret && (kind === undefined || each.kinds.includes(kind))).map((each) => each.name));
 
-/** A YAML document against a schema, for files whose keys are not settings (server.yml, app.yml). */
-export const checkShape = (file: string, values: unknown, schema: z.ZodType) => {
+/** A YAML document against a schema, for files whose keys are not settings (app.yml): what the schema makes of it. */
+// eslint-disable-next-line functional/prefer-immutable-types -- a Zod schema: immutable once built, but a class the rule cannot see into
+export const checkShape = <S extends z.ZodType>(file: string, values: unknown, schema: S) => {
   const parsed = schema.safeParse(values);
-  return parsed.success ? ok<unknown>(values) : err(firstIssue(file, parsed.error, [], "is not a key it knows"));
+  return parsed.success ? ok<z.output<S>>(parsed.data) : err(firstIssue(file, parsed.error, [], "is not a key it knows"));
 };

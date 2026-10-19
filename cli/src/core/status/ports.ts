@@ -1,5 +1,5 @@
 import type { AbsolutePath, Host, Port } from "../fleet/brand.ts";
-import type { Result } from "../../result.ts";
+import type { Result } from "../../lib/result.ts";
 import type { Reach } from "./model.ts";
 
 /** OpenTofu's state, as status reads it. */

@@ -1,4 +1,4 @@
-import { err, ok } from "../../result.ts";
+import { err, ok } from "../../lib/result.ts";
 import type { Adapter, State } from "./forge.ts";
 import { header, secretMatches } from "../http/webhook.ts";
 

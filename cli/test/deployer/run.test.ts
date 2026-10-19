@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { deploy, type Effects } from "../../src/deployer/runs/run.ts";
-import { err, ok } from "../../src/result.ts";
+import { err, ok } from "../../src/lib/result.ts";
 import { commit, shop } from "./support.ts";
 
 const bundle = {

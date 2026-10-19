@@ -10,13 +10,13 @@ import {
   type ServerKind,
   type Setting,
 } from "./settings.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 const version = "https://json-schema.org/draft/2020-12/schema";
 
 const jsonSchema = (title: string, schema: z.ZodType) =>
   typed<Readonly<Record<string, unknown>>>({
-    ...z.toJSONSchema(schema, { target: "draft-2020-12", unrepresentable: "any" }),
+    ...z.toJSONSchema(schema, { target: "draft-2020-12", unrepresentable: "any", io: "input" }),
     $schema: version,
     title,
   });

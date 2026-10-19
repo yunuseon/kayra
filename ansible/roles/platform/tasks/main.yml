@@ -123,10 +123,18 @@
     mode: "0644"
   loop:
     - deployer/
-    - "result.{{ 'ts' if deployer_source.stat.exists else 'js' }}"
-    - "typed.{{ 'ts' if deployer_source.stat.exists else 'js' }}"
+    - lib/
   vars:
     code: "{{ 'src' if deployer_source.stat.exists else 'dist' }}"
+  become: true
+
+# result and typed used to sit next to deployer/, before lib/. Drop this
+# once every fleet's servers have deployed lib/.
+- name: Remove the deployer's shared files of earlier versions
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/deployer/app/{{ item.0 }}.{{ item.1 }}"
+    state: absent
+  loop: "{{ ['result', 'typed'] | product(['ts', 'js']) | list }}"
   become: true
 
 # The deployer's files used to sit flat in deployer/; those now in folders

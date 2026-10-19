@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** What admission reads of a request. */
 type Arrival = {

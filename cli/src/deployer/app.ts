@@ -1,7 +1,7 @@
-import { typed } from "../typed.ts";
+import { typed } from "../lib/typed.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { err, ok } from "../result.ts";
+import { err, ok } from "../lib/result.ts";
 import { appName, type AppName } from "./brand.ts";
 
 /**

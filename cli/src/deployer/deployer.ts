@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
-import { all, err, ok, type Result } from "../result.ts";
+import { all, err, ok, type Result } from "../lib/result.ts";
 import { field, registered, type App } from "./app.ts";
 import { appName, appOwner, jobOwner, newRunId, sha, type JobName, type Owner, type RunId, type Sha } from "./brand.ts";
 import { matches, parseCron, type Cron } from "./cron.ts";
@@ -18,7 +18,7 @@ import { githubIssues } from "./forges/issues.ts";
 import { decide, parseNotify, silent, type Notifier, type NotifyConfig, type RunEnd } from "./forges/notify.ts";
 import { deploy, renovate, type Effects, type Env, type Outcome } from "./runs/run.ts";
 import { runsOf } from "./runs/store.ts";
-import { typed } from "../typed.ts";
+import { typed } from "../lib/typed.ts";
 
 /**
  * The deployer: the half that holds the docker socket and the app secrets.

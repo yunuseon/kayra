@@ -9,7 +9,7 @@ export type Asked = { readonly invocation: Invocation; readonly json: boolean };
  * The parsed command line as the operation it names. `app rollback` without a
  * commit lists the releases (`app.releases`), with one it rolls back.
  */
-export const fromCommand = (command: Exclude<Command, { readonly name: "serve" }>) => {
+export const fromCommand = (command: Exclude<Command, { readonly name: "serve" | "mcp" }>) => {
   const plainly = (invocation: Invocation) => typed<Asked>({ invocation, json: false });
   switch (command.name) {
     case "up":

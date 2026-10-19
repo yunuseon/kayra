@@ -88,6 +88,10 @@ terminal; the browser/API use a terminal session.
 From 0.17.0, replace `kayra ui` with `kayra serve`; there is no alias. See the
 [0.17.0 upgrade notes](../upgrading-0-17/).
 
+`kayra mcp` serves every operation as a tool to an agent such as Claude Code,
+over stdin and stdout, started by the agent from the fleet's `.mcp.json`. It
+asks for no password. See the [MCP reference](../mcp/).
+
 ## Per server
 
 | Command | What it does |

@@ -23,6 +23,7 @@ import { operation as describe } from "./core/operations/catalog.ts";
 import { contextFor, hasPlan, planOf, query, serverOf, stream } from "./core/operations/dispatch.ts";
 import { systemBrowser } from "./clients/ui/opener.ts";
 import { serve } from "./serve.ts";
+import { serveMcp } from "./clients/mcp/server.ts";
 import { network } from "./core/adapters/network.ts";
 import { render } from "./core/plan/describe.ts";
 import type { Plan } from "./core/plan/model.ts";
@@ -102,7 +103,11 @@ const short = shortener([
   [homedir(), "~"],
 ]);
 const context = contextFor({ kayra, fleet: fleet, version, here: here.value, network: network(2_000), tofu: opentofu });
-if (args.command.name === "serve") {
+if (args.command.name === "mcp") {
+  // stdout is the protocol: nothing else may write there, and every step's output is piped.
+  if (!found.ok) fail(found.error);
+  else serveMcp({ context, short }, (message) => { process.stderr.write(`kayra mcp: ${message}\n`); });
+} else if (args.command.name === "serve") {
   if (!found.ok) fail(found.error);
   // The browser side: web/dist in a checkout, cli/dist/browser in the package.
   const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "browser")].find((dir) => existsSync(join(dir, "index.html")));

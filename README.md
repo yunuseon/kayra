@@ -62,6 +62,7 @@ kayra deploy shop-prod    # host setup + apps, no re-provision (from main only)
 kayra status
 kayra serve               # the fleet in the browser
 kayra serve --ui --api     # browser and the local program API
+kayra mcp                 # every command as a tool, for an agent (from .mcp.json)
 ```
 
 ## Documentation
@@ -73,6 +74,7 @@ kayra serve --ui --api     # browser and the local program API
 | [CI isolation](https://yunuseon.github.io/kayra/concepts/ci-isolation/) | why app code cannot reach the host or the platform |
 | [Authentication](https://yunuseon.github.io/kayra/concepts/authentication/) | staff login (Authelia), adding people, recovery |
 | [Local API](https://yunuseon.github.io/kayra/reference/api/) | program access, authentication, operations, runs and terminal sessions |
+| [MCP](https://yunuseon.github.io/kayra/reference/mcp/) | every operation as a tool for an agent such as Claude Code, and what asks |
 | [Upgrade to 0.17.0](https://yunuseon.github.io/kayra/reference/upgrading-0-17/) | replacing `kayra ui`, client changes and the fleet dependency bump |
 | [`CLAUDE.md`](CLAUDE.md) | how everything fits together, and the rules that keep it working |
 

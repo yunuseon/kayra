@@ -5,7 +5,7 @@ import { createApi, type Api } from "./clients/api/api.ts";
 import { admit, cookieName, tokenIn } from "./clients/api/auth.ts";
 import { discover } from "./clients/api/discovery.ts";
 import { serveAsset } from "./clients/ui/assets.ts";
-import { send } from "./deployer/http.ts";
+import { send } from "./deployer/http/http.ts";
 
 export type Listening = { readonly url: string; readonly port: number; readonly discovery?: string; readonly close: () => Promise<void> };
 export type Clients = { readonly ui: boolean; readonly api: boolean };

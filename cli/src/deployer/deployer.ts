@@ -9,15 +9,16 @@ import { all, err, ok, type Result } from "../result.ts";
 import { field, registered, type App } from "./app.ts";
 import { appName, appOwner, jobOwner, newRunId, sha, type JobName, type Owner, type RunId, type Sha } from "./brand.ts";
 import { matches, parseCron, type Cron } from "./cron.ts";
-import { forge, forgeRepo } from "./forge.ts";
-import { json, send } from "./http.ts";
+import { forge, forgeRepo } from "./forges/forge.ts";
+import { json, send } from "./http/http.ts";
 import { spawnLines } from "./process.ts";
-import { empty, enqueue, finish, type Queue, type Request, type Why } from "./queue.ts";
-import { expired, moved, releaseName, releases, type RunMeta } from "./records.ts";
-import { githubIssues } from "./github-issues.ts";
-import { decide, parseNotify, silent, type Notifier, type NotifyConfig, type RunEnd } from "./notify.ts";
-import { deploy, renovate, type Effects, type Env, type Outcome } from "./run.ts";
-import { runsOf } from "./store.ts";
+import { empty, enqueue, finish, type Queue, type Request, type Why } from "./runs/queue.ts";
+import { expired, moved, releaseName, releases, type RunMeta } from "./runs/records.ts";
+import { githubIssues } from "./forges/issues.ts";
+import { decide, parseNotify, silent, type Notifier, type NotifyConfig, type RunEnd } from "./forges/notify.ts";
+import { deploy, renovate, type Effects, type Env, type Outcome } from "./runs/run.ts";
+import { runsOf } from "./runs/store.ts";
+import { typed } from "../typed.ts";
 
 /**
  * The deployer: the half that holds the docker socket and the app secrets.
@@ -45,20 +46,20 @@ type Settings = {
   readonly notifier: Notifier;
 };
 
-const token = (name: string): string => {
+const token = (name: string) => {
   const path = `/run/platform-secrets/${name}`;
   return existsSync(path) ? readFileSync(path, "utf8").trim() : "";
 };
 
-const must = <T>(result: Result<T, string>): T => {
+const must = <T>(result: Result<T, string>) => {
   if (!result.ok) throw new Error(result.error);
   return result.value;
 };
 
-const settings = (env: NodeJS.ProcessEnv): Settings => {
+const settings = (env: NodeJS.ProcessEnv) => {
   const scripts = env["PLATFORM_SCRIPTS"] ?? "/opt/kayra/scripts/platform";
-  const strings = Object.fromEntries(Object.entries(env).flatMap(([key, value]) => (value === undefined ? [] : [[key, value]])));
-  return {
+  const strings = Object.fromEntries(Object.entries(env).flatMap(([key, value]) => typed<readonly (readonly [string, string])[]>(value === undefined ? [] : [[key, value]])));
+  return typed<Settings>({
     platformDir: env["PLATFORM_DIR"] ?? "/opt/platform",
     appsDir: env["APPS_DIR"] ?? "/opt/apps",
     builder: env["BUILDER_URL"] ?? "http://builder:8081",
@@ -72,11 +73,11 @@ const settings = (env: NodeJS.ProcessEnv): Settings => {
     env: strings,
     server: env["SERVER"] ?? env["DOMAIN"] ?? "this server",
     notifier: notifierFor(must(parseNotify(env["NOTIFIER"])), env["PLATFORM_DIR"] ?? "/opt/platform"),
-  };
+  });
 };
 
 /** The configured notifier; its open alerts are kept in <platformDir>/alerts/<key>. */
-const notifierFor = (config: NotifyConfig, platformDir: string): Notifier => {
+const notifierFor = (config: NotifyConfig, platformDir: string) => {
   if (config.kind === "none") return silent;
   const alerts = join(platformDir, "alerts");
   const keyFile = "/run/deployer-secrets/NOTIFIER_GITHUB_APP_KEY";
@@ -101,7 +102,7 @@ const notifierFor = (config: NotifyConfig, platformDir: string): Notifier => {
 };
 
 /** Raises or resolves what the finished run means; a notifier's failure is logged, never the run's. */
-const notify = async (s: Settings, end: RunEnd, log: (line: string) => void): Promise<void> => {
+const notify = async (s: Settings, end: RunEnd, log: (line: string) => void) => {
   const decision = decide(end);
   const done =
     decision.kind === "raise"
@@ -112,19 +113,19 @@ const notify = async (s: Settings, end: RunEnd, log: (line: string) => void): Pr
   if (!done.ok) log(`(alert not sent: ${done.error})`);
 };
 
-const runsDir = (s: Settings): string => join(s.platformDir, "runs");
+const runsDir = (s: Settings) => join(s.platformDir, "runs");
 const keepRuns = 50;
 
-const registeredApps = (s: Settings): readonly App[] => {
+const registeredApps = (s: Settings) => {
   const dir = join(s.platformDir, "apps");
-  return (existsSync(dir) ? readdirSync(dir) : []).flatMap((file) => {
+  return Object.freeze((existsSync(dir) ? readdirSync(dir) : []).flatMap((file) => {
     const name = /^(.+)\.json$/.exec(file)?.[1];
     const app = name === undefined ? undefined : registered(s.platformDir, name);
-    return app?.ok === true ? [app.value] : [];
-  });
+    return app?.ok === true ? Object.freeze([app.value]) : Object.freeze([]);
+  }));
 };
 
-const builderResolve = async (s: Settings, app: App, ref: string): Promise<Result<Sha, string>> => {
+const builderResolve = async (s: Settings, app: App, ref: string) => {
   const response = await fetch(`${s.builder}/resolve`, { method: "POST", body: JSON.stringify({ app: app.name, ref }) }).catch(() => undefined);
   if (response === undefined) return err("the builder did not answer");
   const answer: unknown = await response.json().catch(() => undefined);
@@ -134,7 +135,7 @@ const builderResolve = async (s: Settings, app: App, ref: string): Promise<Resul
 };
 
 /** The builder's NDJSON: log lines as they come, then the bundle or an error. */
-const builderPrepare = async (s: Settings, app: App, commit: Sha, log: (line: string) => void): Promise<Result<unknown, string>> => {
+const builderPrepare = async (s: Settings, app: App, commit: Sha, log: (line: string) => void) => {
   const response = await fetch(`${s.builder}/prepare`, {
     method: "POST",
     body: JSON.stringify({ app: app.name, sha: commit }),
@@ -158,19 +159,19 @@ const builderPrepare = async (s: Settings, app: App, commit: Sha, log: (line: st
   return outcome.findLast((item) => item !== undefined) ?? err("the builder stopped without a bundle");
 };
 
-const appSecrets = (app: App): Result<Env, string> => {
+const appSecrets = (app: App) => {
   const read = all(
-    app.secrets.map((key): Result<readonly [string, string], string> => {
+    app.secrets.map((key) => {
       const path = join("/run/app-secrets", app.name, key);
-      return existsSync(path) ? ok([key, readFileSync(path, "utf8")]) : err(`${app.name}: secret ${key} is missing; run kayra apps`);
+      return existsSync(path) ? ok<readonly [string, string]>([key, readFileSync(path, "utf8")]) : err(`${app.name}: secret ${key} is missing; run kayra apps`);
     }),
   );
-  return read.ok ? ok(Object.fromEntries(read.value)) : read;
+  return read.ok ? ok<Env>(Object.fromEntries(read.value)) : read;
 };
 
-const target = (s: Settings, who: Owner, id: RunId): string => `https://deploy.${s.domain}/runs/${who}/${id}`;
+const target = (s: Settings, who: Owner, id: RunId) => `https://deploy.${s.domain}/runs/${who}/${id}`;
 
-const effects = (s: Settings, who: Owner, id: RunId, log: (line: string) => void): Effects => ({
+const effects = (s: Settings, who: Owner, id: RunId, log: (line: string) => void) => typed<Effects>({
   log,
   resolve: (app, ref) => builderResolve(s, app, ref),
   prepare: (app, commit) => builderPrepare(s, app, commit, log),
@@ -202,24 +203,24 @@ const effects = (s: Settings, who: Owner, id: RunId, log: (line: string) => void
   },
 });
 
-const describe = (request: Request): { readonly what: string; readonly why: RunMeta["why"] } =>
+const describe = (request: Request) =>
   request.work.kind === "deploy"
-    ? { what: `deploy ${request.work.ref}`, why: request.work.why }
-    : { what: `${request.work.job}${request.work.dryRun ? " (dry run)" : ""}`, why: "schedule" };
+    ? typed<{ readonly what: string; readonly why: RunMeta["why"] }>({ what: `deploy ${request.work.ref}`, why: request.work.why })
+    : typed<{ readonly what: string; readonly why: RunMeta["why"] }>({ what: `${request.work.job}${request.work.dryRun ? " (dry run)" : ""}`, why: "schedule" });
 
-const work = async (s: Settings, request: Request, fx: Effects): Promise<Outcome> => {
+const work = async (s: Settings, request: Request, fx: Effects) => {
   if (request.work.kind === "deploy") {
     const app = registered(s.platformDir, request.work.app);
     if (!app.ok) {
       fx.log(app.error);
-      return { ok: false };
+      return typed<Outcome>({ ok: false });
     }
     return deploy(app.value, request.work.ref, { appsDir: s.appsDir, policyScript: s.policyScript }, fx);
   }
   const argv = request.work.job === "gc" ? (["bash", s.gcScript] as const) : renovate(s.env, request.work.dryRun, s.renovateImage);
   const env: Env = request.work.job === "renovate" ? { RENOVATE_TOKEN: token("RENOVATE_TOKEN") } : {};
   const exit = await fx.exec(argv, { cwd: s.platformDir, env });
-  return { ok: exit.code === 0 };
+  return typed<Outcome>({ ok: exit.code === 0 });
 };
 
 /** The daemon's one mutable cell: the queue, swapped whole on every change. */
@@ -227,7 +228,7 @@ const work = async (s: Settings, request: Request, fx: Effects): Promise<Outcome
 const cell: { queue: Queue } = { queue: empty(2) };
 
 /** Applies a change to the queue and starts what it lets start; returns those. */
-const swap = (s: Settings, change: (queue: Queue) => { readonly queue: Queue; readonly start: readonly Request[] }): readonly Request[] => {
+const swap = (s: Settings, change: (queue: Queue) => { readonly queue: Queue; readonly start: readonly Request[] }) => {
   const next = change(cell.queue);
   // eslint-disable-next-line functional/immutable-data -- the daemon's state lives here, nowhere else
   cell.queue = next.queue;
@@ -237,19 +238,19 @@ const swap = (s: Settings, change: (queue: Queue) => { readonly queue: Queue; re
   return next.start;
 };
 
-const start = async (s: Settings, request: Request): Promise<void> => {
+const start = async (s: Settings, request: Request) => {
   const id = newRunId(new Date(), randomBytes(3).toString("hex"));
   const dir = join(runsDir(s), request.owner, id);
   mkdirSync(dir, { recursive: true });
   const { what, why } = describe(request);
   const begun: RunMeta = { id, owner: request.owner, what, why, state: "running", started: new Date().toISOString() };
   writeFileSync(join(dir, "meta.json"), JSON.stringify(begun));
-  const log = (line: string): void => {
+  const log = (line: string) => {
     appendFileSync(join(dir, "log"), `${new Date().toISOString().slice(11, 19)} ${line}\n`);
   };
-  const outcome = await work(s, request, effects(s, request.owner, id, log)).catch((error: unknown): Outcome => {
+  const outcome = await work(s, request, effects(s, request.owner, id, log)).catch((error: unknown) => {
     log(`deployer: ${String(error)}`);
-    return { ok: false };
+    return typed<Outcome>({ ok: false });
   });
   const ended: RunMeta = {
     ...begun,
@@ -274,15 +275,15 @@ const start = async (s: Settings, request: Request): Promise<void> => {
   swap(s, (queue) => finish(queue, request.owner));
 };
 
-const deployRequest = (app: App, ref: string, why: Why): Request => ({
+const deployRequest = (app: App, ref: string, why: Why) => typed<Request>({
   owner: appOwner(app.name),
   work: { kind: "deploy", app: app.name, ref, why },
 });
 
-const jobRequest = (job: JobName, dryRun: boolean): Request => ({ owner: jobOwner(job), work: { kind: "job", job, dryRun } });
+const jobRequest = (job: JobName, dryRun: boolean) => typed<Request>({ owner: jobOwner(job), work: { kind: "job", job, dryRun } });
 
 /** The webhook's fallback: an app whose ref moved to a commit no run has tried yet and no release runs (one migrated from Jenkins has releases but no runs). */
-const poll = async (s: Settings): Promise<void> => {
+const poll = async (s: Settings) => {
   await Promise.all(
     registeredApps(s).map(async (app) => {
       const commit = await builderResolve(s, app, app.ref);
@@ -294,13 +295,13 @@ const poll = async (s: Settings): Promise<void> => {
   );
 };
 
-const tick = (s: Settings, at: Date): void => {
+const tick = (s: Settings, at: Date) => {
   if (matches(s.poll, at)) void poll(s);
   if (matches(s.gc, at)) swap(s, (queue) => enqueue(queue, jobRequest("gc", false)));
   if (s.renovate !== undefined && matches(s.renovate, at)) swap(s, (queue) => enqueue(queue, jobRequest("renovate", false)));
 };
 
-const schedule = (s: Settings): void => {
+const schedule = (s: Settings) => {
   const wait = 60_000 - (Date.now() % 60_000) + 500;
   setTimeout(() => {
     tick(s, new Date());
@@ -310,19 +311,19 @@ const schedule = (s: Settings): void => {
 
 const handle =
   (handler: (request: IncomingMessage, response: ServerResponse) => Promise<void>) =>
-  (request: IncomingMessage, response: ServerResponse): void => {
+  (request: IncomingMessage, response: ServerResponse) => {
     handler(request, response).catch((error: unknown) => {
       console.error(error);
       if (!response.headersSent) send(response, 500, "internal error\n");
     });
   };
 
-const accept = (s: Settings, response: ServerResponse, request: Request): void => {
+const accept = (s: Settings, response: ServerResponse, request: Request) => {
   const started = swap(s, (queue) => enqueue(queue, request)).includes(request);
   send(response, 202, started ? `${request.owner}: started\n` : `${request.owner}: queued, after what runs now\n`);
 };
 
-const control = async (s: Settings, request: IncomingMessage, response: ServerResponse): Promise<void> => {
+const control = async (s: Settings, request: IncomingMessage, response: ServerResponse) => {
   const path = new URL(request.url ?? "/", "http://deployer").pathname;
   const input = await json(request);
   if (request.method !== "POST" || typeof input !== "object" || input === null) {
@@ -353,7 +354,7 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
   send(response, 404, "not found\n");
 };
 
-export const serveDeployer = (env: NodeJS.ProcessEnv): void => {
+export const serveDeployer = (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
   createServer(
     handle(async (request, response) => {

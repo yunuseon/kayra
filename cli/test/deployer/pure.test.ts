@@ -1,12 +1,12 @@
 import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { parseApp } from "../../src/deployer/app.ts";
-import { parseBundle, imagesEnv } from "../../src/deployer/bundle.ts";
-import { config, policy, up } from "../../src/deployer/compose.ts";
+import { parseBundle, imagesEnv } from "../../src/deployer/build/bundle.ts";
+import { config, policy, up } from "../../src/deployer/build/compose.ts";
 import { matches, parseCron } from "../../src/deployer/cron.ts";
-import { expired, moved, releaseName, releases } from "../../src/deployer/records.ts";
-import { renovate } from "../../src/deployer/run.ts";
-import { pushedRef } from "../../src/deployer/webhook.ts";
+import { expired, moved, releaseName, releases } from "../../src/deployer/runs/records.ts";
+import { renovate } from "../../src/deployer/runs/run.ts";
+import { pushedRef } from "../../src/deployer/http/webhook.ts";
 import { commit, must, name, shop } from "./support.ts";
 
 test("cron: fields, ranges, steps, lists; 7 is Sunday", () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { serveBuilder } from "./builder.ts";
-import { ctl } from "./ctl.ts";
+import { serveBuilder } from "./build/builder.ts";
+import { ctl } from "./ctl/ctl.ts";
 import { serveDeployer } from "./deployer.ts";
 
 /** One program, three roles: `builder`, `deployer` (the two daemons) and `ctl` (the operator, inside the deployer). */

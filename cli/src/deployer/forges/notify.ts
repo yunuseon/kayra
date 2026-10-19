@@ -1,6 +1,7 @@
-import { err, ok, type Result } from "../result.ts";
-import { field } from "./app.ts";
-import type { Request } from "./queue.ts";
+import { err, ok, type Result } from "../../result.ts";
+import { field } from "../app.ts";
+import type { Request } from "../runs/queue.ts";
+import { typed } from "../../typed.ts";
 
 /**
  * Something wrong that lasts until a later run fixes it: the app's own ref
@@ -28,8 +29,8 @@ export type NotifyConfig =
   | { readonly kind: "none" }
   | { readonly kind: "github-issue"; readonly repository: string; readonly appId: string };
 
-export const parseNotify = (raw: string | undefined): Result<NotifyConfig, string> => {
-  if (raw === undefined || raw.trim() === "") return ok({ kind: "none" });
+export const parseNotify = (raw: string | undefined) => {
+  if (raw === undefined || raw.trim() === "") return ok<NotifyConfig>({ kind: "none" });
   try {
     const json: unknown = JSON.parse(raw);
     if (typeof json !== "object" || json === null) return err("notifier: not an object");
@@ -39,7 +40,7 @@ export const parseNotify = (raw: string | undefined): Result<NotifyConfig, strin
     if (kind !== "github-issue") return err(`notifier: unknown kind ${String(kind)}`);
     if (typeof repository !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(repository)) return err(`notifier: repository ${String(repository)}`);
     if (typeof appId !== "string" && typeof appId !== "number") return err("notifier: app_id missing");
-    return ok({ kind, repository, appId: String(appId) });
+    return ok<NotifyConfig>({ kind, repository, appId: String(appId) });
   } catch {
     return err("notifier: not JSON");
   }
@@ -64,28 +65,28 @@ export type Decision =
  * (kayra app deploy | rollback) only resolves, since whoever started it is
  * watching. A platform job raises when it fails. Any success resolves.
  */
-export const decide = (end: RunEnd): Decision => {
+export const decide = (end: RunEnd) => {
   const { request, server } = end;
   const key = request.owner;
   const commit = end.sha === undefined ? "" : ` at ${end.sha.slice(0, 12)}`;
-  if (end.ok) return { kind: "resolve", key, note: `Recovered: ${end.page}` };
+  if (end.ok) return typed<Decision>({ kind: "resolve", key, note: `Recovered: ${end.page}` });
   if (request.work.kind === "deploy") {
-    if (request.work.why !== "push" && request.work.why !== "poll") return { kind: "none" };
-    return {
+    if (request.work.why !== "push" && request.work.why !== "poll") return typed<Decision>({ kind: "none" });
+    return typed<Decision>({
       kind: "raise",
       alert: {
         key,
         title: `${server}: ${request.work.app} did not deploy${commit}`,
         body: `${request.work.app}'s ${request.work.ref} failed to build or deploy on ${server}${commit}, after a ${request.work.why}.\n\nThe run: ${end.page}\n\nIt stays open until a deploy of ${request.work.app} on ${server} succeeds.`,
       },
-    };
+    });
   }
-  return {
+  return typed<Decision>({
     kind: "raise",
     alert: {
       key,
       title: `${server}: the ${request.work.job} job failed`,
       body: `The platform's ${request.work.job} job failed on ${server}.\n\nThe run: ${end.page}\n\nIt stays open until the job succeeds on ${server}.`,
     },
-  };
+  });
 };

@@ -1,5 +1,6 @@
-import type { AppName } from "./brand.ts";
-import type { Release, RunMeta, RunState } from "./records.ts";
+import type { AppName } from "../brand.ts";
+import type { Release, RunMeta, RunState } from "../runs/records.ts";
+import { typed } from "../../typed.ts";
 
 /**
  * What `ctl … --json` answers, for kayra on the operator's machine to draw:
@@ -25,11 +26,11 @@ export type RunsAnswer = { readonly app: string; readonly live?: Deployed; reado
 export type ReleasesAnswer = { readonly app: string; readonly releases: readonly (Deployed & { readonly live: boolean })[] };
 
 /** A release record's compact UTC time, 20261018T101500Z, as ISO 8601. */
-const iso = (compact: string): string => compact.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z");
+const iso = (compact: string) => compact.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z");
 
-const deployed = (release: Release): Deployed => ({ sha: release.sha, time: iso(release.time) });
+const deployed = (release: Release) => typed<Deployed>({ sha: release.sha, time: iso(release.time) });
 
-const answer = (run: RunMeta): RunAnswer => ({
+const answer = (run: RunMeta) => typed<RunAnswer>({
   id: run.id,
   state: run.state,
   why: run.why,
@@ -39,13 +40,13 @@ const answer = (run: RunMeta): RunAnswer => ({
   ...(run.finished === undefined ? {} : { finished: run.finished }),
 });
 
-export const runsAnswer = (app: AppName, runs: readonly RunMeta[], live: Release | undefined): RunsAnswer => ({
+export const runsAnswer = (app: AppName, runs: readonly RunMeta[], live: Release | undefined) => typed<RunsAnswer>({
   app,
   ...(live === undefined ? {} : { live: deployed(live) }),
   runs: runs.map(answer),
 });
 
-export const releasesAnswer = (app: AppName, releases: readonly Release[]): ReleasesAnswer => ({
+export const releasesAnswer = (app: AppName, releases: readonly Release[]) => typed<ReleasesAnswer>({
   app,
-  releases: releases.map((release, index) => ({ ...deployed(release), live: index === 0 })),
+  releases: releases.map((release, index) => ({ ...deployed(release), live: index === 0 } as const)),
 });

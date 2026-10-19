@@ -1,6 +1,6 @@
-import { err, ok } from "../result.ts";
+import { err, ok } from "../../result.ts";
 import type { Adapter } from "./forge.ts";
-import { header, hmacMatches } from "./webhook.ts";
+import { header, hmacMatches } from "../http/webhook.ts";
 
 /** A Forgejo's API (Gitea's statuses endpoint); webhooks signed `X-Forgejo-Signature: <hex>` (or Gitea's, or GitHub's, which it sends too). */
 export const forgejo: Adapter = {
@@ -14,7 +14,7 @@ export const forgejo: Adapter = {
       if (response === undefined) return err("no answer");
       return response.ok ? ok(undefined) : err(`HTTP ${String(response.status)}`);
     },
-  }),
+  } as const),
   signed: (secret, body, headers) => {
     const hub = header(headers, "x-hub-signature-256");
     const own = header(headers, "x-forgejo-signature") ?? header(headers, "x-gitea-signature");

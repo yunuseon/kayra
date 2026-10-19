@@ -1,6 +1,6 @@
-import { err, ok } from "../result.ts";
+import { err, ok } from "../../result.ts";
 import type { Adapter, State } from "./forge.ts";
-import { header, secretMatches } from "./webhook.ts";
+import { header, secretMatches } from "../http/webhook.ts";
 
 /** GitLab knows no "failure" or "error", only "failed". */
 const states: Readonly<Record<State, string>> = { pending: "pending", success: "success", failure: "failed", error: "failed" };
@@ -22,6 +22,6 @@ export const gitlab: Adapter = {
       if (response === undefined) return err("no answer");
       return response.ok ? ok(undefined) : err(`HTTP ${String(response.status)}`);
     },
-  }),
+  } as const),
   signed: (secret, _body, headers) => secretMatches(secret, header(headers, "x-gitlab-token")),
 };

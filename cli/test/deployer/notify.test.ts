@@ -2,9 +2,9 @@ import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
 import { appOwner, jobOwner } from "../../src/deployer/brand.ts";
-import { appJwt, githubIssues, type GithubIssueWorld } from "../../src/deployer/github-issues.ts";
-import { decide, parseNotify, type RunEnd } from "../../src/deployer/notify.ts";
-import type { Request, Why } from "../../src/deployer/queue.ts";
+import { appJwt, githubIssues, type GithubIssueWorld } from "../../src/deployer/forges/issues.ts";
+import { decide, parseNotify, type RunEnd } from "../../src/deployer/forges/notify.ts";
+import type { Request, Why } from "../../src/deployer/runs/queue.ts";
 import { ok } from "../../src/result.ts";
 import { commit, name } from "./support.ts";
 

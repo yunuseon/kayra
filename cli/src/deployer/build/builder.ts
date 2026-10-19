@@ -1,16 +1,17 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { err, ok, type Result } from "../result.ts";
-import { field, registered, type App } from "./app.ts";
-import { owner, runId, sha, type Sha } from "./brand.ts";
+import { err, ok, type Result } from "../../result.ts";
+import { field, registered, type App } from "../app.ts";
+import { owner, runId, sha, type Sha } from "../brand.ts";
 import type { Argv } from "./compose.ts";
-import { body, json, send } from "./http.ts";
-import { page, runPage } from "./page.ts";
-import { spawnLines } from "./process.ts";
-import type { Env } from "./run.ts";
-import { forgeRepo, signed } from "./forge.ts";
-import { pushedRef } from "./webhook.ts";
+import { body, json, send } from "../http/http.ts";
+import { page, runPage } from "../http/page.ts";
+import { spawnLines } from "../process.ts";
+import type { Env } from "../runs/run.ts";
+import { forgeRepo, signed } from "../forges/forge.ts";
+import { pushedRef } from "../http/webhook.ts";
+import { typed } from "../../typed.ts";
 
 /**
  * The builder: the half of the deployer that faces app code and the internet.
@@ -31,22 +32,22 @@ type Settings = {
   readonly gitToken: () => string;
 };
 
-const fromFile = (path: string): (() => string) => () => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
+const fromFile = (path: string) => () => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
 
-const settings = (env: NodeJS.ProcessEnv): Settings => {
+const settings = (env: NodeJS.ProcessEnv) => {
   const platformDir = env["PLATFORM_DIR"] ?? "/opt/platform";
-  return {
+  return typed<Settings>({
     platformDir,
     work: env["WORK_DIR"] ?? "/work",
     deployer: env["DEPLOYER_URL"] ?? "http://deployer:8090",
     resolveImages: env["RESOLVE_IMAGES"] ?? "/opt/kayra/scripts/platform/resolve-images.sh",
     webhookSecret: () => env["WEBHOOK_SECRET"] ?? "",
     gitToken: fromFile("/run/platform-secrets/GIT_TOKEN"),
-  };
+  });
 };
 
 /** git with the platform's token as a header: neither in the clone's config nor in the process list. */
-const gitEnv = (token: string): Env => ({
+const gitEnv = (token: string) => typed<Env>({
   GIT_TERMINAL_PROMPT: "0",
   GIT_CONFIG_COUNT: "1",
   GIT_CONFIG_KEY_0: "http.extraHeader",
@@ -54,7 +55,7 @@ const gitEnv = (token: string): Env => ({
 });
 
 /** A full commit id as it is; otherwise the branch or tag it names (a tag's commit, not the tag object). */
-export const resolveRef = async (app: App, ref: string, token: string): Promise<Result<Sha, string>> => {
+export const resolveRef = async (app: App, ref: string, token: string) => {
   const given = sha(ref);
   if (given.ok) return given;
   const exit = await spawnLines(
@@ -66,7 +67,7 @@ export const resolveRef = async (app: App, ref: string, token: string): Promise<
   const refs = new Map(
     exit.stdout.split("\n").flatMap((line) => {
       const [commit, name] = line.split("\t");
-      return commit === undefined || name === undefined ? [] : [[name, commit] as const];
+      return typed<readonly (readonly [string, string])[]>(commit === undefined || name === undefined ? [] : [[name, commit]]);
     }),
   );
   const found = refs.get(`refs/tags/${ref}^{}`) ?? refs.get(`refs/heads/${ref}`) ?? refs.get(`refs/tags/${ref}`);
@@ -75,12 +76,12 @@ export const resolveRef = async (app: App, ref: string, token: string): Promise<
 
 type Line = (text: string) => void;
 
-const run = async (argv: Argv, options: Parameters<typeof spawnLines>[1], line: Line): Promise<Result<string, string>> => {
+const run = async (argv: Argv, options: Parameters<typeof spawnLines>[1], line: Line) => {
   const exit = await spawnLines(argv, options, line);
-  return exit.code === 0 ? ok(exit.stdout) : err(`${argv.slice(0, 3).join(" ")} failed (exit ${String(exit.code)})`);
+  return exit.code === 0 ? ok<string>(exit.stdout) : err(`${argv.slice(0, 3).join(" ")} failed (exit ${String(exit.code)})`);
 };
 
-const sequence = async (steps: readonly (() => Promise<Result<string, string>>)[]): Promise<Result<string, string>> =>
+const sequence = async (steps: readonly (() => Promise<Result<string, string>>)[]) =>
   steps.reduce<Promise<Result<string, string>>>(async (previous, next) => {
     const so = await previous;
     return so.ok ? next() : so;
@@ -92,10 +93,10 @@ const sequence = async (steps: readonly (() => Promise<Result<string, string>>)[
  * lists at that commit. A clone per app, kept between runs; the deployer never
  * runs two for the same app at once, and neither does this.
  */
-export const prepare = async (app: App, commit: Sha, s: Settings, line: Line): Promise<Result<unknown, string>> => {
+export const prepare = async (app: App, commit: Sha, s: Settings, line: Line) => {
   const dir = join(s.work, app.name);
   const env = gitEnv(s.gitToken());
-  const git = (...args: readonly string[]): Promise<Result<string, string>> => run(["git", "-C", dir, ...args], { env, timeoutMs: 10 * 60_000 }, line);
+  const git = (...args: readonly string[]) => run(["git", "-C", dir, ...args], { env, timeoutMs: 10 * 60_000 }, line);
   mkdirSync(dir, { recursive: true });
   const fresh = !existsSync(join(dir, ".git"));
   const checkedOut = await sequence([
@@ -117,7 +118,7 @@ export const prepare = async (app: App, commit: Sha, s: Settings, line: Line): P
   const artifacts = planned.value
     .split("\n")
     .filter((row) => row !== "")
-    .map((row) => row.split("\t"));
+    .map((row) => Object.freeze(row.split("\t")));
   const built = await sequence(
     artifacts.map(([name]) => () => {
       line(`── Image ${name ?? "?"}`);
@@ -134,14 +135,14 @@ export const prepare = async (app: App, commit: Sha, s: Settings, line: Line): P
   if (outside !== undefined) return err(`app.yml: compose file ${outside} is outside the app`);
   const missing = files.find((file) => !existsSync(join(root, file)));
   if (missing !== undefined) return err(`app.yml: compose file ${missing} does not exist at ${commit}`);
-  return ok({
+  return ok<unknown>({
     sha: commit,
-    images: artifacts.map(([, variable, ref]) => ({ variable, ref })),
-    compose: files.map((file) => ({ path: file, content: readFileSync(join(root, file), "utf8") })),
+    images: artifacts.map(([, variable, ref]) => ({ variable, ref } as const)),
+    compose: files.map((file) => ({ path: file, content: readFileSync(join(root, file), "utf8") } as const)),
   });
 };
 
-const hook = async (s: Settings, name: string, request: IncomingMessage, response: ServerResponse): Promise<void> => {
+const hook = async (s: Settings, name: string, request: IncomingMessage, response: ServerResponse) => {
   const raw = await body(request);
   const app = registered(s.platformDir, name);
   if (!app.ok) {
@@ -162,7 +163,7 @@ const hook = async (s: Settings, name: string, request: IncomingMessage, respons
   send(response, forwarded?.ok === true ? 202 : 502, forwarded?.ok === true ? "queued\n" : "the deployer did not answer\n");
 };
 
-const pages = (s: Settings, path: string, response: ServerResponse): void => {
+const pages = (s: Settings, path: string, response: ServerResponse) => {
   const [, runs, who, id] = path.split("/");
   if (path === "/") {
     send(response, 200, page(join(s.platformDir, "runs")), "text/html; charset=utf-8");
@@ -177,7 +178,7 @@ const pages = (s: Settings, path: string, response: ServerResponse): void => {
   send(response, 404, "not found\n");
 };
 
-const internal = async (s: Settings, path: string, request: IncomingMessage, response: ServerResponse): Promise<void> => {
+const internal = async (s: Settings, path: string, request: IncomingMessage, response: ServerResponse) => {
   const input = await json(request);
   const name = typeof input === "object" && input !== null ? field(input, "app") : undefined;
   const app = registered(s.platformDir, typeof name === "string" ? name : "");
@@ -210,7 +211,7 @@ const failing = (handler: (request: IncomingMessage, response: ServerResponse) =
   });
 };
 
-export const serveBuilder = (env: NodeJS.ProcessEnv): void => {
+export const serveBuilder = (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
   createServer(
     failing(async (request, response) => {

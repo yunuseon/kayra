@@ -1,9 +1,9 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { releasesAnswer, runsAnswer } from "./answers.ts";
-import { appOwner, appName, owner as mintOwner, runId } from "./brand.ts";
-import { releases } from "./records.ts";
-import { log, runsOf } from "./store.ts";
+import { appOwner, appName, owner as mintOwner, runId } from "../brand.ts";
+import { releases } from "../runs/records.ts";
+import { log, runsOf } from "../runs/store.ts";
 
 /**
  * The operator's side, run inside the deployer container by `kayra app …` and
@@ -15,19 +15,19 @@ import { log, runsOf } from "./store.ts";
 const platformDir = process.env["PLATFORM_DIR"] ?? "/opt/platform";
 const runs = join(platformDir, "runs");
 
-const fail = (message: string): number => {
+const fail = (message: string) => {
   console.error(message);
   return 1;
 };
 
-const post = async (path: string, payload: object): Promise<number> => {
+const post = async (path: string, payload: object) => {
   const response = await fetch(`http://127.0.0.1:8091${path}`, { method: "POST", body: JSON.stringify(payload) }).catch(() => undefined);
   if (response === undefined) return fail("the deployer is not running");
   process.stdout.write(await response.text());
   return response.ok ? 0 : 1;
 };
 
-const releasesOf = (app: string): ReturnType<typeof releases> => {
+const releasesOf = (app: string) => {
   const dir = join(platformDir, "releases", app);
   return releases(existsSync(dir) ? readdirSync(dir) : []);
 };
@@ -81,7 +81,7 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
   job: ([job, flag]) => post("/job", { job, dryRun: flag === "--dry-run" }),
 };
 
-export const ctl = async (args: readonly string[]): Promise<number> => {
+export const ctl = async (args: readonly string[]) => {
   const [name, ...rest] = args;
   const command = name === undefined ? undefined : commands[name];
   return command === undefined

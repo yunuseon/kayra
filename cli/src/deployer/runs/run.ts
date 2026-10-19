@@ -1,9 +1,10 @@
-import { err, ok, type Result } from "../result.ts";
-import type { App } from "./app.ts";
-import type { Sha } from "./brand.ts";
-import { imagesEnv, parseBundle, type Bundle } from "./bundle.ts";
-import { config, policy, up, type Argv } from "./compose.ts";
-import type { Context, State } from "./forge.ts";
+import { err, ok, type Result } from "../../result.ts";
+import type { App } from "../app.ts";
+import type { Sha } from "../brand.ts";
+import { imagesEnv, parseBundle, type Bundle } from "../build/bundle.ts";
+import { config, policy, up, type Argv } from "../build/compose.ts";
+import type { Context, State } from "../forges/forge.ts";
+import { typed } from "../../typed.ts";
 
 export type Env = Readonly<Record<string, string>>;
 export type Exit = { readonly code: number; readonly stdout: string };
@@ -28,17 +29,17 @@ export type Paths = { readonly appsDir: string; readonly policyScript: string };
 
 export type Outcome = { readonly ok: boolean; readonly sha?: Sha };
 
-const step = async (fx: Effects, label: string, argv: Argv, options: Parameters<Effects["exec"]>[1]): Promise<Result<string, string>> => {
+const step = async (fx: Effects, label: string, argv: Argv, options: Parameters<Effects["exec"]>[1]) => {
   fx.log(`── ${label}`);
   const exit = await fx.exec(argv, options);
-  return exit.code === 0 ? ok(exit.stdout) : err(`${label} failed (exit ${String(exit.code)})`);
+  return exit.code === 0 ? ok<string>(exit.stdout) : err(`${label} failed (exit ${String(exit.code)})`);
 };
 
 /**
  * Admission, then up: the compose config of the commit being deployed must
  * pass the policy before anything starts, and what it checked is what runs.
  */
-const deployBundle = async (app: App, bundle: Bundle, paths: Paths, fx: Effects): Promise<Result<string, string>> => {
+const deployBundle = async (app: App, bundle: Bundle, paths: Paths, fx: Effects) => {
   const images = imagesEnv(bundle);
   const secrets = fx.secrets(app);
   if (!secrets.ok) return secrets;
@@ -50,7 +51,7 @@ const deployBundle = async (app: App, bundle: Bundle, paths: Paths, fx: Effects)
   const started = await step(fx, "Up", up(app, paths.appsDir, bundle), { cwd, env: secrets.value });
   if (!started.ok) return started;
   await fx.record(app, bundle.sha, images);
-  return ok(images);
+  return ok<string>(images);
 };
 
 /**
@@ -58,12 +59,12 @@ const deployBundle = async (app: App, bundle: Bundle, paths: Paths, fx: Effects)
  * then admitted and started (kayra/deploy). Each phase posts its status on the
  * commit; a failed build never reaches deploy.
  */
-export const deploy = async (app: App, ref: string, paths: Paths, fx: Effects): Promise<Outcome> => {
+export const deploy = async (app: App, ref: string, paths: Paths, fx: Effects) => {
   fx.log(`Deploying ${app.name} at ${ref}`);
   const commit = await fx.resolve(app, ref);
   if (!commit.ok) {
     fx.log(commit.error);
-    return { ok: false };
+    return typed<Outcome>({ ok: false });
   }
   const sha = commit.value;
   fx.log(`── ${ref} is ${sha}`);
@@ -74,7 +75,7 @@ export const deploy = async (app: App, ref: string, paths: Paths, fx: Effects): 
   if (!bundle.ok) {
     fx.log(bundle.error);
     await fx.status(app, sha, "kayra/build", "failure", "Build failed");
-    return { ok: false, sha };
+    return typed<Outcome>({ ok: false, sha });
   }
   await fx.status(app, sha, "kayra/build", "success", "Images built");
 
@@ -83,22 +84,22 @@ export const deploy = async (app: App, ref: string, paths: Paths, fx: Effects): 
   if (!deployed.ok) {
     fx.log(deployed.error);
     await fx.status(app, sha, "kayra/deploy", "failure", deployed.error);
-    return { ok: false, sha };
+    return typed<Outcome>({ ok: false, sha });
   }
   fx.log(`Deployed ${sha}`);
   await fx.status(app, sha, "kayra/deploy", "success", "Deployed");
-  return { ok: true, sha };
+  return typed<Outcome>({ ok: true, sha });
 };
 
 /** Renovate's settings, as the platform's .env holds them; the optional ones only when set. */
-export const renovate = (env: Env, dryRun: boolean, image: string): Argv => {
+export const renovate = (env: Env, dryRun: boolean, image: string) => {
   const optional = ["RENOVATE_ENDPOINT", "RENOVATE_GIT_URL", "RENOVATE_HOST_RULES", "RENOVATE_GITHUB_COM_TOKEN"]
     .filter((key) => (env[key] ?? "") !== "")
-    .flatMap((key) => ["-e", key]);
-  return [
+    .flatMap((key) => ["-e", key] as const);
+  return typed<Argv>([
     "docker", "run", "--rm", "--network", "platform-internal",
     "-e", "RENOVATE_TOKEN", "-e", "RENOVATE_PLATFORM", ...optional, "-e", "RENOVATE_REPOSITORIES",
     "-e", `RENOVATE_DRY_RUN=${dryRun ? "full" : "null"}`, "-e", "LOG_LEVEL=info",
     image,
-  ];
+  ]);
 };

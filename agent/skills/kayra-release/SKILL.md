@@ -47,12 +47,17 @@ In the worktree:
 ```bash
 git -C "$W" switch -c release-<version>
 npm --prefix "$W" version <version> --no-git-tag-version   # package.json + package-lock.json only
-git -C "$W" add package.json package-lock.json
+npm --prefix "$W" run contract                              # openapi.json carries the version
+git -C "$W" add package.json package-lock.json cli/src/clients/api/openapi.json
 git -C "$W" commit -s -F <message file>                      # DCO sign-off; the message summarises the PRs
 git -C "$W" push -u origin release-<version>
 gh pr create --repo yunuseon/kayra --base main --head release-<version> --title "<version>" --body-file <file>
 gh pr checks release-<version> --repo yunuseon/kayra --watch --interval 20
 ```
+
+The generated API contract names the version: a bump without `npm run
+contract` fails the checks (0.17.2's first push did, and 0.17.1 needed a
+follow-up commit).
 
 Write commit messages and PR bodies to a file first (quoted heredoc):
 backticks inside `-m "…"` or a double-quoted `--body` are executed by the

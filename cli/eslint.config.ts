@@ -64,7 +64,7 @@ export default defineConfig(
   },
   {
     // The local server (the API, the browser side, serve.ts) works with Node's I/O objects too (requests, responses,
-    // the abort controller that stops a run): classes the rule cannot make readonly. Its inferred returns are those
+    // the abort controller that stops a run; Live and Served hold them): classes the rule cannot make readonly. Its inferred returns are those
     // objects, or JSON on its way out: they are not checked.
     files: ["src/clients/api/**/*.ts", "src/clients/ui/**/*.ts", "src/serve.ts"],
     rules: {
@@ -74,12 +74,12 @@ export default defineConfig(
           enforcement: "ReadonlyDeep",
           ignoreInferredTypes: true,
           ignoreClasses: true,
-          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "^URL$", "URLSearchParams", "^Live$"],
+          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "^URL$", "URLSearchParams", "^Live$", "^Served$"],
         },
       ],
       "functional/type-declaration-immutability": [
         "error",
-        { rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }], ignoreIdentifierPattern: ["^Live$"] },
+        { rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }], ignoreIdentifierPattern: ["^Live$", "^Served$"] },
       ],
     },
   },

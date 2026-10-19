@@ -15,14 +15,13 @@ import type { Watched } from "../status/model.ts";
 import { findings, type Report } from "../validation/findings.ts";
 import type { Fleet, Server } from "../fleet/model.ts";
 import { gather } from "../validation/facts.ts";
-import { interpret } from "../interpreter/loop.ts";
 import type { Io } from "../interpreter/io.ts";
-import { flat } from "../text/spans.ts";
 import type { Plan } from "../plan/model.ts";
 import { all, err, flatMap, map, ok, type Result } from "../../result.ts";
 import { operations, type InputOf, type Invocation, type PlanName, type QueryName, type SessionName, type StreamName } from "./catalog.ts";
 import { textAt } from "../adapters/fs.ts";
 import { typed } from "../../typed.ts";
+import { resolve as substitute, spawned } from "../interpreter/process.ts";
 
 /** What the core runs an operation with: the engine, the fleet, and the world as the client's machine sees it. */
 export type Context = {
@@ -80,7 +79,7 @@ export const invocation = (name: string, input: unknown) => {
   if (parsed.success) return ok<Invocation>(parsed.data);
   const issue = parsed.error.issues[0];
   const where = issue?.path.slice(1).join(".") ?? "";
-  return err(name in operations ? `${name}: ${where === "" ? "input" : where}: ${issue?.message ?? "invalid"}` : `no operation '${name}'`);
+  return err(Object.hasOwn(operations, name) ? `${name}: ${where === "" ? "input" : where}: ${issue?.message ?? "invalid"}` : `no operation '${name}'`);
 };
 
 const onServer = (ctx: Context, name: string) => {
@@ -154,25 +153,18 @@ export type Answers = { readonly validate: readonly Report[]; readonly version: 
 
 type Queries = { readonly [N in QueryName]: (ctx: Context, input: InputOf<N>) => Promise<Result<Answers[N], string>> };
 
+/** What a deployer's ctl answers, read whole: its stdout, or why it failed. */
 const deployerAnswer = async (ctx: Context, name: "app.runs" | "app.releases" | "app.log", input: InputOf<typeof name>) => {
   const plan = planOf(ctx, { name, input });
   if (!plan.ok) return plan;
-  // eslint-disable-next-line functional/prefer-immutable-types -- the interpreter's captured streams
-  const said: { stdout: string; stderr: string } = { stdout: "", stderr: "" };
-  const passed = await interpret(plan.value.map((step) => step.kind === "run" ? { ...step, stdout: "show" } : step), {
-    out: () => undefined,
-    // eslint-disable-next-line functional/immutable-data -- capturing interpreter diagnostics
-    err: (text) => { said.stderr += flat(text); },
-    ask: () => Promise.resolve(""),
-    ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
-    output: (chunk, stream) => {
-      // eslint-disable-next-line functional/immutable-data -- capturing program output
-      if (stream === "stdout") said.stdout += chunk;
-      // eslint-disable-next-line functional/immutable-data -- capturing program errors
-      else said.stderr += chunk;
-    },
-  });
-  return passed ? ok<string>(said.stdout) : err(said.stderr.trim() || "the deployer query failed");
+  const [step] = plan.value;
+  if (step?.kind !== "run") return err("the deployer's plan runs nothing");
+  // Like a step without a terminal: no stdin, and stopping reaches the whole process group.
+  const plumbing = { output: () => undefined, ...(ctx.signal === undefined ? {} : { signal: ctx.signal }) };
+  const argv = await substitute(step.argv, plumbing);
+  if (!argv.ok) return argv;
+  const exit = await spawned(argv.value, { stdout: "capture", stderr: "capture" }, step.env, plumbing);
+  return exit.code === 0 ? ok(exit.stdout) : err(exit.stderr.trim() || "the deployer query failed");
 };
 
 const queries: Queries = {

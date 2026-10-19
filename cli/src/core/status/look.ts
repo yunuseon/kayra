@@ -8,7 +8,7 @@ import { typed } from "../../typed.ts";
 export const listed = (server: Server) =>
   server.inventory === undefined
     ? undefined
-    : typed<Machine | undefined>({ kind: "found", address: server.inventory.host === "" ? undefined : server.inventory.host, from: "inventory" });
+    : typed<Machine | undefined>({ kind: "found", address: server.inventory.host, from: "inventory" });
 
 const provisioned = async (server: Server, tofu: Tofu) => {
   const dir = within(server.dir, "terraform");

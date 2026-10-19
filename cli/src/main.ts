@@ -26,7 +26,7 @@ import { serve } from "./serve.ts";
 import { network } from "./core/adapters/network.ts";
 import { render } from "./core/plan/describe.ts";
 import type { Plan } from "./core/plan/model.ts";
-import { flatMap, map } from "./result.ts";
+import { err, flatMap, map, ok } from "./result.ts";
 import { explain } from "./clients/cli/explain.ts";
 import { draw } from "./clients/cli/views.ts";
 import { bad, muted, strong } from "./core/text/spans.ts";
@@ -108,14 +108,21 @@ if (args.command.name === "serve") {
   const assets = [join(kayra, "web", "dist"), join(kayra, "cli", "dist", "browser")].find((dir) => existsSync(join(dir, "index.html")));
   const { port, noOpen } = args.command;
   const clients = { ui: args.command.ui || !args.command.api, api: args.command.api };
-  const listening = await serve({ kayra, fleet: fleet, version, short, network: context.network }, assets, port, clients);
-  io.err([strong("kayra serve"), muted(` · ${fleet.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);
-  io.out(listening.url);
-  if (listening.discovery !== undefined) io.err([muted(`API credentials: ${listening.discovery}`)]);
-  if (clients.ui && !noOpen) systemBrowser.open(listening.url);
-  const stop = () => { void listening.close().then(() => process.exit(0)); };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  // The port taken, or the discovery file in the way: kayra says why instead of a stack trace.
+  const started = await serve({ kayra, fleet, version, short, network: context.network }, assets, port, clients).then(ok, (error: unknown) =>
+    err(error instanceof Error ? error.message : String(error)),
+  );
+  if (!started.ok) fail(`could not start: ${started.error}`);
+  else {
+    const listening = started.value;
+    io.err([strong("kayra serve"), muted(` · ${fleet.servers.length.toString()} servers · kayra ${version} · Ctrl-C stops it`)]);
+    io.out(listening.url);
+    if (listening.discovery !== undefined) io.err([muted(`API credentials: ${listening.discovery}`)]);
+    if (clients.ui && !noOpen) systemBrowser.open(listening.url);
+    const stop = () => { void listening.close().then(() => process.exit(0)); };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  }
 } else {
   const { invocation: call, json } = fromCommand(args.command);
   const operation = describe(call.name);

@@ -20,8 +20,12 @@ export const discover = (file: string, url: string, token: string) => {
     } catch { return err(`${file} is unreadable; remove it before starting kayra serve`); }
   }
   const contents = `${JSON.stringify({ url, token, pid: process.pid })}\n`;
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, contents, { mode: 0o600, flag: "wx" });
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, contents, { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    return err(`${file} could not be written: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return ok<{ readonly remove: () => void }>({ remove: () => {
     if (existsSync(file) && readFileSync(file, "utf8") === contents) unlinkSync(file);
   } });

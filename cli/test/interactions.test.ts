@@ -10,7 +10,7 @@ import { interpret } from "../src/core/interpreter/loop.ts";
 import type { Io, Question } from "../src/core/interpreter/io.ts";
 import { render } from "../src/core/plan/describe.ts";
 import { run } from "../src/core/plan/model.ts";
-import { reporting, type Event } from "../src/core/present/progress.ts";
+import { reporting, type Event } from "../src/core/interpreter/events.ts";
 import { must } from "./support.ts";
 
 const server = must(serverName("box"));

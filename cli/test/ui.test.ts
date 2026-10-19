@@ -5,13 +5,14 @@ import { interpret } from "../src/core/interpreter/loop.ts";
 import { needsTerminal, partOf, run, type Plan } from "../src/core/plan/model.ts";
 import { explain } from "../src/clients/cli/explain.ts";
 import { bad, flat, link, strong, width } from "../src/core/text/spans.ts";
-import { footer, listed, reporting, type Event, type Heading } from "../src/core/present/progress.ts";
+import { footer, listed, reporting, type Event, type Heading } from "../src/core/interpreter/events.ts";
 import { position } from "../src/core/interpreter/progress.ts";
 import { settle } from "../src/core/status/updates.ts";
 import { framed } from "../src/clients/cli/framed.ts";
 import { paint } from "../src/clients/cli/paint.ts";
 import { colors, escapes, screen, watch } from "../src/clients/cli/terminal.ts";
-import { duration, fit, spread, table, truncate, wrap } from "../src/core/present/text.ts";
+import { duration } from "../src/core/text/time.ts";
+import { fit, spread, table, truncate, wrap } from "../src/clients/cli/text.ts";
 import { must } from "./support.ts";
 
 const guard = (label: string, code = 0) =>

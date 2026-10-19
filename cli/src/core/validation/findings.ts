@@ -163,3 +163,12 @@ export type Report = { readonly server: Server; readonly findings: readonly Find
 /** How a set of findings went as a whole: its worst. */
 export const overall = (found: readonly Finding[]): Verdict =>
   found.some((each) => each.result === "problem") ? "problem" : found.some((each) => each.result === "unchecked") ? "unchecked" : "passed";
+
+/** How many problems, and how many checks could not look, across reports. */
+export const tally = (reports: readonly Report[]): { readonly problems: number; readonly unchecked: number } => {
+  const all = reports.flatMap((report) => report.findings);
+  return {
+    problems: all.filter((each) => each.result === "problem").length,
+    unchecked: all.filter((each) => each.result === "unchecked").length,
+  };
+};

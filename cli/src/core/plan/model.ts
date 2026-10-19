@@ -20,7 +20,7 @@ export type Probe =
   /** Its stdout is discarded (it may be a secret), its stderr shown on failure. */
   | { readonly kind: "exits-zero"; readonly argv: Argv; readonly env?: Env };
 
-/** A deployer's answer, read whole and drawn for the operator (core/present/views.ts): which drawing, and of what. */
+/** A deployer's answer, read whole and drawn for the operator by the client (the command line's clients/cli/views.ts): which drawing, and of what. */
 export type DeployerAnswer = { readonly view: "runs" | "releases" | "log"; readonly app: AppName; readonly server: ServerName };
 
 /**

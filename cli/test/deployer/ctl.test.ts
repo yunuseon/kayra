@@ -9,7 +9,7 @@ import { runId } from "../../src/deployer/brand.ts";
 import { releases, type RunMeta } from "../../src/deployer/records.ts";
 import { appName, serverName } from "../../src/core/fleet/brand.ts";
 import { flat } from "../../src/core/text/spans.ts";
-import { draw } from "../../src/core/present/views.ts";
+import { draw } from "../../src/clients/cli/views.ts";
 import { commit, must, name } from "./support.ts";
 
 const platform = mkdtempSync(join(tmpdir(), "kayra-ctl-"));

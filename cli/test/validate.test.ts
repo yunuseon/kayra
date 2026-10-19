@@ -1,7 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { findings, type Facts, type Finding } from "../src/core/validation/findings.ts";
-import { summary, validateJson, validateView } from "../src/core/present/validate.ts";
+import { summary, validateView } from "../src/clients/cli/validate.ts";
+import { validateJson } from "../src/clients/api/validate.ts";
 import { flat } from "../src/core/text/spans.ts";
 import { server } from "./support.ts";
 

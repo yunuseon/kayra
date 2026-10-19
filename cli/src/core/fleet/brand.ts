@@ -1,5 +1,3 @@
-import { text } from "@optique/core/message";
-import type { NonEmptyString, ValueParser } from "@optique/core/valueparser";
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
 import { err, ok, type Result } from "../../result.ts";
@@ -53,23 +51,10 @@ export const vaultPasswordFile = (path: AbsolutePath): VaultPasswordFile => path
 export const within = (base: AbsolutePath, ...segments: readonly string[]): AbsolutePath =>
   join(base, ...segments) as AbsolutePath;
 
-/** An Optique value parser that mints a brand: arguments arrive already validated. */
-const minting = <T extends string>(
-  metavar: NonEmptyString,
-  mint: (input: string) => Result<T, string>,
-  placeholder: T,
-): ValueParser<"sync", T> => ({
-  mode: "sync",
-  metavar,
-  placeholder,
-  parse: (input) => {
-    const minted = mint(input);
-    return minted.ok ? { success: true, value: minted.value } : { success: false, error: [text(minted.error)] };
-  },
-  format: (value) => value,
-});
-
-export const appNameParser = minting("APP", appName, "app" as AppName);
-export const serverNameParser = minting("SERVER", serverName, "server" as ServerName);
-export const domainParser = minting("DOMAIN", domain, "example.com" as Domain);
-export const subdomainParser = minting("SUBDOMAIN", subdomain, "www" as Subdomain);
+/** One of each, as help shows a value: what a command-line parser offers before the operator types one. */
+export const examples = {
+  app: "app" as AppName,
+  server: "server" as ServerName,
+  domain: "example.com" as Domain,
+  subdomain: "www" as Subdomain,
+};

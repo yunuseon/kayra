@@ -1,11 +1,13 @@
 import type { Plan, Step } from "../plan/model.ts";
 import { active, bad, ok as fine, muted, strong, type Line, type Text } from "../text/spans.ts";
 import { position, silent, type Done, type Ended, type Progress } from "./progress.ts";
-import { draw } from "../present/views.ts";
 import { ask, isStopped, type Io } from "./io.ts";
 import { answer, resolve, spawned, type Plumbing } from "./process.ts";
 import { meet, scratch, type Given, type Met } from "./needs.ts";
 import { inPty } from "./pty.ts";
+
+/** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
+const asItCame = (_answer: unknown, said: string): readonly string[] => (said === "" ? [] : said.replace(/\n$/, "").split("\n"));
 
 const lines = (text: string): readonly string[] =>
   text
@@ -54,7 +56,7 @@ const runStep = async (step: Extract<Step, { kind: "run" | "session" }>, io: Io,
   );
   if (!exit.started) return { failed: true, stopped: true, why: "not started", out: [], err: [detail(`${argv.value[0]}: ${exit.stderr}`)] };
   // Whatever it answered is shown, even when it failed: it may say why.
-  const out = typeof stdout === "string" ? [] : draw(stdout, exit.stdout, Date.now());
+  const out = typeof stdout === "string" ? [] : (io.draw ?? asItCame)(stdout, exit.stdout);
   if (exit.code === 0) return { ...goOn, out, err: lines(exit.stderr).map(aside) };
   return { failed: true, stopped: true, why: `exit ${String(exit.code)}`, out, err: lines(exit.stderr).map(detail) };
 };

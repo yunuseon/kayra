@@ -7,11 +7,12 @@ views {
   }
 
   view clients of kayra {
-    title 'One core, three clients'
-    description 'The command line calls the core directly; the browser and local programs use the API. All operations share the catalog, plans, guards and interpreter.'
+    title 'One core, four clients'
+    description 'The command line calls the core directly; the browser and local programs use the API; an agent uses MCP. All operations share the catalog, plans, guards and interpreter.'
     include *
     include operator
     include localProgram
+    include agent
     include kayra.core ->
   }
 

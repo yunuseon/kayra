@@ -5,6 +5,8 @@ import { fromCommand, reaches } from "../src/clients/cli/invocation.ts";
 import { parser } from "../src/clients/cli/parser.ts";
 import { operation, operationNames } from "../src/core/operations/catalog.ts";
 import { catalog } from "../src/clients/wire/contract.ts";
+import { operationOf, reaches as mcpReaches, tools } from "../src/clients/mcp/tools.ts";
+import { invocation } from "../src/core/operations/dispatch.ts";
 import { defaults, fields, inputOf, onServer, reaches as uiReaches } from "../../web/src/operations.ts";
 import { fleet, server } from "./support.ts";
 
@@ -48,8 +50,8 @@ test("the command line reaches every operation in the catalog, each by its own w
     const parsed = parseSync(commandLine, argv);
     strictEqual(parsed.success, true, `${name}: ${argv.join(" ")} does not parse`);
     const { command } = parsed.value;
-    strictEqual(command.name === "serve", false);
-    if (command.name === "serve") return;
+    strictEqual(command.name === "serve" || command.name === "mcp", false);
+    if (command.name === "serve" || command.name === "mcp") return;
     strictEqual(fromCommand(command).invocation.name, name, `${argv.join(" ")} lands elsewhere`);
   });
 });
@@ -74,9 +76,34 @@ test("every operation has a UI entry and its schema form preserves the CLI's inv
     const parsed = info.name === "version" ? undefined : parseSync(commandLine, argv);
     if (parsed !== undefined && !parsed.success) throw new Error(`${info.name} does not parse`);
     const command = parsed?.value.command;
-    const seed = command === undefined || command.name === "serve" ? {} : fromCommand(command).invocation.input;
+    const seed = command === undefined || command.name === "serve" || command.name === "mcp" ? {} : fromCommand(command).invocation.input;
     const original = operation(info.name).input.parse(seed);
     const edited = inputOf(info.input, defaults(info.input, seed));
     deepStrictEqual(operation(info.name).input.parse(edited), original, info.name);
   });
+});
+
+test("every operation is an MCP tool named after it, or refused with a reason, and each tool takes the command line's input", () => {
+  const listed = tools(fleet(shop));
+  operationNames.forEach((name) => {
+    const offer = mcpReaches[name];
+    if (!("tool" in offer)) {
+      strictEqual(offer.refused.length > 0, true, name);
+      return;
+    }
+    strictEqual(offer.tool, name.replaceAll(".", "_"));
+    strictEqual(operationOf(offer.tool), name);
+    const tool = listed.find((each) => each.name === offer.tool);
+    if (tool === undefined) throw new Error(`${name}: no tool listed`);
+    const argv = reaches[name].map((word) => (word === "SERVER" ? "shop" : word === "APP" ? "shop" : word));
+    const parsed = name === "version" ? undefined : parseSync(commandLine, argv);
+    if (parsed !== undefined && !parsed.success) throw new Error(`${name} does not parse`);
+    const command = parsed?.value.command;
+    const seed = command === undefined || command.name === "serve" || command.name === "mcp" ? {} : fromCommand(command).invocation.input;
+    const properties = tool.inputSchema.properties ?? {};
+    deepStrictEqual(Object.keys(seed).filter((key) => !(key in properties)), [], `${name}: input the tool does not take`);
+    const called = invocation(name, seed);
+    strictEqual(called.ok && called.value.name === name, true, name);
+  });
+  deepStrictEqual(listed.map((tool) => tool.name).toSorted(), operationNames.flatMap((name) => ("tool" in mcpReaches[name] ? [name.replaceAll(".", "_")] : [])).toSorted());
 });

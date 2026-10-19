@@ -13,7 +13,7 @@ import { verbose } from "../../core/recipes/steps.ts";
 import { err, ok } from "../../result.ts";
 import { typed } from "../../typed.ts";
 import type { Api } from "./api.ts";
-import { words } from "./commands.ts";
+import { words } from "../wire/words.ts";
 import type * as wire from "../wire/contract.gen.ts";
 import type { LiveRuns } from "./live.ts";
 import type { options } from "../wire/schemas.ts";

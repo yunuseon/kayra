@@ -1,4 +1,5 @@
 import type { Invocation, Line, Listed, RunEvent, Stop, Text } from "../../cli/src/clients/api/contract.gen.ts";
+import { typed } from "./typed.ts";
 
 export type StepState = "waiting" | "running" | "passed" | "failed" | "stopped" | "skipped";
 
@@ -28,28 +29,28 @@ export type RunView = {
 
 export const empty: RunView = { invocation: undefined, steps: [], current: undefined, asking: undefined, ended: undefined };
 
-const at = (view: RunView, index: number | undefined, change: (step: StepView) => StepView): RunView =>
-  index === undefined ? view : { ...view, steps: view.steps.map((step, each) => (each === index ? change(step) : step)) };
+const at = (view: RunView, index: number | undefined, change: (step: StepView) => StepView) =>
+  index === undefined ? view : typed<RunView>({ ...view, steps: view.steps.map((step, each) => (each === index ? change(step) : step)) });
 
-const said = (view: RunView, line: Said): RunView => at(view, view.current, (step) => ({ ...step, said: [...step.said, line] }));
+const said = (view: RunView, line: Said) => at(view, view.current, (step) => ({ ...step, said: [...step.said, line] } as const));
 
 /** One event onto the view; `now` stamps when a step started, for its running time. */
-export const reduce = (view: RunView, event: RunEvent, now: number): RunView => {
+export const reduce = (view: RunView, event: RunEvent, now: number) => {
   switch (event.kind) {
     case "plan":
-      return { ...view, invocation: event.invocation, steps: event.steps.map((listed) => ({ listed, state: "waiting", said: [] })) };
+      return typed<RunView>({ ...view, invocation: event.invocation, steps: event.steps.map((listed) => ({ listed, state: "waiting", said: [] } as const)) });
     case "started":
-      return at({ ...view, current: event.index }, event.index, (step) => ({ ...step, state: "running", started: now }));
+      return at({ ...view, current: event.index }, event.index, (step) => ({ ...step, state: "running", started: now } as const));
     case "done":
       return at(view, event.index, (step) => ({
         ...step,
         state: event.failed ? "failed" : event.stopped ? "stopped" : "passed",
         ms: event.ms,
         ...(event.why === undefined ? {} : { why: event.why }),
-      }));
+      } as const));
     case "ended": {
       const ended: Ended = { failures: event.failures, ms: event.ms, footer: event.footer, ...(event.stop === undefined ? {} : { stop: event.stop }) };
-      return {
+      return typed<RunView>({
         ...view,
         asking: undefined,
         ended,
@@ -61,25 +62,25 @@ export const reduce = (view: RunView, event: RunEvent, now: number): RunView => 
               ? { ...step, state: "skipped" }
               : step,
         ),
-      };
+      });
     }
     case "output":
       return said(view, { kind: "output", stream: event.stream, chunk: event.chunk });
     case "said":
       return said(view, { kind: "said", stream: event.stream, text: event.text });
     case "ask":
-      return { ...view, asking: event };
+      return typed<RunView>({ ...view, asking: event });
     case "answered":
-      return { ...view, asking: undefined };
+      return typed<RunView>({ ...view, asking: undefined });
   }
 };
 
 export type Outcome = "running" | "passed" | "failed" | "interrupted" | "declined";
 
-export const outcome = (view: RunView): Outcome => {
+export const outcome = (view: RunView) => {
   const { ended } = view;
-  if (ended === undefined) return "running";
-  if (ended.stop?.why === "interrupted") return "interrupted";
-  if (ended.stop?.why === "declined") return "declined";
-  return ended.failures === 0 ? "passed" : "failed";
+  if (ended === undefined) return typed<Outcome>("running");
+  if (ended.stop?.why === "interrupted") return typed<Outcome>("interrupted");
+  if (ended.stop?.why === "declined") return typed<Outcome>("declined");
+  return ended.failures === 0 ? typed<Outcome>("passed") : typed<Outcome>("failed");
 };

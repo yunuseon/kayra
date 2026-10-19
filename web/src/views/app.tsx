@@ -4,17 +4,18 @@ import { operation, type Answer } from "../api.ts";
 import { show } from "../components/operation.tsx";
 import { Dot, Header, Pill, Problem, Waiting } from "../components/ui.tsx";
 import { ago, duration } from "../time.ts";
+import { typed } from "../typed.ts";
 
 type Tab = "runs" | "releases" | "log";
 
-const useAnswer = <T,>(load: () => Promise<Answer<T>>, key: string): readonly [Answer<T> | undefined, () => void] => {
+const useAnswer = <T,>(load: () => Promise<Answer<T>>, key: string) => {
   const [answer, setAnswer] = useState<Answer<T> | undefined>(undefined);
-  const reload = (): void => {
+  const reload = () => {
     setAnswer(undefined);
     void load().then(setAnswer);
   };
   useEffect(reload, [key]);
-  return [answer, reload];
+  return typed<readonly [Answer<T> | undefined, () => void]>([answer, reload]);
 };
 
 const stateTone = (state: AppRuns["runs"][number]["state"]) => (state === "success" ? "ok" : state === "failure" ? "bad" : "waiting");
@@ -85,9 +86,9 @@ const Releases = ({ server, app }: { readonly server: string; readonly app: stri
 };
 
 /** A deployer's log, its errors and warnings marked as the terminal marks them. */
-const mark = (line: string): string | undefined => {
-  if (/\b(error|failed|fatal|refused)\b/i.test(line)) return "tone-bad";
-  if (/\bwarn(ing)?\b/i.test(line)) return "tone-warn";
+const mark = (line: string) => {
+  if (/\b(error|failed|fatal|refused)\b/i.test(line)) return typed<string | undefined>("tone-bad");
+  if (/\bwarn(ing)?\b/i.test(line)) return typed<string | undefined>("tone-warn");
   return undefined;
 };
 

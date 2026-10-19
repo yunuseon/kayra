@@ -16,7 +16,7 @@ export const SessionView = ({ id }: { readonly id: string }) => {
   useEffect(() => {
     const active = { current: true };
     const dispose: { current: () => void } = { current: () => undefined };
-    const setup = async (): Promise<void> => {
+    const setup = async () => {
       const { Terminal } = await import("@xterm/xterm");
       if (!active.current || host.current === null) return;
       const terminal = new Terminal({
@@ -34,12 +34,12 @@ export const SessionView = ({ id }: { readonly id: string }) => {
       const ended = { current: false };
       const ready = { current: false };
       const refused = { current: false };
-      const disable = (value: boolean): void => {
+      const disable = (value: boolean) => {
         ready.current = !value;
         // eslint-disable-next-line functional/immutable-data -- xterm controls terminal input through its public options
         terminal.options.disableStdin = value;
       };
-      const fail = (failure: Failure): void => {
+      const fail = (failure: Failure) => {
         refused.current = true;
         disable(true);
         setFailure(failure);
@@ -100,7 +100,7 @@ export const SessionView = ({ id }: { readonly id: string }) => {
       dispose.current();
     };
   }, [id]);
-  const close = async (): Promise<void> => {
+  const close = async () => {
     setClosing(true);
     const answer = await closeSession(id);
     if (!answer.ok) {

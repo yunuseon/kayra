@@ -1,5 +1,6 @@
 /** A piece of a program's output with the look its colour codes gave it. */
 export type Styled = { readonly text: string; readonly classes: string };
+import { typed } from "./typed.ts";
 
 type Look = { readonly fg: string | undefined; readonly bold: boolean; readonly dim: boolean };
 
@@ -8,9 +9,9 @@ const plain: Look = { fg: undefined, bold: false, dim: false };
 const colours = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
 
 /** One SGR parameter list (`0;32`, `1`, `38;5;208`) applied to the look so far. */
-const apply = (look: Look, params: string): Look => {
+const apply = (look: Look, params: string) => {
   const codes = params === "" ? [0] : params.split(";").map(Number);
-  const step = (so: Look, rest: readonly number[]): Look => {
+  const step = (so: Look, rest: readonly number[]) => {
     const [code, ...more] = rest;
     if (code === undefined) return so;
     // 256 colours and true colour: their arguments are no codes of their own.
@@ -27,7 +28,7 @@ const apply = (look: Look, params: string): Look => {
   return step(look, codes);
 };
 
-const classesOf = (look: Look): string =>
+const classesOf = (look: Look) =>
   [look.fg === undefined ? "" : `sgr-${look.fg}`, look.bold ? "sgr-bold" : "", look.dim ? "sgr-dim" : ""].filter((each) => each !== "").join(" ");
 
 // SGR sequences are kept; every other escape (cursor moves, line clears, titles) is dropped.
@@ -35,16 +36,16 @@ const classesOf = (look: Look): string =>
 const escapes = /\u001b\[([0-9;]*)m|\u001b\[[0-9;?]*[A-Za-z]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 
 /** Output with colour codes as styled pieces; text that is not a code stays as it came. */
-export const styled = (text: string): readonly Styled[] => {
+export const styled = (text: string) => {
   const pieces = [...text.matchAll(escapes)].reduce<{ readonly out: readonly Styled[]; readonly look: Look; readonly at: number }>(
     (so, match) => {
       const before = text.slice(so.at, match.index);
       const out = before === "" ? so.out : [...so.out, { text: before, classes: classesOf(so.look) }];
       const sgr = match[1];
-      return { out, look: sgr === undefined ? so.look : apply(so.look, sgr), at: match.index + match[0].length };
+      return { out, look: sgr === undefined ? so.look : apply(so.look, sgr), at: match.index + match[0].length } as const;
     },
     { out: [], look: plain, at: 0 },
   );
   const rest = text.slice(pieces.at);
-  return rest === "" ? pieces.out : [...pieces.out, { text: rest, classes: classesOf(pieces.look) }];
+  return rest === "" ? pieces.out : typed<readonly Styled[]>([...pieces.out, { text: rest, classes: classesOf(pieces.look) }]);
 };

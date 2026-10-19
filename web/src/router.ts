@@ -8,25 +8,26 @@ export type Route =
   | { readonly page: "session"; readonly id: string }
   | { readonly page: "validate" }
   | { readonly page: "missing"; readonly path: string };
+import { typed } from "./typed.ts";
 
 const segment = /^[A-Za-z0-9._-]+$/;
 
-export const parse = (path: string): Route => {
+export const parse = (path: string) => {
   const parts = path.split("/").filter((part) => part !== "").map(decodeURIComponent);
-  if (!parts.every((part) => segment.test(part))) return { page: "missing", path };
+  if (!parts.every((part) => segment.test(part))) return typed<Route>({ page: "missing", path });
   const [first, second, third, fourth] = parts;
-  if (first === undefined) return { page: "fleet" };
-  if (first === "runs" && second === undefined) return { page: "runs" };
-  if (first === "runs" && second !== undefined && third === undefined) return { page: "run", id: second };
-  if (first === "sessions" && second !== undefined && third === undefined) return { page: "session", id: second };
-  if (first === "validate" && second === undefined) return { page: "validate" };
-  if (first === "servers" && second !== undefined && third === undefined) return { page: "server", server: second };
+  if (first === undefined) return typed<Route>({ page: "fleet" });
+  if (first === "runs" && second === undefined) return typed<Route>({ page: "runs" });
+  if (first === "runs" && second !== undefined && third === undefined) return typed<Route>({ page: "run", id: second });
+  if (first === "sessions" && second !== undefined && third === undefined) return typed<Route>({ page: "session", id: second });
+  if (first === "validate" && second === undefined) return typed<Route>({ page: "validate" });
+  if (first === "servers" && second !== undefined && third === undefined) return typed<Route>({ page: "server", server: second });
   if (first === "servers" && second !== undefined && third === "apps" && fourth !== undefined && parts.length === 4)
-    return { page: "app", server: second, app: fourth };
-  return { page: "missing", path };
+    return typed<Route>({ page: "app", server: second, app: fourth });
+  return typed<Route>({ page: "missing", path });
 };
 
-export const href = (route: Route): string => {
+export const href = (route: Route) => {
   switch (route.page) {
     case "fleet":
       return "/";

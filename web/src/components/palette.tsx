@@ -5,30 +5,31 @@ import { ranked, type Choice } from "../fuzzy.ts";
 import type { Route } from "../router.ts";
 import { catalog, fleet, go } from "../state.ts";
 import { openOperation } from "./operation.tsx";
+import { typed } from "../typed.ts";
 
 const open = signal(false);
 
 type Item = Choice & ({ readonly go: Route } | { readonly run: Draft });
 
 /** Everything there is to go to or run: pages, servers, apps, and each server's commands. */
-const items = (): readonly Item[] => {
+const items = () => {
   const loaded = fleet.value;
   const servers = loaded.state === "ready" ? loaded.value.servers : [];
   const operations = catalog.value.state === "ready" ? catalog.value.value : [];
-  return [
+  return typed<readonly Item[]>([
     { label: "Fleet", hint: "every server", go: { page: "fleet" } },
     { label: "Runs", hint: "what ran from here", go: { page: "runs" } },
     { label: "Validate", hint: "the fleet beyond its schemas", go: { page: "validate" } },
-    ...operations.map((operation): Item => ({ label: `${operation.name} · ${reaches[operation.name].label}`, hint: operation.summary, run: { name: operation.name, input: {} } })),
-    ...servers.flatMap((server): readonly Item[] => [
+    ...operations.map((operation) => (typed<Item>({ label: `${operation.name} · ${reaches[operation.name].label}`, hint: operation.summary, run: { name: operation.name, input: {} } }))),
+    ...servers.flatMap((server) => typed<readonly Item[]>([
       { label: server.name, hint: `${server.kind} on ${server.target}`, go: { page: "server", server: server.name } },
-      ...server.apps.map((app): Item => ({ label: `${server.name}/${app}`, hint: "app", go: { page: "app", server: server.name, app } })),
-      ...onServer(operations, server).map((operation): Item => ({ label: `${operation.name} ${server.name}`, hint: operation.summary, run: { name: operation.name, input: { server: server.name } } })),
-    ]),
-  ];
+      ...server.apps.map((app) => (typed<Item>({ label: `${server.name}/${app}`, hint: "app", go: { page: "app", server: server.name, app } }))),
+      ...onServer(operations, server).map((operation) => (typed<Item>({ label: `${operation.name} ${server.name}`, hint: operation.summary, run: { name: operation.name, input: { server: server.name } } }))),
+    ])),
+  ]);
 };
 
-const choose = (item: Item): void => {
+const choose = (item: Item) => {
   open.value = false;
   if ("go" in item) go(item.go);
   else openOperation(item.run.name, item.run.input);
@@ -45,7 +46,7 @@ export const Palette = () => {
     if (shownNow) input.current?.focus();
   }, [shownNow]);
   useEffect(() => {
-    const key = (event: KeyboardEvent): void => {
+    const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         open.value = !open.value;
@@ -95,6 +96,6 @@ export const Palette = () => {
   );
 };
 
-export const openPalette = (): void => {
+export const openPalette = () => {
   open.value = true;
 };

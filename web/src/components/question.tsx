@@ -11,7 +11,7 @@ export const Question = ({ id, question }: { readonly id: string; readonly quest
   useEffect(() => {
     input.current?.focus();
   }, []);
-  const answer = async (text: string): Promise<void> => {
+  const answer = async (text: string) => {
     setPending(true);
     setTyped("");
     const result = await answerRun(id, text);

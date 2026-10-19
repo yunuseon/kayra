@@ -7,20 +7,21 @@ import { spread, truncate } from "./text.ts";
 import { paint } from "./paint.ts";
 import { escapes, spinner, type Screen } from "./terminal.ts";
 import { milliseconds } from "../../core/fleet/brand.ts";
+import { typed } from "../../typed.ts";
 
 /** A run of this long earns a notification when it ends: the operator has looked away. */
 const worthNotifying = 30_000;
 
 /** Frames on stderr: a heading, each step as it runs and how it went, a footer; on a terminal also spinners, the window title, a notification. */
-export const framed = (screen: Screen, write: (raw: string) => void, invocation: Heading): Progress => {
+export const framed = (screen: Screen, write: (raw: string) => void, invocation: Heading) => {
   const columns = Math.min(screen.columns, 80);
-  const say = (text: Text): void => {
+  const say = (text: Text) => {
     write(`${paint(text, screen.colors)}\n`);
   };
-  const tell = (raw: string, when: boolean): void => {
+  const tell = (raw: string, when: boolean) => {
     if (when) write(raw);
   };
-  return {
+  return typed<Progress>({
     plan: async (plan, work) => {
       const started = performance.now();
       tell(escapes.pushTitle + escapes.title(invocation.command), screen.title);
@@ -69,5 +70,5 @@ export const framed = (screen: Screen, write: (raw: string) => void, invocation:
       );
       return done;
     },
-  };
+  });
 };

@@ -1,11 +1,12 @@
 import type { Server } from "../fleet/model.ts";
 import { partOf, run, type Plan, type Step } from "../plan/model.ts";
-import { err, map, ok, type Result } from "../../result.ts";
+import { err, map, ok } from "../../result.ts";
 import { ansibleEnv, ansiblePath, appSubdomains, certs, collections, fleetEnv, fromMain, inventory, latestState, needing, reachable, script, sequence, terraform, vault, vaulted, type Engine } from "./steps.ts";
 import { apps } from "./apps.ts";
+import { typed } from "../../typed.ts";
 
-export const provision = (engine: Engine, server: Server): Result<Plan, string> =>
-  ok(
+export const provision = (engine: Engine, server: Server) =>
+  ok<Plan>(
     partOf("provision", [
       fromMain(engine, server),
       ...(server.buildsVm ? [run("VM image and seed ISO", ["bash", script(engine, "home-image.sh"), server.name], fleetEnv(engine))] : []),
@@ -20,7 +21,7 @@ export const provision = (engine: Engine, server: Server): Result<Plan, string> 
   );
 
 /** The playbook for the server's kind, as setup runs it; plan adds check mode. */
-const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []): Step =>
+const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []) =>
   vaulted(run(
     `Host layer · ${server.kind}.yml${extra.includes("--check") ? ", check mode" : ""}`,
     [
@@ -42,8 +43,8 @@ const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] =
   ), server);
 
 /** The host layer: the playbook for the server's kind. */
-export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
-  ok(
+export const setup = (engine: Engine, server: Server) =>
+  ok<Plan>(
     partOf("setup", [
       fromMain(engine, server),
       // mkcert where Let's Encrypt cannot reach: test VMs, and home servers without DNS-01.
@@ -61,8 +62,8 @@ export const setup = (engine: Engine, server: Server): Result<Plan, string> =>
  * the playbook in check mode, with diffs (files holding secrets say only that
  * they would change). From any checkout: it previews a branch against a server.
  */
-export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
-  ok([
+export const preview = (engine: Engine, server: Server) =>
+  ok<Plan>([
     ...reachable(engine, server),
     ...(server.hasTerraform
       ? [
@@ -76,8 +77,8 @@ export const preview = (engine: Engine, server: Server): Result<Plan, string> =>
     { kind: "note", text: `kayra plan changed nothing on ${server.name}: the changed tasks above are what kayra setup would do.` },
   ]);
 
-export const hosts = (engine: Engine, server: Server): Result<Plan, string> =>
-  ok(
+export const hosts = (engine: Engine, server: Server) =>
+  ok<Plan>(
     partOf(
       "hosts",
       server.target === "multipass"
@@ -95,28 +96,28 @@ export const hosts = (engine: Engine, server: Server): Result<Plan, string> =>
   );
 
 /** Whether a platform server works as its users see it (scripts/local/verify.sh); other kinds have nothing to check yet. */
-const verifyStep = (engine: Engine, server: Server): Step => ({
+const verifyStep = (engine: Engine, server: Server) => typed<Step>({
   ...run("Verify", ["bash", script(engine, "verify.sh"), server.name], fleetEnv(engine)),
   part: "verify",
 });
 
-export const verify = (engine: Engine, server: Server): Result<Plan, string> =>
+export const verify = (engine: Engine, server: Server) =>
   server.kind === "platform"
-    ? ok([verifyStep(engine, server)])
+    ? ok<Plan>([verifyStep(engine, server)])
     : err(`'${server.name}' is of kind ${server.kind}: kayra verify checks platform servers only.`);
 
 /** Host setup, then the apps; a platform server is verified at the end, so a deploy that leaves it broken fails. */
-export const deploy = (engine: Engine, server: Server): Result<Plan, string> =>
+export const deploy = (engine: Engine, server: Server) =>
   map(sequence([setup(engine, server), apps(engine, server)]), (plan) =>
-    server.kind === "platform" ? [...plan, verifyStep(engine, server)] : plan,
+    server.kind === "platform" ? typed<Plan>([...plan, verifyStep(engine, server)]) : plan,
   );
 
-export const up = (engine: Engine, server: Server): Result<Plan, string> =>
+export const up = (engine: Engine, server: Server) =>
   sequence([provision(engine, server), deploy(engine, server), hosts(engine, server)]);
 
-export const down = (engine: Engine, server: Server): Result<Plan, string> =>
+export const down = (engine: Engine, server: Server) =>
   server.hasTerraform
-    ? ok([
+    ? ok<Plan>([
         latestState(engine, server),
         ...(server.target === "hetzner"
           ? [
@@ -132,8 +133,8 @@ export const down = (engine: Engine, server: Server): Result<Plan, string> =>
     : err(`${server.name} has no terraform/: nothing here creates it, so nothing destroys it`);
 
 /** Once, for a server we did not create: the deploy user, added as root. */
-export const adopt = (engine: Engine, server: Server): Result<Plan, string> =>
-  ok([
+export const adopt = (engine: Engine, server: Server) =>
+  ok<Plan>([
     fromMain(engine, server),
     collections(engine, {}),
     run(

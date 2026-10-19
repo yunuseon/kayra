@@ -3,25 +3,26 @@ import { connect } from "node:net";
 import { getCACertificates } from "node:tls";
 import type { Network } from "../status/ports.ts";
 import type { Reach } from "../status/model.ts";
-import { milliseconds, type Milliseconds } from "../fleet/brand.ts";
+import { milliseconds } from "../fleet/brand.ts";
+import { typed } from "../../typed.ts";
 
 /** Why a connection failed, by Node's error code. */
-export const failure = (code: string): Reach => {
-  if (code === "ECONNREFUSED") return { kind: "refused" };
-  if (code === "ETIMEDOUT") return { kind: "no-answer" };
-  if (["EHOSTUNREACH", "ENETUNREACH", "EHOSTDOWN", "EADDRNOTAVAIL"].includes(code)) return { kind: "unreachable" };
-  if (["ENOTFOUND", "EAI_AGAIN", "EAI_NONAME", "EAI_NODATA"].includes(code)) return { kind: "unknown-host" };
-  if (/CERT|SELF_SIGNED|UNABLE_TO_(GET|VERIFY)/.test(code)) return { kind: "bad-certificate", code };
-  return { kind: "failed", code };
+export const failure = (code: string) => {
+  if (code === "ECONNREFUSED") return typed<Reach>({ kind: "refused" });
+  if (code === "ETIMEDOUT") return typed<Reach>({ kind: "no-answer" });
+  if (["EHOSTUNREACH", "ENETUNREACH", "EHOSTDOWN", "EADDRNOTAVAIL"].includes(code)) return typed<Reach>({ kind: "unreachable" });
+  if (["ENOTFOUND", "EAI_AGAIN", "EAI_NONAME", "EAI_NODATA"].includes(code)) return typed<Reach>({ kind: "unknown-host" });
+  if (/CERT|SELF_SIGNED|UNABLE_TO_(GET|VERIFY)/.test(code)) return typed<Reach>({ kind: "bad-certificate", code });
+  return typed<Reach>({ kind: "failed", code });
 };
 
-const codeOf = (error: unknown): string =>
+const codeOf = (error: unknown) =>
   typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : "ERROR";
 
-const since = (started: number): Milliseconds => milliseconds(Math.round(performance.now() - started));
+const since = (started: number) => milliseconds(Math.round(performance.now() - started));
 
 /** The network, as status asks it: a TCP connect, an HTTPS GET, each given up after `ms`; every answer a Reach, never an exception. */
-export const network = (ms: number): Network => {
+export const network = (ms: number) => {
   // A multipass server's certificates are mkcert's, whose root is in the system's store, not Node's.
   // Reading it takes a while: after the first frame, not before.
   const agent = new Promise<Agent>((resolve) => {
@@ -29,7 +30,7 @@ export const network = (ms: number): Network => {
       resolve(new Agent({ ca: [...new Set([...getCACertificates("default"), ...getCACertificates("system")])] }));
     });
   });
-  return {
+  return typed<Network>({
     connect: (host, port) =>
       new Promise((resolve) => {
         const started = performance.now();
@@ -65,5 +66,5 @@ export const network = (ms: number): Network => {
         asked.end();
       });
     },
-  };
+  });
 };

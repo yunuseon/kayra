@@ -1,5 +1,6 @@
 /** What a piece of text means, not how it looks: each client gives it a look (a terminal colour, a CSS class), or none. */
 export const tones = ["ok", "bad", "warn", "active", "muted", "strong", "accent"] as const;
+import { typed } from "../../typed.ts";
 export type Tone = (typeof tones)[number];
 
 /** `href`: where the text leads, on a terminal that makes links of it. */
@@ -11,7 +12,7 @@ export type Text = string | Line;
 
 const toned =
   (tone: Tone) =>
-  (text: string): Span => ({ tone, text });
+  (text: string) => typed<Span>({ tone, text });
 
 export const ok = toned("ok");
 export const bad = toned("bad");
@@ -21,21 +22,21 @@ export const muted = toned("muted");
 export const strong = toned("strong");
 export const accent = toned("accent");
 
-export const link = (text: string, href: string, tone?: Tone): Span => ({ text, href, ...(tone === undefined ? {} : { tone }) });
+export const link = (text: string, href: string, tone?: Tone) => typed<Span>({ text, href, ...(tone === undefined ? {} : { tone }) });
 
-export const spans = (text: Text): Line => (typeof text === "string" ? [text] : text);
+export const spans = (text: Text) => (typeof text === "string" ? typed<Line>([text]) : text);
 
-const textOf = (span: Span): string => (typeof span === "string" ? span : span.text);
+const textOf = (span: Span) => (typeof span === "string" ? span : span.text);
 
-export const flat = (text: Text): string => spans(text).map(textOf).join("");
+export const flat = (text: Text) => spans(text).map(textOf).join("");
 
 const graphemes = new Intl.Segmenter();
 
 /** A string's characters as a reader counts them. */
-export const characters = (text: string): readonly string[] => Array.from(graphemes.segment(text), (each) => each.segment);
+export const characters = (text: string) => Object.freeze(Array.from(graphemes.segment(text), (each) => each.segment));
 
 /** Columns it takes: one per character, which holds for everything kayra writes itself. */
-export const width = (text: Text): number => characters(flat(text)).length;
+export const width = (text: Text) => characters(flat(text)).length;
 
 /** What to do about it, under what it is about: an arrow, then the advice. */
-export const pointing = (indent: string, ...said: readonly Span[]): Line => [indent, active("→"), " ", ...said];
+export const pointing = (indent: string, ...said: readonly Span[]) => typed<Line>([indent, active("→"), " ", ...said]);

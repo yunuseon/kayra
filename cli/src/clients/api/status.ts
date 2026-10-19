@@ -1,9 +1,9 @@
 import type { Look, Pending, Reach } from "../../core/status/model.ts";
 import { authUrl, sshPort } from "../../core/status/look.ts";
 
-export const ms = (reach: Reach | Pending): number | null => ("ms" in reach ? reach.ms : null);
+export const ms = (reach: Reach | Pending) => ("ms" in reach ? reach.ms : null);
 
-const error = (reach: Reach | Pending): string | null => ("code" in reach ? reach.code : null);
+const error = (reach: Reach | Pending) => ("code" in reach ? reach.code : null);
 
 /** `kayra status --json`: the shape cli.md documents. */
 export const statusJson = (looks: readonly Look[]) => ({
@@ -31,4 +31,4 @@ export const statusJson = (looks: readonly Look[]) => ({
             error: error(https),
           },
   })),
-});
+} as const);

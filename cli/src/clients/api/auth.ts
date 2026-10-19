@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { typed } from "../../typed.ts";
 
 /** What admission reads of a request. */
 type Arrival = {
@@ -13,41 +14,41 @@ type Arrival = {
 export type Admission = { readonly admitted: true } | { readonly admitted: false; readonly status: 401 | 403; readonly why: string };
 
 /** Cookies are shared by every port of a host: the name carries the port, so another local server's cookie is not ours. */
-export const cookieName = (port: number): string => `kayra_ui_${String(port)}`;
+export const cookieName = (port: number) => `kayra_ui_${String(port)}`;
 
-const origins = (port: number): readonly string[] => [`127.0.0.1:${String(port)}`, `localhost:${String(port)}`];
+const origins = (port: number) => typed<readonly string[]>([`127.0.0.1:${String(port)}`, `localhost:${String(port)}`]);
 
-const same = (a: string, b: string): boolean => {
+const same = (a: string, b: string) => {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 };
 
-const cookieValue = (header: string | undefined, name: string): string | undefined =>
+const cookieValue = (header: string | undefined, name: string) =>
   header
     ?.split(";")
-    .map((pair) => pair.trim().split("="))
+    .map((pair) => Object.freeze(pair.trim().split("=")))
     .find(([key]) => key === name)?.[1];
 
-const refuse = (status: 401 | 403, why: string): Admission => ({ admitted: false, status, why });
+const refuse = (status: 401 | 403, why: string) => typed<Admission>({ admitted: false, status, why });
 
 /** Host always, the launch token on API calls, and the exact Origin on cookie writes. */
-export const admit = (asked: Arrival, port: number, token: string, enabled = { ui: true, api: false }): Admission => {
-  if (asked.host === undefined || !origins(port).includes(asked.host)) return refuse(403, "not this listener's host");
+export const admit = (asked: Arrival, port: number, token: string, enabled = { ui: true, api: false }) => {
+  if (asked.host === undefined || !origins(port).some((origin) => origin === asked.host)) return refuse(403, "not this listener's host");
   if (asked.authorization !== undefined) {
     const bearer = asked.authorization.startsWith("Bearer ") ? asked.authorization.slice(7) : "";
-    return enabled.api && same(bearer, token) ? { admitted: true } : refuse(401, "invalid bearer token");
+    return enabled.api && same(bearer, token) ? typed<Admission>({ admitted: true }) : refuse(401, "invalid bearer token");
   }
   const writes = asked.method !== "GET" && asked.method !== "HEAD";
   // Cookie credentials are ambient: the request must originate at the host it names.
   if (writes && asked.origin !== `http://${asked.host}`) return refuse(403, "not this listener's origin");
-  if (!asked.path.startsWith("/api/")) return { admitted: true };
+  if (!asked.path.startsWith("/api/")) return typed<Admission>({ admitted: true });
   const presented = cookieValue(asked.cookie, cookieName(port));
-  return enabled.ui && presented !== undefined && same(presented, token) ? { admitted: true } : refuse(401, "no token: open the URL kayra serve printed, or use its API token");
+  return enabled.ui && presented !== undefined && same(presented, token) ? typed<Admission>({ admitted: true }) : refuse(401, "no token: open the URL kayra serve printed, or use its API token");
 };
 
 /** The token the opened URL carries, if it is this launch's. */
-export const tokenIn = (query: URLSearchParams, token: string): boolean => {
+export const tokenIn = (query: URLSearchParams, token: string) => {
   const given = query.get("token");
   return given !== null && same(given, token);
 };

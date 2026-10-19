@@ -10,10 +10,10 @@ import { send } from "./deployer/http.ts";
 export type Listening = { readonly url: string; readonly port: number; readonly discovery?: string; readonly close: () => Promise<void> };
 export type Clients = { readonly ui: boolean; readonly api: boolean };
 
-export const serve = (config: Api, assets: string | undefined, port: number, clients: Clients = { ui: true, api: false }): Promise<Listening> => {
+export const serve = (config: Api, assets: string | undefined, port: number, clients: Clients = { ui: true, api: false }) => {
   const token = randomBytes(32).toString("base64url");
   const api = createApi(config);
-  return new Promise((resolve, reject) => {
+  return new Promise<Listening>((resolve, reject) => {
     const server = createServer((request, response) => {
       const at = listening();
       const url = new URL(request.url ?? "/", `http://127.0.0.1:${String(at)}`);
@@ -31,7 +31,7 @@ export const serve = (config: Api, assets: string | undefined, port: number, cli
       } else if (clients.ui) serveAsset(assets, url.pathname, response);
       else send(response, 404, "the browser interface is not enabled\n");
     });
-    const listening = (): number => {
+    const listening = () => {
       const address = server.address();
       return typeof address === "object" && address !== null ? address.port : port;
     };

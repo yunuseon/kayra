@@ -6,6 +6,7 @@ import { parts, position, type Ended, type Progress, type StopReason } from "./p
 import { count } from "../text/plural.ts";
 import type { Server } from "../fleet/model.ts";
 import { milliseconds, type KayraVersion, type Milliseconds } from "../fleet/brand.ts";
+import { typed } from "../../typed.ts";
 
 /** The invocation, as the heading and the footer name it. */
 export type Heading = {
@@ -18,36 +19,34 @@ export type Heading = {
 };
 
 /** The heading for a command: as typed, what it runs on, which kayra. */
-export const heading = (command: string, target: Server | undefined, version: KayraVersion): Heading => ({
+export const heading = (command: string, target: Server | undefined, version: KayraVersion) => typed<Heading>({
   command,
   ...(target === undefined ? {} : { server: target.name }),
   about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${version}`],
 });
 
 /** "8 steps", or "15 checks" for a plan of nothing else (doctor). */
-export const steps = (plan: Plan): string => {
+export const steps = (plan: Plan) => {
   const noun = plan.every((step) => step.kind === "check") ? "check" : "step";
   return count(plan.length, noun);
 };
 
 /** The footer: how it went, how long it took, and what reruns a failed part alone. */
-export const footer = (invocation: Heading, plan: Plan, ended: Ended, ms: Milliseconds): readonly Line[] => {
+export const footer = (invocation: Heading, plan: Plan, ended: Ended, ms: Milliseconds) => {
   const took = duration(ms);
   const { command } = invocation;
   const { stop } = ended;
   if (stop === undefined)
-    return ended.failures === 0
-      ? [[ok("✓"), " ", strong(command), muted(` · ${steps(plan)} · ${took}`)]]
-      : [[bad("✗"), " ", strong(command), muted(` · ${String(ended.failures)} of ${steps(plan)} failed · ${took}`)]];
+    return typed<readonly Line[]>(ended.failures === 0 ? [[ok("✓"), " ", strong(command), muted(` · ${steps(plan)} · ${took}`)]] : [[bad("✗"), " ", strong(command), muted(` · ${String(ended.failures)} of ${steps(plan)} failed · ${took}`)]]);
   const where = `step ${String(stop.index + 1)} of ${String(plan.length)}`;
-  if (stop.why === "declined") return [[warn("■"), " ", strong(command), muted(` stopped at ${where}: not confirmed`)]];
-  if (stop.why === "interrupted") return [[warn("■"), " ", strong(command), muted(` interrupted at ${where} · ${took}`)]];
+  if (stop.why === "declined") return typed<readonly Line[]>([[warn("■"), " ", strong(command), muted(` stopped at ${where}: not confirmed`)]]);
+  if (stop.why === "interrupted") return typed<readonly Line[]>([[warn("■"), " ", strong(command), muted(` interrupted at ${where} · ${took}`)]]);
   const { part } = stop.step;
   const alone = part !== undefined && parts(plan).length > 1 && invocation.server !== undefined;
-  return [
+  return typed<readonly Line[]>([
     [bad("✗"), " ", strong(command), " failed at ", strong(titleOf(stop.step)), muted(` · ${where} · ${took}`)],
     ...(alone ? [pointing("  ", strong(`kayra ${part} ${invocation.server ?? ""}`), muted(" runs just this part"))] : []),
-  ];
+  ]);
 };
 
 /** A step as listed before it runs: --dry-run's facts, as data. */
@@ -61,19 +60,19 @@ export type Listed = {
 };
 
 /** Every step of a plan, its command's paths named by their root. */
-export const listed = (plan: Plan, short: (text: string) => string): readonly Listed[] =>
-  plan.map((step, index) => {
+export const listed = (plan: Plan, short: (text: string) => string) =>
+  Object.freeze(plan.map((step, index) => {
     const command = commandOf(step);
     const { opens } = position(plan, index);
-    return {
+    return typed<Listed>({
       index,
       kind: kindOf(step),
       title: titleOf(step),
       ...(command === undefined ? {} : { command: short(command) }),
       ...(step.part === undefined ? {} : { part: step.part }),
       ...(opens === undefined ? {} : { opens }),
-    };
-  });
+    });
+  }));
 
 /** A plan's run as events, for a viewer that is not a terminal. */
 export type Event =
@@ -96,7 +95,7 @@ export type Event =
     };
 
 /** The plan and each step as events: what framed draws on a terminal, as data. */
-export const reporting = (emit: (event: Event) => void, invocation: Heading, short: (text: string) => string): Progress => ({
+export const reporting = (emit: (event: Event) => void, invocation: Heading, short: (text: string) => string) => typed<Progress>({
   plan: async (plan, work) => {
     const started = performance.now();
     emit({ kind: "plan", invocation, steps: listed(plan, short) });

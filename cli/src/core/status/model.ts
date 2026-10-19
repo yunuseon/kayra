@@ -42,6 +42,6 @@ export type Look = {
 };
 
 /** A machine kayra's modules create, by its resource type; a data source is none. */
-export const isMachine = (resource: string): boolean => /(?:^|\.)(?<!data\.)(?:hcloud_server|multipass_instance)\.[^.]+$/.test(resource);
+export const isMachine = (resource: string) => /(?:^|\.)(?<!data\.)(?:hcloud_server|multipass_instance)\.[^.]+$/.test(resource);
 
 export type Watched = { readonly initial: readonly Look[]; readonly updates: readonly Promise<Update<readonly Look[]>>[] };

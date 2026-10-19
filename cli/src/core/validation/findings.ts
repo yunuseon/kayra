@@ -4,6 +4,7 @@ import { closest } from "../fleet/shape.ts";
 import { count } from "../text/plural.ts";
 import { mapping as fields } from "../fleet/parse.ts";
 import { subdomain } from "../fleet/brand.ts";
+import { typed } from "../../typed.ts";
 
 /** A secrets file as validate could read it; a missing one holds no values. */
 export type Secrets =
@@ -34,34 +35,34 @@ export type Verdict = (typeof verdicts)[number];
 /** `hint`: what to do about it. */
 export type Finding = { readonly result: Verdict; readonly text: string; readonly hint?: string };
 
-const finding = (result: Verdict, text: string, hint?: string): Finding => ({ result, text, ...(hint === undefined ? {} : { hint }) });
+const finding = (result: Verdict, text: string, hint?: string) => typed<Finding>({ result, text, ...(hint === undefined ? {} : { hint }) });
 
-const problem = (text: string, hint?: string): Finding => finding("problem", text, hint);
+const problem = (text: string, hint?: string) => finding("problem", text, hint);
 
-const unchecked = (text: string, hint?: string): Finding => finding("unchecked", text, hint);
+const unchecked = (text: string, hint?: string) => finding("unchecked", text, hint);
 
-const passed = (text: string): Finding => finding("passed", text);
+const passed = (text: string) => finding("passed", text);
 
 /** A check's findings, or one line saying it holds when it found nothing to say. */
-const holds = (found: readonly Finding[], text: string): readonly Finding[] => (found.length === 0 ? [passed(text)] : found);
+const holds = (found: readonly Finding[], text: string) => (found.length === 0 ? typed<readonly Finding[]>([passed(text)]) : found);
 
 
-const mapping = (value: unknown): Readonly<Record<string, unknown>> => fields(value) ?? {};
+const mapping = (value: unknown) => fields(value) ?? {};
 
-const strings = (value: unknown): readonly string[] =>
-  Array.isArray(value) ? value.filter((each): each is string => typeof each === "string") : [];
+const strings = (value: unknown) =>
+  Array.isArray(value) ? value.filter((each): each is string => typeof each === "string") : typed<readonly string[]>([]);
 
-const secretSettingNames = (kind: ServerKind): readonly string[] =>
-  settings.filter((each) => each.secret && each.kinds.includes(kind)).map((each) => each.name);
+const secretSettingNames = (kind: ServerKind) =>
+  Object.freeze(settings.filter((each) => each.secret && each.kinds.includes(kind)).map((each) => each.name));
 
 /** secrets.yml: known secrets typed; anything else must be a helper vars.yml uses. */
-const secretsFindings = (facts: Facts): readonly Finding[] => {
-  if (facts.secrets.kind === "locked") return [unchecked(`secrets.yml not checked: ${facts.secrets.reason}`, facts.secrets.hint)];
+const secretsFindings = (facts: Facts) => {
+  if (facts.secrets.kind === "locked") return typed<readonly Finding[]>([unchecked(`secrets.yml not checked: ${facts.secrets.reason}`, facts.secrets.hint)]);
   const values = facts.secrets.values;
-  const typed = secretsSchema(facts.server.kind).safeParse(values);
-  const typeProblems = typed.success
+  const checked = secretsSchema(facts.server.kind).safeParse(values);
+  const typeProblems = checked.success
     ? []
-    : typed.error.issues.slice(0, 1).map((issue) => problem(`secrets.yml: ${issue.path.join(".")}: ${issue.message}`));
+    : checked.error.issues.slice(0, 1).map((issue) => problem(`secrets.yml: ${issue.path.join(".")}: ${issue.message}`));
   const known = secretSettingNames(facts.server.kind);
   const unused = Object.keys(values)
     .filter((key) => !known.includes(key) && !key.startsWith("ansible_"))
@@ -77,9 +78,9 @@ const secretsFindings = (facts: Facts): readonly Finding[] => {
 };
 
 /** compose_stacks.stacks and stacks/ name the same stacks. */
-const stackFindings = (facts: Facts): readonly Finding[] => {
+const stackFindings = (facts: Facts) => {
   const listed = strings(mapping(facts.vars["compose_stacks"])["stacks"]);
-  if (listed.length === 0 && facts.stackDirs.length === 0) return [];
+  if (listed.length === 0 && facts.stackDirs.length === 0) return typed<readonly Finding[]>([]);
   return holds(
     [
       ...listed
@@ -98,35 +99,35 @@ const stackFindings = (facts: Facts): readonly Finding[] => {
 };
 
 /** edge_routes: subdomains and an upstream host:port. */
-const routeFindings = (facts: Facts): readonly Finding[] => {
+const routeFindings = (facts: Facts) => {
   const routes: readonly unknown[] = Array.isArray(facts.vars["edge_routes"]) ? facts.vars["edge_routes"] : [];
-  if (routes.length === 0) return [];
+  if (routes.length === 0) return typed<readonly Finding[]>([]);
   return holds(
     routes.flatMap((route, index) => {
       const fields = mapping(route);
       const upstream = fields["upstream"];
-      return [
+      return Object.freeze([
         ...strings(fields["subdomains"])
           .filter((sub) => !subdomain(sub).ok)
           .map((sub) => problem(`edge_routes[${String(index)}]: '${sub}' is not a subdomain`, "lowercase letters, digits and dashes")),
         ...(typeof upstream === "string" && /^[^\s:]+:\d+$/.test(upstream)
           ? []
           : [problem(`edge_routes[${String(index)}]: upstream must be host:port`, "a host and its port, e.g. 192.168.1.10:8080")]),
-      ];
+      ]);
     }),
     `edge_routes: ${count(routes.length, "route")}, each with subdomains and a host:port upstream`,
   );
 };
 
 /** Each app's contract against the fleet's values for it. */
-const appFindings = (facts: Facts): readonly Finding[] =>
-  facts.server.apps.flatMap((app): readonly Finding[] => {
+const appFindings = (facts: Facts) =>
+  Object.freeze(facts.server.apps.flatMap((app) => {
     const manifest: unknown = facts.manifests[app.name];
-    if (manifest === undefined) return [unchecked(`app ${app.name} not checked: not cloned yet`, `kayra apps ${facts.server.name} clones it`)];
+    if (manifest === undefined) return typed<readonly Finding[]>([unchecked(`app ${app.name} not checked: not cloned yet`, `kayra apps ${facts.server.name} clones it`)]);
     const parsed = appManifestSchema.safeParse(manifest);
-    if (!parsed.success) return [problem(`app ${app.name}: its app.yml: ${parsed.error.issues.at(0)?.message ?? "invalid"}`)];
+    if (!parsed.success) return typed<readonly Finding[]>([problem(`app ${app.name}: its app.yml: ${parsed.error.issues.at(0)?.message ?? "invalid"}`)]);
     if (parsed.data.name !== app.name)
-      return [problem(`app ${app.name}: its app.yml says name ${parsed.data.name}`, "server.yml and app.yml must name it alike")];
+      return typed<readonly Finding[]>([problem(`app ${app.name}: its app.yml says name ${parsed.data.name}`, "server.yml and app.yml must name it alike")]);
     const configKeys = parsed.data.config ?? [];
     const secretKeys = parsed.data.secrets ?? [];
     const config = facts.appConfig[app.name] ?? {};
@@ -149,28 +150,28 @@ const appFindings = (facts: Facts): readonly Finding[] =>
       [...missingConfig, ...missingSecrets],
       `app ${app.name}: ${count(configKeys.length, "config value")} and ${count(secretKeys.length, "secret")}, as its app.yml asks`,
     );
-  });
+  }));
 
 const rank: Readonly<Record<Verdict, number>> = { problem: 0, unchecked: 1, passed: 2 };
 
 /** Everything validate finds for one server: problems first, then what it could not check, then what holds. */
-export const findings = (facts: Facts): readonly Finding[] =>
-  [...secretsFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...appFindings(facts)].toSorted(
+export const findings = (facts: Facts) =>
+  Object.freeze([...secretsFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...appFindings(facts)].toSorted(
     (a, b) => rank[a.result] - rank[b.result],
-  );
+  ));
 
 /** One server's findings. */
 export type Report = { readonly server: Server; readonly findings: readonly Finding[] };
 
 /** How a set of findings went as a whole: its worst. */
-export const overall = (found: readonly Finding[]): Verdict =>
-  found.some((each) => each.result === "problem") ? "problem" : found.some((each) => each.result === "unchecked") ? "unchecked" : "passed";
+export const overall = (found: readonly Finding[]) =>
+  verdicts.find((verdict) => found.some((each) => each.result === verdict)) ?? "passed";
 
 /** How many problems, and how many checks could not look, across reports. */
-export const tally = (reports: readonly Report[]): { readonly problems: number; readonly unchecked: number } => {
+export const tally = (reports: readonly Report[]) => {
   const all = reports.flatMap((report) => report.findings);
   return {
     problems: all.filter((each) => each.result === "problem").length,
     unchecked: all.filter((each) => each.result === "unchecked").length,
-  };
+  } as const;
 };

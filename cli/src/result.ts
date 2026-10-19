@@ -2,29 +2,29 @@ export type Result<T, E> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: E };
 
-export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value });
+export const ok = <T>(value: T) => ({ ok: true, value }) as const;
 
-export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
+export const err = <E>(error: E) => ({ ok: false, error }) as const;
 
-export const map = <T, U, E>(result: Result<T, E>, f: (value: T) => U): Result<U, E> =>
-  result.ok ? ok(f(result.value)) : result;
+export const map = <T, U, E>(result: Result<T, E>, f: (value: T) => U) =>
+  result.ok ? ok<U>(f(result.value)) : result;
 
 export const flatMap = <T, U, E>(
   result: Result<T, E>,
   f: (value: T) => Result<U, E>,
-): Result<U, E> => (result.ok ? f(result.value) : result);
+) => (result.ok ? f(result.value) : result);
 
-export const all = <T, E>(results: readonly Result<T, E>[]): Result<readonly T[], E> =>
+export const all = <T, E>(results: readonly Result<T, E>[]) =>
   results.reduce<Result<readonly T[], E>>(
-    (acc, result) => flatMap(acc, (values) => map(result, (value) => [...values, value])),
+    (acc, result) => flatMap(acc, (values) => map(result, (value) => Object.freeze([...values, value]))),
     ok([]),
   );
 
-export const mapError = <T, E, F>(result: Result<T, E>, f: (error: E) => F): Result<T, F> =>
+export const mapError = <T, E, F>(result: Result<T, E>, f: (error: E) => F) =>
   result.ok ? result : err(f(result.error));
 
 /** What `run` makes, or why it threw: for code that reads the disk, the one place an exception becomes a value. */
-export const attempt = <T>(run: () => Result<T, string>, why: (error: string) => string): Result<T, string> => {
+export const attempt = <T>(run: () => Result<T, string>, why: (error: string) => string) => {
   try {
     return run();
   } catch (error) {

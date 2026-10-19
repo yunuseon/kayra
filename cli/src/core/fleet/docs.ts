@@ -10,42 +10,44 @@ import {
   type ServerKind,
   type Setting,
 } from "./settings.ts";
+import { typed } from "../../typed.ts";
 
 const version = "https://json-schema.org/draft/2020-12/schema";
 
-const jsonSchema = (title: string, schema: z.ZodType): unknown => ({
-  ...z.toJSONSchema(schema, { target: "draft-2020-12", unrepresentable: "any" }),
-  $schema: version,
-  title,
-});
+const jsonSchema = (title: string, schema: z.ZodType) =>
+  typed<Readonly<Record<string, unknown>>>({
+    ...z.toJSONSchema(schema, { target: "draft-2020-12", unrepresentable: "any" }),
+    $schema: version,
+    title,
+  });
 
 /** The fleet's files as JSON Schemas, for editors: published in the package under schema/. */
-export const jsonSchemas = (): Readonly<Record<string, unknown>> => ({
+export const jsonSchemas = () => typed<Readonly<Record<string, unknown>>>({
   "server.json": jsonSchema("server.yml", serverSchema),
   "defaults.json": jsonSchema("defaults.yml", defaultsSchema),
   ...Object.fromEntries(
-    serverKinds.map((kind) => [`vars-${kind}.json`, jsonSchema(`vars.yml (kind ${kind})`, varsSchema(kind))]),
+    serverKinds.map((kind) => [`vars-${kind}.json`, jsonSchema(`vars.yml (kind ${kind})`, varsSchema(kind))] as const),
   ),
   "app.json": jsonSchema("app.yml", appManifestSchema),
   "app-values.json": jsonSchema("apps/<app>.yml and apps/<app>.secrets.yml", appValuesSchema),
 });
 
-const kindsOf = (each: Setting): string => each.kinds.join(", ");
+const kindsOf = (each: Setting) => each.kinds.join(", ");
 
 /** MDX reads <…> as a component and {…} as an expression; a table cell's | ends it. */
-const escaped = (description: string): string =>
+const escaped = (description: string) =>
   description.replaceAll("|", "\\|").replaceAll("<", "&lt;").replaceAll("{", "&#123;").replaceAll("}", "&#125;");
 
-const row = (each: Setting): string => `| \`${each.name}\` | ${kindsOf(each)} | ${escaped(each.description)} |`;
+const row = (each: Setting) => `| \`${each.name}\` | ${kindsOf(each)} | ${escaped(each.description)} |`;
 
-const table = (chosen: readonly Setting[]): string =>
+const table = (chosen: readonly Setting[]) =>
   ["| Setting | Kinds | What it is |", "|---|---|---|", ...chosen.map(row)].join("\n");
 
-const editorLine = (kind: ServerKind): string =>
+const editorLine = (kind: ServerKind) =>
   `# yaml-language-server: $schema=../../node_modules/@yunuseon/kayra/schema/vars-${kind}.json`;
 
 /** The docs site's settings page, generated from the same registry as the schemas. */
-export const settingsPage = (): string =>
+export const settingsPage = () =>
   [
     "---",
     "title: Settings",

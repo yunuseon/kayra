@@ -14,7 +14,7 @@ const looks: Readonly<Record<Tone, readonly Format[]>> = {
   accent: ["magenta", "bold"],
 };
 
-export const paint = (text: Text, colors: boolean, links = false): string =>
+export const paint = (text: Text, colors: boolean, links = false) =>
   spans(text)
     .map((span) => {
       if (typeof span === "string") return span;

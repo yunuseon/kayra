@@ -1,4 +1,5 @@
 import type { AppName, ServerName } from "../fleet/brand.ts";
+import { typed } from "../../typed.ts";
 
 /** A value only known when the step runs: the stdout of a command, as `$(…)` would give it. */
 export type Substitution = {
@@ -65,7 +66,7 @@ export type Plan = readonly Step[];
 
 export type RunStep = Extract<Step, { readonly kind: "run" | "session" }>;
 
-export const run = (title: string, argv: readonly [string, ...Arg[]], env: Env = {}): RunStep => ({
+export const run = (title: string, argv: readonly [string, ...Arg[]], env: Env = {}) => typed<RunStep>({
   kind: "run",
   title,
   argv,
@@ -74,7 +75,7 @@ export const run = (title: string, argv: readonly [string, ...Arg[]], env: Env =
 });
 
 /** Every step of a plan as part of one kayra command. */
-export const partOf = (part: Part, plan: Plan): Plan => plan.map((step) => ({ ...step, part }));
+export const partOf = (part: Part, plan: Plan) => Object.freeze(plan.map((step) => ({ ...step, part } as const)));
 
 /** A plan with a step that talks with a person: a client without a terminal gives it a pty and the person's keys. */
-export const needsTerminal = (plan: Plan): boolean => plan.some((step) => step.kind === "session");
+export const needsTerminal = (plan: Plan) => plan.some((step) => step.kind === "session");

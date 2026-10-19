@@ -5,10 +5,11 @@ import { position } from "../../core/interpreter/progress.ts";
 import { steps as count, type Heading } from "../../core/interpreter/events.ts";
 import { wrap } from "./text.ts";
 import { drawnAs } from "./views.ts";
+import { typed } from "../../typed.ts";
 
 const kinds: Readonly<Record<string, (text: string) => Span>> = { guard: warn, check: active, run: active, confirm: bad, note: muted };
 
-const tag = (step: Step): Span => {
+const tag = (step: Step) => {
   const kind = kindOf(step);
   return (kinds[kind] ?? muted)(kind.padEnd(7));
 };
@@ -23,27 +24,27 @@ export const explain = (
   plan: Plan,
   short: (text: string) => string,
   columns: number,
-): readonly Line[] => {
+) => {
   const digits = String(plan.length).length;
   const indent = " ".repeat(digits + 13);
-  const steps = plan.flatMap((step, index): readonly Line[] => {
+  const steps = plan.flatMap((step, index) => {
     const { opens } = position(plan, index);
     const command = commandOf(step);
-    return [
+    return typed<readonly Line[]>([
       ...(opens === undefined ? [] : index === 0 ? [[accent(opens)]] : [[], [accent(opens)]]),
       ["  ", muted(String(index + 1).padStart(digits)), "  ", tag(step), "  ", strong(titleOf(step))],
       ...(step.kind === "confirm" ? [[indent, muted(`asks for '${step.expect}' to be typed, or stops`)]] : []),
       ...(command === undefined
         ? []
         : wrap(short(command).split(" "), Math.max(40, Math.min(columns, 120) - indent.length - 2)).map(
-            (line, at): Line => [indent, muted(at === 0 ? line : `  ${line}`)],
+            (line, at) => typed<Line>([indent, muted(at === 0 ? line : `  ${line}`)]),
           )),
       ...(step.kind === "run" && typeof step.stdout === "object" ? [[indent, muted(`→ ${drawnAs(step.stdout)}`)]] : []),
-    ];
+    ]);
   });
-  return [
+  return typed<readonly Line[]>([
     [strong(invocation.command), muted([...invocation.about, count(plan), "dry run: nothing runs"].map((each) => ` · ${each}`).join(""))],
     [],
     ...steps,
-  ];
+  ]);
 };

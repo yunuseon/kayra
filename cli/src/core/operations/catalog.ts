@@ -200,7 +200,9 @@ export const operationNames = Object.keys(operations).filter((name): name is Ope
 export const isOperation = (name: string): name is OperationName => Object.hasOwn(operations, name);
 
 /** An operation as every client reads it, whatever its own entry spells out. */
-export const operation = (name: OperationName): Operation => operations[name];
+const described: Readonly<Record<OperationName, Operation>> = operations;
+
+export const operation = (name: OperationName) => Object.freeze(described[name]);
 
 /** An operation, with its input as its schema has it: what every client hands the core. */
 export type Invocation = { readonly [N in OperationName]: { readonly name: N; readonly input: InputOf<N> } }[OperationName];

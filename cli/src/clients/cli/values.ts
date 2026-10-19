@@ -2,19 +2,21 @@ import { text } from "@optique/core/message";
 import type { NonEmptyString, ValueParser } from "@optique/core/valueparser";
 import { appName, domain, examples, serverName, subdomain } from "../../core/fleet/brand.ts";
 import type { Result } from "../../result.ts";
+import { typed } from "../../typed.ts";
 
 /** An Optique value parser that mints a brand: arguments arrive already validated. */
 const minting = <T extends string>(
   metavar: NonEmptyString,
   mint: (input: string) => Result<T, string>,
   placeholder: T,
-): ValueParser<"sync", T> => ({
+) => typed<ValueParser<"sync", T>>({
   mode: "sync",
   metavar,
   placeholder,
+  // eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message: readonly by contract, but a type the rule cannot see into
   parse: (input) => {
     const minted = mint(input);
-    return minted.ok ? { success: true, value: minted.value } : { success: false, error: [text(minted.error)] };
+    return minted.ok ? { success: true, value: minted.value } as const : { success: false, error: [text(minted.error)] } as const;
   },
   format: (value) => value,
 });

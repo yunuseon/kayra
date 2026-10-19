@@ -27,7 +27,7 @@ export const releasesSchema = z.object({
 }) satisfies z.ZodType<ReleasesAnswer>;
 
 /** The answer as the schema has it, or nothing: then it is not the answer this kayra expects. */
-export const parsed = <T>(schema: z.ZodType<T>, answer: string): T | undefined => {
+export const parsed = <T>(schema: z.ZodType<T>, answer: string) => {
   try {
     const json: unknown = JSON.parse(answer);
     const result = schema.safeParse(json);

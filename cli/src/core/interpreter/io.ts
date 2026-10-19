@@ -41,17 +41,17 @@ type Stopping = {
   readonly removeEventListener: (type: "abort", listener: () => void) => void;
 };
 
-export const isStopped = (signal: Io["signal"]): boolean => signal?.aborted === true;
+export const isStopped = (signal: Io["signal"]) => signal?.aborted === true;
 
 /** Cancellation also ends a question; a late answer cannot restart the plan. */
-export const ask = async (io: Io, question: Question): Promise<string> => {
+export const ask = async (io: Io, question: Question) => {
   if (isStopped(io.signal)) return "";
-  return new Promise((resolve, reject) => {
-    const done = (answer: string): void => {
+  return new Promise<string>((resolve, reject) => {
+    const done = (answer: string) => {
       io.signal?.removeEventListener("abort", stopped);
       resolve(answer);
     };
-    const stopped = (): void => { done(""); };
+    const stopped = () => { done(""); };
     io.signal?.addEventListener("abort", stopped, { once: true });
     void io.ask(question).then(done, (error: unknown) => {
       io.signal?.removeEventListener("abort", stopped);

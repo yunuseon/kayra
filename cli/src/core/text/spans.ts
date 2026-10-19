@@ -1,5 +1,6 @@
 /** What a piece of text means, not how it looks: each client gives it a look (a terminal colour, a CSS class), or none. */
-export type Tone = "ok" | "bad" | "warn" | "active" | "muted" | "strong" | "accent";
+export const tones = ["ok", "bad", "warn", "active", "muted", "strong", "accent"] as const;
+export type Tone = (typeof tones)[number];
 
 /** `href`: where the text leads, on a terminal that makes links of it. */
 export type Span = string | { readonly tone?: Tone; readonly text: string; readonly href?: string };
@@ -35,3 +36,6 @@ export const characters = (text: string): readonly string[] => Array.from(graphe
 
 /** Columns it takes: one per character, which holds for everything kayra writes itself. */
 export const width = (text: Text): number => characters(flat(text)).length;
+
+/** What to do about it, under what it is about: an arrow, then the advice. */
+export const pointing = (indent: string, ...said: readonly Span[]): Line => [indent, active("→"), " ", ...said];

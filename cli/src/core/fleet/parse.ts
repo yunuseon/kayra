@@ -7,7 +7,7 @@ import { serverTargets, type App, type Inventory, type Server, type ServerFiles,
 
 type Fields = Readonly<Record<string, unknown>>;
 
-const mapping = (value: unknown): Fields | undefined =>
+export const mapping = (value: unknown): Fields | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 
 /** YAML text as a value; a syntax error is a value too, not an exception. */
@@ -17,7 +17,8 @@ export const yamlOf = (text: string): Result<unknown, string> => {
   return problem === undefined ? ok(document.toJS()) : err(`is not valid YAML: ${problem.message.split("\n")[0] ?? ""}`);
 };
 
-const fields = (text: string): Result<Fields, string> => {
+/** YAML text as a mapping; empty for an empty file. */
+export const fields = (text: string): Result<Fields, string> => {
   const parsed = yamlOf(text);
   if (!parsed.ok) return parsed;
   const value = parsed.value;
@@ -26,7 +27,7 @@ const fields = (text: string): Result<Fields, string> => {
   return result === undefined ? err("is not a YAML mapping") : ok(result);
 };
 
-const isVaulted = (text: string): boolean => text.startsWith("$ANSIBLE_VAULT");
+export const isVaulted = (text: string): boolean => text.startsWith("$ANSIBLE_VAULT");
 
 const oneOf = <T extends string>(allowed: readonly T[], value: unknown, field: string): Result<T, string> => {
   const match = allowed.find((candidate) => candidate === value);
@@ -61,7 +62,7 @@ const app = (target: ServerTarget) => (value: unknown): Result<App, string> => {
   const path = entry["path"] ?? ".";
   if (typeof path !== "string" || `/${path}/`.includes("/../"))
     return err(`app ${name.value}: path must stay inside its repo`);
-  return ok({ name: name.value, repo, entry: JSON.stringify(value) });
+  return ok({ name: name.value, repo, path, entry });
 };
 
 const inventoryField = (inventory: string, key: string): string =>
@@ -147,6 +148,8 @@ export const parseServer = (files: ServerFiles): Result<Server, string> => {
     usesAcmeDns: typeof vars.value["acme_dns"] === "string" && vars.value["acme_dns"] !== "",
     inventory: files.inventory === undefined ? undefined : inventoryOf(files.inventory),
     backupDir: typeof backupDir === "string" ? backupDir : undefined,
-    stackHosts: stackHosts(files.stacks, serverDomain.value),
+    stackHosts: stackHosts(files.stacks.flatMap((stack) => stack.compose ?? []), serverDomain.value),
+    vars: vars.value,
+    files: { vars: files.vars, secrets: files.secrets, stacks: files.stacks.map((stack) => stack.name), appValues: files.appValues },
   });
 };

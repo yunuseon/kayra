@@ -9,16 +9,19 @@ import { z } from "zod";
  */
 
 /** What an operation acts on: the fleet as a whole, one server, one app on a server, or an app's own repository. */
-export type Scope = "fleet" | "server" | "app" | "repo";
+export const scopes = ["fleet", "server", "app", "repo"] as const;
+export type Scope = (typeof scopes)[number];
 
 /** What it does to the world: a client asks before a change to a real server, and twice before destroying. */
-export type Effect = "reads" | "changes" | "destroys";
+export const effects = ["reads", "changes", "destroys"] as const;
+export type Effect = (typeof effects)[number];
 
 /**
  * How it runs: a plan of steps (shown before, followed while), a query
  * answering at once, a stream of answers as they land (status), or an interactive session.
  */
-export type Kind = "plan" | "query" | "stream" | "session";
+export const kinds = ["plan", "query", "stream", "session"] as const;
+export type Kind = (typeof kinds)[number];
 
 export type Operation = {
   readonly summary: string;

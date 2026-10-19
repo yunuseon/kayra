@@ -1,8 +1,10 @@
 import type { Part, Plan } from "../plan/model.ts";
 import { commandOf, kindOf, titleOf } from "../plan/describe.ts";
-import { active, bad, muted, ok, strong, warn, type Line } from "../text/spans.ts";
+import { bad, muted, ok, pointing, strong, warn, type Line } from "../text/spans.ts";
 import { duration } from "../text/time.ts";
-import { parts, position, type Ended, type Progress } from "./progress.ts";
+import { parts, position, type Ended, type Progress, type StopReason } from "./progress.ts";
+import { count } from "../text/plural.ts";
+import type { Server } from "../fleet/model.ts";
 
 /** The invocation, as the heading and the footer name it. */
 export type Heading = {
@@ -14,10 +16,17 @@ export type Heading = {
   readonly about: readonly string[];
 };
 
+/** The heading for a command: as typed, what it runs on, which kayra. */
+export const heading = (command: string, target: Server | undefined, version: string): Heading => ({
+  command,
+  ...(target === undefined ? {} : { server: target.name }),
+  about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${version}`],
+});
+
 /** "8 steps", or "15 checks" for a plan of nothing else (doctor). */
 export const steps = (plan: Plan): string => {
   const noun = plan.every((step) => step.kind === "check") ? "check" : "step";
-  return `${String(plan.length)} ${noun}${plan.length === 1 ? "" : "s"}`;
+  return count(plan.length, noun);
 };
 
 /** The footer: how it went, how long it took, and what reruns a failed part alone. */
@@ -36,7 +45,7 @@ export const footer = (invocation: Heading, plan: Plan, ended: Ended, ms: number
   const alone = part !== undefined && parts(plan).length > 1 && invocation.server !== undefined;
   return [
     [bad("✗"), " ", strong(command), " failed at ", strong(titleOf(stop.step)), muted(` · ${where} · ${took}`)],
-    ...(alone ? [["  ", active("→"), " ", strong(`kayra ${part} ${invocation.server ?? ""}`), muted(" runs just this part")]] : []),
+    ...(alone ? [pointing("  ", strong(`kayra ${part} ${invocation.server ?? ""}`), muted(" runs just this part"))] : []),
   ];
 };
 
@@ -80,7 +89,7 @@ export type Event =
   | {
       readonly kind: "ended";
       readonly failures: number;
-      readonly stop?: { readonly index: number; readonly why: "failed" | "declined" | "interrupted" };
+      readonly stop?: { readonly index: number; readonly why: StopReason };
       readonly ms: number;
       readonly footer: readonly Line[];
     };

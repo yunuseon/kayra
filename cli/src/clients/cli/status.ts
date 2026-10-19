@@ -1,4 +1,4 @@
-import { active, bad, ok as fine, type Line, link, muted, type Span, strong, warn } from "../../core/text/spans.ts";
+import { active, bad, ok as fine, link, muted, pointing, strong, warn, type Line, type Span } from "../../core/text/spans.ts";
 import { fit, table } from "./text.ts";
 import type { Look, Machine, Pending, Reach } from "../../core/status/model.ts";
 import { authUrl } from "../../core/status/look.ts";
@@ -86,7 +86,7 @@ export const statusView = (looks: readonly Look[], drawing: Drawing): readonly L
       ? [
           ["  ", bad("✗"), " ", strong(look.server.name), `: OpenTofu's state could not be read: ${look.machine.reason}`],
           ...(look.machine.reason === "tofu init needed"
-            ? [["    ", active("→"), " ", `tofu -chdir=servers/${look.server.name}/terraform init`]]
+            ? [pointing("    ", `tofu -chdir=servers/${look.server.name}/terraform init`)]
             : []),
         ]
       : [],

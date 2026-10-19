@@ -1,6 +1,7 @@
 import type { Arg, Argv, Env, Need, Plan, Probe, Step } from "./model.ts";
 
-const quote = (word: string): string => (/^[\w@%+=:,./~-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+/** A word as a shell reads it back: bare where it is safe, else single-quoted. */
+export const quote = (word: string): string => (/^[\w@%+=:,./~-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 
 const shell = (argv: Argv): string => argv.map(quote).join(" ");
 

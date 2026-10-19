@@ -3,6 +3,7 @@ import type { Server } from "../fleet/model.ts";
 import { run, type Plan } from "../plan/model.ts";
 import { err, ok, type Result } from "../../result.ts";
 import { ansibleEnv, inventory, reachable, vaulted, type Engine } from "./steps.ts";
+import { sshArgv } from "./ssh.ts";
 
 /**
  * The restic-backup role's restore test: the latest backup, restored to a scratch dir and checked.
@@ -32,17 +33,9 @@ export const backupTest = (engine: Engine, server: Server): Result<Plan, string>
       ansibleEnv(engine, {}),
     ), server),
     { kind: "note", text: "Following the restore test. Ctrl-C stops following, not the test." },
-    run("Follow the restore test", [
-      "ssh",
-      "-p",
-      server.inventory.port,
-      "-i",
-      server.inventory.key,
-      "-o",
-      "StrictHostKeyChecking=accept-new",
-      `${server.inventory.user}@${server.inventory.host}`,
-      "sh",
-      `${server.backupDir}/follow-restore-test.sh`,
-    ]),
+    run(
+      "Follow the restore test",
+      sshArgv(server.inventory, ["-o", "StrictHostKeyChecking=accept-new"], ["sh", `${server.backupDir}/follow-restore-test.sh`]),
+    ),
   ]);
 };

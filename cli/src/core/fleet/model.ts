@@ -13,8 +13,10 @@ export type Vault =
 export type App = {
   readonly name: AppName;
   readonly repo: string;
-  /** The server.yml entry as compact JSON, the form the app playbook takes it in. */
-  readonly entry: string;
+  /** Where in its repository the app lives. */
+  readonly path: string;
+  /** The server.yml entry as written: the app playbook takes it whole. */
+  readonly entry: Readonly<Record<string, unknown>>;
 };
 
 /** How to reach a server, as its inventory.ini says. */
@@ -41,6 +43,16 @@ export type Server = {
   readonly backupDir: string | undefined;
   /** What the server's own stacks route (their Traefik Host rules), relative to its domain where under it. */
   readonly stackHosts: readonly string[];
+  /** vars.yml, parsed. */
+  readonly vars: Readonly<Record<string, unknown>>;
+  /** The files as they were read when the fleet loaded: what validate looks at beyond the schemas. */
+  readonly files: {
+    readonly vars: string;
+    readonly secrets: string;
+    /** The folders under stacks/. */
+    readonly stacks: readonly string[];
+    readonly appValues: ServerFiles["appValues"];
+  };
 };
 
 export type Fleet = {
@@ -57,8 +69,8 @@ export type ServerFiles = {
   readonly secrets: string | undefined;
   readonly inventory: string | undefined;
   readonly hasTerraform: boolean;
-  /** Each stack's compose.yaml, in path order. */
-  readonly stacks: readonly string[];
+  /** Each folder under stacks/, by name, with its compose.yaml where it has one. */
+  readonly stacks: readonly { readonly name: string; readonly compose: string | undefined }[];
   /** apps/: each app's values, `<app>.yml` (config) and `<app>.secrets.yml`, by file name. */
   readonly appValues: readonly { readonly file: string; readonly text: string }[];
 };

@@ -11,10 +11,14 @@ export type Done = {
 /** Where a step is in its plan; `opens` names the part it begins, in a plan of several. */
 export type At = { readonly index: number; readonly total: number; readonly opens?: Part };
 
+/** Why a plan stopped before its end. */
+export const stopReasons = ["failed", "declined", "interrupted"] as const;
+export type StopReason = (typeof stopReasons)[number];
+
 /** How a plan ended: every step run, or stopped at one. */
 export type Ended = {
   readonly failures: number;
-  readonly stop?: { readonly index: number; readonly step: Step; readonly why: "failed" | "declined" | "interrupted" };
+  readonly stop?: { readonly index: number; readonly step: Step; readonly why: StopReason };
 };
 
 /** What the operator sees of a plan while it runs: brackets around the plan and around each step. */

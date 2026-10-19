@@ -25,6 +25,12 @@ export type Reach =
 
 export type Pending = { readonly kind: "pending" };
 
+/** Every state a probe's cell can be in, as the API names them. */
+export const reachStates = ["pending", "open", "answered", "refused", "no-answer", "unreachable", "unknown-host", "bad-certificate", "failed", "skipped"] as const satisfies readonly (Reach | Pending)["kind"][];
+
+/** Every state a machine's cell can be in. */
+export const machineStates = ["pending", "found", "not-provisioned", "no-machine", "unreadable"] as const satisfies readonly (Machine | Pending)["kind"][];
+
 /** A server as status sees it; a cell is pending until its answer is in. */
 export type Look = {
   readonly server: Server;

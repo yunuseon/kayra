@@ -72,9 +72,9 @@ test("an app lives in its own repo, cloned over HTTPS, its root inside it", () =
     "app shop: repo must be an https:// URL",
   );
   strictEqual(app("{name: shop, repo: https://x.test/s.git, path: ../up}"), "app shop: path must stay inside its repo");
-  deepStrictEqual(server("a", "target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, ref: main}]").apps, [
-    { name: "shop", repo: "https://x.test/s.git", entry: '{"name":"shop","repo":"https://x.test/s.git","ref":"main"}' },
-  ]);
+  const apps = server("a", "target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, ref: main}]").apps;
+  deepStrictEqual(apps, [{ name: "shop", repo: "https://x.test/s.git", path: ".", entry: { name: "shop", repo: "https://x.test/s.git", ref: "main" } }]);
+  strictEqual(JSON.stringify(apps[0]?.entry), '{"name":"shop","repo":"https://x.test/s.git","ref":"main"}');
 });
 
 test("the vault: none, asked for, or a password file under ~", () => {
@@ -100,7 +100,11 @@ test("only a home server builds a VM image, and only when vars.yml has a vm", ()
 test("the hosts a server's stacks route, relative to its domain where they are under it", () => {
   deepStrictEqual(
     server("a", "target: home\ndomain: a.test\nvault: true", {
-      stacks: ["rule=Host(`git.a.test`) || Host(`ci.a.test`)", "rule=Host(`other.example`)"],
+      stacks: [
+        { name: "forge", compose: "rule=Host(`git.a.test`) || Host(`ci.a.test`)" },
+        { name: "other", compose: "rule=Host(`other.example`)" },
+        { name: "empty", compose: undefined },
+      ],
     }).stackHosts,
     ["git", "ci", "other.example"],
   );

@@ -32,7 +32,8 @@ export type DeployerAnswer = { readonly view: "runs" | "releases" | "log"; reado
 export type Need = { readonly kind: "vault"; readonly server: ServerName } | { readonly kind: "sudo" };
 
 /** The kayra commands a longer one is made of, each of which runs its part alone. */
-export type Part = "provision" | "setup" | "apps" | "verify" | "hosts";
+export const parts = ["provision", "setup", "apps", "verify", "hosts"] as const;
+export type Part = (typeof parts)[number];
 
 export type Step = { readonly part?: Part } & (
   | {

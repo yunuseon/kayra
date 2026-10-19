@@ -21,7 +21,7 @@ test("decide: a failed push or poll raises, a failed manual deploy does not, any
   strictEqual(decide(end(deployOf("deploy"), false)).kind, "none");
   strictEqual(decide(end(deployOf("rollback"), false)).kind, "none");
   deepStrictEqual(decide(end(deployOf("rollback"), true)), { kind: "resolve", key: "shop", note: "Recovered: https://deploy.x/runs/shop/1" });
-  const job: Request = { owner: jobOwner("gc"), work: { kind: "job", job: "gc", dryRun: false } };
+  const job: Request = { owner: jobOwner("gc"), work: { kind: "job", job: "gc", dryRun: false, why: "schedule" } };
   const failedJob = decide(end(job, false));
   assert(failedJob.kind === "raise");
   strictEqual(failedJob.alert.key, "_gc");

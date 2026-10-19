@@ -1,4 +1,4 @@
-import type { Why } from "./queue.ts";
+import type { JobWhy, Why } from "./queue.ts";
 import { runId, sha, type RunId, type Sha } from "../brand.ts";
 import { field } from "../app.ts";
 import { typed } from "../../lib/typed.ts";
@@ -32,7 +32,7 @@ export type RunMeta = {
   readonly id: RunId;
   readonly owner: string;
   readonly what: string;
-  readonly why: Why | "schedule" | "manual";
+  readonly why: Why | JobWhy;
   readonly sha?: Sha;
   readonly state: RunState;
   readonly started: string;

@@ -7,12 +7,12 @@ import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { all, err, ok, type Result } from "../lib/result.ts";
 import { field, registered, type App } from "./app.ts";
-import { appName, appOwner, jobOwner, newRunId, sha, type JobName, type Owner, type RunId, type Sha } from "./brand.ts";
+import { appName, appOwner, newRunId, sha, type Owner, type RunId, type Sha } from "./brand.ts";
 import { matches, parseCron, type Cron } from "./cron.ts";
 import { forge, forgeRepo } from "./forges/forge.ts";
 import { json, send } from "./http/http.ts";
 import { spawnLines } from "./process.ts";
-import { empty, enqueue, finish, type Queue, type Request, type Why } from "./runs/queue.ts";
+import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request, type Why } from "./runs/queue.ts";
 import { expired, moved, releaseName, releases, type RunMeta } from "./runs/records.ts";
 import { githubIssues } from "./forges/issues.ts";
 import { decide, parseNotify, silent, type Notifier, type NotifyConfig, type RunEnd } from "./forges/notify.ts";
@@ -203,11 +203,6 @@ const effects = (s: Settings, who: Owner, id: RunId, log: (line: string) => void
   },
 });
 
-const describe = (request: Request) =>
-  request.work.kind === "deploy"
-    ? typed<{ readonly what: string; readonly why: RunMeta["why"] }>({ what: `deploy ${request.work.ref}`, why: request.work.why })
-    : typed<{ readonly what: string; readonly why: RunMeta["why"] }>({ what: `${request.work.job}${request.work.dryRun ? " (dry run)" : ""}`, why: "schedule" });
-
 const work = async (s: Settings, request: Request, fx: Effects) => {
   if (request.work.kind === "deploy") {
     const app = registered(s.platformDir, request.work.app);
@@ -280,8 +275,6 @@ const deployRequest = (app: App, ref: string, why: Why) => typed<Request>({
   work: { kind: "deploy", app: app.name, ref, why },
 });
 
-const jobRequest = (job: JobName, dryRun: boolean) => typed<Request>({ owner: jobOwner(job), work: { kind: "job", job, dryRun } });
-
 /** The webhook's fallback: an app whose ref moved to a commit no run has tried yet and no release runs (one migrated from Jenkins has releases but no runs). */
 const poll = async (s: Settings) => {
   await Promise.all(
@@ -297,8 +290,8 @@ const poll = async (s: Settings) => {
 
 const tick = (s: Settings, at: Date) => {
   if (matches(s.poll, at)) void poll(s);
-  if (matches(s.gc, at)) swap(s, (queue) => enqueue(queue, jobRequest("gc", false)));
-  if (s.renovate !== undefined && matches(s.renovate, at)) swap(s, (queue) => enqueue(queue, jobRequest("renovate", false)));
+  if (matches(s.gc, at)) swap(s, (queue) => enqueue(queue, jobRequest("gc", false, "schedule")));
+  if (s.renovate !== undefined && matches(s.renovate, at)) swap(s, (queue) => enqueue(queue, jobRequest("renovate", false, "schedule")));
 };
 
 const schedule = (s: Settings) => {
@@ -348,7 +341,7 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
       send(response, 409, "this server has no renovate_repositories\n");
       return;
     }
-    accept(s, response, jobRequest(job, field(input, "dryRun") === true));
+    accept(s, response, jobRequest(job, field(input, "dryRun") === true, "manual"));
     return;
   }
   send(response, 404, "not found\n");

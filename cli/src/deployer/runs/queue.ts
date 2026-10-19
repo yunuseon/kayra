@@ -1,13 +1,26 @@
-import type { AppName, JobName, Owner } from "../brand.ts";
+import { jobOwner, type AppName, type JobName, type Owner } from "../brand.ts";
 import { typed } from "../../lib/typed.ts";
 
 export type Why = "push" | "poll" | "deploy" | "rollback";
 
+/** A job's cron fired, or someone asked for it (`kayra job`, through ctl). */
+export type JobWhy = "schedule" | "manual";
+
 export type Work =
   | { readonly kind: "deploy"; readonly app: AppName; readonly ref: string; readonly why: Why }
-  | { readonly kind: "job"; readonly job: JobName; readonly dryRun: boolean };
+  | { readonly kind: "job"; readonly job: JobName; readonly dryRun: boolean; readonly why: JobWhy };
 
 export type Request = { readonly owner: Owner; readonly work: Work };
+
+export const jobRequest = (job: JobName, dryRun: boolean, why: JobWhy) =>
+  typed<Request>({ owner: jobOwner(job), work: { kind: "job", job, dryRun, why } });
+
+/** A run's meta.json `what` and `why`. */
+export const describe = (request: Request) =>
+  Object.freeze({
+    what: request.work.kind === "deploy" ? `deploy ${request.work.ref}` : `${request.work.job}${request.work.dryRun ? " (dry run)" : ""}`,
+    why: request.work.why,
+  });
 
 /**
  * What runs and what waits. One run per owner at a time; a request for an

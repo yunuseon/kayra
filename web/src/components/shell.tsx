@@ -19,7 +19,7 @@ export const Link = ({ to, children, class: className }: { readonly to: Route; r
   </a>
 );
 
-const same = (a: Route, b: Route): boolean => href(a) === href(b);
+const same = (a: Route, b: Route) => href(a) === href(b);
 
 const NavItem = ({ to, label }: { readonly to: Route; readonly label: string }) => (
   <Link to={to} class={same(route.value, to) ? "nav-item current" : "nav-item"}>

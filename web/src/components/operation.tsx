@@ -9,13 +9,13 @@ import { DirectoryPicker } from "./directory.tsx";
 import { Pill, Problem, Waiting } from "./ui.tsx";
 
 const selection = signal<Draft | undefined>(undefined);
-export const openOperation = (name: OperationName, input: Readonly<Record<string, unknown>> = {}): void => {
+export const openOperation = (name: OperationName, input: Readonly<Record<string, unknown>> = {}) => {
   selection.value = { name, input };
 };
-export const show = (command: CommandInput): void => {
+export const show = (command: CommandInput) => {
   openOperation(command.name, Object.fromEntries(Object.entries(command).filter(([key]) => key !== "name")));
 };
-const close = (): void => {
+const close = () => {
   selection.value = undefined;
 };
 
@@ -225,7 +225,7 @@ const OperationForm = ({
   );
 };
 
-const realServer = (draft: Draft): string | undefined => {
+const realServer = (draft: Draft) => {
   const loaded = fleet.value;
   const facts = loaded.state === "ready" ? loaded.value.servers.find((each) => each.name === draft.input["server"]) : undefined;
   return facts?.target === "multipass" ? undefined : facts?.name;
@@ -257,7 +257,7 @@ const Review = ({ prepared, back }: { readonly prepared: Prepared; readonly back
   const { invocation, steps, changes } = shown.value;
   const real = changes && !options.dryRun ? realServer(draft) : undefined;
   const confirmed = real === undefined || typed === real;
-  const run = async (): Promise<void> => {
+  const run = async () => {
     setStarting("starting");
     const started = await start(draft, options, real === undefined ? undefined : typed);
     if (started.ok) {
@@ -380,7 +380,7 @@ const Query = ({ prepared, info, back }: { readonly prepared: Prepared; readonly
 const Body = ({ draft, info }: { readonly draft: Draft; readonly info: OperationInfo }) => {
   const [prepared, setPrepared] = useState<Prepared | undefined>(undefined);
   const [seed, setSeed] = useState<Prepared>({ draft, options: {} });
-  const back = (): void => {
+  const back = () => {
     if (prepared !== undefined) setSeed(prepared);
     setPrepared(undefined);
   };
@@ -411,7 +411,7 @@ export const OperationSheet = () => {
     if (!opened) return undefined;
     const previous = document.activeElement;
     sheet.current?.focus();
-    const key = (event: KeyboardEvent): void => {
+    const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
       if (event.key === "Tab") {
         const focusable = sheet.current?.querySelectorAll<HTMLElement>(

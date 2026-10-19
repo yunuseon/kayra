@@ -17,7 +17,7 @@ const tone: Readonly<Record<RunState, "waiting" | "ok" | "bad" | "warn">> = {
 export const RunTable = ({ server }: { readonly server?: string }) => {
   const [answer, setAnswer] = useState<Answer<readonly RunSummary[]> | undefined>(undefined);
   useEffect(() => {
-    const load = (): void => {
+    const load = () => {
       void runs().then(setAnswer);
     };
     load();

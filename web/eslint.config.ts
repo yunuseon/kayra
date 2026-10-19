@@ -26,11 +26,28 @@ export default defineConfig(
           ignoreInferredTypes: true,
           ignoreClasses: true,
           ignoreTypePattern: ["^HTML", "Event(<.*>)?$", "^EventSource$", "^Response$", "^Signal", "^ReadonlySignal", "^KeyboardEvent$", "ComponentChildren", "^VNode", "JSX"],
+          returnTypes: { enforcement: "ReadonlyDeep", ignoreInferredTypes: false, ignoreClasses: true },
         },
       ],
       "functional/type-declaration-immutability": [
         "error",
         { rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }], ignoreIdentifierPattern: ["Props$"] },
+      ],
+    },
+  },
+  {
+    // Components return JSX (a VNode, which the rule cannot see into) and hand
+    // handlers to the DOM: their inferred returns are not checked; the modules' are.
+    files: ["src/**/*.tsx"],
+    rules: {
+      "functional/prefer-immutable-types": [
+        "error",
+        {
+          enforcement: "ReadonlyDeep",
+          ignoreInferredTypes: true,
+          ignoreClasses: true,
+          ignoreTypePattern: ["^HTML", "Event(<.*>)?$", "^EventSource$", "^Response$", "^Signal", "^ReadonlySignal", "^KeyboardEvent$", "ComponentChildren", "^VNode", "JSX"],
+        },
       ],
     },
   },

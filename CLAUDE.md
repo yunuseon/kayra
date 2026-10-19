@@ -78,15 +78,15 @@ Also `provision`, `hosts`, `adopt`, `backup test`, `app purge|runs|logs|deploy|r
 - **`kayra plan <server>`** shows what `provision` and `setup` would change and changes nothing: `tofu plan`, then the setup playbook with `--check --diff`. Not tied to `main` — it previews a branch against a server. So every role must run in check mode: **a task that only reads (a lookup, a `GET`, a status command) gets `check_mode: false`**, since Ansible skips commands and `uri` there and later tasks read their results; **a file task whose content holds secrets gets `diff: false`** (or `no_log`), or `--diff` prints them.
 - **`kayra verify <server>`** checks a platform server as its users see it (`scripts/local/verify.sh`): from the Mac, each name pinned to the server's address, `auth.` answers, the platform's pages send a browser to the login (a 403 means Authelia runs rules without that host), every certificate is real (never `TRAEFIK DEFAULT CERT`), an unsigned webhook is refused, every app hostname answers without 5xx; over SSH, the registrations match `server.yml`, every container runs and none is unhealthy, no app's last run failed, no alert is open. The probes retry for `VERIFY_WAIT` seconds (150) for certificates that are still coming. `deploy` and `up` run it last on platform servers, so a deploy that leaves a server broken fails. Each way a server has broken is a case in `ci/tests/verify/run.sh` (stubbed curl, openssl, ssh); a new one gets a case.
 - **`kayra validate [server]`** checks what the schemas cannot: every unknown key in `secrets.yml` must be a helper `vars.yml` uses; each app's `app.yml` (from `.cache/apps`) against the fleet's values for it; `compose_stacks.stacks` against `stacks/`; `edge_routes`. Vaulted files only with the password file, apps only where cloned — otherwise noted as not checked. Each finding is `passed`, `problem` or `unchecked`, with a hint saying what to do; the view groups them per server under a mark and ends with a summary; exit 1 on a problem. The fleet's checks run it (`fleet:kayra-validate`).
-- **`kayra status`** knows a server's address from its `inventory.ini` where there is one (a home server's is hand-written), else from OpenTofu's `server_ip` if the state holds a machine (`hcloud_server`, `multipass_instance`; a storage box is none). Then every server is probed at once, through `Network` (`net.ts`, the adapter): a TCP connect to SSH (2 s; refused is `off`, an on-demand SSH), and on platform servers HTTPS on `auth.<domain>/api/health`. On a terminal the table appears at once on stderr and its cells fill in (`watch`, in `clients/cli/terminal.ts`), then the finished table goes to stdout. `--offline` asks only OpenTofu: the golden case runs it, since probes are not deterministic.
+- **`kayra status`** knows a server's address from its `inventory.ini` where there is one (a home server's is hand-written), else from OpenTofu's `server_ip` if the state holds a machine (`hcloud_server`, `multipass_instance`; a storage box is none). Then every server is probed at once, through `Network` (`core/adapters/network.ts`, the adapter): a TCP connect to SSH (2 s; refused is `off`, an on-demand SSH), and on platform servers HTTPS on `auth.<domain>/api/health`. On a terminal the table appears at once on stderr and its cells fill in (`watch`, in `clients/cli/terminal.ts`), then the finished table goes to stdout. `--offline` asks only OpenTofu: the golden case runs it, since probes are not deterministic.
 - **`--json`** on `status` and `validate`: one document on stdout, nothing on stderr; the shapes are documented in the site's CLI reference. Add fields freely; renaming or removing one is a change a release must call out.
 - **Settings are a registry** (`cli/src/core/fleet/settings.ts`): every variable a role reads from a fleet, with its kinds, type, description and whether it is secret. From it come the schemas (Zod): `server.yml` and `vars.yml` strict (an unknown key is an error, with a "did you mean"), a secret in `vars.yml` refused, nested structures typed but open; `defaults.yml` any kind's settings; `secrets.yml` its known keys typed. Also the JSON Schemas for editors (`schema/`, in the package) and the docs' settings page. **A role reading a new variable from the fleet gets its entry in the same PR**, or every fleet setting it is refused; then `npm run schemas` (a test fails while `schema/` or the page are stale). A value that never varies is not a setting.
 - **Golden tests:** `test/golden/record.sh <out>` runs `test/golden/cases` against a fixture fleet with ansible, tofu, ssh and the local scripts stubbed, recording argv, Ansible env, stdout and exit status; `cli-test` holds kayra to `expected/`. It was recorded from the justfiles kayra replaced, which proved the two equal. Re-record a case only for a change meant to alter it, and read the diff.
 - **Output is spans of meaning, painted at the edge** (`core/text/spans.ts`; drawing and the terminal's painting in `clients/cli/`): a `Line` is spans with a `Tone` (`ok`, `bad`, `muted`, …) and maybe an `href` (an OSC 8 link where `Screen.links`), never escape codes; tables with `table`/`fit` (`clients/cli/text.ts`); `main.ts` paints each stream by its own `Screen` (`FORCE_COLOR`, `NO_COLOR`, a TTY), so tests compare plain text. **stdout is what a command reports, stderr what is around it**: `framed` puts a heading, each step (titled: every `run` has one) with its time, part headings (`partOf`: the commands a longer one is made of) and a footer on stderr, which is why the golden tests, recording stdout, never see it. `ssh`, `app` and `job` run `silent`: their output is the point. Renderers are pure; only `clients/cli/terminal.ts` (spinner, escapes) and `main.ts` touch a stream.
-- **The deployer's answers are data, drawn by kayra:** `ctl runs|rollback <app> --json` (`deployer/answers.ts`, every time ISO 8601) is what a `run` step with a `DeployerAnswer` captures, and the command line's `clients/cli/views.ts` draws it (through `Io.draw`) (`app runs`, `app rollback` without a commit; `app logs` marked, the same bytes when uncoloured). Between a kayra bump and the server's `kayra deploy` a newer kayra asks an older ctl: an answer a view cannot read is printed as it came (an older ctl refuses `rollback <app> --json`, deploying nothing). A new answer gets its type in `answers.ts`, its schema in `core/ctl/answers.ts`, its view in `clients/cli/views.ts`, and a case in `test/deployer/ctl.test.ts`.
+- **The deployer's answers are data, drawn by kayra:** `ctl runs|rollback <app> --json` (`deployer/ctl/answers.ts`, every time ISO 8601) is what a `run` step with a `DeployerAnswer` captures, and the command line's `clients/cli/views.ts` draws it (through `Io.draw`) (`app runs`, `app rollback` without a commit; `app logs` marked, the same bytes when uncoloured). Between a kayra bump and the server's `kayra deploy` a newer kayra asks an older ctl: an answer a view cannot read is printed as it came (an older ctl refuses `rollback <app> --json`, deploying nothing). A new answer gets its type in `deployer/ctl/answers.ts`, its schema in `core/ctl/answers.ts`, its view in `clients/cli/views.ts`, and a case in `cli/test/deployer/ctl.test.ts`.
 - **Help is Optique's, arranged in `clients/cli/parser.ts`:** commands in `group()` sections (on a server, apps on a server, the whole fleet; `sectionOrder` keeps that order), a brief per command, a `description` and an examples `footer` where they help, `runOptions` for the program's brief, examples and docs link. Global options sit in a `merge` beside the commands, not in an `object` around them: `object()` drops a command's description and footer from its help page. Server names are a `choice()` with `suggest: "nearest"` (a "did you mean"), shown in help by `showChoices`. Errors come without the usage above them (`aboveError: "none"`): the root's would bury them.
 - **`-v`/`--verbose` is a plan transform** (`verbose` in `core/recipes/steps.ts`): every `ansible-playbook` step gets `-v` and `ANSIBLE_STDOUT_CALLBACK=default`, so `--dry-run` and the golden tests see it.
-- **Brands for every meaningful string** (`src/core/fleet/brand.ts`, the only file where `as` is allowed; arguments are minted by the command line's Optique value parsers, `clients/cli/values.ts`); errors are `Result` values, not exceptions.
+- **Brands for every meaningful string** (`cli/src/core/fleet/brand.ts`, the only file where `as` is allowed; arguments are minted by the command line's Optique value parsers, `clients/cli/values.ts`); errors are `Result` values, not exceptions.
 - Strictest tsconfig, `typescript-eslint` strict + `eslint-plugin-functional` (no `let`, no mutation). An inline `eslint-disable` says why. Dependencies are pinned exactly (`.npmrc`).
 - The checks run `cli-typecheck`, `cli-lint`, `cli-test`. Locally: `npm run typecheck|lint|test` at the root.
 
@@ -105,7 +105,7 @@ Every client offers kayra's full feature set: a new operation reaches every one.
 
 - **The catalog** (`core/operations/catalog.ts`) declares each operation once: its summary (every client's one line), scope, effect (`reads`, `changes`, `destroys`), kind (`plan`, `query`, `stream`, `session`) and input schema (plain JSON, zod). `core/operations/dispatch.ts` is the one way in: `invocation(name, input)` checks the input; `planOf`, `query` and `stream` run it, each a table typed over every operation of its kind, so one without an implementation does not compile.
 - **Interactions** (`core/interpreter/`): questions distinguish confirmations from secrets; the CLI hides secret typing and the API records only the question. A run asks once per server for its vault password, given to Ansible by an executable helper in a private temporary directory; the helper reads the password from the child environment, and its directory is removed when the run ends. Sudo passwords reach `setup-hosts.sh` through stdin. Interactive SSH is a `session` step: the CLI inherits its terminal; other clients supply input and receive a pty through `script`. Cancellation also releases questions and terminates child process groups.
-- **Coverage is compiled in:** each client maps its own input onto invocations and holds a table `satisfies Record<OperationName, …>`; the command line's is `reaches` in `clients/cli/invocation.ts`, MCP's `reaches` in `clients/mcp/tools.ts` (a tool, or refused with a reason: only the interactive `ssh`). `test/parity.test.ts` parses each and checks it lands on its operation. A new operation: its catalog entry, its implementation, then every client's table, or nothing compiles.
+- **Coverage is compiled in:** each client maps its own input onto invocations and holds a table `satisfies Record<OperationName, …>`; the command line's is `reaches` in `clients/cli/invocation.ts`, MCP's `reaches` in `clients/mcp/tools.ts` (a tool, or refused with a reason: only the interactive `ssh`). `cli/test/parity.test.ts` parses each and checks it lands on its operation. A new operation: its catalog entry, its implementation, then every client's table, or nothing compiles.
 
 ### Local server (`kayra serve`)
 
@@ -131,7 +131,7 @@ Every client offers kayra's full feature set: a new operation reaches every one.
 - **Results:** a plan's run as plain text (each step, its output, the footer; `render` for `dryRun`), a tool error when it failed *or stopped* (for an agent, declined is not done); queries and `status` in `clients/wire/`'s shapes as structured content; a progress notification as each step begins.
 - **Questions:** a plan's `confirm` steps (the typed name before `down` on Hetzner) are asked up front, as MCP's multi-round-trip `inputRequired` form elicitations, answered in Claude Code's dialog by the operator and never seen by the model; the SDK's shim serves the same code to 2025-era clients. **Secrets are never asked:** a vault or sudo need stops the step and says how else to give it (`vault_password_file`, a cached sudo, a terminal).
 - **One change per server at a time** in the process (Claude calls tools in parallel); cancelling a call aborts the plan as Ctrl-C does.
-- `test/mcp.test.ts` drives it with the SDK's client, in memory in both protocol eras and spawned over stdio.
+- `cli/test/mcp.test.ts` drives it with the SDK's client, in memory in both protocol eras and spawned over stdio.
 
 ---
 
@@ -183,7 +183,7 @@ apps:
 ## Apps: the contract (read before touching any app or pipeline)
 
 An app is **data**. It never contains a pipeline, Ansible or platform config — that is what lets it move to its own repo and be handed to a customer without exposing the platform.
-The customer-facing version of this section is the site's `concepts/app-contract.md` — keep the two in step.
+The customer-facing version of this section is the site's `site/src/content/docs/concepts/app-contract.md` — keep the two in step.
 
 ```yaml
 # app.yml, at the root of the app's repository
@@ -222,11 +222,11 @@ On the server:
 
 Rules that keep apps untrusted-safe:
 
-- **The pipeline is the platform's.** Every app runs the same run (`cli/src/deployer/run.ts`); nothing in an app's repository is executed except its Dockerfiles, inside BuildKit. Never let a run read a script, pipeline or hook from the app's repo.
+- **The pipeline is the platform's.** Every app runs the same run (`cli/src/deployer/runs/run.ts`); nothing in an app's repository is executed except its Dockerfiles, inside BuildKit. Never let a run read a script, pipeline or hook from the app's repo.
 - **Everything the operator approves comes from the registration, not from the app at the commit**: hosts and secret keys are written at `kayra apps`. Only the compose file list is read from `app.yml` at the commit.
 - **Compose files come from the commit being deployed** and are admitted before `up`. The policy (`scripts/platform/compose-policy.sh`, modelled on Pod Security "restricted") is an **allow-list** of service keys — extend it deliberately, never switch it back to a deny-list. On top: every service needs a memory limit, no bind mounts, foreign images/networks/volumes, Host() outside the app's hosts, Traefik names or `platform-public` aliases without the `<app>-` prefix, `platform-public` not `external`, `@internal` services, `authelia@file`. Changing it: add a case to `ci/tests/compose-policy/cases/` and run `bash ci/tests/compose-policy/run.sh`.
 - **Admission runs `config --no-env-resolution`.** Otherwise Compose reads `env_file` in the deployer, from any path — `/run/app-secrets/<other-app>/` included — and bakes it into the app's container. With it, `env_file` stays visible and the allow-list refuses it.
-- **The deployer trusts nothing the builder returns.** The builder handles app code; the bundle it hands over is checked again (`bundle.ts`: the commit asked for, images only under `localhost:5000/<app>/`, compose paths relative and inside the app) before admission. Keep that check when the bundle grows.
+- **The deployer trusts nothing the builder returns.** The builder handles app code; the bundle it hands over is checked again (`cli/src/deployer/build/bundle.ts`: the commit asked for, images only under `localhost:5000/<app>/`, compose paths relative and inside the app) before admission. Keep that check when the bundle grows.
 - **Two networks.** `platform-public` is Traefik + apps; `platform-internal` is the builder, the deployer, BuildKit, registry, Authelia, with Traefik as the only bridge. Platform services go on `internal` with `traefik.docker.network=platform-internal`; never put one on `public` again, or every app can reach it. Apps can still reach each other on `platform-public`, so they must not address their own services by name across it (`api` there is anyone's) — e.g. the container name `shop-api-1`.
 - **Traefik router/service/middleware names are global** — hence the mandatory `<app>-` prefix; two apps with a router called `api` would knock each other out.
 - **Secrets are injected by app name**: the deployer reads `app-secrets/<app>/<KEY>` for the keys of the app it is deploying, into the environment of that app's compose commands only. An app cannot name another app's secret.
@@ -286,8 +286,8 @@ the app secrets, and Traefik never routes to it.
 - **Only the deployer mounts the socket** *(checked)* — and socket-proxy, read-only. Never mount it into the builder: that is the thing this arrangement exists to prevent; it made any pushed branch host root.
 - **The builder has no docker CLI** *(checked)* **and no language toolchain** (git, buildctl, jq, yq, node). Apps build and check inside their Dockerfiles; adding Node or Go tools for an app is the platform learning about an app.
 - **The builder's two ports:** `:8080` is Traefik's (`/hook/<app>`, the pages); `:8081` (`/resolve`, `/prepare`) is reachable on platform-internal only. Never route `:8081`.
-- **A run is one data flow, two halves** (`run.ts`): the ref resolved and the images built by the builder, admission + `compose up` by the deployer. Do not move the build into the deployer or the up into the builder.
-- **One run per app at a time, two at once, the registry GC alone** (`queue.ts`): a push while a run goes collapses with any waiting one into one follow-up run; the GC stops the registry, so it waits for everything and nothing starts while it runs. The queue lives in memory: a restart loses waiting runs, and the hourly poll picks up a ref that moved.
+- **A run is one data flow, two halves** (`cli/src/deployer/runs/run.ts`): the ref resolved and the images built by the builder, admission + `compose up` by the deployer. Do not move the build into the deployer or the up into the builder.
+- **One run per app at a time, two at once, the registry GC alone** (`cli/src/deployer/runs/queue.ts`): a push while a run goes collapses with any waiting one into one follow-up run; the GC stops the registry, so it waits for everything and nothing starts while it runs. The queue lives in memory: a restart loses waiting runs, and the hourly poll picks up a ref that moved.
 - `resolve-images.sh` pushes to `registry:5000` and emits `localhost:5000` refs.
   Both point at the same storage; the first is reachable from containers, the
   second from the host daemon. Do not "fix" the mismatch.
@@ -312,7 +312,7 @@ the app secrets, and Traefik never routes to it.
 - **A Forgejo is configured as code** by `forgejo-config` (`forgejo_config` in the server's `vars.yml`): users and SSH keys, organizations (`orgs: [{name, owner, visibility}]` — an organization's visibility is its packages' too, so a private one keeps internal images private), runners (`runners: [{name, scope}]`; without a scope a runner serves every repo on the instance), repos (created inside their organization, private from the start where their settings say so; `pull_mirror: <url>` makes one a pull mirror of another forge, fetched every `mirror_interval`), collaborators, Actions secrets, webhooks (signed with `webhook_secret`), push mirrors. It adds and adopts, never deletes.
 - **A repo on GitHub, GitLab or a Forgejo works the same.** Everything the
   platform asks of a forge — commit statuses, a webhook's proof — is an adapter
-  in `cli/src/deployer/` (`forge.ts` picks it from the repo URL):
+  in `cli/src/deployer/forges/` (`forge.ts` picks it from the repo URL):
   `https://github.com/…` is GitHub, `https://gitlab.com/…` GitLab (group paths
   included), any other host a Forgejo, so a self-hosted GitLab is not supported
   yet. Clones need none: all three take `GIT_TOKEN` as a Basic password. A Forgejo on the same server calls
@@ -329,7 +329,7 @@ the app secrets, and Traefik never routes to it.
   server's own Forgejo hosts the repos, `forgejo_config.tokens` mints them
   instead — checked every setup, minted again when missing or revoked, never in
   the vault.
-- **Alerts go through a notifier** (`notify.ts`: `raise` / `resolve` per key, `decide()` pure). A failed deploy of an app's own ref (a push or the poll) or a failed job raises; a failed `kayra app deploy|rollback` does not, since whoever started it is watching; any success resolves. The one notifier today is `github-issue` (`github-issues.ts`): an issue in the `notifier.repository` opened by a GitHub App (GitHub notifies no one about their own actions), commented on and closed when resolved; open ones are kept in `/opt/platform/alerts/<key>`. Its key lives in `deployer-secrets/`, which only the deployer mounts. A notifier's failure lands in the run's log, never fails the run. A new notifier is a new `kind` in the `notifier` setting and an adapter for `Notifier`.
+- **Alerts go through a notifier** (`cli/src/deployer/forges/notify.ts`: `raise` / `resolve` per key, `decide()` pure). A failed deploy of an app's own ref (a push or the poll) or a failed job raises; a failed `kayra app deploy|rollback` does not, since whoever started it is watching; any success resolves. The one notifier today is `github-issue` (`cli/src/deployer/forges/issues.ts`): an issue in the `notifier.repository` opened by a GitHub App (GitHub notifies no one about their own actions), commented on and closed when resolved; open ones are kept in `/opt/platform/alerts/<key>`. Its key lives in `deployer-secrets/`, which only the deployer mounts. A notifier's failure lands in the run's log, never fails the run. A new notifier is a new `kind` in the `notifier` setting and an adapter for `Notifier`.
 - **Releases are the source of truth for GC and rollback.** Every successful
   deploy writes `releases/<app>/<time>-<sha>.env`. The nightly registry GC
   (03:00, `scripts/platform/registry-gc.sh`) keeps what the newest 10 of those
@@ -345,7 +345,7 @@ the app secrets, and Traefik never routes to it.
   `renovate_repositories`); no
   floating tags such as `latest` or `lts`.
 
-See the site's `concepts/ci-isolation.md` for what is still reachable.
+See the site's `site/src/content/docs/concepts/ci-isolation.md` for what is still reachable.
 
 ### Checks: the rules above, enforced
 
@@ -360,13 +360,15 @@ Docker build of `ci/checks/Dockerfile`; the last `RUN` is
 
 - **Two parts:** `run.sh --platform` checks the engine (`kayra`) on
   its own; `run.sh --fleet <dir>` checks a fleet against it (its YAML, stacks,
-  Terraform, and that the engine names none of its apps). Here both run; once
-  kayra has its own repo, each repo runs its part. A rule about the engine's
-  files is a platform check, one about `servers/` a fleet check.
+  Terraform, and that the engine names none of its apps). Each repo runs its
+  part: this one `--platform`, a fleet `--fleet` with the same image. A rule
+  about the engine's files is a platform check, one about `servers/` a fleet
+  check.
 - **Turning a rule into a check:** add a `rule_*` function to `run.sh`, prove it
   fails on a planted violation, mark the rule *(checked)* here. Rules without a
   check stay prose on purpose — not everything greps.
 - **No private key is committed** *(checked)*: keys, certs and state stay gitignored, secrets go in a vault.
+- **Every file path this document names exists** *(checked)*: backticked, with a `/` and an extension, from the repo root or from `cli/src` (which it drops for the CLI's source). Not checked: absolute paths, `.cache/`, `<placeholders>` and globs, and the layouts of other repos (`servers/`, `apps/`, `docker/`, `releases/`) — `claude_md_paths` in `ci/checks/run.sh` is the list. A file that moves takes its mentions with it.
 - **A linter finding you disagree with** goes into its config
   (`ansible/.ansible-lint`, `ci/checks/yamllint.yml`)
   with the reason, never into an inline ignore without one.
@@ -382,8 +384,6 @@ Docker build of `ci/checks/Dockerfile`; the last `RUN` is
 | kayra's version (the deployer's code included) | `kayra deploy <name>` — a new version may change the app role, which `setup` alone does not run |
 | Everything (fresh server) | `kayra up <name>` |
 | Config changes only, no re-provision | `kayra deploy <name>` |
-
-Upgrading to 0.8.0 in particular needs `kayra deploy` (or `kayra apps` after `setup`): `setup` removes the Jenkins registration, and only `apps` writes the deployer's.
 
 ---
 
@@ -423,7 +423,7 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 ## Stack & conventions
 
 - **Reverse proxy:** Traefik v3.7. Platform subdomains: `auth.`, `traefik.`, `deploy.`; apps claim their own (e.g. `www.`, `api.`). Platform subdomains live in `hosts.conf`, app ones in each `app.yml` — `scripts/local/setup-hosts.sh`, `scripts/local/certs.sh` and the app role all read those, so they cannot drift.
-- **Auth:** Authelia at `auth.<domain>`, passkeys. Staff only, one `admin` group, users in a vault-rendered YAML file. See the site's `concepts/authentication.md`.
+- **Auth:** Authelia at `auth.<domain>`, passkeys. Staff only, one `admin` group, users in a vault-rendered YAML file. See the site's `site/src/content/docs/concepts/authentication.md`.
 - **Ansible's output is kayra's** (`ansible/callback_plugins/kayra.py`, the `stdout_callback` in `ansible.cfg`): changed tasks (with diffs under `--diff`, so `kayra plan` shows them), failures with their message and output, what a `debug` task says, a recap; ok and skipped tasks are only counted. Indented to sit under kayra's step, the task at work redrawn in place on a terminal, holding Display's lock. A task whose result an operator must read uses `debug`, not an ok result. `ANSIBLE_STDOUT_CALLBACK=default` brings back Ansible's own. Each kind of result is a task in `ci/tests/ansible-output/play.yml` (`platform:ansible-output`); a new kind gets one.
 
 ## Working here as an AI agent
@@ -438,7 +438,7 @@ kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude 
   - `tofu apply|destroy|import|state …`;
   - destructive commands over SSH.
   Building, testing, reading, `kayra verify|plan|validate|app check|app runs|app logs`, and pushing a feature branch run without asking.
-  An MCP tool is read from its JSON input, exactly: one that changes nothing (`mcp_reads`, held to the catalog's `reads` by `test/mcp.test.ts`) or `dryRun: true` passes; a change to a multipass server passes; any other asks. A fleet's hook matcher is `Bash|mcp__kayra__.*`, its `.mcp.json` names the server `kayra`, and editing `.mcp.json` asks.
+  An MCP tool is read from its JSON input, exactly: one that changes nothing (`mcp_reads`, held to the catalog's `reads` by `cli/test/mcp.test.ts`) or `dryRun: true` passes; a change to a multipass server passes; any other asks. A fleet's hook matcher is `Bash|mcp__kayra__.*`, its `.mcp.json` names the server `kayra`, and editing `.mcp.json` asks.
 - **It fails closed** in kayra (`onFailure: block`); a fleet without its kayra installed lets only `npm ci` through until then: everything else asks, or is refused in a mode that approves by itself.
 - **Editing the guardrails asks too:** `.claude/**`, `scripts/agent/**`, `.github/CODEOWNERS`.
 - **It reads the command's text.** It stops mistakes and instructions smuggled in through a file, an issue or a web page, not an adversary: a script it does not read runs whatever it contains. Each case is in `ci/tests/guard/run.sh` (in the checks as `platform:guard`); a new guard gets a case.

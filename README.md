@@ -60,6 +60,8 @@ kayra doctor              # what is still missing
 kayra up shop-test        # provision + set up a server, register its apps
 kayra deploy shop-prod    # host setup + apps, no re-provision (from main only)
 kayra status
+kayra serve               # the fleet in the browser
+kayra serve --ui --api     # browser and the local program API
 ```
 
 ## Documentation
@@ -70,6 +72,8 @@ kayra status
 | [The app contract](https://yunuseon.github.io/kayra/concepts/app-contract/) | what an app provides and what it may not do |
 | [CI isolation](https://yunuseon.github.io/kayra/concepts/ci-isolation/) | why app code cannot reach the host or the platform |
 | [Authentication](https://yunuseon.github.io/kayra/concepts/authentication/) | staff login (Authelia), adding people, recovery |
+| [Local API](https://yunuseon.github.io/kayra/reference/api/) | program access, authentication, operations, runs and terminal sessions |
+| [Upgrade to 0.17.0](https://yunuseon.github.io/kayra/reference/upgrading-0-17/) | replacing `kayra ui`, client changes and the fleet dependency bump |
 | [`CLAUDE.md`](CLAUDE.md) | how everything fits together, and the rules that keep it working |
 
 ## Contributing

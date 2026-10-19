@@ -22,5 +22,5 @@ export default defineConfig({
     }),
     react(),
   ],
-  vite: { plugins: [LikeC4VitePlugin({ workspace: "model" })] },
+  vite: { plugins: [LikeC4VitePlugin({ workspace: "model", ai: "disabled" })] },
 });

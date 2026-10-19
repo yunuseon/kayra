@@ -27,10 +27,18 @@ model {
   localProgram = tool 'Local program' {
     description 'A script or client on the operator machine, authenticated by the private discovery token'
   }
-  cli = tool 'kayra CLI' {
-    description 'On the operator machine: plans each command, then runs OpenTofu, Ansible and SSH'
+  kayra = tool 'Local kayra' {
+    description 'One package pinned by the fleet, with a core and three clients on the operator machine'
     technology 'TypeScript, Node 24'
 
+    core = tool 'Core' {
+      description 'The operation catalog, fleet validation, pure plans and the interpreter; the only layer running OpenTofu, Ansible and SSH'
+      technology 'cli/src/core'
+    }
+    cli = tool 'Command line' {
+      description 'Parses commands, presents the core output and hides secret input; interactive SSH inherits the terminal'
+      technology 'Optique, kayra'
+    }
     ui = tool 'Browser interface' {
       description 'The web interface, on 127.0.0.1 with a launch token: the same plans and guards, each run live'
       technology 'Preact, kayra serve --ui'
@@ -87,13 +95,15 @@ model {
 
   // Operating the fleet
   operator -> fleet 'edits, through PRs'
-  operator -> cli 'kayra up / setup / apps / app deploy'
-  operator -> cli.ui 'in the browser: the fleet, previews, runs as they happen'
-  cli.ui -> cli.api 'same-origin cookie: catalog operations and live events'
-  localProgram -> cli.api 'bearer token: /api operations and events'
-  cli -> fleet 'reads and validates'
-  cli -> hetzner 'provisions (OpenTofu)'
-  cli -> platform 'sets up (Ansible over SSH)'
+  operator -> kayra.cli 'kayra up / setup / apps / app deploy'
+  operator -> kayra.ui 'in the browser: the fleet, previews, runs and terminal sessions'
+  kayra.cli -> kayra.core 'typed catalog invocations; terminal input and output'
+  kayra.ui -> kayra.api 'same-origin cookie: catalog operations and live events'
+  localProgram -> kayra.api 'bearer token: /api operations and events'
+  kayra.api -> kayra.core 'typed catalog invocations; streamed output, questions and session input'
+  kayra.core -> fleet 'reads and validates'
+  kayra.core -> hetzner 'provisions (OpenTofu)'
+  kayra.core -> platform 'sets up and operates (Ansible and SSH)'
 
   // An app's way to production
   developer -> appRepo 'pushes'

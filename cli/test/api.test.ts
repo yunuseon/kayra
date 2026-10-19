@@ -13,6 +13,7 @@ import { contractTypes, openapi } from "../src/clients/api/contract.ts";
 import { busy, readRecord, recordLine, runId, stateOf } from "../src/clients/api/runs.ts";
 import { serve, type Clients } from "../src/serve.ts";
 import { schemas } from "../src/clients/api/protocol.ts";
+import { apiReference } from "../scripts/api-reference.ts";
 import type { RunEvent } from "../src/clients/api/contract.gen.ts";
 import { must, server } from "./support.ts";
 
@@ -100,11 +101,12 @@ test("admission: exact Host for everyone, bearer or cookie token, Origin only fo
   strictEqual(admit({ ...cookie, method: "GET" }, 7700, "token", { api: true, ui: false }).admitted, false);
 });
 
-test("generated browser types and OpenAPI match the catalog and protocol schemas", () => {
+test("generated browser types, OpenAPI and API reference match the catalog and protocol schemas", () => {
   const source = join(import.meta.dirname, "../src/clients/api");
   const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(import.meta.dirname, "../../package.json"), "utf8"))).version;
   strictEqual(readFileSync(join(source, "contract.gen.ts"), "utf8"), contractTypes());
   strictEqual(readFileSync(join(source, "openapi.json"), "utf8"), `${JSON.stringify(openapi(version), null, 2)}\n`);
+  strictEqual(readFileSync(join(import.meta.dirname, "../../site/src/content/docs/reference/api.md"), "utf8"), apiReference(openapi(version)));
 });
 
 test("run records retain their history and session identity, and only live runs lock a server", () => {

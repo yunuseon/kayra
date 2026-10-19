@@ -1,4 +1,4 @@
-import type { ServerFacts } from "../../../cli/src/clients/api/contract.gen.ts";
+import type { ServerFacts } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { OperationActions } from "../components/operations.tsx";
 import { Link } from "../components/shell.tsx";
 import { Dot, Fact, Header, Pill, Problem, Waiting } from "../components/ui.tsx";

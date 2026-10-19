@@ -66,8 +66,8 @@ export default defineConfig(
   {
     // The local server (the API, the browser side, serve.ts) works with Node's I/O objects too (requests, responses,
     // the abort controller that stops a run; Live and Served hold them): classes the rule cannot make readonly. Its inferred returns are those
-    // objects, or JSON on its way out: they are not checked.
-    files: ["src/clients/api/**/*.ts", "src/clients/ui/**/*.ts", "src/serve.ts"],
+    // objects, or JSON on its way out (the wire's shapes): they are not checked.
+    files: ["src/clients/api/**/*.ts", "src/clients/ui/**/*.ts", "src/clients/wire/**/*.ts", "src/serve.ts"],
     rules: {
       "functional/prefer-immutable-types": [
         "error",
@@ -96,6 +96,7 @@ export default defineConfig(
   },
   // Core and clients: the core knows no client, no client knows another, the
   // deployer (it runs on servers) knows neither. main.ts and serve.ts compose them.
+  // The wire (the JSON every machine client speaks) is any client's, and knows none.
   // The core may name the deployer's answers as types: they are ctl's wire format.
   ...(
     [
@@ -103,6 +104,7 @@ export default defineConfig(
       ["src/clients/cli/**/*.ts", ["**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
       ["src/clients/api/**/*.ts", ["**/clients/cli/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
       ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/clients/wire/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
       ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts"], false],
     ] as const
   ).map(([files, forbidden, deployerTypes]) => ({

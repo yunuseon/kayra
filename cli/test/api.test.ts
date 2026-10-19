@@ -9,12 +9,13 @@ import { absolutePath, fleetRoot, kayraRoot, kayraVersion, remotePath } from "..
 import { operation, operationNames, type OperationName } from "../src/core/operations/catalog.ts";
 import { ok } from "../src/result.ts";
 import { admit, cookieName } from "../src/clients/api/auth.ts";
-import { contractTypes, openapi } from "../src/clients/api/contract.ts";
+import { openapi } from "../src/clients/api/openapi.ts";
+import { contractTypes } from "../src/clients/wire/contract.ts";
 import { busy, readRecord, recordLine, runId, stateOf } from "../src/clients/api/runs.ts";
 import { serve, type Clients } from "../src/serve.ts";
-import { schemas } from "../src/clients/api/protocol.ts";
+import { schemas } from "../src/clients/wire/schemas.ts";
 import { apiReference } from "../scripts/api-reference.ts";
-import type { RunEvent } from "../src/clients/api/contract.gen.ts";
+import type { RunEvent } from "../src/clients/wire/contract.gen.ts";
 import { must, server } from "./support.ts";
 
 type Answer = { readonly status: number; readonly headers: Readonly<Record<string, string | string[] | undefined>>; readonly body: string };
@@ -102,10 +103,10 @@ test("admission: exact Host for everyone, bearer or cookie token, Origin only fo
 });
 
 test("generated browser types, OpenAPI and API reference match the catalog and protocol schemas", () => {
-  const source = join(import.meta.dirname, "../src/clients/api");
+  const clients = join(import.meta.dirname, "../src/clients");
   const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(import.meta.dirname, "../../package.json"), "utf8"))).version;
-  strictEqual(readFileSync(join(source, "contract.gen.ts"), "utf8"), contractTypes());
-  strictEqual(readFileSync(join(source, "openapi.json"), "utf8"), `${JSON.stringify(openapi(version), null, 2)}\n`);
+  strictEqual(readFileSync(join(clients, "wire", "contract.gen.ts"), "utf8"), contractTypes());
+  strictEqual(readFileSync(join(clients, "api", "openapi.json"), "utf8"), `${JSON.stringify(openapi(version), null, 2)}\n`);
   strictEqual(readFileSync(join(import.meta.dirname, "../../site/src/content/docs/reference/api.md"), "utf8"), apiReference(openapi(version)));
 });
 

@@ -1,7 +1,7 @@
 import { readdir, realpath, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { err, ok } from "../../result.ts";
-import type { DirectoryListing } from "./contract.gen.ts";
+import type { DirectoryListing } from "../wire/contract.gen.ts";
 
 export const directories = async (path: string, root: string) => {
   try {

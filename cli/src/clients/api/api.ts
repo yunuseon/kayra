@@ -10,15 +10,17 @@ import type { Network, Tofu } from "../../core/status/ports.ts";
 import { follow } from "../../core/status/updates.ts";
 import { json, send } from "../../deployer/http/http.ts";
 import { facts } from "./commands.ts";
-import type * as wire from "./contract.gen.ts";
-import { catalog, openapi } from "./contract.ts";
+import type * as wire from "../wire/contract.gen.ts";
+import { catalog } from "../wire/contract.ts";
+import { openapi } from "./openapi.ts";
 import { directories } from "./directories.ts";
 import { inFlight, liveRuns } from "./live.ts";
-import { options, requestBody } from "./protocol.ts";
-import { answer as queryAnswer } from "./queries.ts";
+import { options } from "../wire/schemas.ts";
+import { requestBody } from "./protocol.ts";
+import { answer as queryAnswer } from "../wire/queries.ts";
 import { stateOf, summary } from "./runs.ts";
 import { allRuns, preview, start, type Served } from "./start.ts";
-import { statusJson } from "./status.ts";
+import { statusJson } from "../wire/status.ts";
 
 export type Api = {
   readonly kayra: KayraRoot;

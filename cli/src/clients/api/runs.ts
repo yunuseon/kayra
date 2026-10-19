@@ -1,4 +1,4 @@
-import type { RunEvent, RunState, RunSummary } from "./contract.gen.ts";
+import type { RunEvent, RunState, RunSummary } from "../wire/contract.gen.ts";
 import { typed } from "../../typed.ts";
 
 /** A run as kayra keeps it: what it was asked, and everything that happened since, in order. */

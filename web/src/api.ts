@@ -1,4 +1,4 @@
-import type { Preview, RunOptions, RunSummary } from "../../cli/src/clients/api/contract.gen.ts";
+import type { Preview, RunOptions, RunSummary } from "../../cli/src/clients/wire/contract.gen.ts";
 import type { Draft } from "./operations.ts";
 import { typed } from "./typed.ts";
 
@@ -8,7 +8,7 @@ export type Answer<T> = { readonly ok: true; readonly value: T } | { readonly ok
 
 /**
  * kayra's answers, typed by the contract both sides compile against
- * (cli/src/clients/api/contract.gen.ts): the one place a value from the server takes a type.
+ * (cli/src/clients/wire/contract.gen.ts): the one place a value from the server takes a type.
  */
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions, @typescript-eslint/no-unnecessary-type-parameters -- see above
 const trusted = <T>(value: unknown) => value as T;

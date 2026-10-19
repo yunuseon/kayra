@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { Listed, OperationInfo, OperationName, Preview, RunOptions } from "../../../cli/src/clients/api/contract.gen.ts";
+import type { Listed, OperationInfo, OperationName, Preview, RunOptions } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { operation, preview, start, stream, type Answer, type Failure } from "../api.ts";
 import type { CommandInput } from "../commands.ts";
 import { defaults, fields, inputOf, reaches, type Draft, type Field, type Values } from "../operations.ts";

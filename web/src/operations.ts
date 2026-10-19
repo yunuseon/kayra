@@ -1,4 +1,4 @@
-import type { OperationInfo, OperationName, ServerFacts } from "../../cli/src/clients/api/contract.gen.ts";
+import type { OperationInfo, OperationName, ServerFacts } from "../../cli/src/clients/wire/contract.gen.ts";
 import { typed } from "./typed.ts";
 
 export const reaches = {

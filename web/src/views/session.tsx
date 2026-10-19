@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { Invocation, Listed, RunEvent, RunState } from "../../../cli/src/clients/api/contract.gen.ts";
+import type { Invocation, Listed, RunEvent, RunState } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { closeSession, sessionInput, stream, type Failure } from "../api.ts";
 import { Question } from "../components/question.tsx";
 import { Header, Pill, Problem } from "../components/ui.tsx";

@@ -1,14 +1,14 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { appOwner, jobOwner } from "../../src/deployer/brand.ts";
-import { empty, enqueue, finish, type Queue, type Request } from "../../src/deployer/runs/queue.ts";
+import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request } from "../../src/deployer/runs/queue.ts";
 import { name } from "./support.ts";
 
 const push = (app: string, ref = "main"): Request => ({
   owner: appOwner(name(app)),
   work: { kind: "deploy", app: name(app), ref, why: "push" },
 });
-const gc: Request = { owner: jobOwner("gc"), work: { kind: "job", job: "gc", dryRun: false } };
+const gc = jobRequest("gc", false, "schedule");
 
 const after = (queue: Queue, ...requests: readonly Request[]): Queue =>
   requests.reduce((so, request) => enqueue(so, request).queue, queue);
@@ -41,4 +41,10 @@ test("the registry GC waits for everything and runs alone", () => {
   deepStrictEqual(gcStarts.start, [gc]);
   deepStrictEqual(enqueue(gcStarts.queue, push("c")).start, []);
   deepStrictEqual(finish(gcStarts.queue, jobOwner("gc")).start, [push("b")]);
+});
+
+test("a job's run says why it ran: its cron, or someone asking through ctl", () => {
+  deepStrictEqual(describe(jobRequest("renovate", false, "schedule")), { what: "renovate", why: "schedule" });
+  deepStrictEqual(describe(jobRequest("renovate", true, "manual")), { what: "renovate (dry run)", why: "manual" });
+  deepStrictEqual(describe(push("shop")), { what: "deploy main", why: "push" });
 });

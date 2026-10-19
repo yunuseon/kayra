@@ -1,5 +1,6 @@
-import type { App } from "./app.ts";
+import type { App } from "../app.ts";
 import type { Bundle } from "./bundle.ts";
+import { typed } from "../../typed.ts";
 
 export type Argv = readonly [string, ...string[]];
 
@@ -9,12 +10,12 @@ export type Argv = readonly [string, ...string[]];
  * from the commit being deployed. Never COMPOSE_PROJECT_NAME from the
  * environment: -p names the project.
  */
-const project = (app: App, appsDir: string, bundle: Bundle): readonly string[] => {
+const project = (app: App, appsDir: string, bundle: Bundle) => {
   const dir = `${appsDir}/${app.name}`;
-  return [
+  return typed<readonly string[]>([
     "compose", "-p", app.name, "--project-directory", dir, "--env-file", `${dir}/.env`, "--env-file", "images.env",
-    ...bundle.compose.flatMap((file) => ["-f", file.path]),
-  ];
+    ...bundle.compose.flatMap((file) => ["-f", file.path] as const),
+  ]);
 };
 
 /**
@@ -22,13 +23,13 @@ const project = (app: App, appsDir: string, bundle: Bundle): readonly string[] =
  * env_file here, from any path (another app's secrets included), and bakes it
  * into the config; unresolved, the allow-list sees env_file and refuses it.
  */
-export const config = (app: App, appsDir: string, bundle: Bundle): Argv => [
+export const config = (app: App, appsDir: string, bundle: Bundle) => typed<Argv>([
   "docker", ...project(app, appsDir, bundle), "config", "--no-env-resolution", "--format", "json",
-];
+]);
 
-export const policy = (app: App, script: string): Argv => ["bash", script, app.name, ...app.hosts];
+export const policy = (app: App, script: string) => typed<Argv>(["bash", script, app.name, ...app.hosts]);
 
 /** --remove-orphans: a service the app dropped from its compose files must not keep running. */
-export const up = (app: App, appsDir: string, bundle: Bundle): Argv => [
+export const up = (app: App, appsDir: string, bundle: Bundle) => typed<Argv>([
   "docker", ...project(app, appsDir, bundle), "up", "-d", "--wait", "--wait-timeout", "180", "--remove-orphans",
-];
+]);

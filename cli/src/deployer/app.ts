@@ -1,6 +1,7 @@
+import { typed } from "../typed.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { err, ok, type Result } from "../result.ts";
+import { err, ok } from "../result.ts";
 import { appName, type AppName } from "./brand.ts";
 
 /**
@@ -20,17 +21,17 @@ export type App = {
   readonly secrets: readonly string[];
 };
 
-const strings = (value: unknown, pattern: RegExp): readonly string[] | undefined =>
+const strings = (value: unknown, pattern: RegExp) =>
   Array.isArray(value) && value.every((item): item is string => typeof item === "string" && pattern.test(item))
-    ? value
+    ? typed<readonly string[]>(value)
     : undefined;
 
-export const field = (record: object, key: string): unknown => {
+export const field = (record: object, key: string) => {
   const value: unknown = Reflect.get(record, key);
   return value;
 };
 
-export const parseApp = (expected: string, json: unknown): Result<App, string> => {
+export const parseApp = (expected: string, json: unknown) => {
   if (typeof json !== "object" || json === null) return err(`${expected}: not an object`);
   const name = field(json, "name");
   const repo = field(json, "repo");
@@ -45,11 +46,11 @@ export const parseApp = (expected: string, json: unknown): Result<App, string> =
   if (typeof ref !== "string" || !/^[\w./-]+$/.test(ref)) return err(`${expected}: ref ${String(ref)}`);
   if (typeof path !== "string" || path.split("/").includes("..")) return err(`${expected}: path ${String(path)}`);
   if (hosts === undefined || secrets === undefined) return err(`${expected}: hosts or secrets malformed`);
-  return ok({ name: minted.value, repo, ref, path, hosts, secrets });
+  return ok<App>({ name: minted.value, repo, ref, path, hosts, secrets });
 };
 
 /** An app registered on this server, from <platformDir>/apps/<name>.json. */
-export const registered = (platformDir: string, name: string): Result<App, string> => {
+export const registered = (platformDir: string, name: string) => {
   const path = join(platformDir, "apps", `${name}.json`);
   if (!appName(name).ok || !existsSync(path)) return err(`${name} is not registered here`);
   try {

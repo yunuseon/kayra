@@ -1,4 +1,4 @@
-import { all, err, map, ok, type Result } from "../result.ts";
+import { all, err, map, ok } from "../result.ts";
 
 /** A standard five-field cron spec, in the server's local time. */
 export type Cron = {
@@ -11,23 +11,23 @@ export type Cron = {
   readonly eitherDay: boolean;
 };
 
-const range = (from: number, to: number, step: number): readonly number[] =>
-  Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => from + i * step);
+const range = (from: number, to: number, step: number) =>
+  Object.freeze(Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => from + i * step));
 
-const part = (text: string, min: number, max: number): Result<readonly number[], string> => {
+const part = (text: string, min: number, max: number) => {
   const match = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(text);
   if (match === null) return err(`'${text}'`);
   const [, whole, low, high, every] = match;
   const step = every === undefined ? 1 : Number(every);
   const from = whole === "*" ? min : Number(low);
   const to = whole === "*" ? max : high === undefined ? (every === undefined ? from : max) : Number(high);
-  return from < min || to > max || from > to || step < 1 ? err(`'${text}' (${String(min)}-${String(max)})`) : ok(range(from, to, step));
+  return from < min || to > max || from > to || step < 1 ? err(`'${text}' (${String(min)}-${String(max)})`) : ok<readonly number[]>(range(from, to, step));
 };
 
-const values = (text: string, min: number, max: number): Result<ReadonlySet<number>, string> =>
-  map(all(text.split(",").map((piece) => part(piece, min, max))), (parts) => new Set(parts.flat()));
+const values = (text: string, min: number, max: number) =>
+  map(all(text.split(",").map((piece) => part(piece, min, max))), (parts) => Object.freeze(new Set(parts.flat())));
 
-export const parseCron = (spec: string): Result<Cron, string> => {
+export const parseCron = (spec: string) => {
   const fields = spec.trim().split(/\s+/);
   const [minute, hour, day, month, weekday] = fields;
   if (fields.length !== 5 || minute === undefined || hour === undefined || day === undefined || month === undefined || weekday === undefined) {
@@ -39,7 +39,7 @@ export const parseCron = (spec: string): Result<Cron, string> => {
   if (minutes === undefined || hours === undefined || days === undefined || months === undefined || weekdays === undefined) {
     return err(`'${spec}' is not a five-field cron spec`);
   }
-  return ok({
+  return ok<Cron>({
     minute: minutes,
     hour: hours,
     day: days,
@@ -50,7 +50,7 @@ export const parseCron = (spec: string): Result<Cron, string> => {
   });
 };
 
-export const matches = (cron: Cron, at: Date): boolean => {
+export const matches = (cron: Cron, at: Date) => {
   const day = cron.day.has(at.getDate());
   const weekday = cron.weekday.has(at.getDay());
   return (

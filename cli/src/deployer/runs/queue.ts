@@ -1,4 +1,5 @@
-import type { AppName, JobName, Owner } from "./brand.ts";
+import type { AppName, JobName, Owner } from "../brand.ts";
+import { typed } from "../../typed.ts";
 
 export type Why = "push" | "poll" | "deploy" | "rollback";
 
@@ -17,12 +18,12 @@ export type Request = { readonly owner: Owner; readonly work: Work };
  */
 export type Queue = { readonly running: readonly Request[]; readonly waiting: readonly Request[]; readonly limit: number };
 
-export const empty = (limit: number): Queue => ({ running: [], waiting: [], limit });
+export const empty = (limit: number) => typed<Queue>({ running: [], waiting: [], limit });
 
-const exclusive = (request: Request): boolean => request.work.kind === "job" && request.work.job === "gc";
+const exclusive = (request: Request) => request.work.kind === "job" && request.work.job === "gc";
 
 /** Starts what may start, in order; a waiting exclusive request holds back everything behind it. */
-const fill = (queue: Queue): { readonly queue: Queue; readonly start: readonly Request[] } => {
+const fill = (queue: Queue) => {
   const pick = queue.waiting.reduce<{ readonly running: readonly Request[]; readonly blocked: boolean; readonly start: readonly Request[] }>(
     (so, request) => {
       if (so.blocked || so.running.some(exclusive)) return { ...so, blocked: true };
@@ -36,13 +37,13 @@ const fill = (queue: Queue): { readonly queue: Queue; readonly start: readonly R
     },
     { running: queue.running, blocked: false, start: [] },
   );
-  return {
+  return typed<{ readonly queue: Queue; readonly start: readonly Request[] }>({
     queue: { ...queue, running: pick.running, waiting: queue.waiting.filter((request) => !pick.start.includes(request)) },
     start: pick.start,
-  };
+  });
 };
 
-export const enqueue = (queue: Queue, request: Request): { readonly queue: Queue; readonly start: readonly Request[] } => {
+export const enqueue = (queue: Queue, request: Request) => {
   const waits = queue.waiting.some((waiting) => waiting.owner === request.owner);
   const waiting = waits
     ? queue.waiting.map((waiting) => (waiting.owner === request.owner ? request : waiting))
@@ -50,5 +51,5 @@ export const enqueue = (queue: Queue, request: Request): { readonly queue: Queue
   return fill({ ...queue, waiting });
 };
 
-export const finish = (queue: Queue, owner: Owner): { readonly queue: Queue; readonly start: readonly Request[] } =>
+export const finish = (queue: Queue, owner: Owner) =>
   fill({ ...queue, running: queue.running.filter((running) => running.owner !== owner) });

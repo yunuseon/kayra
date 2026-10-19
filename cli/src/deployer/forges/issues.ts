@@ -1,7 +1,8 @@
 import { createSign } from "node:crypto";
-import { err, ok, type Result } from "../result.ts";
-import { field } from "./app.ts";
+import { err, ok, type Result } from "../../result.ts";
+import { field } from "../app.ts";
 import type { Alert, Notifier } from "./notify.ts";
+import { typed } from "../../typed.ts";
 
 /**
  * Alerts as GitHub issues in one repository, opened by a GitHub App: GitHub
@@ -18,10 +19,10 @@ export type GithubIssueWorld = {
   readonly remember: (key: string, issue: number | undefined) => void;
 };
 
-const base64url = (data: string | Buffer): string => Buffer.from(data).toString("base64url");
+const base64url = (data: string | Buffer) => Buffer.from(data).toString("base64url");
 
 /** The app's own token: a JWT signed with its private key, valid nine minutes. */
-export const appJwt = (appId: string, privateKey: string, nowSeconds: number): string => {
+export const appJwt = (appId: string, privateKey: string, nowSeconds: number) => {
   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const payload = base64url(JSON.stringify({ iat: nowSeconds - 60, exp: nowSeconds + 540, iss: appId }));
   const signature = createSign("RSA-SHA256").update(`${header}.${payload}`).sign(privateKey);
@@ -29,22 +30,22 @@ export const appJwt = (appId: string, privateKey: string, nowSeconds: number): s
 };
 
 const api = "https://api.github.com";
-const headers = (token: string): Readonly<Record<string, string>> => ({
+const headers = (token: string) => typed<Readonly<Record<string, string>>>({
   Authorization: `Bearer ${token}`,
   Accept: "application/vnd.github+json",
   "Content-Type": "application/json",
 });
 
-export const githubIssues = (repository: string, appId: string, world: GithubIssueWorld): Notifier => {
-  const call = async (token: string, method: string, path: string, body?: object): Promise<Result<unknown, string>> => {
+export const githubIssues = (repository: string, appId: string, world: GithubIssueWorld) => {
+  const call = async (token: string, method: string, path: string, body?: object) => {
     const response = await world
       .fetch(`${api}${path}`, { method, headers: headers(token), ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
-      .catch((error: unknown) => ({ status: 0, json: String(error) }));
-    return response.status >= 200 && response.status < 300 ? ok(response.json) : err(`GitHub ${method} ${path}: ${String(response.status)}`);
+      .catch((error: unknown) => ({ status: 0, json: String(error) } as const));
+    return response.status >= 200 && response.status < 300 ? ok<unknown>(response.json) : err(`GitHub ${method} ${path}: ${String(response.status)}`);
   };
 
   /** The installation's token for the repository, through the app's JWT. */
-  const token = async (): Promise<Result<string, string>> => {
+  const token = async () => {
     const key = world.privateKey();
     if (!key.ok) return key;
     const jwt = appJwt(appId, key.value, Math.floor(world.now() / 1000));
@@ -53,10 +54,10 @@ export const githubIssues = (repository: string, appId: string, world: GithubIss
     if (typeof id !== "number") return err(installation.ok ? "GitHub: the app is not installed on the repository" : installation.error);
     const access = await call(jwt, "POST", `/app/installations/${String(id)}/access_tokens`);
     const value = access.ok && typeof access.value === "object" && access.value !== null ? field(access.value, "token") : undefined;
-    return typeof value === "string" ? ok(value) : err(access.ok ? "GitHub: no installation token" : access.error);
+    return typeof value === "string" ? ok<string>(value) : err(access.ok ? "GitHub: no installation token" : access.error);
   };
 
-  const raise = async (alert: Alert): Promise<Result<void, string>> => {
+  const raise = async (alert: Alert) => {
     if (world.openIssue(alert.key) !== undefined) return ok(undefined);
     const minted = await token();
     if (!minted.ok) return minted;
@@ -68,7 +69,7 @@ export const githubIssues = (repository: string, appId: string, world: GithubIss
     return ok(undefined);
   };
 
-  const resolve = async (key: string, note: string): Promise<Result<void, string>> => {
+  const resolve = async (key: string, note: string) => {
     const issue = world.openIssue(key);
     if (issue === undefined) return ok(undefined);
     const minted = await token();
@@ -81,5 +82,5 @@ export const githubIssues = (repository: string, appId: string, world: GithubIss
     return ok(undefined);
   };
 
-  return { raise, resolve };
+  return typed<Notifier>({ raise, resolve });
 };

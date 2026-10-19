@@ -1,13 +1,13 @@
-import type { Owner, RunId } from "./brand.ts";
-import type { RunMeta } from "./records.ts";
-import { log, meta, owners, runsOf } from "./store.ts";
+import type { Owner, RunId } from "../brand.ts";
+import type { RunMeta } from "../runs/records.ts";
+import { log, meta, owners, runsOf } from "../runs/store.ts";
 
 /** The read-only runs pages at deploy.<domain>, behind Authelia: what Jenkins' job pages were for. */
 
-const escape = (text: string): string =>
+const escape = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
-const shell = (title: string, content: string): string => `<!doctype html>
+const shell = (title: string, content: string) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title>
 <style>
@@ -22,19 +22,19 @@ code, pre { font: 13px/1.45 ui-monospace, monospace; } pre { white-space: pre-wr
 </style></head><body>${content}</body></html>
 `;
 
-const row = (run: RunMeta): string =>
+const row = (run: RunMeta) =>
   `<tr><td><a href="/runs/${escape(run.owner)}/${escape(run.id)}"><code>${escape(run.id)}</code></a></td>` +
   `<td class="${run.state}">${run.state}</td><td>${escape(run.what)}</td><td class="muted">${run.why}</td>` +
   `<td><code>${run.sha === undefined ? "" : run.sha.slice(0, 12)}</code></td></tr>`;
 
-export const page = (runs: string): string => {
+export const page = (runs: string) => {
   const sections = owners(runs).map(
     (who) => `<h2>${escape(who)}</h2><table>${runsOf(runs, who).slice(0, 10).map(row).join("")}</table>`,
   );
   return shell("Runs", `<h1>Runs</h1>${sections.length === 0 ? `<p class="muted">Nothing has run yet.</p>` : sections.join("")}`);
 };
 
-export const runPage = (runs: string, who: Owner, id: RunId): string => {
+export const runPage = (runs: string, who: Owner, id: RunId) => {
   const found = meta(runs, who, id);
   if (found === undefined) return shell("Not found", `<p><a href="/">Runs</a> · no run ${escape(id)}</p>`);
   return shell(

@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { appOwner, jobOwner } from "../../src/deployer/brand.ts";
-import { empty, enqueue, finish, type Queue, type Request } from "../../src/deployer/queue.ts";
+import { empty, enqueue, finish, type Queue, type Request } from "../../src/deployer/runs/queue.ts";
 import { name } from "./support.ts";
 
 const push = (app: string, ref = "main"): Request => ({

@@ -58,6 +58,7 @@ export default defineConfig(
           ignoreInferredTypes: true,
           ignoreClasses: true,
           ignoreTypePattern: ["IncomingMessage", "ServerResponse", "ProcessEnv", "IncomingHttpHeaders", "Buffer", "Date", "RegExp"],
+          returnTypes: { enforcement: "ReadonlyDeep", ignoreInferredTypes: false, ignoreClasses: true },
         },
       ],
     },

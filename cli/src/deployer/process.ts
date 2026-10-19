@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { text } from "node:stream/consumers";
-import type { Argv } from "./compose.ts";
-import type { Env, Exit } from "./run.ts";
+import type { Argv } from "./build/compose.ts";
+import type { Env, Exit } from "./runs/run.ts";
 
 export type Spawn = {
   readonly cwd?: string;
@@ -14,7 +14,7 @@ export type Spawn = {
 };
 
 /** Runs a program; its stderr, and its stdout unless captured, reach `line` one line at a time. */
-export const spawnLines = (argv: Argv, options: Spawn, line: (text: string) => void): Promise<Exit> => {
+export const spawnLines = (argv: Argv, options: Spawn, line: (text: string) => void) => {
   const [program, ...args] = argv;
   const child = spawn(program, args, {
     cwd: options.cwd,
@@ -28,7 +28,7 @@ export const spawnLines = (argv: Argv, options: Spawn, line: (text: string) => v
   const stdout = options.capture === true ? text(child.stdout) : Promise.resolve("");
   if (options.capture !== true) createInterface({ input: child.stdout }).on("line", line);
   createInterface({ input: child.stderr }).on("line", line);
-  return new Promise((resolve) => {
+  return new Promise<Exit>((resolve) => {
     child.on("error", (error) => {
       line(error.message);
       resolve({ code: 127, stdout: "" });

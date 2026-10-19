@@ -124,8 +124,39 @@
   loop:
     - deployer/
     - "result.{{ 'ts' if deployer_source.stat.exists else 'js' }}"
+    - "typed.{{ 'ts' if deployer_source.stat.exists else 'js' }}"
   vars:
     code: "{{ 'src' if deployer_source.stat.exists else 'dist' }}"
+  become: true
+
+# The deployer's files used to sit flat in deployer/; those now in folders
+# are removed here, since a copy adds and never removes. Idempotent; drop it
+# once every fleet's servers have deployed the folders.
+- name: Remove the deployer's flat files of earlier versions
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/deployer/app/deployer/{{ item.0 }}.{{ item.1 }}"
+    state: absent
+  loop: "{{ moved | product(['ts', 'js']) | list }}"
+  vars:
+    moved:
+      - answers
+      - builder
+      - bundle
+      - compose
+      - ctl
+      - forge
+      - forgejo
+      - github
+      - github-issues
+      - gitlab
+      - http
+      - notify
+      - page
+      - queue
+      - records
+      - run
+      - store
+      - webhook
   become: true
 
 - name: Copy the platform scripts

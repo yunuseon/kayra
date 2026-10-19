@@ -1,27 +1,28 @@
 import type { Why } from "./queue.ts";
-import { runId, sha, type RunId, type Sha } from "./brand.ts";
-import { field } from "./app.ts";
+import { runId, sha, type RunId, type Sha } from "../brand.ts";
+import { field } from "../app.ts";
+import { typed } from "../../typed.ts";
 
 /** A release record's name: releases/<app>/<UTC time>-<sha>.env. registry-gc.sh reads the same files. */
-export const releaseName = (at: Date, commit: Sha): string =>
+export const releaseName = (at: Date, commit: Sha) =>
   `${at.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}-${commit}.env`;
 
 export type Release = { readonly sha: Sha; readonly time: string };
 
 /** Newest first, one per commit: the first is what runs now, the rest are what rollback offers. */
-export const releases = (names: readonly string[]): readonly Release[] =>
-  names
+export const releases = (names: readonly string[]) =>
+  Object.freeze(names
     .toSorted()
     .toReversed()
     .flatMap((name) => {
       const match = /^(\d{8}T\d{6}Z)-([0-9a-f]{40})\.env$/.exec(name);
       const commit = sha(match?.[2] ?? "");
-      return match?.[1] === undefined || !commit.ok ? [] : [{ sha: commit.value, time: match[1] }];
+      return match?.[1] === undefined || !commit.ok ? Object.freeze([]) : Object.freeze([{ sha: commit.value, time: match[1] }]);
     })
-    .filter((release, i, all) => all.findIndex((other) => other.sha === release.sha) === i);
+    .filter((release, i, all) => all.findIndex((other) => other.sha === release.sha) === i));
 
 /** The poll's question: has the ref moved to a commit neither the newest run tried nor the newest release runs? */
-export const moved = (resolved: Sha, lastRun: Sha | undefined, lastRelease: Sha | undefined): boolean =>
+export const moved = (resolved: Sha, lastRun: Sha | undefined, lastRelease: Sha | undefined) =>
   resolved !== lastRun && resolved !== lastRelease;
 
 export type RunState = "running" | "success" | "failure";
@@ -43,7 +44,7 @@ const states = ["running", "success", "failure"] as const;
 const isWhy = (value: unknown): value is RunMeta["why"] => whys.some((why) => why === value);
 const isState = (value: unknown): value is RunState => states.some((state) => state === value);
 
-export const parseMeta = (json: unknown): RunMeta | undefined => {
+export const parseMeta = (json: unknown) => {
   if (typeof json !== "object" || json === null) return undefined;
   const id = runId(String(field(json, "id")));
   const owner = field(json, "owner");
@@ -55,7 +56,7 @@ export const parseMeta = (json: unknown): RunMeta | undefined => {
   const finished = field(json, "finished");
   if (!id.ok || typeof owner !== "string" || typeof what !== "string" || typeof started !== "string") return undefined;
   if (!isWhy(why) || !isState(state)) return undefined;
-  return {
+  return typed<RunMeta | undefined>({
     id: id.value,
     owner,
     what,
@@ -64,8 +65,8 @@ export const parseMeta = (json: unknown): RunMeta | undefined => {
     started,
     ...(commit.ok ? { sha: commit.value } : {}),
     ...(typeof finished === "string" ? { finished } : {}),
-  };
+  });
 };
 
 /** Run directories past the newest `keep`, oldest first: what retention deletes. */
-export const expired = (ids: readonly string[], keep: number): readonly string[] => ids.toSorted().slice(0, Math.max(0, ids.length - keep));
+export const expired = (ids: readonly string[], keep: number) => Object.freeze(ids.toSorted().slice(0, Math.max(0, ids.length - keep)));

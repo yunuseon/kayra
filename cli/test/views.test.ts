@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { appName, serverName } from "../src/core/fleet/brand.ts";
+import { appName, milliseconds, serverName } from "../src/core/fleet/brand.ts";
 import type { DeployerAnswer } from "../src/core/plan/model.ts";
 import { flat } from "../src/core/text/spans.ts";
 import { paint } from "../src/clients/cli/paint.ts";
@@ -16,7 +16,7 @@ const b = "b".repeat(40);
 const plain = (lines: readonly (string | Parameters<typeof flat>[0])[]): readonly string[] => lines.map(flat);
 
 test("ago rounds down to what is worth reading", () => {
-  deepStrictEqual([-5_000, 59_999, 60_000, 3_599_000, 7_200_000, 172_799_000, 172_800_000].map(ago), [
+  deepStrictEqual([-5_000, 59_999, 60_000, 3_599_000, 7_200_000, 172_799_000, 172_800_000].map((ms) => ago(milliseconds(ms))), [
     "0s ago",
     "59s ago",
     "1m ago",

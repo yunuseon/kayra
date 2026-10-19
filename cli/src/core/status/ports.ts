@@ -1,4 +1,4 @@
-import type { AbsolutePath } from "../fleet/brand.ts";
+import type { AbsolutePath, Host, Port } from "../fleet/brand.ts";
 import type { Result } from "../../result.ts";
 import type { Reach } from "./model.ts";
 
@@ -12,6 +12,6 @@ export type Tofu = {
 /** The network, as status probes it. */
 export type Network = {
   /** A TCP connection to a port. */
-  readonly connect: (host: string, port: number) => Promise<Reach>;
+  readonly connect: (host: Host, port: Port) => Promise<Reach>;
   readonly get: (url: string) => Promise<Reach>;
 };

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
-import { absolutePath, fleetRoot, kayraRoot } from "../src/core/fleet/brand.ts";
+import { absolutePath, fleetRoot, kayraRoot, kayraVersion, remotePath } from "../src/core/fleet/brand.ts";
 import { operation, operationNames, type OperationName } from "../src/core/operations/catalog.ts";
 import { ok } from "../src/result.ts";
 import { admit, cookieName } from "../src/clients/api/auth.ts";
@@ -62,10 +62,10 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
     *wait*) exec sleep 30 ;;
     *) echo READY; read -r line; printf 'answer:%s\\n' "$line" ;;
   esac`);
-  const lab = { ...server("lab", "target: multipass\ndomain: lab.test\nvault: false\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" }), backupDir: "/backup" };
+  const lab = { ...server("lab", "target: multipass\ndomain: lab.test\nvault: false\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" }), backupDir: must(remotePath("/backup")) };
   const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example\nvault: true");
   const fleet = { root: fleetRoot(must(absolutePath(dir))), servers: [lab, prod] };
-  const config = { kayra: kayraRoot(must(absolutePath(engine))), fleet, version: "test-version", short: (text: string) => text, network: {
+  const config = { kayra: kayraRoot(must(absolutePath(engine))), fleet, version: must(kayraVersion("0.0.0-test")), short: (text: string) => text, network: {
     connect: () => Promise.resolve({ kind: "skipped" as const }), get: () => Promise.resolve({ kind: "skipped" as const }),
   }, tofu: { state: () => Promise.resolve(ok([])), output: () => Promise.resolve(undefined) } };
   // eslint-disable-next-line functional/immutable-data -- all subprocesses use fixture programs, never real infrastructure tools

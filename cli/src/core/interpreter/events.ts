@@ -5,6 +5,7 @@ import { duration } from "../text/time.ts";
 import { parts, position, type Ended, type Progress, type StopReason } from "./progress.ts";
 import { count } from "../text/plural.ts";
 import type { Server } from "../fleet/model.ts";
+import { milliseconds, type KayraVersion, type Milliseconds } from "../fleet/brand.ts";
 
 /** The invocation, as the heading and the footer name it. */
 export type Heading = {
@@ -17,7 +18,7 @@ export type Heading = {
 };
 
 /** The heading for a command: as typed, what it runs on, which kayra. */
-export const heading = (command: string, target: Server | undefined, version: string): Heading => ({
+export const heading = (command: string, target: Server | undefined, version: KayraVersion): Heading => ({
   command,
   ...(target === undefined ? {} : { server: target.name }),
   about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${version}`],
@@ -30,7 +31,7 @@ export const steps = (plan: Plan): string => {
 };
 
 /** The footer: how it went, how long it took, and what reruns a failed part alone. */
-export const footer = (invocation: Heading, plan: Plan, ended: Ended, ms: number): readonly Line[] => {
+export const footer = (invocation: Heading, plan: Plan, ended: Ended, ms: Milliseconds): readonly Line[] => {
   const took = duration(ms);
   const { command } = invocation;
   const { stop } = ended;
@@ -84,13 +85,13 @@ export type Event =
       readonly failed: boolean;
       readonly stopped: boolean;
       readonly why?: string;
-      readonly ms: number;
+      readonly ms: Milliseconds;
     }
   | {
       readonly kind: "ended";
       readonly failures: number;
       readonly stop?: { readonly index: number; readonly why: StopReason };
-      readonly ms: number;
+      readonly ms: Milliseconds;
       readonly footer: readonly Line[];
     };
 
@@ -100,7 +101,7 @@ export const reporting = (emit: (event: Event) => void, invocation: Heading, sho
     const started = performance.now();
     emit({ kind: "plan", invocation, steps: listed(plan, short) });
     const ended = await work();
-    const ms = performance.now() - started;
+    const ms = milliseconds(performance.now() - started);
     emit({
       kind: "ended",
       failures: ended.failures,
@@ -120,7 +121,7 @@ export const reporting = (emit: (event: Event) => void, invocation: Heading, sho
       failed: done.failed,
       stopped: done.stopped,
       ...(done.why === undefined ? {} : { why: done.why }),
-      ms: performance.now() - started,
+      ms: milliseconds(performance.now() - started),
     });
     return done;
   },

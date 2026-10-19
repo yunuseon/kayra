@@ -3,6 +3,7 @@ import { text } from "node:stream/consumers";
 import type { Arg, Argv, Env, Probe } from "../plan/model.ts";
 import { all, err, flatMap, ok, type Result } from "../../result.ts";
 import { isStopped, type Io } from "./io.ts";
+import { exitCode, type ExitCode } from "../fleet/brand.ts";
 
 /** Where a program's streams go: kayra's terminal, or the sink and signal of an Io without one. */
 export type Plumbing = Pick<Io, "output" | "signal">;
@@ -13,7 +14,7 @@ const terminal: Plumbing = {};
 const patience = 10_000;
 
 /** `started` is false if the program could not be run at all; `stderr` then says why. */
-type Exit = { readonly code: number; readonly stdout: string; readonly stderr: string; readonly started: boolean };
+type Exit = { readonly code: ExitCode; readonly stdout: string; readonly stderr: string; readonly started: boolean };
 
 /**
  * What a program reads: kayra's terminal, nothing, a line kayra gives it (a
@@ -30,7 +31,7 @@ type Wiring = { readonly stdout: "show" | "capture" | "discard"; readonly stderr
 export const spawned = async (argv: Argv, streams: Wiring, env: Env = {}, plumbing: Plumbing = terminal): Promise<Exit> => {
   const [program, ...args] = argv;
   const { output, signal } = plumbing;
-  if (isStopped(signal)) return { code: 130, stdout: "", stderr: "", started: false };
+  if (isStopped(signal)) return { code: exitCode(130), stdout: "", stderr: "", started: false };
   const shown = (stream: "show" | "capture" | "discard"): "inherit" | "pipe" | "ignore" =>
     stream === "show" ? (output === undefined ? "inherit" : "pipe") : stream === "capture" ? "pipe" : "ignore";
   const stdin = streams.stdin ?? (output === undefined ? { kind: "inherit" } : { kind: "none" });
@@ -95,8 +96,8 @@ export const spawned = async (argv: Argv, streams: Wiring, env: Env = {}, plumbi
   clearTimeout(stopping.timer);
   unsubscribe();
   return exit instanceof Error
-    ? { code: 127, stdout: "", stderr: exit.message, started: false }
-    : { code: exit, stdout: await stdout, stderr: await stderr, started: true };
+    ? { code: exitCode(127), stdout: "", stderr: exit.message, started: false }
+    : { code: exitCode(exit), stdout: await stdout, stderr: await stderr, started: true };
 };
 
 /** A command's stdout, for kayra to read; its stderr reaches the operator unless captured too. */

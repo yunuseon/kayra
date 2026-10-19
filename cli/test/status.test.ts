@@ -11,6 +11,7 @@ import { err, ok } from "../src/result.ts";
 import { flat } from "../src/core/text/spans.ts";
 import { settle } from "../src/core/status/updates.ts";
 import { fleet, server } from "./support.ts";
+import { milliseconds } from "../src/core/fleet/brand.ts";
 
 const hetzner = (name: string, apps = "") =>
   server(name, `target: hetzner\ndomain: ${name}.example\nvault: true${apps}`, { inventory: undefined });
@@ -39,8 +40,8 @@ const tofu: Tofu = {
 
 const answers: Readonly<Record<string, Reach>> = {
   "192.0.2.9:22": { kind: "refused" },
-  "192.0.2.3:2222": { kind: "open", ms: 3 },
-  "203.0.113.10:22": { kind: "open", ms: 31 },
+  "192.0.2.3:2222": { kind: "open", ms: milliseconds(3) },
+  "203.0.113.10:22": { kind: "open", ms: milliseconds(31) },
 };
 
 const asked: Network = {
@@ -48,7 +49,7 @@ const asked: Network = {
   get: (url) =>
     Promise.resolve(
       url === "https://auth.shop.example/api/health"
-        ? { kind: "answered", status: 200, ms: 84 }
+        ? { kind: "answered", status: 200, ms: milliseconds(84) }
         : { kind: "bad-certificate", code: "DEPTH_ZERO_SELF_SIGNED_CERT" },
     ),
 };

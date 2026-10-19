@@ -3,6 +3,7 @@ import { connect } from "node:net";
 import { getCACertificates } from "node:tls";
 import type { Network } from "../status/ports.ts";
 import type { Reach } from "../status/model.ts";
+import { milliseconds, type Milliseconds } from "../fleet/brand.ts";
 
 /** Why a connection failed, by Node's error code. */
 export const failure = (code: string): Reach => {
@@ -17,7 +18,7 @@ export const failure = (code: string): Reach => {
 const codeOf = (error: unknown): string =>
   typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : "ERROR";
 
-const since = (started: number): number => Math.round(performance.now() - started);
+const since = (started: number): Milliseconds => milliseconds(Math.round(performance.now() - started));
 
 /** The network, as status asks it: a TCP connect, an HTTPS GET, each given up after `ms`; every answer a Reach, never an exception. */
 export const network = (ms: number): Network => {
@@ -32,7 +33,7 @@ export const network = (ms: number): Network => {
     connect: (host, port) =>
       new Promise((resolve) => {
         const started = performance.now();
-        const socket = connect({ host, port, timeout: ms });
+        const socket = connect({ host, port: Number(port), timeout: ms });
         socket.once("connect", () => {
           socket.destroy();
           resolve({ kind: "open", ms: since(started) });

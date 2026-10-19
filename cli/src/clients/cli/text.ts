@@ -1,4 +1,5 @@
 import { characters, type Line, type Span, width } from "../../core/text/spans.ts";
+import type { Milliseconds } from "../../core/fleet/brand.ts";
 
 /** `left`, then `right` flush with the last column, at least two spaces apart. */
 export const spread = (left: Line, right: Line, columns: number): Line => [
@@ -32,7 +33,7 @@ export const wrap = (words: readonly string[], columns: number): readonly string
   }, []);
 
 /** How long ago, as a reader rounds it: 45s ago, 12m ago, 30h ago, 3d ago. */
-export const ago = (ms: number): string => {
+export const ago = (ms: Milliseconds): string => {
   const seconds = Math.floor(Math.max(0, ms) / 1000);
   if (seconds < 60) return `${String(seconds)}s ago`;
   const minutes = Math.floor(seconds / 60);

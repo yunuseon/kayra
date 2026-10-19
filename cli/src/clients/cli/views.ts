@@ -5,13 +5,14 @@ import { ago, table } from "./text.ts";
 import { duration } from "../../core/text/time.ts";
 import { parsed, releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
 import { count } from "../../core/text/plural.ts";
+import { milliseconds } from "../../core/fleet/brand.ts";
 
 /** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
 const linesOf = (text: string): readonly string[] => (text === "" ? [] : text.replace(/\n$/, "").split("\n"));
 
 const short = (sha: string): string => sha.slice(0, 7);
 
-const since = (time: string, now: number): string => ago(now - Date.parse(time));
+const since = (time: string, now: number): string => ago(milliseconds(now - Date.parse(time)));
 
 const heading = (view: DeployerAnswer, ...more: readonly Span[]): Line => [strong(view.app), muted(` on ${view.server}`), ...more];
 
@@ -30,8 +31,8 @@ const states: Readonly<Record<RunAnswer["state"], Line>> = {
 
 const took = (run: RunAnswer, now: number): Line =>
   run.finished === undefined
-    ? [active(`${duration(now - Date.parse(run.started))}…`)]
-    : [duration(Date.parse(run.finished) - Date.parse(run.started))];
+    ? [active(`${duration(milliseconds(now - Date.parse(run.started)))}…`)]
+    : [duration(milliseconds(Date.parse(run.finished) - Date.parse(run.started)))];
 
 const commit = (run: RunAnswer, release: Deployed | undefined): Line => {
   if (run.sha === undefined) return [muted("—")];

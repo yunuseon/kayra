@@ -19,7 +19,7 @@ export const statusJson = (looks: readonly Look[]) => ({
       from: machine.kind === "found" ? machine.from : null,
       reason: machine.kind === "unreadable" ? machine.reason : null,
     },
-    ssh: { port: sshPort(server), state: ssh.kind, ms: ms(ssh), error: error(ssh) },
+    ssh: { port: Number(sshPort(server)), state: ssh.kind, ms: ms(ssh), error: error(ssh) },
     https:
       https === undefined
         ? null

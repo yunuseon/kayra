@@ -27,7 +27,7 @@ export const apps = (engine: Engine, server: Server): Result<Plan, string> => {
                 "-e",
                 `domain=${server.domain}`,
                 "-e",
-                `{"app": ${app.entry}}`,
+                `{"app": ${JSON.stringify(app.entry)}}`,
               ),
             ]),
             collections(engine, env),

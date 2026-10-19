@@ -1,6 +1,7 @@
 import { within, type KayraRoot } from "../fleet/brand.ts";
 import type { Fleet, Server } from "../fleet/model.ts";
 import type { Plan, Step } from "../plan/model.ts";
+import { homeReach, onPath } from "./steps.ts";
 
 type Tool = {
   readonly program: string;
@@ -38,13 +39,7 @@ const toolChecks = (fleet: Fleet): readonly Step[] =>
     return users.length === 0
       ? []
       : [
-          {
-            kind: "check",
-            label: `${tool.program} (${users.length === fleet.servers.length ? "every server" : users.join(", ")})`,
-            probe: { kind: "on-path", program: tool.program },
-            hint: tool.install,
-            onFailure: "continue",
-          } satisfies Step,
+          onPath(`${tool.program} (${users.length === fleet.servers.length ? "every server" : users.join(", ")})`, tool.program, tool.install, "continue"),
         ];
   });
 
@@ -81,21 +76,7 @@ const repoChecks = (fleet: Fleet): readonly Step[] =>
   );
 
 const reachChecks = (fleet: Fleet, kayra: KayraRoot): readonly Step[] =>
-  fleet.servers
-    .filter((server) => server.target === "home")
-    .map(
-      (server) =>
-        ({
-          kind: "check",
-          label: `${server.name} answers over SSH`,
-          probe: {
-            kind: "exits-zero",
-            argv: ["bash", within(kayra, "scripts", "local", "home-reach.sh"), server.name, server.kind],
-            env: { FLEET_ROOT: fleet.root },
-          },
-          onFailure: "continue",
-        }) satisfies Step,
-    );
+  fleet.servers.filter((server) => server.target === "home").map((server) => homeReach({ kayra, fleet: fleet.root }, server, "continue"));
 
 /** Is this Mac ready to run every command on every server? Each check reports; none stops the others. */
 export const doctor = (fleet: Fleet, kayra: KayraRoot): Plan => [

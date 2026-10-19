@@ -42,12 +42,16 @@ export const ago = (ms: number): string => {
 };
 
 /** Rows of cells in columns as wide as their widest cell, two spaces apart; nothing trails a row's last cell. */
-export const table = (rows: readonly (readonly Line[])[]): readonly Line[] => {
-  const filled = rows.map((row) => row.slice(0, row.findLastIndex((cell) => width(cell) > 0) + 1));
-  const widths = filled.reduce<readonly number[]>(
+/** Each column as wide as its widest cell. */
+const columnWidths = (rows: readonly (readonly Line[])[]): readonly number[] =>
+  rows.reduce<readonly number[]>(
     (most, row) => Array.from({ length: Math.max(most.length, row.length) }, (_, at) => Math.max(most[at] ?? 0, width(row[at] ?? []))),
     [],
   );
+
+export const table = (rows: readonly (readonly Line[])[]): readonly Line[] => {
+  const filled = rows.map((row) => row.slice(0, row.findLastIndex((cell) => width(cell) > 0) + 1));
+  const widths = columnWidths(filled);
   return filled.map((row) =>
     row.flatMap((cell, at): Line => (at === row.length - 1 ? cell : [...cell, " ".repeat((widths[at] ?? 0) - width(cell) + 2)])),
   );
@@ -59,10 +63,7 @@ export const table = (rows: readonly (readonly Line[])[]): readonly Line[] => {
  * heading's) width.
  */
 export const fit = (rows: readonly (readonly Line[])[], room: number, shrink: readonly number[]): typeof rows => {
-  const widths = rows.reduce<readonly number[]>(
-    (most, row) => Array.from({ length: Math.max(most.length, row.length) }, (_, at) => Math.max(most[at] ?? 0, width(row[at] ?? []))),
-    [],
-  );
+  const widths = columnWidths(rows);
   const over = widths.reduce((sum, each) => sum + each, 0) + 2 * Math.max(0, widths.length - 1) - room;
   const cut = shrink.reduce<{ readonly widths: readonly number[]; readonly over: number }>(
     (so, at) => {

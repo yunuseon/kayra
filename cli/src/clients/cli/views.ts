@@ -1,9 +1,10 @@
 import type { Deployed, ReleasesAnswer, RunAnswer, RunsAnswer } from "../../deployer/answers.ts";
 import type { DeployerAnswer } from "../../core/plan/model.ts";
-import { accent, active, bad, muted, ok, strong, warn, type Line, type Span, type Text } from "../../core/text/spans.ts";
+import { accent, active, bad, muted, ok, pointing, strong, warn, type Line, type Span, type Text } from "../../core/text/spans.ts";
 import { ago, table } from "./text.ts";
 import { duration } from "../../core/text/time.ts";
 import { parsed, releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
+import { count } from "../../core/text/plural.ts";
 
 /** Lines as printing them one by one gives the text back: newline-ended, as a ctl writes. */
 const linesOf = (text: string): readonly string[] => (text === "" ? [] : text.replace(/\n$/, "").split("\n"));
@@ -19,7 +20,7 @@ const live = (release: Deployed | undefined, now: number): readonly Span[] =>
     ? [muted(" · not deployed yet")]
     : [muted(" · live "), accent(short(release.sha)), muted(` since ${since(release.time, now)}`)];
 
-const hint = (command: string, what: string): Line => ["  ", active("→"), " ", strong(command), muted(` ${what}`)];
+const hint = (command: string, what: string): Line => pointing("  ", strong(command), muted(` ${what}`));
 
 const states: Readonly<Record<RunAnswer["state"], Line>> = {
   success: [ok("✓ success")],
@@ -63,9 +64,8 @@ export const releasesView = (view: DeployerAnswer, answer: ReleasesAnswer, now: 
       release.live ? [ok("live")] : [],
     ]),
   ]);
-  const count = answer.releases.length;
   return [
-    heading(view, muted(` · ${String(count)} release${count === 1 ? "" : "s"}`)),
+    heading(view, muted(` · ${count(answer.releases.length, "release")}`)),
     [],
     ...rows.map((row): Line => ["  ", ...row]),
     [],

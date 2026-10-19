@@ -69,20 +69,24 @@ export const latestState = (engine: Engine, server: Server): Step => ({
 
 /** Before Ansible's UNREACHABLE: why a home machine cannot be reached. */
 export const reachable = (engine: Engine, server: Server): readonly Step[] =>
-  server.target === "home"
-    ? [
-        {
-          kind: "check",
-          label: `${server.name} answers over SSH`,
-          probe: {
-            kind: "exits-zero",
-            argv: ["bash", script(engine, "home-reach.sh"), server.name, server.kind],
-            env: fleetEnv(engine),
-          },
-          onFailure: "stop",
-        },
-      ]
-    : [];
+  server.target === "home" ? [homeReach(engine, server, "stop")] : [];
+
+/** Whether a home machine answers over SSH, and if not, why (scripts/local/home-reach.sh). */
+export const homeReach = (engine: Engine, server: Server, onFailure: "stop" | "continue"): Step => ({
+  kind: "check",
+  label: `${server.name} answers over SSH`,
+  probe: { kind: "exits-zero", argv: ["bash", script(engine, "home-reach.sh"), server.name, server.kind], env: fleetEnv(engine) },
+  onFailure,
+});
+
+/** Whether a program is on PATH, and how to install it where it is not. */
+export const onPath = (label: string, program: string, hint: string, onFailure: "stop" | "continue"): Step => ({
+  kind: "check",
+  label,
+  probe: { kind: "on-path", program },
+  hint,
+  onFailure,
+});
 
 /** The pinned Ansible collections; a no-op once installed. */
 export const collections = (engine: Engine, env: Env): Step => ({

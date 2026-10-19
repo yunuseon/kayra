@@ -20,7 +20,7 @@ import { interpret } from "./core/interpreter/loop.ts";
 import type { Io } from "./core/interpreter/io.ts";
 import { findFleetRoot, loadFleet } from "./core/fleet/load.ts";
 import { operation as describe } from "./core/operations/catalog.ts";
-import { hasPlan, planOf, query, serverOf, stream, type Context } from "./core/operations/dispatch.ts";
+import { contextFor, hasPlan, planOf, query, serverOf, stream } from "./core/operations/dispatch.ts";
 import { systemBrowser } from "./clients/ui/opener.ts";
 import { serve } from "./serve.ts";
 import { network } from "./core/adapters/network.ts";
@@ -31,7 +31,7 @@ import { explain } from "./clients/cli/explain.ts";
 import { draw } from "./clients/cli/views.ts";
 import { bad, muted, strong } from "./core/text/spans.ts";
 import { silent } from "./core/interpreter/progress.ts";
-import type { Heading } from "./core/interpreter/events.ts";
+import { heading, type Heading } from "./core/interpreter/events.ts";
 import { settle } from "./core/status/updates.ts";
 import { framed } from "./clients/cli/framed.ts";
 import { paint } from "./clients/cli/paint.ts";
@@ -65,12 +65,9 @@ const fail = (message: string): never => {
   process.exit(1);
 };
 
-/** The heading's facts: what the server is, and which kayra runs. */
-const invocation = (target: Server | undefined): Heading => ({
-  command: ["kayra", ...process.argv.slice(2).filter((word) => word !== "--dry-run")].join(" "),
-  ...(target === undefined ? {} : { server: target.name }),
-  about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${version}`],
-});
+/** The heading: the command as typed, what it runs on, which kayra. */
+const invocation = (target: Server | undefined): Heading =>
+  heading(["kayra", ...process.argv.slice(2).filter((word) => word !== "--dry-run")].join(" "), target, version);
 
 /** --dry-run: the plan as data, styled on a terminal, plain and copyable for a program. */
 const show = (steps: Plan, about: Heading, short: (text: string) => string): void => {
@@ -104,15 +101,7 @@ else {
     ...(found.ok ? [[fleet.value.root, "<fleet>"] as const] : []),
     [homedir(), "~"],
   ]);
-  const context: Context = {
-    engine: { kayra, fleet: fleet.value.root },
-    fleet: fleet.value,
-    version,
-    here: here.value,
-    read: (path) => (existsSync(path) ? readFileSync(path, "utf8") : undefined),
-    network: network(2_000),
-    tofu: opentofu,
-  };
+  const context = contextFor({ kayra, fleet: fleet.value, version, here: here.value, network: network(2_000), tofu: opentofu });
   if (args.command.name === "serve") {
     if (!found.ok) fail(found.error);
     // The browser side: web/dist in a checkout, cli/dist/browser in the package.

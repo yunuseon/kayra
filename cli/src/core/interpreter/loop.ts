@@ -1,5 +1,5 @@
 import type { Plan, Step } from "../plan/model.ts";
-import { active, bad, ok as fine, muted, strong, type Line, type Text } from "../text/spans.ts";
+import { bad, ok as fine, muted, pointing, strong, type Line, type Text } from "../text/spans.ts";
 import { position, silent, type Done, type Ended, type Progress } from "./progress.ts";
 import { ask, isStopped, type Io } from "./io.ts";
 import { answer, resolve, spawned, type Plumbing } from "./process.ts";
@@ -20,7 +20,7 @@ const detail = (line: string): Line => ["    ", line];
 
 const aside = (line: string): Line => ["    ", muted(line)];
 
-const hint = (text: string | undefined): readonly Line[] => (text === undefined ? [] : [["    ", active("→"), " ", text]]);
+const hint = (text: string | undefined): readonly Line[] => (text === undefined ? [] : [pointing("    ", text)]);
 
 /** How a step went, and what it has to say: printed once its spinner is gone. */
 type Outcome = Done & { readonly out: readonly Text[]; readonly err: readonly Text[] };

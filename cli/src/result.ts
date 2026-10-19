@@ -19,3 +19,15 @@ export const all = <T, E>(results: readonly Result<T, E>[]): Result<readonly T[]
     (acc, result) => flatMap(acc, (values) => map(result, (value) => [...values, value])),
     ok([]),
   );
+
+export const mapError = <T, E, F>(result: Result<T, E>, f: (error: E) => F): Result<T, F> =>
+  result.ok ? result : err(f(result.error));
+
+/** What `run` makes, or why it threw: for code that reads the disk, the one place an exception becomes a value. */
+export const attempt = <T>(run: () => Result<T, string>, why: (error: string) => string): Result<T, string> => {
+  try {
+    return run();
+  } catch (error) {
+    return err(why(error instanceof Error ? error.message : String(error)));
+  }
+};

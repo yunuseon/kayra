@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { z } from "zod";
-import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName } from "../fleet/brand.ts";
+import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName, type KayraRoot } from "../fleet/brand.ts";
 import { appCheck } from "../recipes/app-check.ts";
 import { doctor } from "../recipes/doctor.ts";
 import { appPurge, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
@@ -21,6 +21,7 @@ import { flat } from "../text/spans.ts";
 import type { Plan } from "../plan/model.ts";
 import { all, err, flatMap, map, ok, type Result } from "../../result.ts";
 import { operations, type InputOf, type Invocation, type PlanName, type QueryName, type SessionName, type StreamName } from "./catalog.ts";
+import { textAt } from "../adapters/fs.ts";
 
 /** What the core runs an operation with: the engine, the fleet, and the world as the client's machine sees it. */
 export type Context = {
@@ -34,6 +35,12 @@ export type Context = {
   readonly network: Network;
   readonly tofu: Tofu;
   readonly signal?: Io["signal"];
+};
+
+/** The context for a fleet, with the files read from disk: what every client runs the core with. */
+export const contextFor = (parts: Omit<Context, "engine" | "read"> & { readonly kayra: KayraRoot }): Context => {
+  const { kayra, ...rest } = parts;
+  return { ...rest, engine: { kayra, fleet: parts.fleet.root }, read: textAt };
 };
 
 /** Every operation with its input: what a client sends, parsed in one go. */

@@ -12,9 +12,9 @@ import type { Fleet } from "../../core/fleet/model.ts";
 import { interpret } from "../../core/interpreter/loop.ts";
 import type { Io } from "../../core/interpreter/io.ts";
 import { isOperation, operation, type Invocation } from "../../core/operations/catalog.ts";
-import { hasPlan, invocation, isQuery, isStream, planOf, serverOf, stream, type Context } from "../../core/operations/dispatch.ts";
+import { contextFor, hasPlan, invocation, isQuery, isStream, planOf, serverOf, stream } from "../../core/operations/dispatch.ts";
 import type { Plan } from "../../core/plan/model.ts";
-import { listed, reporting, type Heading } from "../../core/interpreter/events.ts";
+import { heading, listed, reporting, type Heading } from "../../core/interpreter/events.ts";
 import { follow } from "../../core/status/updates.ts";
 import { err, ok, type Result } from "../../result.ts";
 import { json, send } from "../../deployer/http.ts";
@@ -66,11 +66,7 @@ export const createApi = (api: Api) => {
     // eslint-disable-next-line functional/immutable-data -- replace the one state cell whole
     if (current !== undefined) cell.live = { ...cell.live, [id]: change(current) };
   };
-  const context: Context = {
-    engine: { kayra: api.kayra, fleet: api.fleet.root }, fleet: api.fleet, version: api.version, here: api.fleet.root,
-    read: (path) => existsSync(path) ? readFileSync(path, "utf8") : undefined,
-    network: api.network, tofu: api.tofu ?? opentofu, signal: shutdown.signal,
-  };
+  const context = contextFor({ kayra: api.kayra, fleet: api.fleet, version: api.version, here: api.fleet.root, network: api.network, tofu: api.tofu ?? opentofu, signal: shutdown.signal });
   const dir = within(api.fleet.root, ".cache", "ui", "runs");
   const allRuns = (): readonly Run[] => {
     const live = Object.values(cell.live).map((each) => each.run);
@@ -80,10 +76,7 @@ export const createApi = (api: Api) => {
     }) : [];
     return [...live, ...records].toSorted((a, b) => b.id.localeCompare(a.id));
   };
-  const about = (call: Invocation): Heading => {
-    const target = serverOf(context, call);
-    return { command: words(call), about: [...(target === undefined ? [] : [`${target.kind} on ${target.target}`, target.domain]), `kayra ${api.version}`], ...(target === undefined ? {} : { server: target.name }) };
-  };
+  const about = (call: Invocation): Heading => heading(words(call), serverOf(context, call), api.version);
   const recipe = (call: Invocation, settings: Settings): Result<Plan, string> => {
     if (!hasPlan(call)) return err(`${call.name} has no plan`);
     const plan = planOf(context, call);

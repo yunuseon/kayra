@@ -1,6 +1,9 @@
 import { appManifestSchema, secretsSchema, settings, type ServerKind } from "../fleet/settings.ts";
 import type { Server } from "../fleet/model.ts";
 import { closest } from "../fleet/shape.ts";
+import { count } from "../text/plural.ts";
+import { mapping as fields } from "../fleet/parse.ts";
+import { subdomain } from "../fleet/brand.ts";
 
 /** A secrets file as validate could read it; a missing one holds no values. */
 export type Secrets =
@@ -25,7 +28,8 @@ export type Facts = {
 };
 
 /** How a check went: it found a problem, could not look, or holds. */
-export type Verdict = "problem" | "unchecked" | "passed";
+export const verdicts = ["problem", "unchecked", "passed"] as const;
+export type Verdict = (typeof verdicts)[number];
 
 /** `hint`: what to do about it. */
 export type Finding = { readonly result: Verdict; readonly text: string; readonly hint?: string };
@@ -41,10 +45,8 @@ const passed = (text: string): Finding => finding("passed", text);
 /** A check's findings, or one line saying it holds when it found nothing to say. */
 const holds = (found: readonly Finding[], text: string): readonly Finding[] => (found.length === 0 ? [passed(text)] : found);
 
-export const count = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? "" : "s"}`;
 
-const mapping = (value: unknown): Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {};
+const mapping = (value: unknown): Readonly<Record<string, unknown>> => fields(value) ?? {};
 
 const strings = (value: unknown): readonly string[] =>
   Array.isArray(value) ? value.filter((each): each is string => typeof each === "string") : [];
@@ -105,7 +107,7 @@ const routeFindings = (facts: Facts): readonly Finding[] => {
       const upstream = fields["upstream"];
       return [
         ...strings(fields["subdomains"])
-          .filter((sub) => !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(sub))
+          .filter((sub) => !subdomain(sub).ok)
           .map((sub) => problem(`edge_routes[${String(index)}]: '${sub}' is not a subdomain`, "lowercase letters, digits and dashes")),
         ...(typeof upstream === "string" && /^[^\s:]+:\d+$/.test(upstream)
           ? []

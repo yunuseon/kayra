@@ -95,7 +95,7 @@ export default defineConfig(
     },
   },
   // Core and clients: the core knows no client, no client knows another, the
-  // deployer (it runs on servers) knows neither. main.ts and serve.ts compose them.
+  // deployer (it runs on servers) knows neither, lib/ knows none of them. main.ts and serve.ts compose them.
   // The wire (the JSON every machine client speaks) is any client's, and knows none.
   // The core may name the deployer's answers as types: they are ctl's wire format.
   ...(
@@ -106,7 +106,10 @@ export default defineConfig(
       ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
       ["src/clients/mcp/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
       ["src/clients/wire/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts"], false],
+      // The deployer's image installs no packages: of lib/, only what imports none.
+      ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"], false],
+      // lib/ is what any TypeScript project could use: it knows nothing of kayra.
+      ["src/lib/**/*.ts", ["**/core/**", "**/clients/**", "**/deployer/**", "**/main.ts", "**/serve.ts"], false],
     ] as const
   ).map(([files, forbidden, deployerTypes]) => ({
     files: [files],
@@ -124,7 +127,7 @@ export default defineConfig(
   })),
   {
     // Brands are minted here, and only here: the one place `as` may appear.
-    files: ["src/core/fleet/brand.ts", "src/deployer/brand.ts"],
+    files: ["src/lib/brand.ts", "src/core/fleet/brand.ts", "src/deployer/brand.ts"],
     rules: { "@typescript-eslint/consistent-type-assertions": "off" },
   },
 );

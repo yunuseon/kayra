@@ -1,7 +1,7 @@
-import { err, ok } from "../../result.ts";
+import { err, ok } from "../../lib/result.ts";
 import { field } from "../app.ts";
 import { sha, type AppName, type Sha } from "../brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** One built artifact: the compose variable naming it and the content-addressed ref the host daemon pulls. */
 export type Image = { readonly variable: string; readonly ref: string };

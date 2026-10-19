@@ -1,6 +1,6 @@
 import type { Domain, Subdomain } from "../fleet/brand.ts";
 import type { Plan } from "../plan/model.ts";
-import { ok } from "../../result.ts";
+import { ok } from "../../lib/result.ts";
 import { certs, type Engine } from "./steps.ts";
 
 /** mkcert certs for a domain and its subdomains, for local dev and multipass. */

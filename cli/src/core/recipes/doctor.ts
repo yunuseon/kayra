@@ -2,7 +2,7 @@ import { within, type KayraRoot } from "../fleet/brand.ts";
 import type { Fleet, Server } from "../fleet/model.ts";
 import type { Plan, Step } from "../plan/model.ts";
 import { homeReach, onPath } from "./steps.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 type Tool = {
   readonly program: string;

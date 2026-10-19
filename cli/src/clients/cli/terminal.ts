@@ -63,7 +63,7 @@ export const escapes = {
 } as const;
 
 import type { Update } from "../../core/status/updates.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

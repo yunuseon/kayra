@@ -5,7 +5,7 @@ import type { Env, Need } from "../plan/model.ts";
 import { active, muted, strong } from "../text/spans.ts";
 import { ask, type Io, type Question } from "./io.ts";
 import { spawned, type Plumbing, type Stdin } from "./process.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /**
  * A step's needs, met: the vault password through Ansible's password-file

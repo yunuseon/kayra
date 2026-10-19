@@ -13,7 +13,7 @@ import { statusJson } from "../wire/status.ts";
 import { words } from "../wire/words.ts";
 import { confirmations, run, type Confirmation } from "./run.ts";
 import { operationOf, runOptions, tools } from "./tools.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** What kayra mcp serves with: the core's context, and how paths are shortened. */
 export type Mcp = { readonly context: Context; readonly short: (text: string) => string };

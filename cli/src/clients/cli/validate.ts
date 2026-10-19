@@ -1,7 +1,7 @@
 import { bad, muted, ok, pointing, strong, type Line, type Span } from "../../core/text/spans.ts";
 import { count } from "../../core/text/plural.ts";
 import { overall, type Report, tally, type Verdict } from "../../core/validation/findings.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 const marks: Readonly<Record<Verdict, Span>> = { problem: bad("✗"), unchecked: muted("·"), passed: ok("✓") };
 

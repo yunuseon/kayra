@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Fleet } from "../../core/fleet/model.ts";
 import { operation, operationNames, type Operation, type OperationName, type QueryName } from "../../core/operations/catalog.ts";
 import { querySchemas, schemas } from "../wire/schemas.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** How MCP offers an operation: as a tool, or not, and why. */
 export type Offer = { readonly tool: string } | { readonly refused: string };

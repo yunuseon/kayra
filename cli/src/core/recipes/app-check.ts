@@ -1,11 +1,11 @@
-import { appName, within, type AbsolutePath, type KayraRoot } from "../fleet/brand.ts";
-import { yamlOf } from "../fleet/parse.ts";
+import { within, type AbsolutePath, type KayraRoot } from "../fleet/brand.ts";
+import { yamlOf } from "../../lib/yaml.ts";
 import { type Plan, run } from "../plan/model.ts";
-import { err, flatMap, map, mapError } from "../../result.ts";
+import { err, flatMap, map, mapError } from "../../lib/result.ts";
 import { appManifestSchema } from "../fleet/settings.ts";
 import { checkShape } from "../fleet/shape.ts";
 import { onPath } from "./steps.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 
 const tool = (program: string, hint: string) => onPath(`${program} is installed`, program, hint, "stop");
@@ -19,14 +19,8 @@ const tool = (program: string, hint: string) => onPath(`${program} is installed`
 export const appCheck = (kayra: KayraRoot, root: AbsolutePath, manifest: string | undefined) => {
   if (manifest === undefined) return err(`no app.yml in ${root}`);
   const shaped = flatMap(
-    flatMap(
-      mapError(yamlOf(manifest), (problem) => `app.yml ${problem}`),
-      (values) => checkShape("app.yml", values, appManifestSchema),
-    ),
-    (values) => {
-      const parsed = appManifestSchema.safeParse(values);
-      return parsed.success ? appName(parsed.data.name) : err("app.yml: invalid");
-    },
+    mapError(yamlOf(manifest), (problem) => `app.yml ${problem}`),
+    (values) => checkShape("app.yml", values, appManifestSchema),
   );
   return map(shaped, () => typed<Plan>([
     tool("git", "brew install git"),

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { operations, operationNames } from "../../core/operations/catalog.ts";
 import { options, schemas } from "./schemas.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 export const catalog = () => Object.freeze(operationNames.map((name) => {
   const { summary, scope, effect, kind, input } = operations[name];

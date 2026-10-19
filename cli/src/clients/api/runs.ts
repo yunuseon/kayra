@@ -1,5 +1,5 @@
 import type { RunEvent, RunState, RunSummary } from "../wire/contract.gen.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A run as kayra keeps it: what it was asked, and everything that happened since, in order. */
 export type Run = {

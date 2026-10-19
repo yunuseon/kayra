@@ -1,5 +1,5 @@
 import type { AppName, JobName, Owner } from "../brand.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 export type Why = "push" | "poll" | "deploy" | "rollback";
 

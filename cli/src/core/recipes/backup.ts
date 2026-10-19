@@ -1,7 +1,7 @@
 import { within } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { run, type Plan } from "../plan/model.ts";
-import { err, ok } from "../../result.ts";
+import { err, ok } from "../../lib/result.ts";
 import { ansibleEnv, inventory, reachable, vaulted, type Engine } from "./steps.ts";
 import { sshArgv } from "./ssh.ts";
 

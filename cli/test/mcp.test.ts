@@ -12,7 +12,7 @@ import { reaches } from "../src/clients/mcp/tools.ts";
 import { mcpServer, type Busy } from "../src/clients/mcp/server.ts";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { schemas } from "../src/clients/wire/schemas.ts";
-import { ok } from "../src/result.ts";
+import { ok } from "../src/lib/result.ts";
 import { must, server } from "./support.ts";
 
 type Elicited = { readonly message: string; readonly answer: "accept" | "decline"; readonly typed?: string };

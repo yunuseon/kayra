@@ -1,6 +1,6 @@
 import type { Invocation, OperationName } from "../../core/operations/catalog.ts";
 import type { Command } from "./parser.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** What the command line asks besides the operation: how its answer is printed. */
 export type Asked = { readonly invocation: Invocation; readonly json: boolean };

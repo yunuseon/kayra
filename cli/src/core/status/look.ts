@@ -2,7 +2,7 @@ import { host, sshDefaultPort, within } from "../fleet/brand.ts";
 import type { Fleet, Server } from "../fleet/model.ts";
 import { isMachine, type Look, type Machine, type Pending, type Reach, type Watched } from "./model.ts";
 import type { Network, Tofu } from "./ports.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** The inventory names the address: hand-written at home, written by provision elsewhere. */
 export const listed = (server: Server) =>

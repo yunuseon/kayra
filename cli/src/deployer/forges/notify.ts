@@ -1,7 +1,7 @@
-import { err, ok, type Result } from "../../result.ts";
+import { err, ok, type Result } from "../../lib/result.ts";
 import { field } from "../app.ts";
 import type { Request } from "../runs/queue.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /**
  * Something wrong that lasts until a later run fixes it: the app's own ref

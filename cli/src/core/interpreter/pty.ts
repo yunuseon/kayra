@@ -1,7 +1,7 @@
 import { quote } from "../plan/describe.ts";
 import type { Argv } from "../plan/model.ts";
 import type { Io } from "./io.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** A step that talks with a person, given a pty: macOS's script, util-linux's elsewhere. */
 export const inPty = (argv: Argv, size: Io["size"]) => {

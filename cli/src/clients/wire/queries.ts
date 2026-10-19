@@ -3,7 +3,7 @@ import type { InputOf, QueryName } from "../../core/operations/catalog.ts";
 import { query, type Context } from "../../core/operations/dispatch.ts";
 import { validateJson } from "./validate.ts";
 import { parsed, releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
-import { err, map, ok, type Result } from "../../result.ts";
+import { err, map, ok, type Result } from "../../lib/result.ts";
 import type * as wire from "./contract.gen.ts";
 
 type WireAnswers = { readonly validate: wire.Validation; readonly version: string; readonly "app.runs": wire.AppRuns; readonly "app.releases": wire.AppReleases; readonly "app.log": string };

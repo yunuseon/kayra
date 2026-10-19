@@ -6,7 +6,7 @@ import { interpret } from "../../core/interpreter/loop.ts";
 import type { Plan } from "../../core/plan/model.ts";
 import { duration } from "../../core/text/time.ts";
 import { flat, type Text } from "../../core/text/spans.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 /** What a run told along the way: the interpreter's events, a step's output, what kayra said around it. */
 type Told = Event | { readonly kind: "output"; readonly chunk: string } | { readonly kind: "said"; readonly text: Text };

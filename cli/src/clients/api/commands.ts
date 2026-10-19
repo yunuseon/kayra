@@ -1,6 +1,6 @@
 import type { Server } from "../../core/fleet/model.ts";
 import type { ServerCommand, ServerFacts } from "../wire/contract.gen.ts";
-import { typed } from "../../typed.ts";
+import { typed } from "../../lib/typed.ts";
 
 export const offered = (server: Server) => typed<readonly (ServerCommand | "job")[]>([
   ...(server.kind === "platform" ? (["deploy", "apps", "verify"] as const) : []),

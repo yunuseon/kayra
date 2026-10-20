@@ -120,7 +120,7 @@ Every client offers kayra's full feature set: a new operation reaches every one.
 - **UI parity:** the browser loads `/api/operations` and builds inputs from each operation's JSON Schema. `web/src/operations.ts` holds its compiled coverage table (`reaches`); the parity test round-trips CLI samples through the form. Fleet/server action bars and ⌘K open the same form. App checks browse directories through authenticated `GET /api/directories` (directory names only). SSH sessions use a lazily loaded `@xterm/xterm` terminal at 120×32, matching the API's default pty size; input requests are serialized. Questions use password fields for secrets and expose HTTP failures without retaining answers.
 
 - **`web/`** is its own npm project (Preact, `@preact/signals`, Vite; exact pins), built at `prepack` into `cli/dist/browser` (never `cli/dist/web`: that is where tsc puts the server's own modules, and the build empties its directory; 0.16.0 shipped that way and did not start), served from `web/dist` in a checkout. Same strictness as the CLI: its lint config reuses the CLI's rules from the root's `node_modules`, with signals' `.value` and the DOM's objects exempt. Pure modules (the router, the SGR parser, the run reducer, the palette's matching, the status cells) are vitest-tested; the one place a server answer takes a type is `api.ts`'s `trusted`. Dev: `kayra serve --port 7700 --no-open` beside `npm --prefix web run dev` (Vite proxies `/api` as if from kayra serve's own page).
-- **The agent guard asks before `kayra serve` and local API writes**: what runs from the browser is out of its sight. Don't drive a real fleet's `kayra serve` from a browser tool either; test against a fixture fleet or a Multipass lab.
+- Test the browser against a fixture fleet or a Multipass lab, not a real fleet's `kayra serve`.
 - The checks run `web-typecheck`, `web-lint`, `web-test`, `web-build`.
 
 ### MCP (`kayra mcp`)
@@ -398,24 +398,10 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 
 ## Working here as an AI agent
 
-kayra, and every fleet that pins it, carries guardrails for an AI agent (Claude Code) in its `.claude/settings.json`:
-
-- **`scripts/agent/guard.sh`**, a PreToolUse hook on Bash and on kayra's MCP tools (`mcp__kayra__*`), makes a command that changes something real **ask** the operator first, every time — or, in a mode that approves by itself (`auto`, `dontAsk`, `bypassPermissions`), **refuse** it, since an ask there goes through unseen; the agent stops and says so, and the operator runs the command or switches the session to Manual for it:
-  - kayra changing a server that is not multipass (`up`, `provision`, `setup`, `deploy`, `apps`, `adopt`, `down`, `app purge|deploy|rollback`, `job`; not with `--dry-run`);
-  - `ansible`/`ansible-playbook` against an inventory, and `ansible-vault` opening or writing a vault;
-  - merging a PR, forge API writes, changing or deleting a repository, releases, `npm publish`;
-  - `git push` of `main` or a tag, force pushes, deleting a remote branch;
-  - `tofu apply|destroy|import|state …`;
-  - destructive commands over SSH.
-  Building, testing, reading, `kayra verify|plan|validate|app check|app runs|app logs`, and pushing a feature branch run without asking.
-  An MCP tool is read from its JSON input, exactly: one that changes nothing (`mcp_reads`, held to the catalog's `reads` by `cli/test/mcp.test.ts`) or `dryRun: true` passes; a change to a multipass server passes; any other asks. A fleet's hook matcher is `Bash|mcp__kayra__.*`, its `.mcp.json` names the server `kayra`, and editing `.mcp.json` asks.
-- **It fails closed** in kayra (`onFailure: block`); a fleet without its kayra installed lets only `npm ci` through until then: everything else asks, or is refused in a mode that approves by itself.
-- **Editing the guardrails asks too:** `.claude/**`, `scripts/agent/**`, `.github/CODEOWNERS`.
-- **It reads the command's text.** It stops mistakes and instructions smuggled in through a file, an issue or a web page, not an adversary: a script it does not read runs whatever it contains. Each case is in `ci/tests/guard/run.sh` (in the checks as `platform:guard`); a new guard gets a case.
 - **Procedures are skills** (`agent/skills/`, shipped in the package; `.claude/skills/` links them here): **kayra-release** (bump PR → checks → merge → tag → `release.yml` → the published package), **kayra-lab** (the upgrade lab, reading its failures), **kayra-rollout** (a release into each fleet: the bump PR in a worktree, then `kayra deploy` server by server with `verify`). A fleet links `kayra-rollout` from its pinned kayra. A procedure that went wrong gets its lesson written into its skill.
 - **Types come from the language server:** `.claude/settings.json` enables the `typescript-lsp` plugin (once per machine: `npm install -g typescript-language-server typescript`). Before reading files to work out a type, hover the symbol for what TypeScript inferred, and use go-to-definition and find-references to follow it; after an edit, its diagnostics before `npm run typecheck`. Where no language server runs, `npm run signatures` writes every module's inferred declarations to `.cache/signatures/` (`.d.ts`, the tree of `cli/src`): read those instead of guessing.
 - **The user works in the same checkouts in parallel.** Changes happen in a separate git worktree off `origin/main`, steps as one `set -euo pipefail` script, never a write after `;` behind a guard.
-- **CODEOWNERS** (`.github/CODEOWNERS`) names the trust boundary, the files a change to which the maintainer reviews: the compose policy, the deployer's webhook, forge and bundle code, the platform compose files, `require-main.sh`, the guard itself, the checks.
+- **CODEOWNERS** (`.github/CODEOWNERS`) names the trust boundary, the files a change to which the maintainer reviews: the compose policy, the deployer's webhook, forge and bundle code, the platform compose files, `require-main.sh`, the checks.
 - **`main` is protected on GitHub:** changes arrive through a pull request with green checks; no direct push, no force push, no deletion, for admins too.
 
 ## Code style

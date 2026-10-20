@@ -1,16 +1,12 @@
 # The trust boundary: what keeps an app's code away from the host, the
-# platform and other apps, what keeps prod changed from main only, and what
-# keeps an AI agent asking before it changes anything real. A change here is
-# reviewed by the maintainer, whoever (or whatever) wrote it.
+# platform and other apps, and what keeps prod changed from main only. A
+# change here is reviewed by the maintainer, whoever (or whatever) wrote it.
 /scripts/platform/compose-policy.sh   @yunuseon
 /scripts/platform/resolve-images.sh   @yunuseon
-/cli/src/deployer/builder.ts          @yunuseon
-/cli/src/deployer/bundle.ts           @yunuseon
-/cli/src/deployer/webhook.ts          @yunuseon
-/cli/src/deployer/forge.ts            @yunuseon
-/cli/src/deployer/github.ts           @yunuseon
-/cli/src/deployer/forgejo.ts          @yunuseon
-/cli/src/deployer/gitlab.ts           @yunuseon
+/cli/src/deployer/build/builder.ts    @yunuseon
+/cli/src/deployer/build/bundle.ts     @yunuseon
+/cli/src/deployer/http/webhook.ts     @yunuseon
+/cli/src/deployer/forges/             @yunuseon
 /compose/docker-compose.yml           @yunuseon
 /compose/docker-compose.ci.yml        @yunuseon
 /compose/deployer/                    @yunuseon
@@ -18,7 +14,6 @@
 /compose/authelia/                    @yunuseon
 /scripts/local/require-main.sh        @yunuseon
 /scripts/local/require-latest-state.sh @yunuseon
-/scripts/agent/                       @yunuseon
 /.claude/                             @yunuseon
 /.github/                             @yunuseon
 /ci/checks/                           @yunuseon

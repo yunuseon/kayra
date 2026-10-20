@@ -16,7 +16,8 @@ kayra serve --ui --api              # browser and local program API
 ## What it shows
 
 - **Fleet:** every server as a card: kind, target, domain, its address, and
-  live answers from SSH and, on platform servers, the login (Authelia), as
+  live answers from SSH and, on platform servers, the login (Authelia), and
+  which kayra set it up (marked where it is not the fleet's pin), as
   `kayra status` asks them.
 - **A server:** the same facts, its apps, the commands it offers (deploy,
   apps, verify, setup, plan, …, down), and the runs started from here.

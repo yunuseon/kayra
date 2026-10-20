@@ -1,7 +1,7 @@
 import { OperationActions } from "../components/operations.tsx";
 import { Link } from "../components/shell.tsx";
 import { Dot, Fact, Header, Pill, Waiting } from "../components/ui.tsx";
-import { health, login, machine, ssh } from "../reach.ts";
+import { health, kayra, login, machine, ssh } from "../reach.ts";
 import { fleet, status } from "../state.ts";
 import { RunTable } from "./runs.tsx";
 
@@ -38,6 +38,7 @@ export const ServerView = ({ name }: { readonly name: string }) => {
               <Fact label="Address" cell={machine(seen)} />
               <Fact label="SSH" cell={ssh(seen)} />
               <Fact label="Login" cell={login(seen)} />
+              <Fact label="kayra" cell={kayra(seen)} />
             </dl>
           )}
         </section>

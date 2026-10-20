@@ -40,7 +40,7 @@ const fixture = async (elicit: (message: string) => Elicited = (message) => ({ m
   const fleet = { root: fleetRoot(must(absolutePath(dir))), servers: [lab, prod] };
   const context = contextFor({
     kayra: kayraRoot(must(absolutePath(engine))), fleet, version: must(kayraVersion("0.0.0-test")), here: must(absolutePath(dir)),
-    network: { connect: () => Promise.resolve({ kind: "skipped" as const }), get: () => Promise.resolve({ kind: "skipped" as const }) },
+    network: { connect: () => Promise.resolve({ kind: "skipped" as const }), get: () => Promise.resolve({ kind: "skipped" as const }), read: () => Promise.resolve(ok("")) },
     tofu: { state: () => Promise.resolve(ok([])), output: () => Promise.resolve(undefined) },
   });
   // eslint-disable-next-line functional/immutable-data -- all subprocesses use fixture programs, never real infrastructure tools

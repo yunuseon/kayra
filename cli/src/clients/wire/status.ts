@@ -7,7 +7,7 @@ const error = (reach: Reach | Pending) => ("code" in reach ? reach.code : null);
 
 /** `kayra status --json`: the shape cli.md documents. */
 export const statusJson = (looks: readonly Look[]) => ({
-  servers: looks.map(({ server, machine, ssh, https }) => ({
+  servers: looks.map(({ server, machine, ssh, https, kayra, pin }) => ({
     name: server.name,
     kind: server.kind,
     target: server.target,
@@ -30,5 +30,11 @@ export const statusJson = (looks: readonly Look[]) => ({
             ms: ms(https),
             error: error(https),
           },
+    kayra: {
+      pin,
+      state: kayra.kind,
+      version: kayra.kind === "recorded" ? kayra.version : null,
+      error: kayra.kind === "unreadable" ? kayra.reason : null,
+    },
   })),
 } as const);

@@ -88,7 +88,8 @@ Things that have bitten before:
 
 ## 4. Report
 
-Per server: the version it runs now, the deploy's recap (nothing failed?),
-the `kayra verify` result, and anything left for the user (a DNS apply, a
+Per server: the version it runs now (`kayra status`'s `KAYRA` column, read
+from the server: `1.2.2 → 1.2.3` is one the rollout has not reached), the
+deploy's recap (nothing failed?), the `kayra verify` result, and anything left for the user (a DNS apply, a
 switch in a vendor UI, a manual cleanup). Then whether the user's checkouts
 are as they left them.

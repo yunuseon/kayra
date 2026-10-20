@@ -9,8 +9,10 @@
 #
 #   1  the release: kayra deploy, the app's first deploy by a signed webhook,
 #      the app as the release knew it (test/lab/app at its tag)
-#   2  the upgrade: the fleet's kayra becomes this checkout, kayra deploy
-#      (which ends with kayra verify); the old containers keep serving
+#   2  the upgrade: the fleet's kayra becomes this checkout, kayra plan (check
+#      mode on the release's server), kayra deploy (which ends with kayra
+#      verify), kayra status reading back the kayra that set it up; the old
+#      containers keep serving
 #   3  the app as this checkout knows it, in a commit of its own (what an app
 #      does when kayra's contract changes), then a new commit by webhook;
 #      deploying it again builds nothing (CACHED)
@@ -223,16 +225,18 @@ upgrade() {
     local upgraded ok
     upgraded="$(kayra_cmd "$1" "$server" 2>&1)" && ok=true || ok=false
     printf '%s\n' "$upgraded" >> "$log"
-    grep -E '^(    )?(✓|✗)' <<< "$upgraded" || true
+    grep -E '^(    )?(✓|✗|!)' <<< "$upgraded" || true
     [ "$ok" = true ] || die "kayra $1 after the upgrade"
 }
+[ "$app_at_release" = true ] || descriptor with-app > "servers/${server}/server.yml"
+kayra_cmd plan "$server" >> "$log" 2>&1 || die "kayra plan after the upgrade, before its deploy (check mode)"
+echo "✓ kayra plan: the upgraded playbook in check mode"
 # Where the app contract changed since the release, the cutover an operator
 # follows: the platform first (setup keeps the registrations the release
 # wrote, and the old containers keep serving), then the app's own commit,
 # then kayra deploy registers it from its new app.yml.
 cutover=false
 if [ "$app_at_release" = false ]; then
-    descriptor with-app > "servers/${server}/server.yml"
     adopt_checkout_app
     commit "v1: the app as this checkout knows it"
     upgrade deploy
@@ -244,6 +248,9 @@ else
     echo "the app contract changed since ${from}: kayra setup first, kayra deploy after the app's own commit"
     upgrade setup
 fi
+running="$(kayra_cmd status --json | jq -r --arg name "$server" '.servers[] | select(.name == $name) | .kayra | select(.state == "recorded" and .version == .pin) | .version')"
+[ -n "$running" ] || die "kayra status does not read back the kayra that set ${server} up: $(kayra_cmd status --json | jq -c '.servers[].kayra')"
+echo "✓ kayra status: set up by kayra ${running}, the pin"
 expect_serves v1
 
 # ── 3: the app as this checkout knows it; a new commit; the same again ─────

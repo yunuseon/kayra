@@ -1,5 +1,5 @@
 {"argv":["bash","<kayra>/scripts/local/require-main.sh","shop-prod"],"env":{"FLEET_ROOT":"<fleet>"}}
 {"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-playbook","-v","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/platform.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","target=hetzner"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_STDOUT_CALLBACK":"default","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-playbook","-v","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/platform.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","target=hetzner","-e","kayra_version=<version>"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_STDOUT_CALLBACK":"default","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
 --- stdout
 --- exit 0

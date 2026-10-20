@@ -14,6 +14,9 @@
 #   - every app in server.yml is registered, and nothing else
 #   - every app's containers run, none unhealthy; its last run did not fail
 #   - every platform container runs, none unhealthy; no alert is open
+#   - which kayra set it up (/opt/kayra/version): one that is not this kayra
+#     (KAYRA_VERSION, the fleet's pin) is noted, not failed — it still works,
+#     and every server runs the last release until its rollout reaches it
 #
 # Certificates and routes can lag a fresh deploy (ACME, DNS-01's minute), so
 # the probes retry for VERIFY_WAIT seconds (default 150) before failing.
@@ -23,6 +26,7 @@ set -euo pipefail
 
 KAYRA_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FLEET_ROOT="${FLEET_ROOT:?the directory of the fleet (servers/), set by kayra}"
+pin="${KAYRA_VERSION:?the kayra that runs, set by kayra}"
 name="${1:?Usage: verify.sh <server>}"
 dir="${FLEET_ROOT}/servers/${name}"
 wait="${VERIFY_WAIT:-150}"
@@ -30,6 +34,7 @@ failed=0
 
 fail() { echo "    ✗ $*"; failed=1; }
 pass() { echo "    ✓ $*"; }
+note() { echo "    ! $*"; }
 
 domain="$(yq -r '.domain' "${dir}/server.yml")"
 inventory="${dir}/inventory.ini"
@@ -102,6 +107,7 @@ facts="$(ssh -p "${port:-22}" -i "$key" -o StrictHostKeyChecking=no -o UserKnown
 cd /opt/platform
 echo "registered $(ls apps 2>/dev/null | sed -n "s/\.json$//p" | sort | tr "\n" " ")"
 echo "alerts $(ls alerts 2>/dev/null | tr "\n" " ")"
+echo "kayra $(cat /opt/kayra/version 2>/dev/null || true)"
 docker compose ps -a --format "{{.Service}}|{{.State}}|{{.Health}}" | sed "s/^/platform /"
 for app in $(ls apps 2>/dev/null | sed -n "s/\.json$//p"); do
     docker ps -a --filter "label=com.docker.compose.project=$app" --format "{{.Names}}|{{.State}}|{{.Status}}" | sed "s/^/container $app /"
@@ -115,6 +121,11 @@ wanted="$(xargs <<< "$wanted")"
 have="$(xargs <<< "$have")"
 [ "$wanted" = "$have" ] && pass "registered: ${have:-no apps}" \
     || fail "registered: ${have:-nothing}; server.yml says ${wanted:-no apps} (kayra apps ${name})"
+
+running="$(sed -n 's/^kayra //p' <<< "$facts" | xargs)"
+if [ "$running" = "$pin" ]; then pass "set up by kayra ${pin}, the fleet's pin"
+elif [ -z "$running" ]; then note "set up by a kayra that recorded no version; the fleet pins ${pin} (kayra deploy ${name})"
+else note "set up by kayra ${running}; the fleet pins ${pin} (kayra deploy ${name})"; fi
 
 alerts="$(sed -n 's/^alerts //p' <<< "$facts" | xargs)"
 [ -z "$alerts" ] && pass "no alert is open" || fail "open alerts: ${alerts}"

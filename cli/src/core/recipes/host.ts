@@ -20,7 +20,7 @@ export const provision = (engine: Engine, server: Server) =>
     ]),
   );
 
-/** The playbook for the server's kind, as setup runs it; plan adds check mode. */
+/** The playbook for the server's kind, as setup runs it; plan adds check mode. It records which kayra ran it (the kayra-version role). */
 const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []) =>
   vaulted(run(
     `Host layer · ${server.kind}.yml${extra.includes("--check") ? ", check mode" : ""}`,
@@ -37,6 +37,8 @@ const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] =
       `domain=${server.domain}`,
       "-e",
       `target=${server.target}`,
+      "-e",
+      `kayra_version=${engine.version}`,
       ...extra,
     ],
     ansibleEnv(engine, {}),
@@ -95,9 +97,12 @@ export const hosts = (engine: Engine, server: Server) =>
     ),
   );
 
-/** Whether a platform server works as its users see it (scripts/local/verify.sh); other kinds have nothing to check yet. */
+/**
+ * Whether a platform server works as its users see it (scripts/local/verify.sh),
+ * and runs the kayra this is; other kinds have nothing to check yet.
+ */
 const verifyStep = (engine: Engine, server: Server) => typed<Step>({
-  ...run("Verify", ["bash", script(engine, "verify.sh"), server.name], fleetEnv(engine)),
+  ...run("Verify", ["bash", script(engine, "verify.sh"), server.name], { ...fleetEnv(engine), KAYRA_VERSION: engine.version }),
   part: "verify",
 });
 

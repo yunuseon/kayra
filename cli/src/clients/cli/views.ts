@@ -56,7 +56,7 @@ export const releasesView = (view: DeployerAnswer, answer: ReleasesAnswer, now: 
   const earlier = answer.releases.find((release) => !release.live);
   const rows = table([
     [[muted("  COMMIT")], [muted("DEPLOYED")]],
-    ...answer.releases.map((release) => Object.freeze([
+    ...answer.releases.map((release) => typed<readonly Line[]>([
       release.live ? [ok("●"), " ", accent(short(release.sha))] : ["  ", short(release.sha)],
       [since(release.time, now)],
       release.live ? [ok("live")] : [],

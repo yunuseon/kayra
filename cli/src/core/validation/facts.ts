@@ -46,7 +46,6 @@ export const gather = async (root: FleetRoot, server: Server) => {
     appConfig: Object.fromEntries(server.apps.map((app) => [app.name, valuesOf(appText(`${app.name}.yml`))] as const)),
     appSecrets: Object.fromEntries(appSecrets),
     manifests: Object.fromEntries(
-      // eslint-disable-next-line functional/prefer-immutable-types -- an app.yml's values are unknown, read only
       server.apps.flatMap((app) => {
         const manifest = textAt(join(root, ".cache", "apps", app.name, app.path, "app.yml"));
         return manifest === undefined ? Object.freeze([]) : Object.freeze([[app.name, valuesOf(manifest)] as const]);

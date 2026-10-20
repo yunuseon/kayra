@@ -17,7 +17,7 @@ export const releases = (names: readonly string[]) =>
     .flatMap((name) => {
       const match = /^(\d{8}T\d{6}Z)-([0-9a-f]{40})\.env$/.exec(name);
       const commit = sha(match?.[2] ?? "");
-      return match?.[1] === undefined || !commit.ok ? Object.freeze([]) : Object.freeze([{ sha: commit.value, time: match[1] }]);
+      return match?.[1] === undefined || !commit.ok ? Object.freeze([]) : Object.freeze([typed<Release>({ sha: commit.value, time: match[1] })]);
     })
     .filter((release, i, all) => all.findIndex((other) => other.sha === release.sha) === i));
 

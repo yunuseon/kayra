@@ -3,6 +3,20 @@ import { defineConfig } from "eslint/config";
 import functional from "eslint-plugin-functional";
 import tseslint from "typescript-eslint";
 
+// Types taken as ReadonlyDeep wherever they sit: inside another (readonly Setting[], a Record of
+// Operation) or in an inferred return, which ignoreTypePattern never reaches (it skips a type only where it is named).
+// Setting and Operation hold Zod schemas: immutable once built, but classes the rule cannot see into.
+const immutableHere = [
+  { type: { from: "file", name: "Setting" }, to: "ReadonlyDeep" },
+  { type: { from: "file", name: "Operation" }, to: "ReadonlyDeep" },
+  // A URL's properties are writable, but functional/immutable-data refuses every write; Optique's messages hold them.
+  { type: /^URL$/u, to: "ReadonlyDeep" },
+  // Optique's parsers keep their own parsing state (initialState); kayra only hands them to Optique.
+  // command()'s and merge()'s results are intersections, matched by their names.
+  { type: { from: "package", package: "@optique/core", name: ["Parser", "ParserModifiers"] }, to: "ReadonlyDeep" },
+  { type: /^(FluentParser|MergeReturnType)\b/u, to: "ReadonlyDeep" },
+];
+
 export default defineConfig(
   // The compiled CLI, built for the package.
   { ignores: ["dist/"] },
@@ -15,6 +29,7 @@ export default defineConfig(
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
+    settings: { immutability: { overrides: immutableHere } },
     rules: {
       "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "never" }],
       "@typescript-eslint/consistent-type-definitions": ["error", "type"],
@@ -32,7 +47,7 @@ export default defineConfig(
           enforcement: "ReadonlyDeep",
           ignoreInferredTypes: true,
           ignoreClasses: true,
-          ignoreTypePattern: ["^z\\.", "ZodType", "Setting", "^Operation$"],
+          ignoreTypePattern: ["^z\\.", "ZodType"],
           returnTypes: { enforcement: "ReadonlyDeep", ignoreInferredTypes: false, ignoreClasses: true },
         },
       ],
@@ -40,8 +55,6 @@ export default defineConfig(
         "error",
         {
           rules: [{ identifiers: ".+", immutability: "ReadonlyDeep", comparator: "AtLeast" }],
-          // Setting holds a Zod schema: immutable, but a class the rule cannot see into.
-          ignoreIdentifierPattern: ["^Setting$", "^Operation$"],
         },
       ],
     },
@@ -50,6 +63,8 @@ export default defineConfig(
     // The deployer's daemons work with Node's I/O objects (requests, responses,
     // buffers, the environment, dates, regexps): classes the rule cannot make readonly.
     files: ["src/deployer/**/*.ts"],
+    // A Buffer read from a request is bytes nothing changes in place; it reaches inferred returns (Promise<Buffer | undefined>).
+    settings: { immutability: { overrides: [...immutableHere, { type: /^Buffer$/u, to: "ReadonlyDeep" }] } },
     rules: {
       "functional/prefer-immutable-types": [
         "error",
@@ -75,7 +90,7 @@ export default defineConfig(
           enforcement: "ReadonlyDeep",
           ignoreInferredTypes: true,
           ignoreClasses: true,
-          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "^URL$", "URLSearchParams", "^Live$", "^Served$", "^Operation$"],
+          ignoreTypePattern: ["IncomingMessage", "ServerResponse", "AbortController", "Buffer", "^URL$", "URLSearchParams", "^Live$", "^Served$"],
         },
       ],
       "functional/type-declaration-immutability": [
@@ -90,7 +105,7 @@ export default defineConfig(
     rules: {
       "functional/prefer-immutable-types": [
         "error",
-        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true, ignoreTypePattern: ["^z\\.", "ZodType", "Setting", "^Operation$"] },
+        { enforcement: "ReadonlyDeep", ignoreInferredTypes: true, ignoreClasses: true, ignoreTypePattern: ["^z\\.", "ZodType"] },
       ],
     },
   },

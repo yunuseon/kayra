@@ -18,7 +18,6 @@ export const hmacMatches = (secret: string, body: Buffer, given: string | undefi
 /** Whether `given` is the platform's secret itself, compared in constant time. */
 export const secretMatches = (secret: string, given: string | undefined) => {
   if (secret === "" || given === undefined) return false;
-  // eslint-disable-next-line functional/prefer-immutable-types -- Node's Buffer: bytes, never changed here
   const digest = (text: string) => createHash("sha256").update(text).digest();
   return timingSafeEqual(digest(secret), digest(given));
 };

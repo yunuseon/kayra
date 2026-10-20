@@ -174,7 +174,7 @@ const queries: Queries = {
   validate: async (ctx, input) => {
     const chosen = input.server === undefined ? ok(ctx.fleet.servers) : map(onServer(ctx, input.server), (one) => Object.freeze([one]));
     if (!chosen.ok) return chosen;
-    return ok(await Promise.all(chosen.value.map(async (each) => ({ server: each, findings: findings(await gather(ctx.fleet.root, each)) }))));
+    return ok(Object.freeze(await Promise.all(chosen.value.map(async (each) => typed<Report>({ server: each, findings: findings(await gather(ctx.fleet.root, each)) })))));
   },
   version: (ctx) => Promise.resolve(ok(ctx.version)),
 };

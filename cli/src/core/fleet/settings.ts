@@ -19,7 +19,6 @@ export type Setting = {
   readonly description: string;
 };
 
-// eslint-disable-next-line functional/prefer-immutable-types -- holds a Zod schema: immutable once built, but a class the rule cannot see into
 const setting = (
   name: string,
   kinds: readonly ServerKind[],
@@ -27,7 +26,6 @@ const setting = (
   description: string,
 ) => typed<Setting>({ name, kinds, secret: false, schema: schema.describe(description), description });
 
-// eslint-disable-next-line functional/prefer-immutable-types -- holds a Zod schema: immutable once built, but a class the rule cannot see into
 const secret = (
   name: string,
   kinds: readonly ServerKind[],

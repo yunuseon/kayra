@@ -20,7 +20,7 @@ export const appCheck = (kayra: KayraRoot, root: AbsolutePath, manifest: string 
   if (manifest === undefined) return err(`no app.yml in ${root}`);
   const shaped = flatMap(
     mapError(yamlOf(manifest), (problem) => `app.yml ${problem}`),
-    (values) => checkShape("app.yml", values, appManifestSchema),
+    (values) => map(checkShape("app.yml", values, appManifestSchema), () => manifest),
   );
   return map(shaped, () => typed<Plan>([
     tool("git", "brew install git"),

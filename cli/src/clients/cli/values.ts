@@ -13,7 +13,6 @@ const minting = <T extends string>(
   mode: "sync",
   metavar,
   placeholder,
-  // eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message: readonly by contract, but a type the rule cannot see into
   parse: (input) => {
     const minted = mint(input);
     return minted.ok ? { success: true, value: minted.value } as const : { success: false, error: [text(minted.error)] } as const;

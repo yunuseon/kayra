@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 /** The request body, refused past `limit` bytes. */
 export const body = async (request: IncomingMessage, limit = 1 << 20) => {
-  // eslint-disable-next-line functional/prefer-immutable-types -- Node's Buffer: bytes, never changed here
   const chunks = await Array.fromAsync(request, (chunk: Buffer) => chunk);
   const all = Buffer.concat(chunks);
   return all.length > limit ? undefined : all;

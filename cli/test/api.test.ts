@@ -18,7 +18,7 @@ import { apiReference } from "../scripts/api-reference.ts";
 import type { RunEvent } from "../src/clients/wire/contract.gen.ts";
 import { must, server } from "./support.ts";
 
-type Answer = { readonly status: number; readonly headers: Readonly<Record<string, string | string[] | undefined>>; readonly body: string };
+type Answer = { readonly status: number; readonly headers: Readonly<Record<string, string | readonly string[] | undefined>>; readonly body: string };
 type Sent = { readonly method?: string; readonly cookie?: string; readonly token?: string; readonly host?: string; readonly origin?: string; readonly body?: unknown; readonly accept?: string };
 const call = (port: number, path: string, options: Sent = {}): Promise<Answer> => new Promise((resolve, reject) => {
   const sent = request({ host: "127.0.0.1", port, path, method: options.method ?? "GET", headers: {

@@ -27,6 +27,36 @@ runs. Any other branch, tag or commit can be deployed on demand
 A service you remove from your compose files is removed from the server by the
 next deploy.
 
+## An existing project
+
+A project that already runs with Docker Compose, or from a single Dockerfile,
+gets its contract written for it, once:
+
+```bash
+npx @yunuseon/kayra app init         # or: kayra app init [dir] [--name NAME]
+```
+
+It leaves the project's own files as they are and writes:
+
+- `app.yml`: the project's compose file plus `kayra/compose.yml`; a route per
+  service that publishes a port (the service's name as the host); and every
+  variable the compose file needs without a default, and every key of its
+  `env_file`s (never their values), as `secrets` when the name looks secret
+  (`PASSWORD`, `TOKEN`, `KEY`, …) and `config` otherwise;
+- `kayra/compose.yml`, an overlay that uses Compose's `!reset` and `!override`
+  to drop what the platform does instead (`build`, `ports`, `env_file`,
+  `container_name`), gives each built service its image variable and a
+  `mem_limit` of 512m if it had none, and turns bind mounts of directories into
+  named volumes, which start empty on the server;
+- `kayra/<service>/docker/image.json` for each service the project builds.
+
+Then it runs [the check](#check-before-you-push), and says what is left for a
+person: a bind mount of a single file, a key the policy refuses
+(`privileged`, `cap_add`, …), build `args`, a service without a healthcheck.
+A project with only a Dockerfile becomes one service, `web`, on `www` at the
+port it `EXPOSE`s. Review the files, commit them, and set the values with
+`kayra app config set` and `kayra app secret import|generate`.
+
 ## Check before you push
 
 In the app's repository, with Node 24, `git`, `jq`, `yq` and the Docker CLI

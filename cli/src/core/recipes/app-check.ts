@@ -16,6 +16,20 @@ const tool = (program: string, hint: string) => onPath(`${program} is installed`
  * image plan and the compose policy, the same scripts the builder and the
  * deployer run). Needs no fleet and no server.
  */
+/**
+ * In an existing project without app.yml: what app init writes (app.yml, an
+ * overlay of the project's compose file, an image manifest per built service),
+ * then the same check as app check, which names what is left to do.
+ */
+export const appInit = (kayra: KayraRoot, root: AbsolutePath, name: string | undefined) => typed<Plan>([
+  tool("git", "brew install git"),
+  tool("jq", "brew install jq"),
+  tool("yq", "brew install yq"),
+  tool("docker", "the docker CLI with Compose; no daemon is needed"),
+  run("Write app.yml and the platform's overlay", [process.execPath, within(kayra, "bin", "kayra-app-init.js"), JSON.stringify({ root, ...(name === undefined ? {} : { name }) })]),
+  run("Image plan and compose policy", ["bash", within(kayra, "scripts", "local", "app-check.sh"), root]),
+]);
+
 export const appCheck = (kayra: KayraRoot, root: AbsolutePath, manifest: string | undefined) => {
   if (manifest === undefined) return err(`no app.yml in ${root}`);
   const shaped = flatMap(

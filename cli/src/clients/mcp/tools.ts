@@ -26,6 +26,7 @@ export const reaches = {
   down: { tool: "down" },
   adopt: { tool: "adopt" },
   "backup.test": { tool: "backup_test" },
+  "app.init": { tool: "app_init" },
   "app.check": { tool: "app_check" },
   "app.values": { tool: "app_values" },
   "app.config.set": { tool: "app_config_set" },

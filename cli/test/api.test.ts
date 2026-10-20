@@ -129,7 +129,7 @@ const samples = {
   "app.config.set": { server: "lab", app: "shop", dir: "app", key: "FLAG", value: "on" },
   "app.secret.import": { server: "lab", app: "shop", dir: "app", key: "PASSWORD", file: "/tmp/secret" },
   "app.secret.generate": { server: "lab", app: "shop", dir: "app", key: "PASSWORD" },
-  "app.check": { dir: "app" }, "app.purge": { server: "lab", app: "shop" }, "app.runs": { server: "lab", app: "shop" }, "app.log": { server: "lab", app: "shop" }, "app.releases": { server: "lab", app: "shop" },
+  "app.init": { dir: "app" }, "app.check": { dir: "app" }, "app.purge": { server: "lab", app: "shop" }, "app.runs": { server: "lab", app: "shop" }, "app.log": { server: "lab", app: "shop" }, "app.releases": { server: "lab", app: "shop" },
   "app.deploy": { server: "lab", app: "shop" }, "app.rollback": { server: "lab", app: "shop", sha: "0123abc" }, job: { server: "lab", job: "gc" },
   certs: { domain: "fixture.test" }, doctor: {}, validate: {}, status: { offline: true }, version: {},
 } satisfies Readonly<Record<OperationName, unknown>>;

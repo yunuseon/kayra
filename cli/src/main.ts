@@ -94,7 +94,7 @@ const execute = async (steps: Plan, about: Heading, framing: boolean) => {
 };
 
 const found = flatMap(findFleetRoot(here.value), loadFleet);
-// Outside a fleet only what works in an app's repository runs (app check).
+// Outside a fleet only what works in an app's repository runs (app init, app check).
 const fleet: Fleet = found.ok ? found.value : { root: fleetRoot(here.value), servers: [] };
 const args = run(parser(fleet), runOptions(version));
 const short = shortener([

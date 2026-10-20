@@ -54,7 +54,7 @@ has not ended is refused. Cancelling a call stops its step, as Ctrl-C does.
 | A tool that changes nothing (`status`, `validate`, `verify`, `plan`, `doctor`, `version`, `app_check`, `app_values`, `app_runs`, `app_log`, `app_releases`) | Runs |
 | `dryRun: true` | Runs; changes nothing |
 | A change to a multipass server | Runs |
-| A change to any other server, with no server (`certs`), or to the fleet's files alone (`app_config_set`, `app_secret_import`, `app_secret_generate`) | As Claude Code's permission mode decides |
+| A change to any other server, with no server (`certs`, `app_init`), or to the fleet's files alone (`app_config_set`, `app_secret_import`, `app_secret_generate`) | As Claude Code's permission mode decides |
 | `down`, `app_purge` | Claude Code asks every time, in every mode, with no "always allow" |
 | `down` on a Hetzner server | Also asks the operator, in a dialog, to type the server's name. The agent never sees what was typed |
 

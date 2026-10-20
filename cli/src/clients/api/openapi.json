@@ -2458,6 +2458,192 @@
         }
       }
     },
+    "/operations/app.init": {
+      "post": {
+        "summary": "Make an existing project with a compose file or Dockerfile deployable: write app.yml and the platform's overlay, then check it.",
+        "operationId": "app.init",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "dir": {
+                        "default": ".",
+                        "description": "The project's repository",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "description": "The app's name; the directory's by default",
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.init/preview": {
+      "post": {
+        "summary": "Preview: Make an existing project with a compose file or Dockerfile deployable: write app.yml and the platform's overlay, then check it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "dir": {
+                        "default": ".",
+                        "description": "The project's repository",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "description": "The app's name; the directory's by default",
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/operations/app.check": {
       "post": {
         "summary": "What the platform checks at deploy (app.yml, images, compose policy), in an app's repository. No fleet needed.",
@@ -7509,6 +7695,7 @@
               "down",
               "adopt",
               "backup.test",
+              "app.init",
               "app.check",
               "app.values",
               "app.config.set",

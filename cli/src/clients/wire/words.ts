@@ -23,6 +23,8 @@ const extra = (call: Invocation) => {
       return call.input.run === undefined ? [] : [call.input.run];
     case "app.check":
       return [call.input.dir];
+    case "app.init":
+      return [call.input.dir, ...(call.input.name === undefined ? [] : ["--name", call.input.name])];
     case "certs":
       return [call.input.domain, ...call.input.subdomains];
     case "up":

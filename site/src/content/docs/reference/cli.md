@@ -191,6 +191,7 @@ checkout not yet cloned there. A key `app.yml` does not declare is refused.
 
 | Command | What it does |
 |---|---|
+| `kayra app init [dir] [--name NAME]` | Make an existing compose or Dockerfile project deployable: writes `app.yml`, an overlay and its image manifests, leaving its own files alone, then checks them. Needs no fleet; see [an existing project](../../concepts/app-contract/#an-existing-project) |
 | `kayra app check [dir]` | What the platform checks at deploy: `app.yml`, images, the compose policy. Needs no fleet; see [the app contract](../../concepts/app-contract/#check-before-you-push) |
 
 ## Fleet-wide

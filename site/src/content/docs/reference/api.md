@@ -414,6 +414,27 @@ Preview: `POST /api/operations/backup.test/preview`. Returns a JSON plan with st
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.init`
+
+Make an existing project with a compose file or Dockerfile deployable: write app.yml and the platform's overlay, then check it.
+
+`POST /api/operations/app.init`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `dir` | `string` | no | `"."` | The project's repository Minimum length: 1. |
+| `name` | `string` | no | — | The app's name; the directory's by default Minimum length: 1. |
+
+Preview: `POST /api/operations/app.init/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.check`
 
 What the platform checks at deploy (app.yml, images, compose policy), in an app's repository. No fleet needed.

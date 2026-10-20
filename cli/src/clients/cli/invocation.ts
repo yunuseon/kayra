@@ -27,6 +27,8 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "backup.test", input: { server: command.server } });
     case "ssh":
       return plainly(command.remote.length === 0 ? { name: "ssh", input: { server: command.server } } : { name: "ssh.exec", input: { server: command.server, command: command.remote } });
+    case "app init":
+      return plainly({ name: "app.init", input: { dir: command.dir ?? ".", ...(command.appName === undefined ? {} : { name: command.appName }) } });
     case "app check":
       return plainly({ name: "app.check", input: { dir: command.dir ?? "." } });
     case "app values":
@@ -84,6 +86,7 @@ export const reaches = {
   down: ["down", "SERVER"],
   adopt: ["adopt", "SERVER"],
   "backup.test": ["backup", "test", "SERVER"],
+  "app.init": ["app", "init", ".", "--name", "shop"],
   "app.check": ["app", "check", "."],
   "app.values": ["app", "values", "SERVER", "APP"],
   "app.config.set": ["app", "config", "set", "SERVER", "APP", "PUBLIC_URL", "https://example.com"],

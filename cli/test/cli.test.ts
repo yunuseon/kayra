@@ -81,7 +81,7 @@ test("a command's help: what it does, its arguments with the fleet's servers, ex
     ok(help.out.includes("\nExamples:\n  kayra deploy shop-prod            after a new kayra or a fleet change\n"), help.out);
     ok(help.out.endsWith("\n\nDocs: <https://yunuseon.github.io/kayra/>"), help.out);
   }
-  ok(kayra("app", "--help").out.includes("\nIn an app's repository:\n  check "));
+  ok(kayra("app", "--help").out.includes("\nIn an app's repository:\n  init "));
   ok(kayra("job", "--help").out.includes("JOB            Which job (choices: gc, renovate)"));
 });
 

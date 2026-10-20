@@ -137,6 +137,16 @@ export const operations = {
     scope: "app", effect: "changes", kind: "plan", local: true,
     input: z.strictObject({ server, app, dir, key: valueKeySchema }),
   },
+  "app.launch": {
+    summary: "From a repository to a URL that answers: register the app, check its values, apply the apps, deploy and follow it. Run it again after a stop.",
+    scope: "app", effect: "changes", kind: "plan",
+    input: z.strictObject({
+      server, app, dir,
+      repo: z.string().min(1).optional().describe("The app's repository, https://; needed until server.yml registers it"),
+      ref: z.string().min(1).optional().describe("The branch that deploys (default main)"),
+      path: z.string().min(1).optional().describe("The app's root inside the repository (default .)"),
+    }),
+  },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
   "app.runs": {
     summary: "What runs now, and the app's latest runs: state, commit, why, when, how long.",

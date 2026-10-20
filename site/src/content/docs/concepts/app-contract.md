@@ -78,7 +78,9 @@ config: [FEATURE_FLAGS]        # same, but not secret
 - Every name in `secrets` and `config` needs a value from the operator for each
   environment, or registering the app fails. Changing these lists, or adding
   a host to `routes`, needs the operator to re-register the app; compose
-  files, code and the rest of `routes` do not.
+  files, code and the rest of `routes` do not. `kayra app values` lists what
+  is still missing; `app config set`, `app secret import` and
+  `app secret generate` fill it in ([CLI](../../reference/cli/#an-apps-values)).
 - `secrets` reach the deploy as environment variables of the same name —
   reference them in compose as `${DATABASE_PASSWORD:?}`. `config` values and
   `DOMAIN` are available the same way.

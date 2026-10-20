@@ -159,6 +159,18 @@ if (args.command.name === "mcp") {
         ).forEach(io.out);
         break;
       }
+      case "app.values": {
+        const values = await query(context, "app.values", call.input);
+        if (!values.ok) fail(values.error);
+        else if (json) io.out(JSON.stringify(values.value, null, 2));
+        else {
+          io.out(`${values.value.app} on ${values.value.server} · cached contract: ${values.value.manifest}`);
+          values.value.config.forEach((each) => { io.out(`config  ${each.key}: ${each.state}`); });
+          values.value.secrets.forEach((each) => { io.out(`secret  ${each.key}: ${each.state}`); });
+          if (values.value.hint !== null) io.out(values.value.hint);
+        }
+        break;
+      }
       case "validate": {
         const reports = await query(context, "validate", call.input);
         if (!reports.ok) fail(reports.error);

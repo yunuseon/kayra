@@ -330,6 +330,7 @@ verified="$(kayra_cmd deploy "$server" 2>&1)" || { printf '%s\n' "$verified" >> 
 printf '%s\n' "$verified" >> "$log"
 grep -q "webhooks are off: /hook is not served" <<< "$verified" || die "verify does not see /hook gone"
 echo "✓ webhooks: false serves no /hook, and verify knows it"
+yq -i 'del(.services.web.volumes)' "${repo}/deploy/compose.yml"
 echo v4 > "${repo}/web/index.html"
 commit v4
 before="$run"

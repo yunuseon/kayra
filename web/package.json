@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .",
+    "lint": "NODE_ENV=test ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .",
     "test": "vitest run"
   },
   "dependencies": {

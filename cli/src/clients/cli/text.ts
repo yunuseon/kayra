@@ -43,18 +43,21 @@ export const ago = (ms: Milliseconds) => {
   return hours < 48 ? `${String(hours)}h ago` : `${String(Math.floor(hours / 24))}d ago`;
 };
 
-/** Rows of cells in columns as wide as their widest cell, two spaces apart; nothing trails a row's last cell. */
+/** A table's rows, each a line per cell. */
+export type Rows = readonly (readonly Line[])[];
+
 /** Each column as wide as its widest cell. */
-const columnWidths = (rows: readonly (readonly Line[])[]) =>
+const columnWidths = (rows: Rows) =>
   rows.reduce<readonly number[]>(
     (most, row) => Object.freeze(Array.from({ length: Math.max(most.length, row.length) }, (_, at) => Math.max(most[at] ?? 0, width(row[at] ?? [])))),
     [],
   );
 
-export const table = (rows: readonly (readonly Line[])[]) => {
+/** Rows of cells in columns as wide as their widest cell, two spaces apart; nothing trails a row's last cell. */
+export const table = (rows: Rows) => {
   const filled = rows.map((row) => Object.freeze(row.slice(0, row.findLastIndex((cell) => width(cell) > 0) + 1)));
   const widths = columnWidths(filled);
-  return Object.freeze(filled.map((row) =>
+  return typed<readonly Line[]>(filled.map((row) =>
     Object.freeze(row.flatMap((cell, at) => (at === row.length - 1 ? cell : typed<Line>([...cell, " ".repeat((widths[at] ?? 0) - width(cell) + 2)])))),
   ));
 };
@@ -64,7 +67,7 @@ export const table = (rows: readonly (readonly Line[])[]) => {
  * `shrink` cut, in that order, each to no less than its first row's (the
  * heading's) width.
  */
-export const fit = (rows: readonly (readonly Line[])[], room: number, shrink: readonly number[]) => {
+export const fit = (rows: Rows, room: number, shrink: readonly number[]) => {
   const widths = columnWidths(rows);
   const over = widths.reduce((sum, each) => sum + each, 0) + 2 * Math.max(0, widths.length - 1) - room;
   const cut = shrink.reduce<{ readonly widths: readonly number[]; readonly over: number }>(
@@ -75,7 +78,7 @@ export const fit = (rows: readonly (readonly Line[])[], room: number, shrink: re
     },
     { widths, over },
   ).widths;
-  return Object.freeze(rows.map((row) => Object.freeze(row.map((cell, at) => truncate(cell, cut[at] ?? width(cell))))));
+  return typed<Rows>(rows.map((row) => Object.freeze(row.map((cell, at) => truncate(cell, cut[at] ?? width(cell))))));
 };
 
 /** Paths by the root they are under, the longest first: the engine may live inside the fleet. */

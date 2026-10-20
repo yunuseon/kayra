@@ -22,7 +22,7 @@ export const ranked = <T extends Choice>(choices: readonly T[], query: string) =
   Object.freeze(choices
     .flatMap((choice) => {
       const scored = score(`${choice.label} ${choice.hint}`, query);
-      return scored === undefined ? Object.freeze([]) : Object.freeze([{ choice, scored }]);
+      return scored === undefined ? Object.freeze([]) : Object.freeze([{ choice, scored } as const]);
     })
     .toSorted((a, b) => a.scored - b.scored)
     .map((each) => each.choice));

@@ -37,7 +37,7 @@
     "build:web": "npm --prefix web ci --silent && npm --prefix web run build -- --outDir ../cli/dist/browser --emptyOutDir",
     "prepack": "npm run build && npm run build:web",
     "typecheck": "tsc -p cli --noEmit",
-    "lint": "cd cli && eslint --flag unstable_native_nodejs_ts_config .",
+    "lint": "cd cli && NODE_ENV=test eslint --flag unstable_native_nodejs_ts_config .",
     "test": "node --test 'cli/test/**/*.test.ts'",
     "schemas": "node cli/scripts/schemas.ts",
     "contract": "node cli/scripts/contract.ts",

@@ -50,7 +50,7 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
   mkdirSync(join(engine, "scripts/local"), { recursive: true });
   mkdirSync(bin);
   mkdirSync(join(dir, "app"));
-  writeFileSync(join(dir, "app/app.yml"), "name: shop\ncompose: [deploy/compose.yml]\n");
+  writeFileSync(join(dir, "app/app.yml"), "name: shop\ncompose: [deploy/compose.yml]\nconfig: [FLAG]\nsecrets: [PASSWORD]\n");
   ["require-main.sh", "require-latest-state.sh", "home-reach.sh", "certs.sh", "app-check.sh"].forEach((name) => { writeFileSync(join(engine, "scripts/local", name), "exit 0\n"); });
   const program = (name: string, text: string): void => { writeFileSync(join(bin, name), `#!/bin/sh\n${text}\n`, { mode: 0o700 }); };
   program("ansible-galaxy", "exit 0");
@@ -125,6 +125,10 @@ test("run records retain their history and session identity, and only live runs 
 const samples = {
   up: { server: "lab" }, provision: { server: "lab" }, deploy: { server: "lab" }, setup: { server: "lab" }, plan: { server: "lab" }, verify: { server: "lab" }, apps: { server: "lab" }, hosts: { server: "lab" },
   down: { server: "lab" }, adopt: { server: "prod" }, "backup.test": { server: "lab" }, ssh: { server: "lab" }, "ssh.exec": { server: "lab", command: ["uptime"] },
+  "app.values": { server: "lab", app: "shop", dir: "app" },
+  "app.config.set": { server: "lab", app: "shop", dir: "app", key: "FLAG", value: "on" },
+  "app.secret.import": { server: "lab", app: "shop", dir: "app", key: "PASSWORD", file: "/tmp/secret" },
+  "app.secret.generate": { server: "lab", app: "shop", dir: "app", key: "PASSWORD" },
   "app.check": { dir: "app" }, "app.purge": { server: "lab", app: "shop" }, "app.runs": { server: "lab", app: "shop" }, "app.log": { server: "lab", app: "shop" }, "app.releases": { server: "lab", app: "shop" },
   "app.deploy": { server: "lab", app: "shop" }, "app.rollback": { server: "lab", app: "shop", sha: "0123abc" }, job: { server: "lab", job: "gc" },
   certs: { domain: "fixture.test" }, doctor: {}, validate: {}, status: { offline: true }, version: {},

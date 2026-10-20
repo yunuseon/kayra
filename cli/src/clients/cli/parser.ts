@@ -82,6 +82,7 @@ export const parser = (fleet: Fleet) => {
     first === undefined ? serverNameParser : choice([first, ...rest], { metavar: "SERVER", suggest: "nearest" }),
     { description: message`A server` },
   );
+  const valuesDir = optional(option("--dir", string({ metavar: "DIR" }), { description: message`Local app directory; otherwise use the fleet cache.` }));
   const app = argument(appNameParser, { description: message`An app in the server's server.yml.` });
   const onServer = <const N extends string>(name: N, brief: Message, more: { readonly description?: Message; readonly footer?: Message } = {}) =>
     command(name, object({ name: constant(name), server }), { brief, ...more });
@@ -175,6 +176,18 @@ export const parser = (fleet: Fleet) => {
                 group(
                   "On a server",
                   or(
+                    command("values", object({ name: constant("app values"), server, app, dir: valuesDir, json: option("--json") }), { brief: summary("app.values") }),
+                    command("config", command("set", object({
+                      name: constant("app config set"), server, app, dir: valuesDir,
+                      key: argument(string({ metavar: "KEY" })), value: argument(string({ metavar: "VALUE" })),
+                    }), { brief: summary("app.config.set") })),
+                    command("secret", or(
+                      command("import", object({
+                        name: constant("app secret import"), server, app, dir: valuesDir,
+                        key: argument(string({ metavar: "KEY" })), file: argument(string({ metavar: "FILE" })),
+                      }), { brief: summary("app.secret.import") }),
+                      command("generate", object({ name: constant("app secret generate"), server, app, dir: valuesDir, key: argument(string({ metavar: "KEY" })) }), { brief: summary("app.secret.generate") }),
+                    )),
                     command("purge", object({ name: constant("app purge"), server, app }), {
                       brief: summary("app.purge"),
                     }),

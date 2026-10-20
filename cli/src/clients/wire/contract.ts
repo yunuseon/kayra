@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { operations, operationNames } from "../../core/operations/catalog.ts";
+import { operations, operationNames, operation } from "../../core/operations/catalog.ts";
 import { options, schemas } from "./schemas.ts";
 import { typed } from "../../lib/typed.ts";
 
 export const catalog = () => Object.freeze(operationNames.map((name) => {
   const { summary, scope, effect, kind, input } = operations[name];
-  return { name, summary, scope, effect, kind, input: z.toJSONSchema(input, { io: "input" }) } as const;
+  return { name, summary, scope, effect, kind, local: operation(name).local === true, input: z.toJSONSchema(input, { io: "input" }) } as const;
 }));
 
 type Schema = Readonly<Record<string, unknown>>;

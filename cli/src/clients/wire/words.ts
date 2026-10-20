@@ -3,6 +3,14 @@ import type { Invocation } from "../../core/operations/catalog.ts";
 /** What follows the server and the app on the command line, by operation. */
 const extra = (call: Invocation) => {
   switch (call.name) {
+    case "app.config.set":
+      return [call.input.key, call.input.value, ...(call.input.dir === undefined ? [] : ["--dir", call.input.dir])];
+    case "app.secret.import":
+      return [call.input.key, call.input.file, ...(call.input.dir === undefined ? [] : ["--dir", call.input.dir])];
+    case "app.secret.generate":
+      return [call.input.key, ...(call.input.dir === undefined ? [] : ["--dir", call.input.dir])];
+    case "app.values":
+      return call.input.dir === undefined ? [] : ["--dir", call.input.dir];
     case "ssh.exec":
       return ["--", ...call.input.command];
     case "job":

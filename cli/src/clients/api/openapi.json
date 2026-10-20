@@ -2634,6 +2634,827 @@
         }
       }
     },
+    "/operations/app.values": {
+      "post": {
+        "summary": "Which configuration and secrets app.yml declares, and whether each has a value; never the values.",
+        "operationId": "app.values",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      },
+                      "dir": {
+                        "description": "Local app directory containing app.yml; otherwise use the fleet cache",
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Which configuration and secrets app.yml declares, and whether each has a value; never the values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "server": {
+                      "type": "string"
+                    },
+                    "app": {
+                      "type": "string"
+                    },
+                    "manifest": {
+                      "type": "string"
+                    },
+                    "config": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "set",
+                              "missing",
+                              "locked"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "state"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "secrets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "set",
+                              "missing",
+                              "locked"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "state"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hint": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "server",
+                    "app",
+                    "manifest",
+                    "config",
+                    "secrets",
+                    "hint"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/app.config.set": {
+      "post": {
+        "summary": "Prepare a declared configuration value in the local fleet; apply separately with apps.",
+        "operationId": "app.config.set",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      },
+                      "dir": {
+                        "description": "Local app directory containing app.yml; otherwise use the fleet cache",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app",
+                      "key",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.config.set/preview": {
+      "post": {
+        "summary": "Preview: Prepare a declared configuration value in the local fleet; apply separately with apps.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      },
+                      "dir": {
+                        "description": "Local app directory containing app.yml; otherwise use the fleet cache",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app",
+                      "key",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/app.secret.import": {
+      "post": {
+        "summary": "Import a declared secret from a local file into the fleet vault; never print its value.",
+        "operationId": "app.secret.import",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      },
+                      "dir": {
+                        "description": "Local app directory containing app.yml; otherwise use the fleet cache",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Local file containing the secret, not YAML; one trailing newline is removed"
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app",
+                      "key",
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.secret.import/preview": {
+      "post": {
+        "summary": "Preview: Import a declared secret from a local file into the fleet vault; never print its value.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      },
+                      "dir": {
+                        "description": "Local app directory containing app.yml; otherwise use the fleet cache",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Local file containing the secret, not YAML; one trailing newline is removed"
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app",
+                      "key",
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/app.secret.generate": {
+      "post": {
+        "summary": "Generate a 32-byte random secret in the fleet only if missing; preserve existing values.",
+        "operationId": "app.secret.generate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      },
+                      "dir": {
+                        "description": "Local app directory containing app.yml; otherwise use the fleet cache",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app",
+                      "key"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.secret.generate/preview": {
+      "post": {
+        "summary": "Preview: Generate a 32-byte random secret in the fleet only if missing; preserve existing values.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      },
+                      "dir": {
+                        "description": "Local app directory containing app.yml; otherwise use the fleet cache",
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app",
+                      "key"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/operations/app.purge": {
       "post": {
         "summary": "Delete a removed app's volumes: its data, irreversibly.",
@@ -6405,6 +7226,83 @@
         ],
         "additionalProperties": false
       },
+      "AppValues": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string"
+          },
+          "manifest": {
+            "type": "string"
+          },
+          "config": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "set",
+                    "missing",
+                    "locked"
+                  ]
+                }
+              },
+              "required": [
+                "key",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "set",
+                    "missing",
+                    "locked"
+                  ]
+                }
+              },
+              "required": [
+                "key",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "hint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "server",
+          "app",
+          "manifest",
+          "config",
+          "secrets",
+          "hint"
+        ],
+        "additionalProperties": false
+      },
       "AppRuns": {
         "type": "object",
         "properties": {
@@ -6540,6 +7438,10 @@
               "adopt",
               "backup.test",
               "app.check",
+              "app.values",
+              "app.config.set",
+              "app.secret.import",
+              "app.secret.generate",
               "app.purge",
               "app.runs",
               "app.log",
@@ -6583,6 +7485,9 @@
               "session"
             ]
           },
+          "local": {
+            "type": "boolean"
+          },
           "input": {
             "type": "object",
             "propertyNames": {
@@ -6597,6 +7502,7 @@
           "scope",
           "effect",
           "kind",
+          "local",
           "input"
         ],
         "additionalProperties": false

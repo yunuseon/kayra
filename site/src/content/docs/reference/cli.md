@@ -152,6 +152,23 @@ A run started while one runs for the same app waits for it; of several waiting,
 only the newest runs. The runs and their logs are also at
 `https://deploy.<domain>/`, behind the staff login.
 
+## An app's values
+
+What an app's `app.yml` declares in `config` and `secrets`, set in the fleet's
+`apps/<app>.yml` and `apps/<app>.secrets.yml` (vaulted where the server's
+secrets are). These edit files on this machine only: review the change, then
+`kayra apps <server>` applies it, from `main` on a hetzner or home server.
+
+| Command | What it does |
+|---|---|
+| `kayra app values <server> <app> [--dir DIR] [--json]` | Each declared key: `set`, `missing`, or `locked` (a vault that cannot be opened without a prompt). Never a value |
+| `kayra app config set <server> <app> KEY VALUE [--dir DIR]` | A declared configuration value, in plaintext |
+| `kayra app secret import <server> <app> KEY FILE [--dir DIR]` | A declared secret from a file (one trailing newline dropped), so it is in no argument, log or run record |
+| `kayra app secret generate <server> <app> KEY [--dir DIR]` | 32 random bytes, hex, only if the key has no value yet: a retry keeps it |
+
+`app.yml` is read from the app's clone in `.cache/`, or from `--dir`, an app
+checkout not yet cloned there. A key `app.yml` does not declare is refused.
+
 ## In an app's repository
 
 | Command | What it does |

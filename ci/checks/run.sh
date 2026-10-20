@@ -105,13 +105,13 @@ ansible_output() { bash "$E/ci/tests/ansible-output/run.sh"; }
 
 # The kayra CLI: strictest types, its lint rules, its tests.
 cli_typecheck() { (cd "$E" && node_modules/.bin/tsc -p cli --noEmit); }
-cli_lint() { (cd "$E/cli" && NODE_ENV=test ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
+cli_lint() { (cd "$E/cli" && env NODE_ENV=test ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
 cli_test() { (cd "$E" && node --test 'cli/test/**/*.test.ts'); }
 
 # kayra ui's browser side (web/): the same strictness, its own tests, and that it builds.
 # Its lint tooling is the CLI's, from the root's node_modules.
 web_typecheck() { (cd "$E/web" && node_modules/.bin/tsc --noEmit); }
-web_lint() { (cd "$E/web" && NODE_ENV=test ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
+web_lint() { (cd "$E/web" && env NODE_ENV=test ../node_modules/.bin/eslint --flag unstable_native_nodejs_ts_config .); }
 web_test() { (cd "$E/web" && node_modules/.bin/vitest run); }
 web_build() { (cd "$E/web" && node_modules/.bin/vite build --outDir "$(mktemp -d)" --emptyOutDir); }
 

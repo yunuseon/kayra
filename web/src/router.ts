@@ -47,3 +47,30 @@ export const href = (route: Route) => {
       return route.path;
   }
 };
+
+/** Where a page sits, for the breadcrumb: each step back a link, the page itself the last. */
+export type Crumb = { readonly label: string; readonly to?: Route };
+
+export const trail = (route: Route) => {
+  const servers = typed<Crumb>({ label: "servers", to: { page: "fleet" } });
+  const runs = typed<Crumb>({ label: "runs", to: { page: "runs" } });
+  const tail = (id: string) => id.split("-").at(-1) ?? id;
+  switch (route.page) {
+    case "fleet":
+      return typed<readonly Crumb[]>([{ label: "overview" }]);
+    case "server":
+      return typed<readonly Crumb[]>([servers, { label: route.server }]);
+    case "app":
+      return typed<readonly Crumb[]>([servers, { label: route.server, to: { page: "server", server: route.server } }, { label: route.app }]);
+    case "runs":
+      return typed<readonly Crumb[]>([{ label: "runs" }]);
+    case "run":
+      return typed<readonly Crumb[]>([runs, { label: tail(route.id) }]);
+    case "session":
+      return typed<readonly Crumb[]>([runs, { label: `session ${tail(route.id)}` }]);
+    case "validate":
+      return typed<readonly Crumb[]>([{ label: "validate" }]);
+    case "missing":
+      return typed<readonly Crumb[]>([{ label: route.path }]);
+  }
+};

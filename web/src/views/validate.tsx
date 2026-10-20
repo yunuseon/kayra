@@ -1,6 +1,6 @@
 import { useEffect } from "preact/hooks";
 import type { Validation } from "../../../cli/src/clients/wire/contract.gen.ts";
-import { Dot, Header, Pill, Problem, Waiting } from "../components/ui.tsx";
+import { Dot, Header, Pill, Problem, Tag, Waiting } from "../components/ui.tsx";
 import { loadValidation, validation } from "../state.ts";
 
 type Verdict = Validation["result"];
@@ -21,12 +21,13 @@ export const ValidateView = () => {
   return (
     <>
       <Header
-        title="Validate"
+        kicker="fleet"
+        title="validate"
+        tag={<Tag word={result === "problem" ? "FAIL" : result === "unchecked" ? "PART" : "OK"} tone={tone(result)} />}
         sub={`Secrets, apps against their contract, stacks, routes · ${String(count("problem"))} problems · ${String(count("unchecked"))} not checked`}
       >
-        <Pill tone={tone(result)}>{words[result]}</Pill>
-        <button class="button" onClick={() => void loadValidation()}>
-          Check again
+        <button type="button" class="button" onClick={() => void loadValidation()}>
+          check again<span class="aside">read only</span>
         </button>
       </Header>
       {servers.map((server) => (

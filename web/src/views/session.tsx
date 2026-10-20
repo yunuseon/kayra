@@ -110,7 +110,7 @@ export const SessionView = ({ id }: { readonly id: string }) => {
   };
   return (
     <>
-      <Header title={invocation?.command ?? "SSH terminal"} sub="120 columns × 32 rows">
+      <Header kicker="ssh session" title={<code>{invocation?.command ?? "kayra ssh"}</code>} sub="120 columns × 32 rows">
         <Pill tone={state === "running" ? "active" : state === "passed" ? "ok" : "warn"}>{state}</Pill>
         {state === "running" ? (
           <button

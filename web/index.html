@@ -5,7 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>kayra</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b5bd6'/%3E%3Cpath d='M11 8v16M11 16l9-8M14 13l7 11' stroke='white' stroke-width='3' stroke-linecap='round' fill='none'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Crect width='22' height='22' rx='5' fill='%237c5cf0'/%3E%3Cpath d='M6.5 7l4 4-4 4M12 15.5h4' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
+    <!-- The theme this browser chose, before the first paint (src/theme.ts reads the same key). -->
+    <script>
+      try {
+        const chosen = localStorage.getItem("kayra.theme");
+        if (chosen === "dark" || chosen === "light") document.documentElement.setAttribute("data-theme", chosen);
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

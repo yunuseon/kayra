@@ -13,14 +13,26 @@ kayra serve --port 7700 --no-open   # prints the URL instead
 kayra serve --ui --api              # browser and local program API
 ```
 
+It looks like a terminal on purpose: commands, names and logs in a monospaced
+face, sentences meant for a person in a proportional one, and every state said
+by a word and a glyph, not by colour alone (`[  OK  ]`, `[BEHIND]`, ✓, ✕, ▲).
+It comes in a dark and a light theme: it follows the system until the toggle
+in the top bar picks one, which this browser then keeps. A status line at the
+bottom says which fleet and kayra this is and how many servers answer.
+
 ## What it shows
 
-- **Fleet:** every server as a card: kind, target, domain, its address, and
-  live answers from SSH and, on platform servers, the login (Authelia), and
-  which kayra set it up (marked where it is not the fleet's pin), as
-  `kayra status` asks them.
-- **A server:** the same facts, its apps, the commands it offers (deploy,
-  apps, verify, setup, plan, …, down), and the runs started from here.
+- **Fleet:** a row per server with its state in brackets, kind, target,
+  domain, its address, live answers from SSH and, on platform servers, the
+  login (Authelia), which kayra set it up (marked where it is not the fleet's
+  pin), as `kayra status` asks them, its last runs from here as a strip, and
+  `plan` and `deploy` or `setup` beside it. Above them a few totals; below, the
+  journal of recent runs and **needs you**: servers that do not answer, SSH
+  that is off, servers behind the pin (with the command that records it), last
+  runs that failed, and runs still going.
+- **A server:** the same facts, the same notes for it alone, its apps, the
+  commands it offers (deploy, apps, verify, setup, plan, …, down), and the
+  runs started from here.
 - **An app:** its runs on the server (state, commit, why, when, how long),
   its releases with the live one marked and a rollback for each other one,
   and a run's log with errors and warnings marked. Deploy a branch, tag or
@@ -45,10 +57,16 @@ Status offers **offline**, and the Renovate job offers **noPrs**. Array inputs,
 including SSH command arguments, take one item per line and preserve spaces
 within each item. Queries show their answers in the form.
 
-**Run** starts a plan. Then the run's page shows:
-- each step as it runs, with its time
-- its output, Ansible's colours included
-- a failed step opened, with what it said
+The plan lists each step with a glyph for its kind: ◆ a guard that stops the
+plan, ◇ a check, ? a confirmation, ❯ a run. **Run** starts it; on a real
+server the button reads **approve · kayra deploy alaz** and stays off until
+the server's name is typed. Then the run's page shows:
+- a bar with a segment per step, and the time it has taken
+- the steps beside the log, each with its state and time; choosing one shows
+  only its output
+- the log as the terminal prints it, Ansible's colours included, following
+  new output until you scroll up
+- where it stopped and why, when it failed or was stopped
 - the footer naming the command that reruns a failed part alone
 
 **Stop** sends the running program SIGINT, as Ctrl-C does on the terminal.

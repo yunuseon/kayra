@@ -1,9 +1,15 @@
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
+import "@fontsource/jetbrains-mono/700.css";
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/600.css";
 import { render } from "preact";
 import { useEffect } from "preact/hooks";
-import { Palette, openPalette } from "./components/palette.tsx";
-import { OperationSheet, show } from "./components/operation.tsx";
+import { Palette } from "./components/palette.tsx";
+import { OperationSheet } from "./components/operation.tsx";
 import { Shell } from "./components/shell.tsx";
-import { loadCatalog, loadFleet, refreshStatus, route } from "./state.ts";
+import { follow, loadCatalog, loadFleet, refreshStatus, route } from "./state.ts";
 import "./styles.css";
 import { AppView } from "./views/app.tsx";
 import { FleetView } from "./views/fleet.tsx";
@@ -40,19 +46,11 @@ const App = () => {
     void loadFleet();
     void loadCatalog();
     refreshStatus();
+    return follow();
   }, []);
   return (
     <>
       <Shell>
-        <div class="topbar">
-          <button class="search" onClick={openPalette}>
-            <span>Go to, or run…</span>
-            <kbd>⌘K</kbd>
-          </button>
-          <button class="button" onClick={() => { show({ name: "doctor" }); }}>
-            Doctor
-          </button>
-        </div>
         <Page />
       </Shell>
       <OperationSheet />

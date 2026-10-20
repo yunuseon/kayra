@@ -6,7 +6,7 @@ import type { CommandInput } from "../commands.ts";
 import { defaults, fields, inputOf, reaches, type Draft, type Field, type Values } from "../operations.ts";
 import { catalog, fleet, go } from "../state.ts";
 import { DirectoryPicker } from "./directory.tsx";
-import { Pill, Problem, Waiting } from "./ui.tsx";
+import { Effect, Problem, Waiting } from "./ui.tsx";
 
 const selection = signal<Draft | undefined>(undefined);
 export const openOperation = (name: OperationName, input: Readonly<Record<string, unknown>> = {}) => {
@@ -19,16 +19,42 @@ const close = () => {
   selection.value = undefined;
 };
 
-const Step = ({ step }: { readonly step: Listed }) => (
-  <li class="plan-step">
-    <span class="plan-index">{step.index + 1}</span>
-    <div>
-      <div class="plan-title">
-        <Pill tone={step.kind === "guard" ? "warn" : step.kind === "confirm" ? "bad" : "active"}>{step.kind}</Pill> {step.title}
-      </div>
-      {step.command === undefined ? null : <code class="plan-command">{step.command}</code>}
-    </div>
-  </li>
+/** A step's kind as a glyph: a guard stops the plan, a confirmation asks, a run changes. */
+const kinds: Readonly<Record<string, { readonly glyph: string; readonly tone: string }>> = {
+  guard: { glyph: "◆", tone: "tone-warn" },
+  check: { glyph: "◇", tone: "tone-muted" },
+  confirm: { glyph: "?", tone: "tone-bad" },
+  run: { glyph: "❯", tone: "tone-accent" },
+  session: { glyph: ">", tone: "tone-accent" },
+  note: { glyph: "·", tone: "tone-muted" },
+};
+
+const Step = ({ step }: { readonly step: Listed }) => {
+  const kind = kinds[step.kind] ?? { glyph: "·", tone: "tone-muted" };
+  return (
+    <>
+      {step.opens === undefined ? null : <li class="part">{step.opens}</li>}
+      <li class="plan-step">
+        <span class="plan-index">{step.index + 1}</span>
+        <span class={kind.tone} aria-hidden="true">
+          {kind.glyph}
+        </span>
+        <div>
+          <span>{step.title}</span>
+          <span class="plan-kind">{step.kind}</span>
+          {step.command === undefined ? null : <code class="plan-command">{step.command}</code>}
+        </div>
+      </li>
+    </>
+  );
+};
+
+const Close = () => (
+  <button type="button" class="iconbtn" onClick={close} aria-label="Close">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <path d="M3 3l8 8M11 3l-8 8" />
+    </svg>
+  </button>
 );
 
 const FieldInput = ({
@@ -213,13 +239,16 @@ const OperationForm = ({
           </fieldset>
         ) : null}
       </div>
-      <div class="sheet-foot buttons">
-        <button type="button" class="button" onClick={close}>
-          Cancel
-        </button>
-        <button type="submit" class="button primary" disabled={unsupported}>
-          {planned ? "Preview plan" : "Run query"}
-        </button>
+      <div class="sheet-foot">
+        <div class="buttons">
+          <button type="button" class="button" onClick={close}>
+            cancel <kbd>esc</kbd>
+          </button>
+          <span class="spacer" />
+          <button type="submit" class="button primary" disabled={unsupported}>
+            {planned ? "show the plan" : info.kind === "stream" ? "follow it" : "ask"}
+          </button>
+        </div>
       </div>
     </form>
   );
@@ -231,7 +260,7 @@ const realServer = (draft: Draft) => {
   return facts?.target === "multipass" ? undefined : facts?.name;
 };
 
-const Review = ({ prepared, back }: { readonly prepared: Prepared; readonly back: () => void }) => {
+const Review = ({ prepared, effect, back }: { readonly prepared: Prepared; readonly effect: OperationInfo["effect"]; readonly back: () => void }) => {
   const { draft, options } = prepared;
   const [shown, setShown] = useState<Answer<Preview> | undefined>(undefined);
   const [typed, setTyped] = useState("");
@@ -257,6 +286,14 @@ const Review = ({ prepared, back }: { readonly prepared: Prepared; readonly back
   const { invocation, steps, changes } = shown.value;
   const real = changes && !options.dryRun ? realServer(draft) : undefined;
   const confirmed = real === undefined || typed === real;
+  const match =
+    real === undefined || typed === ""
+      ? undefined
+      : confirmed
+        ? { text: "✓ matches", tone: "tone-ok" }
+        : real.startsWith(typed)
+          ? { text: "keep going", tone: "tone-muted" }
+          : { text: `✕ not ${real}`, tone: "tone-bad" };
   const run = async () => {
     setStarting("starting");
     const started = await start(draft, options, real === undefined ? undefined : typed);
@@ -268,12 +305,21 @@ const Review = ({ prepared, back }: { readonly prepared: Prepared; readonly back
   return (
     <>
       <div class="sheet-body">
-        <code class="command">{invocation.command}</code>
-        <p class="sub">
-          {steps.length} steps · {changes ? "changes things" : "reads only"}
-          {options.verbose ? " · verbose" : ""}
-          {options.dryRun ? " · preview only" : ""}
-        </p>
+        <div>
+          <code class="command">{invocation.command}</code>
+          <p class="sub">
+            {invocation.about.join(" · ")}
+            {invocation.about.length === 0 ? "" : " · "}
+            {changes ? "changes things" : "reads only"}
+            {options.verbose ? " · verbose" : ""}
+            {options.dryRun ? " · dry run, nothing changes" : ""}
+          </p>
+        </div>
+        <div class="plan-head">
+          <span>the plan</span>
+          <span class="rule" aria-hidden="true" />
+          <span>{steps.length} steps</span>
+        </div>
         <ol class="plan">
           {steps.map((step) => (
             <Step key={step.index} step={step} />
@@ -288,37 +334,41 @@ const Review = ({ prepared, back }: { readonly prepared: Prepared; readonly back
         }}
       >
         {real === undefined ? null : (
-          <label class="confirm">
-            <span>
-              This changes <strong>{real}</strong>, a real server. Type its name to go on:
-            </span>
-            <input
-              value={typed}
-              onInput={(event) => {
-                setTyped(event.currentTarget.value);
-              }}
-              placeholder={real}
-              autoComplete="off"
-              spellcheck={false}
-            />
-          </label>
+          <div class="confirm">
+            <label for="operation-confirm">
+              Type <strong>{real}</strong> to approve. The server checks the name too.
+            </label>
+            <div class="field">
+              <span class="prompt" aria-hidden="true">
+                ❯
+              </span>
+              <input
+                id="operation-confirm"
+                value={typed}
+                onInput={(event) => {
+                  setTyped(event.currentTarget.value);
+                }}
+                placeholder={real}
+                autoComplete="off"
+                spellcheck={false}
+              />
+              {match === undefined ? null : <span class={`match ${match.tone}`}>{match.text}</span>}
+            </div>
+          </div>
         )}
         {starting === undefined || starting === "starting" ? null : <Problem failure={starting} />}
         <div class="buttons">
           <button type="button" class="button" onClick={back} disabled={starting === "starting"}>
-            Edit inputs
+            edit inputs
           </button>
+          <span class="spacer" />
           {options.dryRun ? (
             <button type="button" class="button primary" onClick={close}>
-              Done
+              done
             </button>
           ) : (
-            <button
-              type="submit"
-              class={real === undefined ? "button primary" : "button danger"}
-              disabled={!confirmed || starting === "starting"}
-            >
-              {starting === "starting" ? "Starting…" : draft.name === "ssh" ? "Open terminal" : "Run"}
+            <button type="submit" class={effect === "destroys" ? "button danger" : "button primary"} disabled={!confirmed || starting === "starting"}>
+              {starting === "starting" ? "starting…" : real !== undefined ? `approve · ${invocation.command}` : draft.name === "ssh" ? "open terminal" : "run"}
             </button>
           )}
         </div>
@@ -365,13 +415,16 @@ const Query = ({ prepared, info, back }: { readonly prepared: Prepared; readonly
         )}
         {live ? <Waiting what="Receiving updates" /> : null}
       </div>
-      <div class="sheet-foot buttons">
-        <button class="button" onClick={back}>
-          Edit inputs
-        </button>
-        <button class="button" onClick={close}>
-          Close
-        </button>
+      <div class="sheet-foot">
+        <div class="buttons">
+          <button type="button" class="button" onClick={back}>
+            edit inputs
+          </button>
+          <span class="spacer" />
+          <button type="button" class="button" onClick={close}>
+            close
+          </button>
+        </div>
       </div>
     </>
   );
@@ -384,18 +437,25 @@ const Body = ({ draft, info }: { readonly draft: Draft; readonly info: Operation
     if (prepared !== undefined) setSeed(prepared);
     setPrepared(undefined);
   };
+  const real = info.effect === "reads" || prepared?.options.dryRun === true ? undefined : realServer(prepared?.draft ?? draft);
   return (
     <>
+      <div class={real === undefined ? "sheet-bar" : "sheet-bar real"}>
+        <span class={real === undefined ? "prompt" : "tone-warn"} aria-hidden="true">
+          {real === undefined ? "❯" : "▲"}
+        </span>
+        <strong>{real === undefined ? `kayra ${info.name.replace(".", " ")}` : `this changes ${real}, a real server`}</strong>
+        <Effect effect={info.effect} />
+        <Close />
+      </div>
       <div class="sheet-head">
-        <h2 id="operation-title">
-          {reaches[info.name].icon} {reaches[info.name].label}
-        </h2>
+        <h2 id="operation-title">{reaches[info.name].label}</h2>
         <p class="sub">{info.summary}</p>
       </div>
       {prepared === undefined ? (
         <OperationForm info={info} seed={seed.draft} options={seed.options} submit={setPrepared} />
       ) : info.kind === "plan" || info.kind === "session" ? (
-        <Review prepared={prepared} back={back} />
+        <Review prepared={prepared} effect={info.effect} back={back} />
       ) : (
         <Query prepared={prepared} info={info} back={back} />
       )}

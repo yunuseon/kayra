@@ -23,14 +23,20 @@ apps:
 EOF
 echo '[servers]
 shop ansible_host=192.0.2.9 ansible_port=22 ansible_user=deploy ansible_ssh_private_key_file=/keys/shop' > "${fleet}/servers/shop/inventory.ini"
-printf 'name: shop\ncompose: [compose.yml]\nsubdomains: [www]\n' > "${fleet}/.cache/apps/shop/app.yml"
+cat > "${fleet}/.cache/apps/shop/app.yml" <<'EOF'
+name: shop
+compose: [compose.yml]
+routes:
+  - {host: www, service: web, port: 3000}
+  - {host: api, path: /signup, service: api, port: 3000}
+EOF
 
-# curl: answers/<host> (or answers/hook for a webhook); openssl: issuer/<host>; ssh: facts.
+# curl: answers/<host>[_<path>] (or answers/hook for a webhook); openssl: issuer/<host>; ssh: facts.
 cat > "${tmp}/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 for arg in "$@"; do case "$arg" in https://*) url="$arg" ;; esac; done
-host="${url#https://}"; host="${host%%/*}"
-case "$url" in */hook/*) cat "${ANSWERS}/hook" ;; *) cat "${ANSWERS}/${host}" ;; esac
+page="${url#https://}"; page="${page%/}"
+case "$url" in */hook/*) cat "${ANSWERS}/hook" ;; *) cat "${ANSWERS}/${page//\//_}" ;; esac
 EOF
 cat > "${tmp}/bin/openssl" <<'EOF'
 #!/usr/bin/env bash
@@ -46,11 +52,12 @@ chmod +x "${tmp}/bin/"*
 answer() { printf '%s' "$2" > "${tmp}/answers/$1"; }
 healthy() {
     rm -rf "${tmp}/answers"; mkdir -p "${tmp}/answers"
-    for host in auth.shop.test deploy.shop.test traefik.shop.test www.shop.test; do answer "issuer-${host}" "R13"; done
+    for host in auth.shop.test deploy.shop.test traefik.shop.test www.shop.test api.shop.test; do answer "issuer-${host}" "R13"; done
     answer auth.shop.test "200  0"
     answer deploy.shop.test "302 https://auth.shop.test/?rd=x 0"
     answer traefik.shop.test "302 https://auth.shop.test/?rd=y 0"
     answer www.shop.test "200  0"
+    answer api.shop.test_signup "405  0"
     answer hook "401"
     cat > "${tmp}/answers/facts" <<'EOF'
 registered shop
@@ -84,6 +91,8 @@ healthy; answer www.shop.test "200  20"; answer issuer-www.shop.test "TRAEFIK DE
 run_case traefik-default-cert "www.shop.test answers: HTTP 200, certificate by TRAEFIK DEFAULT CERT"
 healthy; answer www.shop.test "502  0"
 run_case app-5xx "www.shop.test answers: HTTP 502"
+healthy; answer api.shop.test_signup "502  0"
+run_case path-route-5xx "api.shop.test/signup answers: HTTP 502"
 healthy; answer hook "202"
 run_case hook-not-refused "an unsigned webhook to /hook/shop: HTTP 202, not 401"
 healthy; sed -i.bak 's/^registered shop$/registered /' "${tmp}/answers/facts"

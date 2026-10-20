@@ -1,0 +1,6 @@
+# expect: service x: label traefik.http.routers.demo-x.service: Traefik labels are the platform's
+services:
+  x:
+    image: alpine
+    mem_limit: 64m
+    labels: {traefik.http.routers.demo-x.service: "other-api@docker"}

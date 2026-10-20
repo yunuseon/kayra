@@ -12,15 +12,72 @@
       "items": {
         "type": "string"
       },
-      "description": "Compose files, relative to the app root, in order."
+      "description": "Compose files, relative to the app root, in order. No Traefik label, no platform network: routes say how the app is reached."
     },
-    "subdomains": {
+    "routes": {
+      "description": "How the app is reached: each route a host (and path) to a service's port. Read at the commit being deployed; a new host needs kayra apps.",
       "type": "array",
       "items": {
-        "type": "string",
-        "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
-      },
-      "description": "Hostnames the app claims: <sub>.<domain>."
+        "type": "object",
+        "properties": {
+          "host": {
+            "description": "Its hostname, <host>.<domain>. The app's hosts are its routes' hosts.",
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "path": {
+            "description": "A path prefix: the route answers below it, and beats its host's route without one.",
+            "type": "string",
+            "pattern": "^\\/[A-Za-z0-9._~%/-]*$"
+          },
+          "service": {
+            "description": "The compose service that answers it.",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The port that service listens on, inside its container."
+          },
+          "rate_limit": {
+            "description": "A rate limit on this route, per client address (Traefik's rateLimit).",
+            "type": "object",
+            "properties": {
+              "average": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Requests a client may send per period, on average."
+              },
+              "period": {
+                "description": "The period, such as 10s, 10m or 1h.",
+                "type": "string",
+                "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+              },
+              "burst": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Requests a client may send at once beyond the average."
+              }
+            },
+            "required": [
+              "average",
+              "period",
+              "burst"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "host",
+          "service",
+          "port"
+        ],
+        "additionalProperties": false
+      }
     },
     "secrets": {
       "description": "Secret keys; their values come from the fleet's apps/<app>.secrets.yml.",
@@ -39,8 +96,7 @@
   },
   "required": [
     "name",
-    "compose",
-    "subdomains"
+    "compose"
   ],
   "additionalProperties": false,
   "title": "app.yml"

@@ -47,6 +47,7 @@ test("a bundle may only name the app's own images and relative compose files", (
     sha: commit("a"),
     images: [{ variable: "WEB_IMAGE", ref: "localhost:5000/shop/web:0123456789ab" }],
     compose: [{ path: "deploy/compose.yml", content: "services: {}\n" }],
+    routes: [{ host: "www", service: "web", port: 3000 }],
   };
   const bundle = must(parseBundle(name("shop"), commit("a"), good));
   strictEqual(imagesEnv(bundle), "WEB_IMAGE=localhost:5000/shop/web:0123456789ab\n");
@@ -57,19 +58,26 @@ test("a bundle may only name the app's own images and relative compose files", (
   );
   deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, compose: [{ path: "../../etc/x", content: "" }] }).ok, false);
   deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, compose: [] }).ok, false);
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, routes: undefined }).ok, false);
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, routes: [{ host: "www", service: "web", port: 3000, middlewares: "x" }] }).ok, false);
 });
 
-test("compose: admission resolves no env files, up removes orphans", () => {
+test("compose: admission sees the app's files alone, resolving no env files; up adds the routes, removes orphans", () => {
   const bundle = must(parseBundle(name("shop"), commit("a"), {
     sha: commit("a"),
     images: [],
-    compose: [{ path: "compose.yml", content: "" }, { path: "compose.deploy.yml", content: "" }],
+    compose: [{ path: "compose.yml", content: "" }, { path: "deploy/compose.deploy.yml", content: "" }],
+    routes: [{ host: "www", path: "/shop", service: "web", port: 3000, rate_limit: { average: 20, period: "10m", burst: 5 } }],
   }));
   const project = ["docker", "compose", "-p", "shop", "--project-directory", "/opt/apps/shop", "--env-file", "/opt/apps/shop/.env",
-    "--env-file", "images.env", "-f", "compose.yml", "-f", "compose.deploy.yml"];
+    "--env-file", "images.env", "-f", "app/compose.yml", "-f", "app/deploy/compose.deploy.yml"];
   deepStrictEqual(config(shop, "/opt/apps", bundle), [...project, "config", "--no-env-resolution", "--format", "json"]);
-  deepStrictEqual(up(shop, "/opt/apps", bundle), [...project, "up", "-d", "--wait", "--wait-timeout", "180", "--remove-orphans"]);
-  deepStrictEqual(policy(shop, "/p/compose-policy.sh"), ["bash", "/p/compose-policy.sh", "shop", "www.shop.example.com"]);
+  deepStrictEqual(up(shop, "/opt/apps", bundle), [...project, "-f", "routes.yml", "up", "-d", "--wait", "--wait-timeout", "180", "--remove-orphans"]);
+  deepStrictEqual(policy(shop, "/p/compose-policy.sh", "shop.example.com", bundle), [
+    "bash", "/p/compose-policy.sh", "shop", "shop.example.com",
+    '[{"host":"www","path":"/shop","service":"web","port":3000,"rate_limit":{"average":20,"period":"10m","burst":5}}]',
+    "www.shop.example.com",
+  ]);
 });
 
 test("releases: newest first, one per commit; retention drops the oldest", () => {

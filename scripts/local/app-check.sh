@@ -4,13 +4,14 @@
 # checked in the app's own repository, before a push: run by `kayra app
 # check`, which has checked app.yml against its schema first.
 #
-#   - app.yml's compose files exist, inside the app; its subdomains are not
-#     the platform's (hosts.conf)
+#   - app.yml's compose files exist, inside the app; its routes' hosts are
+#     not the platform's (hosts.conf)
 #   - every docker/image.json: its image in the app's namespace, a commit
 #     touching its inputs (resolve-images.sh --plan, as the builder runs it)
 #   - the compose config those files resolve to passes the compose policy
-#     (compose-policy.sh, as the deployer runs it), with placeholder values for
-#     the images, config and secrets, and hosts under example.test
+#     (compose-policy.sh, as the deployer runs it: no Traefik label, no
+#     platform network, each route to one of its services), with placeholder
+#     values for the images, config and secrets, and hosts under example.test
 #
 # Needs git, jq, yq and the docker CLI with Compose (no daemon: `compose
 # config` only reads files). Written for macOS's bash 3.2 too: no mapfile.
@@ -28,7 +29,8 @@ pass() { echo "✓ $*"; }
 
 name="$(yq -r '.name' "$manifest")"
 files="$(yq -r '.compose[]' "$manifest")"
-subdomains="$(yq -r '.subdomains[]' "$manifest")"
+routes="$(yq -o=json -I0 '.routes // []' "$manifest")"
+subdomains="$(yq -r '.routes // [] | map(.host) | unique | .[]' "$manifest")"
 reserved="$(awk '!/^[[:space:]]*(#|$)/ {print $1}' "${KAYRA_ROOT}/hosts.conf")"
 
 # ── app.yml ─────────────────────────────────────────────────────────────────
@@ -39,9 +41,10 @@ while IFS= read -r file; do
     esac
 done <<< "$files"
 while IFS= read -r sub; do
-    if grep -qxF -- "$sub" <<< "$reserved"; then fail "subdomain ${sub} is the platform's"; fi
+    if [ -n "$sub" ] && grep -qxF -- "$sub" <<< "$reserved"; then fail "route host ${sub} is the platform's"; fi
 done <<< "$subdomains"
-[ "$failed" = 0 ] && pass "app.yml: compose $(paste -sd' ' - <<< "$files") · subdomains $(paste -sd' ' - <<< "$subdomains")"
+described="$(yq -r '.routes // [] | map(.host + (.path // "") + " → " + .service + ":" + (.port | tostring)) | join(", ")' "$manifest")"
+[ "$failed" = 0 ] && pass "app.yml: compose $(paste -sd' ' - <<< "$files") · routes ${described:-none}"
 
 # ── Images ──────────────────────────────────────────────────────────────────
 if plan="$(bash "${KAYRA_ROOT}/scripts/platform/resolve-images.sh" "$name" "$root" --plan)"; then
@@ -71,8 +74,8 @@ while IFS= read -r file; do set -- "$@" -f "${root}/${file}"; done <<< "$files"
     || { fail "compose: docker compose config failed (above)"; exit 1; }
 
 set --
-while IFS= read -r sub; do set -- "$@" "${sub}.${domain}"; done <<< "$subdomains"
-if violations="$(bash "${KAYRA_ROOT}/scripts/platform/compose-policy.sh" "$name" "$@" < "${work}/config.json")"; then
+while IFS= read -r sub; do [ -z "$sub" ] || set -- "$@" "${sub}.${domain}"; done <<< "$subdomains"
+if violations="$(bash "${KAYRA_ROOT}/scripts/platform/compose-policy.sh" "$name" "$domain" "$routes" "$@" < "${work}/config.json")"; then
     pass "compose policy: admitted"
 else
     while IFS= read -r line; do fail "compose policy: ${line}"; done <<< "$violations"

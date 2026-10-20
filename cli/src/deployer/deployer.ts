@@ -9,6 +9,7 @@ import { all, err, ok, type Result } from "../lib/result.ts";
 import { field, registered, type App } from "./app.ts";
 import { appName, appOwner, newRunId, sha, type Owner, type RunId, type Sha } from "./brand.ts";
 import { matches, parseCron, type Cron } from "./cron.ts";
+import { appFiles, imagesFile, routesFile } from "./build/compose.ts";
 import { forge, forgeRepo } from "./forges/forge.ts";
 import { json, send } from "./http/http.ts";
 import { spawnLines } from "./process.ts";
@@ -179,12 +180,17 @@ const effects = (s: Settings, who: Owner, id: RunId, log: (line: string) => void
   secrets: appSecrets,
   workdir: (bundle, images) => {
     const dir = mkdtempSync(join(tmpdir(), `${id}-`));
-    writeFileSync(join(dir, "images.env"), images);
+    writeFileSync(join(dir, imagesFile), images);
     bundle.compose.forEach((file) => {
-      mkdirSync(dirname(join(dir, file.path)), { recursive: true });
-      writeFileSync(join(dir, file.path), file.content);
+      const path = join(dir, appFiles, file.path);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, file.content);
     });
     return Promise.resolve(dir);
+  },
+  writeRoutes: (cwd, content) => {
+    writeFileSync(join(cwd, routesFile), content);
+    return Promise.resolve();
   },
   record: (app, commit, images) => {
     const dir = join(s.platformDir, "releases", app.name);
@@ -210,7 +216,7 @@ const work = async (s: Settings, request: Request, fx: Effects) => {
       fx.log(app.error);
       return typed<Outcome>({ ok: false });
     }
-    return deploy(app.value, request.work.ref, { appsDir: s.appsDir, policyScript: s.policyScript }, fx);
+    return deploy(app.value, request.work.ref, { appsDir: s.appsDir, policyScript: s.policyScript, domain: s.domain }, fx);
   }
   const argv = request.work.job === "gc" ? (["bash", s.gcScript] as const) : renovate(s.env, request.work.dryRun, s.renovateImage);
   const env: Env = request.work.job === "renovate" ? { RENOVATE_TOKEN: token("RENOVATE_TOKEN") } : {};

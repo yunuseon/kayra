@@ -1,5 +1,0 @@
-# expect: host deploy.example.test is not one of this app's
-services:
-  x:
-    image: alpine
-    labels: {traefik.http.routers.demo-x.rule: "Host(`deploy.example.test`)"}

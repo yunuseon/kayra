@@ -279,7 +279,7 @@ the whole run's the worst of what is under it. `hint` is what to do, or `null`.
 | Changed | Run |
 |---|---|
 | Host settings (`defaults.yml`, `vars.yml`, `secrets.yml`) | `kayra setup <server>` |
-| App values (`apps/<app>.yml`, `apps/<app>.secrets.yml`), or an app's secrets, config or subdomains in `app.yml` | `kayra apps <server>` |
+| App values (`apps/<app>.yml`, `apps/<app>.secrets.yml`), or an app's secrets, config or a new route host in `app.yml` | `kayra apps <server>` |
 | App code or compose files | nothing — push; the next deploy takes them from the commit |
 | A new kayra version in `package.json` | `npm ci`, then `kayra deploy <server>` per server — a new version may change the app role, which `setup` alone does not run |
 | Everything (a fresh server) | `kayra up <server>` |

@@ -1,0 +1,3 @@
+# expect: network public: platform networks are the platform's
+services: {x: {image: alpine, mem_limit: 64m, networks: [public]}}
+networks: {public: {name: platform-public, external: true}}

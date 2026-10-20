@@ -135,10 +135,14 @@ export const prepare = async (app: App, commit: Sha, s: Settings, line: Line) =>
   if (outside !== undefined) return err(`app.yml: compose file ${outside} is outside the app`);
   const missing = files.find((file) => !existsSync(join(root, file)));
   if (missing !== undefined) return err(`app.yml: compose file ${missing} does not exist at ${commit}`);
+  const routes = await run(["yq", "-o=json", ".routes // []", join(root, "app.yml")], { capture: true }, line);
+  if (!routes.ok) return routes;
+  const routed: unknown = JSON.parse(routes.value);
   return ok<unknown>({
     sha: commit,
     images: artifacts.map(([, variable, ref]) => ({ variable, ref } as const)),
     compose: files.map((file) => ({ path: file, content: readFileSync(join(root, file), "utf8") } as const)),
+    routes: routed,
   });
 };
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs compose-policy.sh against every case in cases/. Each case's first line
-# names the violation it must produce (or "nothing"). Needs docker + jq;
+# names the violation it must produce (or "nothing"); a `# routes:` line gives
+# the app's routes (none without one), its hosts are www.example.test. Needs docker + jq;
 # Compose runs from a pinned image so the result does not depend on the
 # local Compose version, unless COMPOSE names one.
 #   bash ci/tests/compose-policy/run.sh
@@ -21,7 +22,8 @@ compose_config() {
 }
 for case in "${here}"/cases/*.yml; do
     expect=$(sed -n '1s/^# expect: //p' "$case")
-    out=$(compose_config "$case" | bash "$policy" demo www.example.test 2>&1) && rc=0 || rc=$?
+    routes=$(sed -n 's/^# routes: //p' "$case")
+    out=$(compose_config "$case" | bash "$policy" demo example.test "${routes:-[]}" www.example.test 2>&1) && rc=0 || rc=$?
     if [ "$expect" = "nothing" ]; then
         [ "$rc" = 0 ] && ok=1 || ok=0
     else

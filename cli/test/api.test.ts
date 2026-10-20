@@ -50,7 +50,7 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
   mkdirSync(join(engine, "scripts/local"), { recursive: true });
   mkdirSync(bin);
   mkdirSync(join(dir, "app"));
-  writeFileSync(join(dir, "app/app.yml"), "name: shop\ncompose: [deploy/compose.yml]\nsubdomains: []\n");
+  writeFileSync(join(dir, "app/app.yml"), "name: shop\ncompose: [deploy/compose.yml]\n");
   ["require-main.sh", "require-latest-state.sh", "home-reach.sh", "certs.sh", "app-check.sh"].forEach((name) => { writeFileSync(join(engine, "scripts/local", name), "exit 0\n"); });
   const program = (name: string, text: string): void => { writeFileSync(join(bin, name), `#!/bin/sh\n${text}\n`, { mode: 0o700 }); };
   program("ansible-galaxy", "exit 0");

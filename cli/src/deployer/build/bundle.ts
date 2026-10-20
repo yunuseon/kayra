@@ -2,6 +2,7 @@ import { err, ok } from "../../lib/result.ts";
 import { field } from "../app.ts";
 import { sha, type AppName, type Sha } from "../brand.ts";
 import { typed } from "../../lib/typed.ts";
+import { parseRoutes, type Route } from "./routes.ts";
 
 /** One built artifact: the compose variable naming it and the content-addressed ref the host daemon pulls. */
 export type Image = { readonly variable: string; readonly ref: string };
@@ -9,11 +10,17 @@ export type ComposeFile = { readonly path: string; readonly content: string };
 
 /**
  * What the builder hands the deployer for one commit: the images it made sure
- * exist and the compose files app.yml lists at that commit. The builder runs
- * next to untrusted code, so the deployer trusts none of it: every field is
- * checked here, and the compose files still go through admission.
+ * exist, and the compose files and routes app.yml lists at that commit. The
+ * builder runs next to untrusted code, so the deployer trusts none of it:
+ * every field is checked here, and the compose files and routes still go
+ * through admission.
  */
-export type Bundle = { readonly sha: Sha; readonly images: readonly Image[]; readonly compose: readonly ComposeFile[] };
+export type Bundle = {
+  readonly sha: Sha;
+  readonly images: readonly Image[];
+  readonly compose: readonly ComposeFile[];
+  readonly routes: readonly Route[];
+};
 
 const relative = (path: string) =>
   path !== "" && !path.startsWith("/") && !path.split("/").some((segment) => segment === ".." || segment === "");
@@ -45,10 +52,13 @@ export const parseBundle = (app: AppName, expected: Sha, json: unknown) => {
   });
   const problem = [...parsedImages, ...parsedCompose].find((item) => typeof item === "string");
   if (problem !== undefined) return err(`bundle: ${problem}`);
+  const routes = parseRoutes(field(json, "routes"));
+  if (!routes.ok) return err(`bundle: ${routes.error}`);
   return ok<Bundle>({
     sha: minted.value,
     images: parsedImages.filter((item) => typeof item !== "string"),
     compose: parsedCompose.filter((item) => typeof item !== "string"),
+    routes: routes.value,
   });
 };
 

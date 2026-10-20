@@ -7,7 +7,7 @@ import { must } from "./support.ts";
 
 const kayra = kayraRoot(must(absolutePath("/kayra")));
 const root = must(absolutePath("/repo"));
-const manifest = "name: shop\ncompose: [deploy/compose.yml]\nsubdomains: [www]\n";
+const manifest = "name: shop\ncompose: [deploy/compose.yml]\nroutes: [{host: www, service: web, port: 3000}]\n";
 
 test("app check: the tools, then app-check.sh on the app's root", () => {
   const plan = must(appCheck(kayra, root, manifest));
@@ -20,4 +20,7 @@ test("app check: no app.yml, a broken one, or an invalid name stops before any s
   strictEqual(appCheck(kayra, root, "name: [").ok, false);
   deepStrictEqual(appCheck(kayra, root, `${manifest}extra: 1\n`).ok, false);
   deepStrictEqual(appCheck(kayra, root, manifest.replace("shop", "Shop")).ok, false);
+  deepStrictEqual(appCheck(kayra, root, "name: shop\ncompose: [deploy/compose.yml]\nsubdomains: [www]\n").ok, false);
+  deepStrictEqual(appCheck(kayra, root, manifest.replace("3000", "0")).ok, false);
+  deepStrictEqual(appCheck(kayra, root, manifest.replace("host: www", "host: www, path: '/a`)'")).ok, false);
 });

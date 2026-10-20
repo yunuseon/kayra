@@ -75,3 +75,12 @@ test("prepare: registers the app once, keeping server.yml's comments, and names 
   strictEqual(readFileSync(join(f.serverDir, "server.yml"), "utf8"), written, "a second launch registers nothing twice");
   assert(!again.stdout.includes("fixture"), "values are never printed");
 });
+
+test("launch: a GitHub repository on a server GitHub reaches gets its push hook last; multipass and other forges none", () => {
+  const prod = server("prod", "kind: platform\ntarget: hetzner\ndomain: shop.example.com\nvault: true\n");
+  const onGithub = render(must(launch(engine, root, prod, { ...wanted, repo: "https://github.com/acme/shop.git" })));
+  assert((onGithub.at(-1) ?? "").includes("kayra-app-hook.js"));
+  const elsewhere = render(must(launch(engine, root, prod, wanted)));
+  assert(!elsewhere.some((line) => line.includes("kayra-app-hook.js")));
+  assert(!render(must(launch(engine, root, lab, { ...wanted, repo: "https://github.com/acme/shop.git" }))).some((line) => line.includes("kayra-app-hook.js")));
+});

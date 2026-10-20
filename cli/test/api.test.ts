@@ -127,6 +127,7 @@ const samples = {
   down: { server: "lab" }, adopt: { server: "prod" }, "backup.test": { server: "lab" }, ssh: { server: "lab" }, "ssh.exec": { server: "lab", command: ["uptime"] },
   "app.values": { server: "lab", app: "shop", dir: "app" },
   "app.launch": { server: "lab", app: "shop" },
+  "app.hook": { server: "lab", app: "shop" },
   "app.config.set": { server: "lab", app: "shop", dir: "app", key: "FLAG", value: "on" },
   "app.secret.import": { server: "lab", app: "shop", dir: "app", key: "PASSWORD", file: "/tmp/secret" },
   "app.secret.generate": { server: "lab", app: "shop", dir: "app", key: "PASSWORD" },

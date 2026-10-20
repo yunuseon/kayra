@@ -567,6 +567,27 @@ Preview: `POST /api/operations/app.launch/preview`. Returns a JSON plan with sta
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.hook`
+
+Wire an app's GitHub repository to its server: check the platform's token reads it, create or update its push webhook.
+
+`POST /api/operations/app.hook`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+
+Preview: `POST /api/operations/app.hook/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.purge`
 
 Delete a removed app's volumes: its data, irreversibly.

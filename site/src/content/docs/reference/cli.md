@@ -188,12 +188,25 @@ run again until it gets there:
    merged: commit it, merge it to `main`, run the launch again.
 3. **Deploy.** `kayra app deploy`, followed to its end, ready routes and URLs
    included.
+4. **Hook.** For a GitHub repository on a server GitHub can reach (not
+   multipass): `kayra app hook`, below.
 
 `--dir` points at the app's checkout, for its `app.yml` before the fleet has
 cloned the app. A step already done is done again harmlessly: registering
-finds the entry, `apps` changes nothing, the deploy reuses its images. A new
-app still needs its webhook (or the hourly poll) for later pushes, and its
-hosts in DNS.
+finds the entry, `apps` changes nothing, the deploy reuses its images, the
+hook is updated in place. Its hosts still need DNS.
+
+```
+kayra app hook <server> <app>
+```
+
+Wires an app's GitHub repository to its server: checks that the platform's
+`git_token` can read it (as the builder will), then creates its push webhook to
+`https://deploy.<domain>/hook/<app>`, signed with the server's `webhook_secret`,
+or updates the one already there, never adding a second. The webhook is set
+with your own `gh` login (it needs a repository admin, which the platform's
+token is not); the secret reaches `gh` on stdin, never as an argument. Not for
+multipass: GitHub cannot reach a local VM.
 
 ## An app's values
 

@@ -86,6 +86,9 @@ deploys (usually `main`). For that the operator needs:
   GitLab its secret token — to `https://deploy.<environment domain>/hook/<app>`). Without it the platform
   still notices a push within the hour.
 
+On GitHub, `kayra app hook <server> <app>` checks the first and sets up the
+second (`kayra app launch` runs it too).
+
 Rollback only reaches releases built from the repository the app is in now: a
 release from before a move to another repository cannot be restored.
 

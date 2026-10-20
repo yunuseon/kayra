@@ -190,6 +190,7 @@ export const parser = (fleet: Fleet) => {
                 group(
                   "On a server",
                   or(
+                    command("hook", object({ name: constant("app hook"), server, app }), { brief: summary("app.hook") }),
                     command("launch", object({
                       name: constant("app launch"), server, app, dir: valuesDir,
                       repo: optional(option("--repo", string({ metavar: "URL" }), { description: message`The app's repository, https://; needed until server.yml registers it.` })),

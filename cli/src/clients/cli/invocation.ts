@@ -31,6 +31,8 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "app.init", input: { dir: command.dir ?? ".", ...(command.appName === undefined ? {} : { name: command.appName }) } });
     case "app check":
       return plainly({ name: "app.check", input: { dir: command.dir ?? "." } });
+    case "app hook":
+      return plainly({ name: "app.hook", input: { server: command.server, app: command.app } });
     case "app launch":
       return plainly({ name: "app.launch", input: {
         server: command.server, app: command.app,
@@ -94,6 +96,7 @@ export const reaches = {
   "backup.test": ["backup", "test", "SERVER"],
   "app.init": ["app", "init", ".", "--name", "shop"],
   "app.check": ["app", "check", "."],
+  "app.hook": ["app", "hook", "SERVER", "APP"],
   "app.launch": ["app", "launch", "SERVER", "APP", "--repo", "https://github.com/OWNER/APP.git", "--dir", "."],
   "app.values": ["app", "values", "SERVER", "APP"],
   "app.config.set": ["app", "config", "set", "SERVER", "APP", "PUBLIC_URL", "https://example.com"],

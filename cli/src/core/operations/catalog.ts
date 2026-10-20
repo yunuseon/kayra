@@ -147,6 +147,10 @@ export const operations = {
       path: z.string().min(1).optional().describe("The app's root inside the repository (default .)"),
     }),
   },
+  "app.hook": {
+    summary: "Wire an app's GitHub repository to its server: check the platform's token reads it, create or update its push webhook.",
+    scope: "app", effect: "changes", kind: "plan", input: appInput,
+  },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
   "app.runs": {
     summary: "What runs now, and the app's latest runs: state, commit, why, when, how long.",

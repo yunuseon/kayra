@@ -55,7 +55,7 @@ const gitEnv = (token: string) => typed<Env>({
 });
 
 /** A full commit id as it is; otherwise the branch or tag it names (a tag's commit, not the tag object). */
-export const resolveRef = async (app: App, ref: string, token: string) => {
+const resolveRef = async (app: App, ref: string, token: string) => {
   const given = sha(ref);
   if (given.ok) return given;
   const exit = await spawnLines(

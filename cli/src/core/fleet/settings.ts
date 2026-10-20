@@ -172,7 +172,7 @@ export const settings: readonly Setting[] = [
 /** Ansible's own variables (connection, privilege escalation) are always allowed. */
 export const isAnsibleVariable = (key: string) => key.startsWith("ansible_");
 
-export const settingsFor = (kind: ServerKind, secrets: boolean) =>
+const settingsFor = (kind: ServerKind, secrets: boolean) =>
   Object.freeze(settings.filter((each) => each.secret === secrets && each.kinds.includes(kind)));
 
 // eslint-disable-next-line functional/prefer-immutable-types -- Zod schemas: immutable once built, but classes the rule cannot see into

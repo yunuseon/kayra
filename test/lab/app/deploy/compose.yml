@@ -5,15 +5,3 @@ services:
       GREETING: ${GREETING:?required}
       MODE: ${MODE:?required}
     mem_limit: 32m
-    networks: [default, public]
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: platform-public
-      traefik.http.routers.sample-web.rule: Host(`www.${DOMAIN}`)
-      traefik.http.routers.sample-web.entrypoints: websecure
-      traefik.http.routers.sample-web.tls.certresolver: le
-      traefik.http.services.sample-web.loadbalancer.server.port: "8080"
-networks:
-  public:
-    name: platform-public
-    external: true

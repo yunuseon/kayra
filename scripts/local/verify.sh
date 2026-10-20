@@ -9,7 +9,7 @@
 #     browser to the login, not a 403 from rules Authelia never loaded
 #   - every certificate is a real one (Let's Encrypt or mkcert), never
 #     Traefik's default
-#   - an unsigned webhook is refused; every app hostname answers, not 5xx
+#   - an unsigned webhook is refused; every app route answers, not 5xx
 # On the server (one SSH call):
 #   - every app in server.yml is registered, and nothing else
 #   - every app's containers run, none unhealthy; its last run did not fail
@@ -42,12 +42,12 @@ key="$(field ansible_ssh_private_key_file)"
 registered_wanted="$(yq -r '.apps // [] | .[].name' "${dir}/server.yml")"
 
 # ── From outside ────────────────────────────────────────────────────────────
-# "<status> <redirect> <verify result> <issuer CN>" for a host, pinned to the server.
+# "<status> <redirect> <verify result> <issuer CN>" for a host (and path), pinned to the server.
 probe() {
-    local host="$1" method="${2:-GET}" result issuer
+    local host="$1" method="${2:-GET}" path="${3:-/}" result issuer
     result="$(curl -s -o /dev/null -m 10 -X "$method" -H 'Accept: text/html' \
         --resolve "${host}:443:${address}" -w '%{http_code} %{redirect_url} %{ssl_verify_result}' \
-        "https://${host}/" 2>/dev/null || echo "000 - -")"
+        "https://${host}${path}" 2>/dev/null || echo "000 - -")"
     issuer="$(openssl s_client -connect "${address}:443" -servername "$host" </dev/null 2>/dev/null \
         | openssl x509 -noout -issuer 2>/dev/null | sed -n 's/.*CN *= *//p')"
     echo "${result} ${issuer:-none}"
@@ -55,10 +55,10 @@ probe() {
 
 # Probes until `test` accepts the answer or VERIFY_WAIT runs out; prints the last answer.
 until_ok() {
-    local host="$1" method="$2" test="$3" deadline answer
+    local host="$1" method="$2" test="$3" path="${4:-/}" deadline answer
     deadline=$(( $(date +%s) + wait ))
     while :; do
-        answer="$(probe "$host" "$method")"
+        answer="$(probe "$host" "$method" "$path")"
         if "$test" "$answer"; then echo "$answer"; return 0; fi
         [ "$(date +%s)" -lt "$deadline" ] || { echo "$answer"; return 1; }
         sleep 10
@@ -74,8 +74,8 @@ refused() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 401 ]; }
 describe() { echo "HTTP $(cut -d' ' -f1 <<< "$1"), certificate by $(cut -d' ' -f4- <<< "$1") (verify $(cut -d' ' -f3 <<< "$1"))"; }
 
 check() {
-    local label="$1" host="$2" method="$3" test="$4" answer
-    if answer="$(until_ok "$host" "$method" "$test")"; then pass "$label"; else fail "${label}: $(describe "$answer")"; fi
+    local label="$1" host="$2" method="$3" test="$4" path="${5:-/}" answer
+    if answer="$(until_ok "$host" "$method" "$test" "$path")"; then pass "$label"; else fail "${label}: $(describe "$answer")"; fi
 }
 
 check "auth.${domain} answers" "auth.${domain}" GET answers
@@ -91,9 +91,9 @@ if [ -n "$first_app" ]; then
     }
     code="$(hook)"
     [ "$code" = 401 ] && pass "an unsigned webhook is refused" || fail "an unsigned webhook to /hook/${first_app}: HTTP ${code}, not 401"
-    while IFS= read -r sub; do
-        [ -z "$sub" ] || check "${sub}.${domain} answers" "${sub}.${domain}" GET not_5xx
-    done < <(bash "${KAYRA_ROOT}/scripts/local/app-manifests.sh" --subdomains "$name")
+    while read -r sub path; do
+        [ -z "$sub" ] || check "${sub}.${domain}${path%/} answers" "${sub}.${domain}" GET not_5xx "$path"
+    done < <(bash "${KAYRA_ROOT}/scripts/local/app-manifests.sh" --routes "$name")
 fi
 
 # ── On the server ───────────────────────────────────────────────────────────

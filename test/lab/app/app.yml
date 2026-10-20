@@ -1,6 +1,7 @@
 # The upgrade lab's app: one web page that says which version it is.
 name: sample
 compose: [deploy/compose.yml]
-subdomains: [www]
+routes:
+  - {host: www, service: web, port: 8080}
 secrets: [GREETING]
 config: [MODE]

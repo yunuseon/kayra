@@ -1,0 +1,3 @@
+# expect: route deploy/hook: deploy.example.test is not one of this app's hosts
+# routes: [{"host": "deploy", "path": "/hook", "service": "x", "port": 3000}]
+services: {x: {image: alpine, mem_limit: 64m}}

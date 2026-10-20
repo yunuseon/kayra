@@ -50,3 +50,27 @@ apps:
 - **Testing platform changes before merging:** `npm link @yunuseon/kayra` to the branch's checkout in the fleet, and `ref: <branch>` on the app entry, against a multipass server. Only a multipass server ever runs anything but a release: `require-main.sh` refuses a hetzner or home server while the fleet's kayra is a linked checkout.
 - **Hetzner servers only change from `main` as merged, with a released kayra.** Every kayra command deploys the local checkout; `require-main.sh` makes `provision`, `adopt`, `setup`, `apps` and `app purge` refuse a hetzner or home server unless the fleet's checkout is a clean `main` equal to `origin/main` (other servers' folders may be dirty — that is where test pointers live) and its kayra is the pinned package, not a link. A vault edit for prod therefore goes through a PR before it is deployed. Never add a bypass: deploying a feature branch to prod once turned the platform's own checks off there.
 - **An app in its own repo** needs, once: the platform's `git_token` extended to the repo (clone, commit statuses) and the Renovate token if Renovate keeps it current, a push webhook to `https://deploy.<domain>/hook/<app>` signed with the platform's `webhook_secret` (a Forgejo on the same server: `http://builder:8080/hook/<app>`, set by `forgejo-config`), and `kayra apps <server>`. The hourly poll deploys a moved ref even without the webhook. The app's local dev never needs the platform.
+
+## DNS
+
+A platform server's records follow from the fleet, never from a list kept by
+hand: kayra's `platform-dns` module (OpenTofu, Hetzner DNS) makes an A record
+for each of the platform's own subdomains and for every route host of every
+app in its `server.yml`, as the app's `app.yml` in the fleet's clone
+(`.cache/apps`, which `kayra doctor` fills) says.
+
+```hcl
+# dns/terraform/main.tf in the fleet, in a Hetzner project of its own
+module "shop_prod" {
+  source     = "../../node_modules/@yunuseon/kayra/terraform/modules/platform-dns"
+  fleet_root = "${path.module}/../.."
+  server     = "shop-prod"
+  zone       = hcloud_zone.this.name
+  address    = data.terraform_remote_state.shop_prod.outputs.server_ip
+}
+```
+
+A new route host in an app is a new record on the next `tofu apply` in
+`dns/terraform`; an app the fleet has not cloned stops the plan with a pointer
+to `kayra doctor` rather than leaving its hosts out. A server whose domain is
+under the zone (`shop.example.com` in `example.com`) gets `www.shop`, and so on.

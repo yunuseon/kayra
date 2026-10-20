@@ -1,0 +1,6 @@
+name: shop
+compose: [compose.yml]
+routes:
+  - {host: www, service: web, port: 3000}
+  - {host: www, path: /api, service: api, port: 3000}
+  - {host: api, service: api, port: 3000}

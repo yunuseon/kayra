@@ -60,8 +60,8 @@ export type Decision =
   | { readonly kind: "none" };
 
 /**
- * What a finished run means for alerts. A deploy of the app's own ref that
- * failed (a push or the poll) raises; a deploy someone started by hand
+ * What a finished run means for alerts. A deploy nobody watches that failed
+ * (a push, the poll, a restore) raises; a deploy someone started by hand
  * (kayra app deploy | rollback) only resolves, since whoever started it is
  * watching. A platform job raises when it fails. Any success resolves.
  */
@@ -71,7 +71,7 @@ export const decide = (end: RunEnd) => {
   const commit = end.sha === undefined ? "" : ` at ${end.sha.slice(0, 12)}`;
   if (end.ok) return typed<Decision>({ kind: "resolve", key, note: `Recovered: ${end.page}` });
   if (request.work.kind === "deploy") {
-    if (request.work.why !== "push" && request.work.why !== "poll") return typed<Decision>({ kind: "none" });
+    if (request.work.why === "deploy" || request.work.why === "rollback") return typed<Decision>({ kind: "none" });
     return typed<Decision>({
       kind: "raise",
       alert: {

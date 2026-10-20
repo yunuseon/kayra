@@ -125,3 +125,25 @@
       hosts: "{{ app_subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
       secrets: "{{ manifest.secrets | default([]) }}"
   become: true
+
+# A Docker update or a reboot stops every container, and one deployed before
+# the platform gave each service a restart policy stays down: its live
+# release, deployed again. ctl follows the run to its end; the retries wait
+# out a deployer the host layer has just restarted.
+- name: Restore the app if it was deployed but runs nothing
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      live="$(ls {{ platform_dir }}/releases/{{ app.name }} 2>/dev/null | sort | tail -1 | sed -n 's/^[0-9]\{8\}T[0-9]\{6\}Z-\([0-9a-f]\{40\}\)\.env$/\1/p')"
+      if [ -z "$live" ]; then echo "never deployed"; exit 0; fi
+      if [ -n "$(docker ps -q --filter label=com.docker.compose.project={{ app.name }} --filter status=running --filter status=restarting)" ]; then echo "runs"; exit 0; fi
+      cd {{ platform_dir }}
+      docker compose exec -T deployer kayra-deployer ctl deploy {{ app.name }} "$live"
+      echo "restored ${live}"
+    executable: /bin/bash
+  register: app_restored
+  retries: 5
+  delay: 3
+  until: app_restored.rc == 0
+  changed_when: "'restored ' in app_restored.stdout"
+  become: true

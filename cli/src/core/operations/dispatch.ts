@@ -40,7 +40,7 @@ export type Context = {
 /** The context for a fleet, with the files read from disk: what every client runs the core with. */
 export const contextFor = (parts: Omit<Context, "engine" | "read"> & { readonly kayra: KayraRoot }) => {
   const { kayra, ...rest } = parts;
-  return typed<Context>({ ...rest, engine: { kayra, fleet: parts.fleet.root }, read: textAt });
+  return typed<Context>({ ...rest, engine: { kayra, fleet: parts.fleet.root, version: parts.version }, read: textAt });
 };
 
 /** Every operation with its input: what a client sends, parsed in one go. */
@@ -133,7 +133,7 @@ const plans: Plans = {
   "app.releases": onDeployer((app) => ({ kind: "rollback", app, more: undefined } as const)),
   "app.rollback": onDeployer((app, input) => ({ kind: "rollback", app, more: optional(input["sha"]) } as const)),
   job: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => deployer(target, { kind: "job", job: input.job, noPrs: input.noPrs })),
-  doctor: (ctx) => ok(doctor(ctx.fleet, ctx.engine.kayra)),
+  doctor: (ctx) => ok(doctor(ctx.fleet, ctx.engine)),
   certs: (ctx, input) =>
     flatMap(domain(input.domain), (named) =>
       flatMap(all(input.subdomains.map(subdomain)), (subdomains) => certsFor(ctx.engine, named, subdomains)),
@@ -184,7 +184,7 @@ export const query = <N extends QueryName>(ctx: Context, name: N, input: InputOf
 type Streams = { readonly [N in StreamName]: (ctx: Context, input: InputOf<N>) => Watched };
 
 const streams: Streams = {
-  status: (ctx, input) => look(ctx.fleet, ctx.tofu, input.offline ? undefined : ctx.network),
+  status: (ctx, input) => look(ctx.fleet, ctx.version, ctx.tofu, input.offline ? undefined : ctx.network),
 };
 
 /** A stream's first state and the updates still to land. */

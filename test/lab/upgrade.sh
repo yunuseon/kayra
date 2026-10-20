@@ -8,8 +8,9 @@
 # this checkout and runs every deploy path against it:
 #
 #   1  the release: kayra deploy, the app's first deploy by a signed webhook
-#   2  the upgrade: the fleet's kayra becomes this checkout, kayra deploy
-#      (which ends with kayra verify)
+#   2  the upgrade: the fleet's kayra becomes this checkout, kayra plan (check
+#      mode on the release's server), kayra deploy (which ends with kayra
+#      verify), kayra status reading back the kayra that set it up
 #   3  a new commit by webhook; deploying it again builds nothing (CACHED)
 #   4  a commit the compose policy refuses: the run fails, the old one serves
 #   5  kayra app rollback to the first release; the registry GC; kayra verify
@@ -204,10 +205,15 @@ step "2  the upgrade to this checkout ($(git -C "$KAYRA_ROOT" rev-parse --short 
 rm -rf node_modules/@yunuseon/kayra
 ln -s "$KAYRA_ROOT" node_modules/@yunuseon/kayra
 [ "$app_at_release" = true ] || descriptor with-app > "servers/${server}/server.yml"
+kayra_cmd plan "$server" >> "$log" 2>&1 || die "kayra plan after the upgrade, before its deploy (check mode)"
+echo "✓ kayra plan: the upgraded playbook in check mode"
 upgraded="$(kayra_cmd deploy "$server" 2>&1)" && ok=true || ok=false
 printf '%s\n' "$upgraded" >> "$log"
-grep -E '^(    )?(✓|✗)' <<< "$upgraded" || true
+grep -E '^(    )?(✓|✗|!)' <<< "$upgraded" || true
 [ "$ok" = true ] || die "kayra deploy after the upgrade"
+running="$(kayra_cmd status --json | jq -r --arg name "$server" '.servers[] | select(.name == $name) | .kayra | select(.state == "recorded" and .version == .pin) | .version')"
+[ -n "$running" ] || die "kayra status does not read back the kayra that set ${server} up: $(kayra_cmd status --json | jq -c '.servers[].kayra')"
+echo "✓ kayra status: set up by kayra ${running}, the pin"
 [ "$app_at_release" = true ] || first_deploy
 expect_serves v1
 

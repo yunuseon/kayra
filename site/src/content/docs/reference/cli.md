@@ -100,7 +100,7 @@ asks for no password. See the [MCP reference](../mcp/).
 | `kayra provision <server>` | Create or update the machine (target home: build the image to import) |
 | `kayra deploy <server>` | Host setup and every app, no provisioning |
 | `kayra setup <server>` | The host layer only: the playbook for the server's kind |
-| `kayra verify <server>` | Whether a platform server works as its users see it: logins, real certificates, a refused unsigned webhook, every app hostname, the registrations, containers, last runs and open alerts. `deploy` and `up` run it at the end |
+| `kayra verify <server>` | Whether a platform server works as its users see it: logins, real certificates, a refused unsigned webhook, every app hostname, the registrations, containers, last runs and open alerts. `deploy` and `up` run it at the end. A server set up by another kayra than the one that runs is noted (`!`), not failed: it still works, and every server runs the last release until a rollout reaches it |
 | `kayra plan <server>` | What `provision` and `setup` would change, changing nothing: OpenTofu's plan and the playbook in check mode with diffs (files holding secrets only say that they would change). Works from any branch |
 | `kayra apps <server>` | Make the server's apps match `server.yml`: register each, remove the rest (data kept) |
 | `kayra hosts <server>` | Point the domain at a multipass VM in `/etc/hosts` (sudo) |
@@ -162,7 +162,7 @@ only the newest runs. The runs and their logs are also at
 
 | Command | What it does |
 |---|---|
-| `kayra status [--offline] [--json]` | Every server: where it is, whether its SSH answers and, on a platform server, its login. See below |
+| `kayra status [--offline] [--json]` | Every server: where it is, whether its SSH answers, which kayra set it up and, on a platform server, its login. See below |
 | `kayra validate [server] [--json]` | The fleet beyond its schemas: secrets (unknown keys must be helpers `vars.yml` uses), each app's `app.yml` against the fleet's values, `compose_stacks` against `stacks/`, `edge_routes`. Exits 1 on a problem |
 | `kayra doctor` | Check that this machine can run every command on every server: tools, vault passwords, app repositories, home servers' SSH |
 | `kayra certs <domain> [subdomain…]` | mkcert certificates for local development |
@@ -171,10 +171,10 @@ only the newest runs. The runs and their logs are also at
 ## The fleet at a glance
 
 ```
-SERVER  KIND      TARGET   DOMAIN                    ADDRESS          SSH        HTTPS      APPS
-alaz    platform  home     alaz.home.example.com     192.168.1.250    open 35ms  200 101ms  wiki
-edge    edge      hetzner  example.com               203.0.113.7      open 34ms
-nas     nas       home     example.com               192.168.1.141    off
+SERVER  KIND      TARGET   DOMAIN                    ADDRESS          SSH        HTTPS      KAYRA          APPS
+alaz    platform  home     alaz.home.example.com     192.168.1.250    open 35ms  200 101ms  1.2.3          wiki
+edge    edge      hetzner  example.com               203.0.113.7      open 34ms             1.2.2 → 1.2.3
+nas     nas       home     example.com               192.168.1.141    off                   –
 ```
 
 - **ADDRESS** is the server's `inventory.ini` where there is one (hand-written
@@ -191,11 +191,21 @@ nas     nas       home     example.com               192.168.1.141    off
   or `untrusted cert`, `wrong cert`, `cert expired`, `refused`, `no answer`.
   The system's trust store counts, so a multipass server's mkcert certificate
   is trusted where mkcert installed its root.
+- **KAYRA** is the kayra that last set the server up, as its setup recorded
+  it (`/opt/kayra/version`; on a NAS `<nas_root>/.kayra/version`), read over
+  SSH once SSH is open, as the inventory says and never asking (batch mode, no
+  host key to confirm). Where it is not the kayra that runs, the fleet's pin,
+  the pin follows it: `1.2.2 → 1.2.3` is what `kayra setup` (`kayra deploy` on
+  a platform server) would make it. `unrecorded → 1.2.3` is a server set up by
+  a kayra from before servers recorded it; `unreadable`, with SSH's reason
+  under the table; `–` where nothing was asked (SSH not open, no
+  `inventory.ini` to log in with). An SSH login costs a handshake per server,
+  all at once, after the TCP probe.
 - Every server is asked at once. On a terminal the table is there at once and
   its cells fill in as the answers arrive, and the domains are links (iTerm2,
   WezTerm, Ghostty, VS Code); piped, it is printed once, plain. `--offline`
   asks no server: only the fleet and OpenTofu's state, and no columns for the
-  probes.
+  probes or the version.
 
 `kayra validate` lists each server's checks under it: `✓` holds, `✗` a
 problem, with what to do about it on the line below, `·` not checked (a vault
@@ -227,7 +237,8 @@ one only in a release that says so.
       "apps": ["wiki"],
       "machine": { "state": "found", "address": "192.168.1.250", "from": "inventory", "reason": null },
       "ssh": { "port": 22, "state": "open", "ms": 35, "error": null },
-      "https": { "url": "https://auth.alaz.home.example.com/api/health", "state": "answered", "status": 200, "ms": 101, "error": null }
+      "https": { "url": "https://auth.alaz.home.example.com/api/health", "state": "answered", "status": 200, "ms": 101, "error": null },
+      "kayra": { "pin": "1.2.3", "state": "recorded", "version": "1.2.3", "error": null }
     }
   ]
 }
@@ -238,6 +249,7 @@ one only in a release that says so.
 | `machine.state` | `found` (`address`, or `null` if OpenTofu has no `server_ip`; `from`: `inventory` or `opentofu`), `not-provisioned`, `no-machine`, `unreadable` (`reason`) |
 | `ssh.state`, `https.state` | `open` (SSH) or `answered` (HTTPS, with `status`), both with `ms`; `refused`, `no-answer`, `unreachable`, `unknown-host`, `bad-certificate` and `failed` (with Node's code in `error`); `skipped` when there is nothing to ask (no address, `--offline`) |
 | `https` | `null` on a server that is not a platform |
+| `kayra` | `pin`: the kayra that runs, the one the fleet pins. `state`: `recorded` (`version`: the kayra that last set the server up), `unrecorded` (set up by a kayra from before servers recorded it), `unreadable` (`error`: SSH's reason, or what the file holds instead), `skipped` (SSH not open, no inventory, `--offline`) |
 
 ```json
 {

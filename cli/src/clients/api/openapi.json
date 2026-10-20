@@ -6264,6 +6264,43 @@
                       "type": "null"
                     }
                   ]
+                },
+                "kayra": {
+                  "type": "object",
+                  "properties": {
+                    "pin": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "recorded",
+                        "unrecorded",
+                        "unreadable",
+                        "skipped"
+                      ]
+                    },
+                    "version": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "pin",
+                    "state",
+                    "version",
+                    "error"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -6274,7 +6311,8 @@
                 "apps",
                 "machine",
                 "ssh",
-                "https"
+                "https",
+                "kayra"
               ],
               "additionalProperties": false
             }

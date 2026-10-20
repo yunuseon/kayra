@@ -18,6 +18,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 infrastructure="$(cd "${here}/../../.." && pwd)"
 out="${1:?Usage: record.sh <out-dir>}"
 real_bash="$(command -v bash)"
+# Recorded as <version>, so a release's bump leaves every case as it was.
+version="$(jq -r .version "${infrastructure}/package.json")"
 
 tmp="$(mktemp -d)"
 tmp="$(cd -P "$tmp" && pwd)"
@@ -73,6 +75,6 @@ grep -v '^#' "${here}/cases" | while IFS='|' read -r case stdin arguments; do
     status=0
     stdout="$(cd "$fleet" && echo "$stdin" | PATH="${tmp}/bin:${PATH}" "${command[@]}" 2>/dev/null)" || status=$?
     { echo "--- stdout"; [ -z "$stdout" ] || echo "$stdout"; echo "--- exit ${status}"; } >> "$TRACE"
-    sed -i.bak -e 's|/[^" ]*/kayra-[^/" ]*/vault-password|<vault-password-helper>|g' -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" "$TRACE"
+    sed -i.bak -e 's|/[^" ]*/kayra-[^/" ]*/vault-password|<vault-password-helper>|g' -e "s/kayra_version=${version}/kayra_version=<version>/g" -e "s/KAYRA_VERSION=${version}/KAYRA_VERSION=<version>/g" -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" "$TRACE"
     rm "${TRACE}.bak"
 done

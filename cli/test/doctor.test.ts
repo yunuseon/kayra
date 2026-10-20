@@ -1,11 +1,11 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { absolutePath, kayraRoot } from "../src/core/fleet/brand.ts";
+import { absolutePath, kayraRoot, kayraVersion } from "../src/core/fleet/brand.ts";
 import { doctor } from "../src/core/recipes/doctor.ts";
 import { render } from "../src/core/plan/describe.ts";
-import { fleet, must, server } from "./support.ts";
+import { fleet, must, root, server } from "./support.ts";
 
-const kayra = kayraRoot(must(absolutePath("/kayra")));
+const engine = { kayra: kayraRoot(must(absolutePath("/kayra"))), fleet: root, version: must(kayraVersion("0.19.0")) };
 const shop = "apps: [{name: shop, repo: https://git.example/shop.git}]";
 
 test("doctor checks the tools the fleet needs, every vault, every app repository and every home server", () => {
@@ -20,7 +20,7 @@ test("doctor checks the tools the fleet needs, every vault, every app repository
         secrets: "git_token: !vault |\n  $ANSIBLE_VAULT;1.1;AES256\n",
       }),
     ),
-    kayra,
+    engine,
   );
   deepStrictEqual(render(plan), [
     "check    git (every server): command -v git",
@@ -41,7 +41,7 @@ test("doctor checks the tools the fleet needs, every vault, every app repository
 
 test("doctor reports every failure: none of its checks stops the plan", () => {
   deepStrictEqual(
-    doctor(fleet(server("a", "target: home\ndomain: a.test\nvault: true")), kayra).filter(
+    doctor(fleet(server("a", "target: home\ndomain: a.test\nvault: true")), engine).filter(
       (step) => step.kind !== "check" || step.onFailure !== "continue",
     ),
     [],

@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# kayra-version role — which kayra set this server up, last in every host
+# play, so only a setup that got this far records it. kayra passes its own
+# version as kayra_version (-e); `kayra status` and `kayra verify` read it.
+# =============================================================================
+
+- name: Create kayra's directory
+  ansible.builtin.file:
+    path: "{{ kayra_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Record which kayra set this server up
+  ansible.builtin.copy:
+    content: "{{ kayra_version }}\n"
+    dest: "{{ kayra_dir }}/version"
+    mode: "0644"

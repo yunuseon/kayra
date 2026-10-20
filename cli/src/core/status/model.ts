@@ -1,6 +1,6 @@
 import type { Server } from "../fleet/model.ts";
 import type { Update } from "./updates.ts";
-import type { Host, Milliseconds } from "../fleet/brand.ts";
+import type { Host, KayraVersion, Milliseconds } from "../fleet/brand.ts";
 
 /** Where a server's machine is, as this checkout knows it: its inventory.ini, else OpenTofu's state. */
 export type Machine =
@@ -24,10 +24,23 @@ export type Reach =
   /** Nothing to ask: no address, or --offline. */
   | { readonly kind: "skipped" };
 
+/** Which kayra set a server up, as the file its setup wrote says (the kayra-version role). */
+export type Running =
+  | { readonly kind: "recorded"; readonly version: KayraVersion }
+  /** No such file: set up by a kayra from before one was recorded. */
+  | { readonly kind: "unrecorded" }
+  /** SSH failed, or the file holds no version. */
+  | { readonly kind: "unreadable"; readonly reason: string }
+  /** Nothing to ask: SSH not open, no inventory to log in with, or --offline. */
+  | { readonly kind: "skipped" };
+
 export type Pending = { readonly kind: "pending" };
 
 /** Every state a probe's cell can be in, as the API names them. */
 export const reachStates = ["pending", "open", "answered", "refused", "no-answer", "unreachable", "unknown-host", "bad-certificate", "failed", "skipped"] as const satisfies readonly (Reach | Pending)["kind"][];
+
+/** Every state the running kayra's cell can be in. */
+export const runningStates = ["pending", "recorded", "unrecorded", "unreadable", "skipped"] as const satisfies readonly (Running | Pending)["kind"][];
 
 /** Every state a machine's cell can be in. */
 export const machineStates = ["pending", "found", "not-provisioned", "no-machine", "unreadable"] as const satisfies readonly (Machine | Pending)["kind"][];
@@ -39,6 +52,10 @@ export type Look = {
   readonly ssh: Reach | Pending;
   /** auth.<domain>: platform servers only. */
   readonly https: Reach | Pending | undefined;
+  /** Which kayra set it up, read over SSH once SSH is open. */
+  readonly kayra: Running | Pending;
+  /** The kayra this is, the one the fleet pins: what a setup now would record. */
+  readonly pin: KayraVersion;
 };
 
 /** A machine kayra's modules create, by its resource type; a data source is none. */

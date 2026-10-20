@@ -41,3 +41,8 @@
       ansible.builtin.command: ufw disable
       when: "'Status: active' in ufw_status.stdout"
       changed_when: true
+
+  post_tasks:
+    - name: Record which kayra set this server up
+      ansible.builtin.import_role:
+        name: kayra-version

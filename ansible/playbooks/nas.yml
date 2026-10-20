@@ -18,13 +18,16 @@
     - "{{ server_dir }}/vars.yml"
     - "{{ server_dir }}/secrets.yml"
 
+  vars:
+    kayra_dir: "{{ nas_root }}/.kayra"
+
   pre_tasks:
     - name: Write only inside nas_root
       ansible.builtin.assert:
         that: item is match('^' ~ nas_root ~ '/') and '/../' not in item ~ '/'
         fail_msg: "{{ item }} lies outside {{ nas_root }}"
         quiet: true
-      loop: "{{ [restic_backup.dir, compose_stacks.dir] }}"
+      loop: "{{ [restic_backup.dir, compose_stacks.dir, kayra_dir] }}"
 
     # Docker creates a missing bind-mount source, a write wherever it points.
     - name: Find the backed-up paths
@@ -45,3 +48,8 @@
   roles:
     - restic-backup
     - compose-stacks
+
+  post_tasks:
+    - name: Record which kayra set this server up
+      ansible.builtin.import_role:
+        name: kayra-version

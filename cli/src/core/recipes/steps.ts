@@ -1,11 +1,11 @@
-import { type FleetRoot, type KayraRoot, within } from "../fleet/brand.ts";
+import { type FleetRoot, type KayraRoot, type KayraVersion, within } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { run, type Arg, type Env, type Need, type Plan, type RunStep, type Step, type Substitution } from "../plan/model.ts";
 import { all, map, type Result } from "../../lib/result.ts";
 import { typed } from "../../lib/typed.ts";
 
-/** What every command works with besides the server: the engine's files and the fleet's. */
-export type Engine = { readonly kayra: KayraRoot; readonly fleet: FleetRoot };
+/** What every command works with besides the server: the engine's files and version, and the fleet's files. */
+export type Engine = { readonly kayra: KayraRoot; readonly fleet: FleetRoot; readonly version: KayraVersion };
 
 /** The local scripts that read the fleet's files find them here, not beside themselves. */
 export const fleetEnv = ({ fleet }: Engine) => typed<Env>({ FLEET_ROOT: fleet });

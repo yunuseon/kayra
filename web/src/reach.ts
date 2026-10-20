@@ -84,6 +84,24 @@ export const login = (server: Server) => {
   }
 };
 
+/** Which kayra set it up; where that is not the fleet's pin, a warning naming both. Not part of its health: an older kayra still works. */
+export const kayra = (server: Server) => {
+  const { state, pin, version, error } = server.kayra;
+  const behind = `This fleet pins kayra ${pin}: a setup records it.`;
+  switch (state) {
+    case "pending":
+      return typed<Cell>({ text: "asking", tone: "waiting" });
+    case "recorded":
+      return version === pin ? typed<Cell>({ text: pin, tone: "ok" }) : typed<Cell>({ text: `${version ?? "?"} → ${pin}`, tone: "warn", title: behind });
+    case "unrecorded":
+      return typed<Cell>({ text: `unrecorded → ${pin}`, tone: "warn", title: `Set up by a kayra that recorded no version. ${behind}` });
+    case "unreadable":
+      return typed<Cell>({ text: "unreadable", tone: "bad", ...(error === null ? {} : { title: error }) });
+    case "skipped":
+      return typed<Cell>({ text: "not asked", tone: "muted" });
+  }
+};
+
 /** One word for a server at a glance: up when everything it was asked answered well. */
 export const health = (server: Server | undefined) => {
   if (server === undefined) return typed<Tone | "waiting">("waiting");

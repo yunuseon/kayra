@@ -54,23 +54,31 @@
     - {name: app_secrets, suffix: .secrets.yml}
   loop_control: {label: "{{ app.name }}{{ item.suffix }}"}
 
+# An app's hosts are its routes' hosts; the routes themselves are read at
+# each commit, by the builder.
+- name: Read the app's hosts from its routes
+  ansible.builtin.set_fact:
+    app_subdomains: "{{ manifest.routes | default([]) | map(attribute='host') | unique | list }}"
+
 - name: Check the app against the platform
   ansible.builtin.assert:
     that:
       - manifest.name == app.name
+      - manifest.subdomains is not defined
       - missing_secrets | length == 0
       - missing_config | length == 0
       - reserved_subdomains | length == 0
     fail_msg: >-
       {{ app.name }}: app.yml name={{ manifest.name }};
+      {{ 'subdomains is gone: declare routes instead (the app contract);' if manifest.subdomains is defined else '' }}
       missing config {{ missing_config }} in servers/{{ server }}/apps/{{ app.name }}.yml,
       missing secrets {{ missing_secrets }} in servers/{{ server }}/apps/{{ app.name }}.secrets.yml;
-      subdomains reserved by the platform {{ reserved_subdomains }}
+      hosts reserved by the platform {{ reserved_subdomains }}
     quiet: true
   vars:
     missing_secrets: "{{ manifest.secrets | default([]) | difference(app_secrets | default({}) | list) }}"
     missing_config: "{{ manifest.config | default([]) | difference(app_config | default({}) | list) }}"
-    reserved_subdomains: "{{ manifest.subdomains | intersect(lookup('file', kayra_root ~ '/hosts.conf').splitlines() | reject('match', '^\\s*(#|$)') | list) }}"
+    reserved_subdomains: "{{ app_subdomains | intersect(lookup('file', kayra_root ~ '/hosts.conf').splitlines() | reject('match', '^\\s*(#|$)') | list) }}"
 
 - name: Create app directory
   ansible.builtin.file:
@@ -114,6 +122,6 @@
       repo: "{{ app_repo }}"
       ref: "{{ app_ref }}"
       path: "{{ app.path | default('.') }}"
-      hosts: "{{ manifest.subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
+      hosts: "{{ app_subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
       secrets: "{{ manifest.secrets | default([]) }}"
   become: true

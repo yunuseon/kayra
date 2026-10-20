@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { typed } from "../../lib/typed.ts";
-import { appNameSchema, domainSchema, repoPathSchema, repoUrlSchema, subdomainSchema } from "./brand.ts";
+import { appNameSchema, domainSchema, periodSchema, repoPathSchema, repoUrlSchema, routePathSchema, serviceNameSchema, subdomainSchema } from "./brand.ts";
 import { serverTargets } from "./model.ts";
 
 /** The server kinds, each with its playbook; settings say which kinds read them. */
@@ -235,11 +235,27 @@ export const serverSchema = z
     });
   });
 
+/** One of an app's public routes: the platform writes its Traefik router, the app no label. */
+const routeSchema = z.strictObject({
+  host: subdomainSchema.describe("Its hostname, <host>.<domain>. The app's hosts are its routes' hosts."),
+  path: routePathSchema.optional().describe("A path prefix: the route answers below it, and beats its host's route without one."),
+  service: serviceNameSchema.describe("The compose service that answers it."),
+  port: z.number().int().min(1).max(65535).describe("The port that service listens on, inside its container."),
+  rate_limit: z
+    .strictObject({
+      average: z.number().int().positive().describe("Requests a client may send per period, on average."),
+      period: periodSchema.describe("The period, such as 10s, 10m or 1h."),
+      burst: z.number().int().positive().describe("Requests a client may send at once beyond the average."),
+    })
+    .optional()
+    .describe("A rate limit on this route, per client address (Traefik's rateLimit)."),
+});
+
 /** app.yml, at the root of an app's repository: the app contract. */
 export const appManifestSchema = z.strictObject({
   name: appNameSchema.describe("The app's name, as in the server.yml entry."),
-  compose: z.array(z.string()).describe("Compose files, relative to the app root, in order."),
-  subdomains: z.array(subdomainSchema).describe("Hostnames the app claims: <sub>.<domain>."),
+  compose: z.array(z.string()).describe("Compose files, relative to the app root, in order. No Traefik label, no platform network: routes say how the app is reached."),
+  routes: z.array(routeSchema).optional().describe("How the app is reached: each route a host (and path) to a service's port. Read at the commit being deployed; a new host needs kayra apps."),
   secrets: z.array(z.string()).optional().describe("Secret keys; their values come from the fleet's apps/<app>.secrets.yml."),
   config: z.array(z.string()).optional().describe("Config keys; their values come from the fleet's apps/<app>.yml."),
 });

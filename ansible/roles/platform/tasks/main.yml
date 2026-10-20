@@ -369,13 +369,15 @@
     - bin/jenkins-app-apply
   become: true
 
-# The registry used to have a public, basic-auth router. Nothing outside the
-# server pushes or pulls, so it is gone; the copy above never deletes files.
-- name: Remove the retired registry basic auth
+# Retired dynamic config; the copy above never deletes files. The registry
+# used to have a public, basic-auth router, but nothing outside the server
+# pushes or pulls. ratelimit.yml held one app's rate limit: routes declare
+# their own now.
+- name: Remove retired Traefik dynamic config
   ansible.builtin.file:
     path: "{{ platform_dir }}/traefik/dynamic/{{ item }}"
     state: absent
-  loop: [registry-auth.yml, registry-htpasswd]
+  loop: [registry-auth.yml, registry-htpasswd, ratelimit.yml]
   become: true
 
 # ---------------------------------------------------------------------------

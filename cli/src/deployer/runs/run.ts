@@ -3,6 +3,7 @@ import type { App } from "../app.ts";
 import type { Sha } from "../brand.ts";
 import { imagesEnv, parseBundle, type Bundle } from "../build/bundle.ts";
 import { config, policy, up, type Argv } from "../build/compose.ts";
+import { describeRoutes, routesOverride } from "../build/routes.ts";
 import type { Context, State } from "../forges/forge.ts";
 import { typed } from "../../lib/typed.ts";
 
@@ -19,13 +20,16 @@ export type Effects = {
   /** stdout captured only with `capture`; everything else reaches the log. */
   readonly exec: (argv: Argv, options: { readonly cwd: string; readonly env: Env; readonly stdin?: string; readonly capture?: boolean }) => Promise<Exit>;
   readonly secrets: (app: App) => Result<Env, string>;
-  /** A fresh directory holding the bundle's compose files and images.env. */
+  /** A fresh directory holding the bundle's compose files and images.env (compose.ts says where). */
   readonly workdir: (bundle: Bundle, images: string) => Promise<string>;
+  /** The platform's routes file, written into that directory once the app's files are admitted. */
+  readonly writeRoutes: (cwd: string, content: string) => Promise<void>;
   readonly record: (app: App, commit: Sha, images: string) => Promise<void>;
   readonly status: (app: App, commit: Sha, context: Context, state: State, description: string) => Promise<void>;
 };
 
-export type Paths = { readonly appsDir: string; readonly policyScript: string };
+/** Where a run deploys: the apps' directory, the policy that admits them, the server's domain. */
+export type Site = { readonly appsDir: string; readonly policyScript: string; readonly domain: string };
 
 export type Outcome = { readonly ok: boolean; readonly sha?: Sha };
 
@@ -37,18 +41,23 @@ const step = async (fx: Effects, label: string, argv: Argv, options: Parameters<
 
 /**
  * Admission, then up: the compose config of the commit being deployed must
- * pass the policy before anything starts, and what it checked is what runs.
+ * pass the policy before anything starts, and what it checked is what runs,
+ * with the routes the platform writes from it.
  */
-const deployBundle = async (app: App, bundle: Bundle, paths: Paths, fx: Effects) => {
+const deployBundle = async (app: App, bundle: Bundle, site: Site, fx: Effects) => {
   const images = imagesEnv(bundle);
   const secrets = fx.secrets(app);
   if (!secrets.ok) return secrets;
   const cwd = await fx.workdir(bundle, images);
-  const resolved = await step(fx, "Admission: compose config", config(app, paths.appsDir, bundle), { cwd, env: secrets.value, capture: true });
+  const resolved = await step(fx, "Admission: compose config", config(app, site.appsDir, bundle), { cwd, env: secrets.value, capture: true });
   if (!resolved.ok) return resolved;
-  const admitted = await step(fx, "Admission: policy", policy(app, paths.policyScript), { cwd, env: {}, stdin: resolved.value });
+  const admitted = await step(fx, "Admission: policy", policy(app, site.policyScript, site.domain, bundle), { cwd, env: {}, stdin: resolved.value });
   if (!admitted.ok) return err("refused by the compose policy");
-  const started = await step(fx, "Up", up(app, paths.appsDir, bundle), { cwd, env: secrets.value });
+  const routes = routesOverride(app.name, site.domain, bundle.routes, resolved.value);
+  if (!routes.ok) return routes;
+  fx.log(`── Routes: ${describeRoutes(bundle.routes)}`);
+  await fx.writeRoutes(cwd, routes.value);
+  const started = await step(fx, "Up", up(app, site.appsDir, bundle), { cwd, env: secrets.value });
   if (!started.ok) return started;
   await fx.record(app, bundle.sha, images);
   return ok<string>(images);
@@ -59,7 +68,7 @@ const deployBundle = async (app: App, bundle: Bundle, paths: Paths, fx: Effects)
  * then admitted and started (kayra/deploy). Each phase posts its status on the
  * commit; a failed build never reaches deploy.
  */
-export const deploy = async (app: App, ref: string, paths: Paths, fx: Effects) => {
+export const deploy = async (app: App, ref: string, site: Site, fx: Effects) => {
   fx.log(`Deploying ${app.name} at ${ref}`);
   const commit = await fx.resolve(app, ref);
   if (!commit.ok) {
@@ -80,7 +89,7 @@ export const deploy = async (app: App, ref: string, paths: Paths, fx: Effects) =
   await fx.status(app, sha, "kayra/build", "success", "Images built");
 
   await fx.status(app, sha, "kayra/deploy", "pending", "Deploying");
-  const deployed = await deployBundle(app, bundle.value, paths, fx);
+  const deployed = await deployBundle(app, bundle.value, site, fx);
   if (!deployed.ok) {
     fx.log(deployed.error);
     await fx.status(app, sha, "kayra/deploy", "failure", deployed.error);

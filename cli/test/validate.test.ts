@@ -19,7 +19,7 @@ const facts = (overrides: Partial<Facts>): Facts => ({
   stackDirs: [],
   appConfig: { shop: { FLAG: "on" } },
   appSecrets: { shop: { kind: "readable", values: { PASSWORD: "x" } } },
-  manifests: { shop: { name: "shop", compose: ["compose.yml"], subdomains: ["www"], secrets: ["PASSWORD"], config: ["FLAG"] } },
+  manifests: { shop: { name: "shop", compose: ["compose.yml"], routes: [{ host: "www", service: "web", port: 3000 }], secrets: ["PASSWORD"], config: ["FLAG"] } },
   ...overrides,
 });
 
@@ -74,7 +74,7 @@ test("an app's values match what its app.yml asks for; a missing secrets file ho
     "✓ secrets.yml: 0 secrets, each a setting or used by vars.yml",
   ]);
   deepStrictEqual(problems({ manifests: {} }), ["· app shop not checked: not cloned yet → kayra apps shop clones it"]);
-  deepStrictEqual(problems({ manifests: { shop: { name: "other", compose: [], subdomains: [] } } }), [
+  deepStrictEqual(problems({ manifests: { shop: { name: "other", compose: [] } } }), [
     "✗ app shop: its app.yml says name other → server.yml and app.yml must name it alike",
   ]);
 });

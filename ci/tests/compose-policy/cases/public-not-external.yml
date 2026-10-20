@@ -1,3 +1,0 @@
-# expect: platform-public is the platform's, declare it external: true
-services: {x: {image: "localhost:5000/demo/web:abc", mem_limit: 64m, networks: [public]}}
-networks: {public: {name: platform-public}}

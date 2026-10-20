@@ -12,6 +12,11 @@ const pattern = (regex: RegExp, what: string) => z.string().regex(regex, { error
 export const serverNameSchema = pattern(/^[a-z0-9][a-z0-9-]*$/, "a server name (lowercase letters, digits, dashes)").transform(branded<"ServerName">());
 export const appNameSchema = pattern(/^[a-z][a-z0-9-]*$/, "an app name (lowercase letters, digits, dashes)").transform(branded<"AppName">());
 export const subdomainSchema = pattern(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "a subdomain").transform(branded<"Subdomain">());
+/** A route's path prefix: no backtick, quote or `$`, so it cannot leave its Traefik rule or meet Compose's interpolation. */
+export const routePathSchema = pattern(/^\/[A-Za-z0-9._~%/-]*$/, "a path (/, then letters, digits and ._~%/-)").transform(branded<"RoutePath">());
+export const serviceNameSchema = pattern(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/, "a compose service name").transform(branded<"ServiceName">());
+/** A Traefik duration. */
+export const periodSchema = pattern(/^[1-9][0-9]*(ms|s|m|h)$/, "a period such as 10s, 10m or 1h").transform(branded<"Period">());
 export const domainSchema = pattern(/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/, "a domain").transform(branded<"Domain">());
 /** A path inside a repository, never above it. */
 export const repoPathSchema = z

@@ -37,7 +37,7 @@ npx @yunuseon/kayra app check        # or: kayra app check [dir]
 ```
 
 It checks what the platform checks when it deploys: `app.yml` against its
-schema, its compose files and subdomains, every `docker/image.json` (the
+schema, its compose files and routes, every `docker/image.json` (the
 image in the app's namespace, a commit touching its inputs), and the compose
 config they resolve to against the [policy](#compose-policy), with placeholder
 values for images, config and secrets, and hosts under `example.test`. The
@@ -68,19 +68,56 @@ name: shop                     # lower-case; also the compose project, the
                                # registry namespace and the runs' name
 compose:                       # deployed together, in this order
   - deploy/compose.yml
-subdomains: [www, api]         # served as <subdomain>.<environment domain>
+routes:                        # how the app is reached; see Routes
+  - {host: www, service: web, port: 3000}
+  - {host: api, service: api, port: 3000}
 secrets: [DATABASE_PASSWORD]   # values provided by the operator per environment
 config: [FEATURE_FLAGS]        # same, but not secret
 ```
 
-- `subdomains` may not use the platform's own (`deploy`, `auth`, `traefik`).
 - Every name in `secrets` and `config` needs a value from the operator for each
-  environment, or registering the app fails. Changing these lists, or
-  `subdomains`, needs the operator to re-register the app; compose files and
-  code do not.
+  environment, or registering the app fails. Changing these lists, or adding
+  a host to `routes`, needs the operator to re-register the app; compose
+  files, code and the rest of `routes` do not.
 - `secrets` reach the deploy as environment variables of the same name —
   reference them in compose as `${DATABASE_PASSWORD:?}`. `config` values and
   `DOMAIN` are available the same way.
+
+## Routes
+
+The platform routes your app; your compose files say nothing about it. Each
+route sends `<host>.<environment domain>` to a service's port:
+
+```yaml
+routes:
+  - {host: www, service: web, port: 3000}
+  - {host: api, service: api, port: 3000}
+  - host: api
+    path: /signup                # a prefix: /signup and everything below it
+    service: api
+    port: 3000
+    rate_limit: {average: 20, period: 10m, burst: 5}
+```
+
+- `host` is a subdomain. Your app's hosts are its routes' hosts, and may not be
+  the platform's own (`deploy`, `auth`, `traefik`).
+- `service` is a service in your compose files, `port` the port it listens on
+  inside its container. Nothing is published on the host.
+- `path` is a prefix. A route with a path wins over its host's route without
+  one, so the example's `/signup` gets its own rate limit and the rest of `api`
+  none.
+- `rate_limit` caps what one client address may send: `average` requests per
+  `period` (`10s`, `10m`, `1h`), and `burst` at once beyond that.
+- Every route serves HTTPS with a real certificate and the platform's security
+  headers (HSTS, `nosniff`, `X-Frame-Options: SAMEORIGIN`, a Referrer-Policy).
+
+Routes are read from the commit being deployed, like the compose files: a new
+port or path ships with the code that needs it. A new host needs the operator
+(`kayra apps`), and is refused until then.
+
+The platform attaches each routed service to its network for Traefik and labels
+it. Services that talk to each other share a network of **your own**, and
+address each other by service name there.
 
 ## Artifacts: `docker/image.json` + a Dockerfile
 
@@ -134,35 +171,14 @@ Within those keys:
 | bind mounts, file-backed `secrets`/`configs`, volume `driver_opts` | host filesystem | named volumes |
 | `env_file`, `label_file` | read on the platform's machine, not yours | `environment`, with values from your `config`/`secrets` |
 | images in another app's registry namespace | | your `<name>/…` images, or public ones |
-| networks other than your own and `platform-public`, external volumes, volumes of another project | other apps' data | your own networks and volumes |
-| aliases on `platform-public` without the `<name>-` prefix | would capture another app's traffic | aliases on your own network |
-| `platform-public` without `external: true` | your project would own the platform's network, and its `down` remove it | `name: platform-public`, `external: true` |
-| Traefik rules without `Host()`, `HostRegexp`, hosts outside your subdomains | other apps' hostnames | `Host(\`www.${DOMAIN}\`)` |
-| Traefik router/service/middleware names without the `<name>-` prefix | names are shared by all apps; a clash takes both down | `traefik.http.routers.shop-web…` |
-| `traefik.tcp.*`, `traefik.udp.*`, `@internal` services | platform internals | HTTP routers to your services |
+| networks other than your own, external volumes, volumes of another project | other apps' data | your own networks and volumes |
+| `traefik.*` labels | routing is the platform's | [`routes`](#routes) in `app.yml` |
+| `platform-*` networks | the platform attaches routed services itself | your own networks |
+| a route to a service your compose files lack, or to a host not registered | | a service you have; `kayra apps` for a new host |
 
-`platform-public` is shared by every app on the server. Put only what Traefik
-routes to on it, and keep databases on a network of your own. **Do not address
-your own services by service name across it**: `api` there is any app's to
-claim. Use a network of your own, or the container name (`<name>-api-1`).
-
-Routing, in short: join the `platform-public` network, and label the service
-
-```yaml
-labels:
-  - traefik.enable=true
-  - traefik.http.routers.shop-web.rule=Host(`www.${DOMAIN}`)
-  - traefik.http.routers.shop-web.entrypoints=websecure
-  - traefik.http.routers.shop-web.tls.certresolver=le
-  - traefik.http.services.shop-web.loadbalancer.server.port=3000
-```
-
-Every router gets the platform's security headers (HSTS, `nosniff`,
-`X-Frame-Options: SAMEORIGIN`, a Referrer-Policy) without asking.
-
-Bring your own login. The platform's login (`authelia@file`) is for its own
-pages and is refused on an app's router: your users belong to your app, which
-therefore runs the same with or without the platform.
+Bring your own login. The platform's login is for its own pages: your users
+belong to your app, which therefore runs the same with or without the
+platform.
 
 Give every long-running service a `healthcheck`: the deploy waits until all
 of them report healthy, and fails if one does not within three minutes.

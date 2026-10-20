@@ -7,13 +7,18 @@
 # release (or --from), with a fixture app (test/lab/app), then upgrades it to
 # this checkout and runs every deploy path against it:
 #
-#   1  the release: kayra deploy, the app's first deploy by a signed webhook
+#   1  the release: kayra deploy, the app's first deploy by a signed webhook,
+#      the app as the release knew it (test/lab/app at its tag)
 #   2  the upgrade: the fleet's kayra becomes this checkout, kayra plan (check
 #      mode on the release's server), kayra deploy (which ends with kayra
-#      verify), kayra status reading back the kayra that set it up
-#   3  a new commit by webhook; deploying it again builds nothing (CACHED)
+#      verify), kayra status reading back the kayra that set it up; the old
+#      containers keep serving
+#   3  the app as this checkout knows it, in a commit of its own (what an app
+#      does when kayra's contract changes), then a new commit by webhook;
+#      deploying it again builds nothing (CACHED)
 #   4  a commit the compose policy refuses: the run fails, the old one serves
-#   5  kayra app rollback to the first release; the registry GC; kayra verify
+#   5  kayra app rollback to the first release after the upgrade; the
+#      registry GC; kayra verify
 #
 # The fleet lives in a temp directory, never in a real one; the app's
 # repository is served to the VM over HTTP from this Mac. Runs on the
@@ -72,7 +77,19 @@ kayra_cmd() { node "${fleet}/node_modules/@yunuseon/kayra/bin/kayra.js" "$@"; }
 step "the fixture app's repository"
 mkdir -p "$served"
 mkdir -p "$repo"
-cp -R "${KAYRA_ROOT}/test/lab/app/." "$repo/"
+# The app as the release knew it: a contract change between it and this
+# checkout is the app's to make, in a commit of its own (step 3).
+if git -C "$KAYRA_ROOT" cat-file -e "v${from}:test/lab/app" 2>/dev/null; then
+    git -C "$KAYRA_ROOT" archive "v${from}" test/lab/app | tar -x -C "$work"
+    cp -R "${work}/test/lab/app/." "$repo/"
+else
+    cp -R "${KAYRA_ROOT}/test/lab/app/." "$repo/"
+fi
+# The app as this checkout knows it.
+adopt_checkout_app() {
+    find "$repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+    cp -R "${KAYRA_ROOT}/test/lab/app/." "$repo/"
+}
 git -C "$repo" init -q -b main
 commit() { git -C "$repo" add -A && git -C "$repo" -c user.email=lab@kayra.test -c user.name=lab commit -qm "$1"; publish; }
 publish() {
@@ -204,34 +221,66 @@ first_deploy() {
 step "2  the upgrade to this checkout ($(git -C "$KAYRA_ROOT" rev-parse --short HEAD))"
 rm -rf node_modules/@yunuseon/kayra
 ln -s "$KAYRA_ROOT" node_modules/@yunuseon/kayra
+upgrade() {
+    local upgraded ok
+    upgraded="$(kayra_cmd "$1" "$server" 2>&1)" && ok=true || ok=false
+    printf '%s\n' "$upgraded" >> "$log"
+    grep -E '^(    )?(✓|✗|!)' <<< "$upgraded" || true
+    [ "$ok" = true ] || die "kayra $1 after the upgrade"
+}
 [ "$app_at_release" = true ] || descriptor with-app > "servers/${server}/server.yml"
 kayra_cmd plan "$server" >> "$log" 2>&1 || die "kayra plan after the upgrade, before its deploy (check mode)"
 echo "✓ kayra plan: the upgraded playbook in check mode"
-upgraded="$(kayra_cmd deploy "$server" 2>&1)" && ok=true || ok=false
-printf '%s\n' "$upgraded" >> "$log"
-grep -E '^(    )?(✓|✗|!)' <<< "$upgraded" || true
-[ "$ok" = true ] || die "kayra deploy after the upgrade"
+# Where the app contract changed since the release, the cutover an operator
+# follows: the platform first (setup keeps the registrations the release
+# wrote, and the old containers keep serving), then the app's own commit,
+# then kayra deploy registers it from its new app.yml.
+cutover=false
+if [ "$app_at_release" = false ]; then
+    adopt_checkout_app
+    commit "v1: the app as this checkout knows it"
+    upgrade deploy
+    first_deploy
+elif diff -rq -x .git "$repo" "${KAYRA_ROOT}/test/lab/app" > /dev/null; then
+    upgrade deploy
+else
+    cutover=true
+    echo "the app contract changed since ${from}: kayra setup first, kayra deploy after the app's own commit"
+    upgrade setup
+fi
 running="$(kayra_cmd status --json | jq -r --arg name "$server" '.servers[] | select(.name == $name) | .kayra | select(.state == "recorded" and .version == .pin) | .version')"
 [ -n "$running" ] || die "kayra status does not read back the kayra that set ${server} up: $(kayra_cmd status --json | jq -c '.servers[].kayra')"
 echo "✓ kayra status: set up by kayra ${running}, the pin"
-[ "$app_at_release" = true ] || first_deploy
 expect_serves v1
 
-# ── 3: a new commit; deploying it again builds nothing ─────────────────────
-step "3  a new commit by webhook, then the same commit again"
+# ── 3: the app as this checkout knows it; a new commit; the same again ─────
+step "3  the app as this checkout knows it, a new commit by webhook, then the same commit again"
+adopt_checkout_app
 echo v2 > "${repo}/web/index.html"
-commit v2
+commit "v2: the app as this checkout knows it"
 before="$(newest_run)"
 push_hook
 run="$(await_run "$before")"
 [ "$(state_of "$run")" = success ] || die "the v2 deploy: ${run}"
 expect_serves v2
+v2="$(awk '{print $3}' <<< "$run")"
+if [ "$cutover" = true ]; then
+    upgrade deploy
+    expect_serves v2
+fi
+echo v3 > "${repo}/web/index.html"
+commit v3
+before="$run"
+push_hook
+run="$(await_run "$before")"
+[ "$(state_of "$run")" = success ] || die "the v3 deploy: ${run}"
+expect_serves v3
 kayra_cmd app runs "$server" sample | grep -q "^  STATE  *COMMIT" || die "kayra app runs prints the deployer's answer undrawn"
 echo "✓ kayra app runs draws the runs"
 before="$run"
 kayra_cmd app deploy "$server" sample >> "$log" 2>&1
 run="$(await_run "$before")"
-[ "$(state_of "$run")" = success ] || die "deploying v2 again: ${run}"
+[ "$(state_of "$run")" = success ] || die "deploying v3 again: ${run}"
 kayra_cmd app logs "$server" sample | grep -q "CACHED localhost:5000/sample/web" || die "deploying the same commit again rebuilt the image"
 echo "✓ the same commit again: CACHED"
 
@@ -245,19 +294,18 @@ run="$(await_run "$before")"
 [ "$(state_of "$run")" = failure ] || die "the refused commit deployed: ${run}"
 kayra_cmd app logs "$server" sample | grep -q "bind mount /etc -> /host-etc" || die "the refusal does not name the bind mount"
 echo "✓ refused: bind mount /etc -> /host-etc"
-expect_serves v2
+expect_serves v3
 
 # ── 5: rollback, GC, verify ─────────────────────────────────────────────────
-step "5  rollback to the first release, the registry GC, kayra verify"
-first="$(ctl rollback sample | awk 'NR > 1 {print $1}' | tail -1)"
-[ -n "$first" ] || die "the deployer lists no earlier release"
+step "5  rollback to v2, the registry GC, kayra verify"
+ctl rollback sample | grep -q "^  ${v2}" || die "the deployer does not list v2 (${v2}) as an earlier release"
 kayra_cmd app rollback "$server" sample | grep -q " live$" || die "kayra app rollback prints the releases undrawn"
 echo "✓ kayra app rollback draws the releases"
 before="$run"
-kayra_cmd app rollback "$server" sample "${first:0:12}" >> "$log" 2>&1
+kayra_cmd app rollback "$server" sample "$v2" >> "$log" 2>&1
 run="$(await_run "$before")"
 [ "$(state_of "$run")" = success ] || die "the rollback: ${run}"
-expect_serves v1
+expect_serves v2
 kayra_cmd job "$server" gc >> "$log" 2>&1
 for _ in $(seq 1 12); do
     kayra_cmd app logs "$server" gc 2>/dev/null | grep -q "Total reclaimed space" && break

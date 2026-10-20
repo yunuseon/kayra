@@ -1,0 +1,2 @@
+# expect: service x: label Traefik.enable: Traefik labels are the platform's
+services: {x: {image: alpine, mem_limit: 64m, labels: {Traefik.enable: "true"}}}

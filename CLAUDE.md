@@ -190,7 +190,9 @@ The customer-facing version of this section is the site's `site/src/content/docs
 # app.yml, at the root of the app's repository
 name: shop
 compose: [deploy/compose.yml, deploy/compose.deploy.yml]
-subdomains: [www, api]                        # <sub>.<domain>
+routes:                                       # <host>.<domain>[path] → a service's port
+  - {host: www, service: web, port: 3000}
+  - {host: api, path: /signup, service: api, port: 3000, rate_limit: {average: 20, period: 10m, burst: 5}}
 secrets: [DATABASE_PASSWORD]
 config: [FEATURE_FLAGS]
 ```
@@ -201,9 +203,9 @@ What the platform does with it:
 
 | Step | Who | What |
 |---|---|---|
-| `kayra apps <server>` | platform `app` role | reads `app.yml` + `servers/<server>/apps/<app>.yml`; fails on missing values or a platform subdomain; writes `/opt/apps/<app>/.env` (config), pipes secrets to `bin/app-apply`, writes the registration `/opt/platform/apps/<app>.json` (repo, ref, path, hosts, secret keys) |
+| `kayra apps <server>` | platform `app` role | reads `app.yml` + `servers/<server>/apps/<app>.yml`; fails on missing values or a platform host (the routes' hosts); writes `/opt/apps/<app>/.env` (config), pipes secrets to `bin/app-apply`, writes the registration `/opt/platform/apps/<app>.json` (repo, ref, path, hosts, secret keys) |
 | push to the app's ref | builder, then deployer | the forge's webhook (or the hourly poll) queues a run: the ref to a commit, each missing content-addressed image built through buildkitd (`kayra/build`), then that exact commit deployed (`kayra/deploy`) |
-| a run's deploy half | deployer | the bundle from the builder (images + the compose files `app.yml` lists at the commit) checked again, **admitted** with `compose-policy.sh`, `docker compose up --wait`, the release recorded |
+| a run's deploy half | deployer | the bundle from the builder (images + the compose files and routes `app.yml` lists at the commit) checked again, **admitted** with `compose-policy.sh`, the routes written (`routes.yml`), `docker compose up --wait`, the release recorded |
 | `kayra app deploy\|rollback <server> <app> [ref]` | deployer, over SSH | the same run for any branch, tag or commit; rollback lists or redeploys release records |
 | app dropped from `server.yml`, then `kayra apps <server>` | `bin/app-remove` (via `apps-prune.yml`) | registration first (no run starts after it), containers down, secrets, `.env`, runs and release records gone; **volumes kept** — `kayra app purge <server> <app>` deletes them, and only once the app is unregistered; the next registry GC collects its images |
 
@@ -224,12 +226,14 @@ On the server:
 Rules that keep apps untrusted-safe:
 
 - **The pipeline is the platform's.** Every app runs the same run (`cli/src/deployer/runs/run.ts`); nothing in an app's repository is executed except its Dockerfiles, inside BuildKit. Never let a run read a script, pipeline or hook from the app's repo.
-- **Everything the operator approves comes from the registration, not from the app at the commit**: hosts and secret keys are written at `kayra apps`. Only the compose file list is read from `app.yml` at the commit.
-- **Compose files come from the commit being deployed** and are admitted before `up`. The policy (`scripts/platform/compose-policy.sh`, modelled on Pod Security "restricted") is an **allow-list** of service keys — extend it deliberately, never switch it back to a deny-list. On top: every service needs a memory limit, no bind mounts, foreign images/networks/volumes, Host() outside the app's hosts, Traefik names or `platform-public` aliases without the `<app>-` prefix, `platform-public` not `external`, `@internal` services, `authelia@file`. Changing it: add a case to `ci/tests/compose-policy/cases/` and run `bash ci/tests/compose-policy/run.sh`.
+- **Everything the operator approves comes from the registration, not from the app at the commit**: hosts (the routes' hosts) and secret keys are written at `kayra apps`. Only the compose file list and the routes are read from `app.yml` at the commit, and a route's host must be a registered one.
+- **Compose files come from the commit being deployed** and are admitted before `up`. The policy (`scripts/platform/compose-policy.sh`, modelled on Pod Security "restricted") is an **allow-list** of service keys — extend it deliberately, never switch it back to a deny-list. On top: every service needs a memory limit, no bind mounts, foreign images/networks/volumes, no `traefik.*` label and no `platform-*` network, and each route to one of the app's services on one of its registered hosts. Changing it: add a case to `ci/tests/compose-policy/cases/` and run `bash ci/tests/compose-policy/run.sh`.
+- **Routing is the platform's.** An app declares `routes` in `app.yml`; after admission the deployer writes `routes.yml` (`cli/src/deployer/build/routes.ts`, pure): each routed service joins `platform-public` beside the networks it has, with the Traefik labels its routes become. Never let an app write a Traefik label again: the policy that once vetted them checked names and `Host()` rules, never what the values pointed at (another app's service or middleware). A route's path and host go into a Traefik rule, so their brands refuse backticks, quotes and `$`.
+- **The run's directory keeps the app's files under `app/`**, the platform's (`images.env`, `routes.yml`) beside it, so no compose file of the app can stand in for one of them.
 - **Admission runs `config --no-env-resolution`.** Otherwise Compose reads `env_file` in the deployer, from any path — `/run/app-secrets/<other-app>/` included — and bakes it into the app's container. With it, `env_file` stays visible and the allow-list refuses it.
-- **The deployer trusts nothing the builder returns.** The builder handles app code; the bundle it hands over is checked again (`cli/src/deployer/build/bundle.ts`: the commit asked for, images only under `localhost:5000/<app>/`, compose paths relative and inside the app) before admission. Keep that check when the bundle grows.
-- **Two networks.** `platform-public` is Traefik + apps; `platform-internal` is the builder, the deployer, BuildKit, registry, Authelia, with Traefik as the only bridge. Platform services go on `internal` with `traefik.docker.network=platform-internal`; never put one on `public` again, or every app can reach it. Apps can still reach each other on `platform-public`, so they must not address their own services by name across it (`api` there is anyone's) — e.g. the container name `shop-api-1`.
-- **Traefik router/service/middleware names are global** — hence the mandatory `<app>-` prefix; two apps with a router called `api` would knock each other out.
+- **The deployer trusts nothing the builder returns.** The builder handles app code; the bundle it hands over is checked again (`cli/src/deployer/build/bundle.ts`: the commit asked for, images only under `localhost:5000/<app>/`, compose paths relative and inside the app, every route field by its brand and nothing else) before admission. Keep that check when the bundle grows.
+- **Two networks.** `platform-public` is Traefik + apps; `platform-internal` is the builder, the deployer, BuildKit, registry, Authelia, with Traefik as the only bridge. Platform services go on `internal` with `traefik.docker.network=platform-internal`; never put one on `public` again, or every app can reach it. The platform attaches only routed services to `platform-public`, and apps can still reach each other there: an app addresses its own services on a network of its own, never across `platform-public` (`api` there is anyone's).
+- **Traefik router/service/middleware names are global** — hence the `<app>-` prefix on every name `routes.ts` writes; two apps with a router called `api` would knock each other out.
 - **Secrets are injected by app name**: the deployer reads `app-secrets/<app>/<KEY>` for the keys of the app it is deploying, into the environment of that app's compose commands only. An app cannot name another app's secret.
 - **What is registered on a server is its set of `apps/<app>.json` files** — `apps-prune.yml`, the registry GC and both daemons read them. Never register an app any other way.
 - **Never export `COMPOSE_PROJECT_NAME` in the deployer** *(checked)*. Deploys pass `-p <app>`; an exported name would beat it.
@@ -255,8 +259,8 @@ the operators. An app's users belong to the app and its customer: the app
 brings its own login, so it runs the same
 without the platform, and hiring or firing staff never needs an operator.
 
-- **Never route an app through `authelia@file`** — the compose policy refuses
-  it. Its access rules name only platform hosts, so it would answer 403
+- **Never route an app through `authelia@file`** — apps write no Traefik
+  label, and a route has no field for it. Its access rules name only platform hosts, so it would answer 403
   anyway; and the app would be back to trusting identity headers, which any
   container on `platform-public` can forge.
 - **The registry has no public router.** Builds push to `registry:5000` on
@@ -380,7 +384,7 @@ Docker build of `ci/checks/Dockerfile`; the last `RUN` is
 | Changed | Re-run |
 |---|---|
 | Host config (`defaults.yml`, `vars.yml`, `secrets.yml`) | `kayra setup <name>` |
-| App values (`apps/<app>.yml`, `apps/<app>.secrets.yml`), or an app's secrets/config/subdomains in `app.yml` | `kayra apps <name>` |
+| App values (`apps/<app>.yml`, `apps/<app>.secrets.yml`), or an app's secrets/config or a new route host in `app.yml` | `kayra apps <name>` |
 | App code or compose files | nothing — push; the next deploy takes them from the commit |
 | kayra's version (the deployer's code included) | `kayra deploy <name>` — a new version may change the app role, which `setup` alone does not run |
 | Everything (fresh server) | `kayra up <name>` |
@@ -423,7 +427,7 @@ cannot reach existing servers, so it becomes a second, drifting copy.
 
 ## Stack & conventions
 
-- **Reverse proxy:** Traefik v3.7. Platform subdomains: `auth.`, `traefik.`, `deploy.`; apps claim their own (e.g. `www.`, `api.`). Platform subdomains live in `hosts.conf`, app ones in each `app.yml` — `scripts/local/setup-hosts.sh`, `scripts/local/certs.sh` and the app role all read those, so they cannot drift.
+- **Reverse proxy:** Traefik v3.7. Platform subdomains: `auth.`, `traefik.`, `deploy.`; apps claim their own (e.g. `www.`, `api.`). Platform subdomains live in `hosts.conf`, app ones in each `app.yml`'s routes — `scripts/local/setup-hosts.sh`, `scripts/local/certs.sh` and the app role all read those, so they cannot drift.
 - **Auth:** Authelia at `auth.<domain>`, passkeys. Staff only, one `admin` group, users in a vault-rendered YAML file. See the site's `site/src/content/docs/concepts/authentication.md`.
 - **Ansible's output is kayra's** (`ansible/callback_plugins/kayra.py`, the `stdout_callback` in `ansible.cfg`): changed tasks (with diffs under `--diff`, so `kayra plan` shows them), failures with their message and output, what a `debug` task says, a recap; ok and skipped tasks are only counted. Indented to sit under kayra's step, the task at work redrawn in place on a terminal, holding Display's lock. A task whose result an operator must read uses `debug`, not an ok result. `ANSIBLE_STDOUT_CALLBACK=default` brings back Ansible's own. Each kind of result is a task in `ci/tests/ansible-output/play.yml` (`platform:ansible-output`); a new kind gets one.
 

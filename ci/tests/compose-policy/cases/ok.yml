@@ -1,13 +1,14 @@
 # expect: nothing
+# routes: [{"host": "www", "service": "x", "port": 3000}, {"host": "www", "path": "/a", "service": "x", "port": 3000, "rate_limit": {"average": 20, "period": "10m", "burst": 5}}]
 services:
   x:
     image: "localhost:5000/demo/web:abc"
     mem_limit: 256m
     volumes: ["data:/data"]
-    networks: {public: {aliases: [demo-x]}, private: {}}
-    labels:
-      traefik.http.routers.demo-x.rule: "Host(`www.example.test`) && Path(`/a`)"
-      traefik.http.routers.demo-x.middlewares: "security-headers@file"
-      traefik.http.services.demo-x.loadbalancer.server.port: "3000"
-networks: {public: {name: platform-public, external: true}, private: {}}
+    networks: {private: {aliases: [backend]}}
+    labels: {com.example.team: shop}
+  worker:
+    image: "localhost:5000/demo/worker:abc"
+    mem_limit: 128m
+networks: {private: {}}
 volumes: {data: {}}

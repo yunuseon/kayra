@@ -69,6 +69,11 @@
               "burst"
             ],
             "additionalProperties": false
+          },
+          "check": {
+            "description": "A path that answers 2xx or 3xx once the app is ready; a deploy waits for it. Without one, the route's own path must answer below 500.",
+            "type": "string",
+            "pattern": "^\\/[A-Za-z0-9._~%/-]*$"
           }
         },
         "required": [

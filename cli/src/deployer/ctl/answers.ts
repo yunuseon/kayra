@@ -1,5 +1,5 @@
 import type { AppName } from "../brand.ts";
-import type { Release, RunMeta, RunState } from "../runs/records.ts";
+import type { Check, Release, RunMeta, RunState } from "../runs/records.ts";
 import { typed } from "../../lib/typed.ts";
 
 /**
@@ -15,6 +15,9 @@ export type RunAnswer = {
   readonly sha?: string;
   readonly started: string;
   readonly finished?: string;
+  readonly error?: string;
+  readonly urls?: readonly string[];
+  readonly checks?: readonly Check[];
 };
 
 export type Deployed = { readonly sha: string; readonly time: string };
@@ -30,7 +33,8 @@ const iso = (compact: string) => compact.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})
 
 const deployed = (release: Release) => typed<Deployed>({ sha: release.sha, time: iso(release.time) });
 
-const answer = (run: RunMeta) => typed<RunAnswer>({
+/** One run as data: `ctl runs --json` lists them, `ctl deploy --json` answers with the one it followed. */
+export const runAnswer = (run: RunMeta) => typed<RunAnswer>({
   id: run.id,
   state: run.state,
   why: run.why,
@@ -38,12 +42,15 @@ const answer = (run: RunMeta) => typed<RunAnswer>({
   ...(run.sha === undefined ? {} : { sha: run.sha }),
   started: run.started,
   ...(run.finished === undefined ? {} : { finished: run.finished }),
+  ...(run.error === undefined ? {} : { error: run.error }),
+  ...(run.urls === undefined ? {} : { urls: run.urls }),
+  ...(run.checks === undefined ? {} : { checks: run.checks }),
 });
 
 export const runsAnswer = (app: AppName, runs: readonly RunMeta[], live: Release | undefined) => typed<RunsAnswer>({
   app,
   ...(live === undefined ? {} : { live: deployed(live) }),
-  runs: runs.map(answer),
+  runs: runs.map(runAnswer),
 });
 
 export const releasesAnswer = (app: AppName, releases: readonly Release[]) => typed<ReleasesAnswer>({

@@ -6,9 +6,9 @@ import { appJwt, githubIssues, type GithubIssueWorld } from "../../src/deployer/
 import { decide, parseNotify, type RunEnd } from "../../src/deployer/forges/notify.ts";
 import type { Request, Why } from "../../src/deployer/runs/queue.ts";
 import { ok } from "../../src/lib/result.ts";
-import { commit, name } from "./support.ts";
+import { commit, name, rid } from "./support.ts";
 
-const deployOf = (why: Why): Request => ({ owner: appOwner(name("shop")), work: { kind: "deploy", app: name("shop"), ref: "main", why } });
+const deployOf = (why: Why): Request => ({ id: rid, owner: appOwner(name("shop")), work: { kind: "deploy", app: name("shop"), ref: "main", why } });
 const end = (request: Request, success: boolean): RunEnd => ({ server: "shop-prod", request, ok: success, sha: commit("a"), page: "https://deploy.x/runs/shop/1" });
 
 test("decide: a failed push or poll raises, a failed manual deploy does not, any success resolves", () => {
@@ -21,7 +21,7 @@ test("decide: a failed push or poll raises, a failed manual deploy does not, any
   strictEqual(decide(end(deployOf("deploy"), false)).kind, "none");
   strictEqual(decide(end(deployOf("rollback"), false)).kind, "none");
   deepStrictEqual(decide(end(deployOf("rollback"), true)), { kind: "resolve", key: "shop", note: "Recovered: https://deploy.x/runs/shop/1" });
-  const job: Request = { owner: jobOwner("gc"), work: { kind: "job", job: "gc", dryRun: false, why: "schedule" } };
+  const job: Request = { id: rid, owner: jobOwner("gc"), work: { kind: "job", job: "gc", dryRun: false, why: "schedule" } };
   const failedJob = decide(end(job, false));
   assert(failedJob.kind === "raise");
   strictEqual(failedJob.alert.key, "_gc");

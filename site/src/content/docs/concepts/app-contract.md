@@ -97,6 +97,7 @@ routes:
     service: api
     port: 3000
     rate_limit: {average: 20, period: 10m, burst: 5}
+  - {host: app, service: web, port: 3000, check: /healthz}
 ```
 
 - `host` is a subdomain. Your app's hosts are its routes' hosts, and may not be
@@ -108,6 +109,11 @@ routes:
   none.
 - `rate_limit` caps what one client address may send: `average` requests per
   `period` (`10s`, `10m`, `1h`), and `burst` at once beyond that.
+- `check` is a path that answers 2xx or 3xx once the app is ready. After
+  `docker compose up --wait` (your healthchecks), a deploy asks every route
+  through Traefik for up to a minute: its `check`, or its own path, which must
+  then answer below 500. A route that never does fails the run, with what it
+  answered; the new release still runs.
 - Every route serves HTTPS with a real certificate and the platform's security
   headers (HSTS, `nosniff`, `X-Frame-Options: SAMEORIGIN`, a Referrer-Policy).
 

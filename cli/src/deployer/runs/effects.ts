@@ -22,6 +22,22 @@ const appSecrets = (app: App) => {
   return read.ok ? ok<Env>(Object.fromEntries(read.value)) : read;
 };
 
+/**
+ * A GET through Traefik on platform-internal, so it needs neither the public
+ * DNS nor a way back in from outside. Its certificate is verify's to judge, not
+ * readiness's: on multipass it is mkcert's, which this container does not trust.
+ */
+const probe = async (url: string) => {
+  const host = new URL(url).hostname;
+  const exit = await spawnLines(
+    ["curl", "-sk", "-o", "/dev/null", "-m", "10", "--connect-to", `${host}:443:traefik:443`, "-w", "%{http_code}", url],
+    { cwd: "/", env: {}, capture: true, timeoutMs: 15_000 },
+    () => undefined,
+  );
+  const status = Number.parseInt(exit.stdout, 10);
+  return Number.isNaN(status) ? 0 : status;
+};
+
 /** A run's page, which its commit statuses link to. */
 export const runPage = (s: Settings, who: Owner, id: RunId) => `https://deploy.${s.domain}/runs/${who}/${id}`;
 
@@ -60,4 +76,6 @@ export const effects = (s: Settings, who: Owner, id: RunId, scratch: string, log
     const posted = await forge(repo, token("GIT_TOKEN"), fetch).postStatus(commit, { context, state, description, target: runPage(s, who, id) });
     if (!posted.ok) log(`(commit status ${context} not posted: ${posted.error})`);
   },
+  probe,
+  pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 });

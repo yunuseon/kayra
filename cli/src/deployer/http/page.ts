@@ -17,7 +17,7 @@ body { font: 15px/1.5 system-ui, sans-serif; color: var(--fg); background: var(-
 h1 { font-size: 1.3rem; } h2 { font-size: 1.05rem; margin-top: 2rem; }
 a { color: inherit; } table { border-collapse: collapse; width: 100%; }
 td { padding: .3rem .6rem .3rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
-.muted { color: var(--muted); } .success { color: var(--ok); } .failure { color: var(--bad); } .running { color: var(--run); }
+.muted { color: var(--muted); } .success { color: var(--ok); } .failure { color: var(--bad); } .running { color: var(--run); } .queued, .superseded { color: var(--muted); }
 code, pre { font: 13px/1.45 ui-monospace, monospace; } pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style></head><body>${content}</body></html>
 `;
@@ -41,6 +41,8 @@ export const runPage = (runs: string, who: Owner, id: RunId) => {
     `${who} ${id}`,
     `<p><a href="/">Runs</a> · ${escape(who)}</p><h1 class="${found.state}">${escape(found.what)} — ${found.state}</h1>` +
       `<p class="muted">${found.why}, started ${escape(found.started)}${found.finished === undefined ? "" : `, finished ${escape(found.finished)}`}</p>` +
+      (found.error === undefined ? "" : `<p class="failure">${escape(found.error)}</p>`) +
+      (found.urls === undefined ? "" : `<p>${found.urls.map((url) => `<a href="${escape(url)}">${escape(url)}</a>`).join(" · ")}</p>`) +
       `<pre>${escape(log(runs, who, id) ?? "")}</pre>`,
   );
 };

@@ -247,6 +247,9 @@ const routeSchema = z.strictObject({
     })
     .optional()
     .describe("A rate limit on this route, per client address (Traefik's rateLimit)."),
+  check: routePathSchema
+    .optional()
+    .describe("A path that answers 2xx or 3xx once the app is ready; a deploy waits for it. Without one, the route's own path must answer below 500."),
 });
 
 /** app.yml, at the root of an app's repository: the app contract. */

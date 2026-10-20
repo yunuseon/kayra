@@ -158,6 +158,7 @@ compose: [deploy/compose.yml, deploy/compose.deploy.yml]
 routes:                                       # <host>.<domain>[path] → a service's port
   - {host: www, service: web, port: 3000}
   - {host: api, path: /signup, service: api, port: 3000, rate_limit: {average: 20, period: 10m, burst: 5}}
+  - {host: app, service: web, port: 3000, check: /healthz}   # must answer 2xx/3xx before a deploy counts
 secrets: [DATABASE_PASSWORD]
 config: [FEATURE_FLAGS]
 ```
@@ -170,8 +171,8 @@ What the platform does with it:
 |---|---|---|
 | `kayra apps <server>` | platform `app` role | reads `app.yml` + `servers/<server>/apps/<app>.yml`; fails on missing values or a platform host (the routes' hosts); writes `/opt/apps/<app>/.env` (config), pipes secrets to `bin/app-apply`, writes the registration `/opt/platform/apps/<app>.json` (repo, ref, path, hosts, secret keys) |
 | push to the app's ref | builder, then deployer | the forge's webhook (or the hourly poll) queues a run: the ref to a commit, each missing content-addressed image built through buildkitd (`kayra/build`), then that exact commit deployed (`kayra/deploy`) |
-| a run's deploy half | deployer | the bundle from the builder (images + the compose files and routes `app.yml` lists at the commit) checked again, **admitted** with `compose-policy.sh`, the routes written (`routes.yml`), `docker compose up --wait`, the release recorded |
-| `kayra app deploy\|rollback <server> <app> [ref]` | deployer, over SSH | the same run for any branch, tag or commit; rollback lists or redeploys release records |
+| a run's deploy half | deployer | the bundle from the builder (images + the compose files and routes `app.yml` lists at the commit) checked again, **admitted** with `compose-policy.sh`, the routes written (`routes.yml`), `docker compose up --wait`, the release recorded, then every route asked through Traefik (`curl --connect-to …:traefik:443`) until ready — its `check` path 2xx/3xx, else its own path below 500 — or the run fails with what answered |
+| `kayra app deploy\|rollback <server> <app> [ref]` | deployer, over SSH | the same run for any branch, tag or commit; rollback lists or redeploys release records. The run's id is given when it is asked for (`queued`; replaced while waiting: `superseded`), and `ctl` follows it to its end: log, then outcome, exit 0 only on success |
 | app dropped from `server.yml`, then `kayra apps <server>` | `bin/app-remove` (via `apps-prune.yml`) | registration first (no run starts after it), containers down, secrets, `.env`, runs and release records gone; **volumes kept** — `kayra app purge <server> <app>` deletes them, and only once the app is unregistered; the next registry GC collects its images |
 
 On the server:

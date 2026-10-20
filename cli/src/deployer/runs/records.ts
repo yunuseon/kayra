@@ -25,7 +25,11 @@ export const releases = (names: readonly string[]) =>
 export const moved = (resolved: Sha, lastRun: Sha | undefined, lastRelease: Sha | undefined) =>
   resolved !== lastRun && resolved !== lastRelease;
 
-export type RunState = "running" | "success" | "failure";
+/** queued until it starts; superseded when a newer request for its owner replaced it before it began. */
+export type RunState = "queued" | "running" | "success" | "failure" | "superseded";
+
+/** A route's readiness after up: the URL asked through Traefik, and what answered (0: nothing did). */
+export type Check = { readonly url: string; readonly status: number; readonly ok: boolean };
 
 /** runs/<owner>/<id>/meta.json, next to its log. */
 export type RunMeta = {
@@ -37,12 +41,33 @@ export type RunMeta = {
   readonly state: RunState;
   readonly started: string;
   readonly finished?: string;
+  /** Why a run failed, in one line. */
+  readonly error?: string;
+  /** Where the deployed app answers. */
+  readonly urls?: readonly string[];
+  readonly checks?: readonly Check[];
 };
 
 const whys = ["push", "poll", "deploy", "rollback", "schedule", "manual"] as const;
-const states = ["running", "success", "failure"] as const;
+const states = ["queued", "running", "success", "failure", "superseded"] as const;
 const isWhy = (value: unknown): value is RunMeta["why"] => whys.some((why) => why === value);
 const isState = (value: unknown): value is RunState => states.some((state) => state === value);
+
+/** A run that will change no more. */
+export const ended = (state: RunState) => state === "success" || state === "failure" || state === "superseded";
+
+const parseCheck = (json: unknown) => {
+  if (typeof json !== "object" || json === null) return Object.freeze([]);
+  const url = field(json, "url");
+  const status = field(json, "status");
+  const passed = field(json, "ok");
+  return typeof url === "string" && typeof status === "number" && typeof passed === "boolean"
+    ? Object.freeze([typed<Check>({ url, status, ok: passed })])
+    : Object.freeze([]);
+};
+
+const texts = (json: unknown) =>
+  Array.isArray(json) && json.every((each) => typeof each === "string") ? Object.freeze(json.map(String)) : undefined;
 
 export const parseMeta = (json: unknown) => {
   if (typeof json !== "object" || json === null) return undefined;
@@ -54,6 +79,9 @@ export const parseMeta = (json: unknown) => {
   const state = field(json, "state");
   const started = field(json, "started");
   const finished = field(json, "finished");
+  const error = field(json, "error");
+  const urls = texts(field(json, "urls"));
+  const checks = field(json, "checks");
   if (!id.ok || typeof owner !== "string" || typeof what !== "string" || typeof started !== "string") return undefined;
   if (!isWhy(why) || !isState(state)) return undefined;
   return typed<RunMeta | undefined>({
@@ -65,6 +93,9 @@ export const parseMeta = (json: unknown) => {
     started,
     ...(commit.ok ? { sha: commit.value } : {}),
     ...(typeof finished === "string" ? { finished } : {}),
+    ...(typeof error === "string" ? { error } : {}),
+    ...(urls === undefined ? {} : { urls }),
+    ...(Array.isArray(checks) ? { checks: Object.freeze(checks.flatMap(parseCheck)) } : {}),
   });
 };
 

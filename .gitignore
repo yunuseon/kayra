@@ -19,7 +19,7 @@ cli/dist/
 web/dist/
 
 # What tools derive from the code, kept for reading: npm run signatures
-.cache/
+/.cache/
 
 # The docs site: build output and Astro's cache
 site/dist/

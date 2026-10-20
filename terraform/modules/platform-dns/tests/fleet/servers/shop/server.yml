@@ -1,0 +1,7 @@
+kind: platform
+target: hetzner
+domain: example.com
+vault: true
+apps:
+  - {name: shop, repo: https://github.com/acme/shop.git}
+  - {name: blog, repo: https://github.com/acme/blog.git, path: site}

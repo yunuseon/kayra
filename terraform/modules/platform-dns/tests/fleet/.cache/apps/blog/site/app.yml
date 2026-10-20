@@ -1,0 +1,3 @@
+name: blog
+compose: [compose.yml]
+routes: [{host: blog, service: web, port: 80}]

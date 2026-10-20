@@ -98,6 +98,17 @@ platform_ansible() { (cd "$E/ansible" && ansible-lint --offline playbooks roles)
 
 platform_tofu_fmt() { tofu fmt -check -recursive -diff "$E/terraform"; }
 
+# The modules' own tests (tests/*.tftest.hcl), providers mocked: no token, no account.
+platform_tofu_test() {
+    local dir ok=0
+    for dir in "$E"/terraform/modules/*/; do
+        [ -d "${dir}tests" ] || continue
+        echo "  ${dir#"$E"/}"
+        (cd "$dir" && tofu_init && tofu test -no-color) || ok=1
+    done
+    return "$ok"
+}
+
 compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.sh"; }
 verify_cases() { bash "$E/ci/tests/verify/run.sh"; }
 ansible_output() { bash "$E/ci/tests/ansible-output/run.sh"; }
@@ -282,6 +293,7 @@ if [ "$platform" = true ]; then
     check platform:yamllint platform_yaml
     check platform:ansible-lint platform_ansible
     check platform:tofu-fmt platform_tofu_fmt
+    check platform:tofu-test platform_tofu_test
     check platform:compose-policy compose_policy
     check platform:verify verify_cases
     check platform:ansible-output ansible_output

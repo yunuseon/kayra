@@ -181,7 +181,7 @@ await_run() {
     local before="$1" line
     for _ in $(seq 1 90); do
         line="$(newest_run)"
-        case "$line" in "$before"|"") ;; *" running "*) ;; *) echo "$line"; return 0 ;; esac
+        case "$line" in "$before"|"") ;; *" running "*|*" queued "*) ;; *) echo "$line"; return 0 ;; esac
         sleep 10
     done
     die "no run ended within 15 minutes after: ${before}"
@@ -278,11 +278,17 @@ expect_serves v3
 kayra_cmd app runs "$server" sample | grep -q "^  STATE  *COMMIT" || die "kayra app runs prints the deployer's answer undrawn"
 echo "✓ kayra app runs draws the runs"
 before="$run"
-kayra_cmd app deploy "$server" sample >> "$log" 2>&1
+deployed="$(kayra_cmd app deploy "$server" sample 2>&1)" || { printf '%s\n' "$deployed" >> "$log"; die "kayra app deploy did not end in success"; }
+printf '%s\n' "$deployed" >> "$log"
+grep -q "✓ sample [0-9a-f]\{7\} deployed (run " <<< "$deployed" || die "kayra app deploy does not end with what it deployed"
+grep -q "https://www.${domain}/" <<< "$deployed" || die "kayra app deploy does not say where the app answers"
+echo "✓ kayra app deploy follows its run to the end: what it deployed, and where"
 run="$(await_run "$before")"
 [ "$(state_of "$run")" = success ] || die "deploying v3 again: ${run}"
 kayra_cmd app logs "$server" sample | grep -q "CACHED localhost:5000/sample/web" || die "deploying the same commit again rebuilt the image"
 echo "✓ the same commit again: CACHED"
+kayra_cmd app logs "$server" sample | grep -q "ready  https://www.${domain}/  " || die "the deploy did not ask its route through Traefik"
+echo "✓ readiness: www.${domain} answered through Traefik"
 
 # ── 4: a commit the policy refuses ──────────────────────────────────────────
 step "4  a commit the compose policy refuses"

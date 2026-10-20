@@ -11,6 +11,8 @@ const immutableHere = [
   { type: { from: "file", name: "Operation" }, to: "ReadonlyDeep" },
   // A URL's properties are writable, but functional/immutable-data refuses every write; Optique's messages hold them.
   { type: /^URL$/u, to: "ReadonlyDeep" },
+  // A RegExp keeps state only in lastIndex, which only the g and y flags use; kayra's patterns (lib/names.ts) have neither.
+  { type: /^RegExp$/u, to: "ReadonlyDeep" },
   // Optique's parsers keep their own parsing state (initialState); kayra only hands them to Optique.
   // command()'s and merge()'s results are intersections, matched by their names.
   { type: { from: "package", package: "@optique/core", name: ["Parser", "ParserModifiers"] }, to: "ReadonlyDeep" },

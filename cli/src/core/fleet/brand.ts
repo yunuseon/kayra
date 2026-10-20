@@ -4,20 +4,19 @@ import { z } from "zod";
 import { branded, type Brand } from "../../lib/brand.ts";
 import { err, ok } from "../../lib/result.ts";
 import { minting } from "../../lib/schema.ts";
+import { names, type Name } from "../../lib/names.ts";
 
-/** A string matching `regex`: brand it, and it is the schema the fleet's files are parsed with and the constructor everything else mints with. */
+/** A string matching a name's pattern: brand it, and it is the schema the fleet's files are parsed with and the constructor everything else mints with. */
 // eslint-disable-next-line functional/prefer-immutable-types -- a RegExp, and a Zod schema: immutable once built, but classes the rule cannot see into
-const pattern = (regex: RegExp, what: string) => z.string().regex(regex, { error: (issue) => `'${String(issue.input)}' is not ${what}` });
+const pattern = ({ pattern: regex, what }: Name) => z.string().regex(regex, { error: (issue) => `'${String(issue.input)}' is not ${what}` });
 
-export const serverNameSchema = pattern(/^[a-z0-9][a-z0-9-]*$/, "a server name (lowercase letters, digits, dashes)").transform(branded<"ServerName">());
-export const appNameSchema = pattern(/^[a-z][a-z0-9-]*$/, "an app name (lowercase letters, digits, dashes)").transform(branded<"AppName">());
-export const subdomainSchema = pattern(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "a subdomain").transform(branded<"Subdomain">());
-/** A route's path prefix: no backtick, quote or `$`, so it cannot leave its Traefik rule or meet Compose's interpolation. */
-export const routePathSchema = pattern(/^\/[A-Za-z0-9._~%/-]*$/, "a path (/, then letters, digits and ._~%/-)").transform(branded<"RoutePath">());
-export const serviceNameSchema = pattern(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/, "a compose service name").transform(branded<"ServiceName">());
-/** A Traefik duration. */
-export const periodSchema = pattern(/^[1-9][0-9]*(ms|s|m|h)$/, "a period such as 10s, 10m or 1h").transform(branded<"Period">());
-export const domainSchema = pattern(/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/, "a domain").transform(branded<"Domain">());
+export const serverNameSchema = pattern({ pattern: /^[a-z0-9][a-z0-9-]*$/, what: "a server name (lowercase letters, digits, dashes)" }).transform(branded<"ServerName">());
+export const appNameSchema = pattern(names.app).transform(branded<"AppName">());
+export const subdomainSchema = pattern(names.subdomain).transform(branded<"Subdomain">());
+export const routePathSchema = pattern(names.routePath).transform(branded<"RoutePath">());
+export const serviceNameSchema = pattern(names.serviceName).transform(branded<"ServiceName">());
+export const periodSchema = pattern(names.period).transform(branded<"Period">());
+export const domainSchema = pattern({ pattern: /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/, what: "a domain" }).transform(branded<"Domain">());
 /** A path inside a repository, never above it. */
 export const repoPathSchema = z
   .string()

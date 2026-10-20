@@ -16,7 +16,7 @@ export const unreadable = (stderr: string) => {
 export const opentofu: Tofu = {
   state: async (dir) => {
     const listed = await capture(["tofu", `-chdir=${dir}`, "state", "list", "-no-color"], "capture");
-    return listed.code === 0 ? ok(listed.stdout.split("\n").filter((line) => line.trim() !== "")) : err(unreadable(listed.stderr));
+    return listed.code === 0 ? ok(Object.freeze(listed.stdout.split("\n").filter((line) => line.trim() !== ""))) : err(unreadable(listed.stderr));
   },
   output: async (dir, name) => {
     const value = await capture(["tofu", `-chdir=${dir}`, "output", "-raw", name], "capture");

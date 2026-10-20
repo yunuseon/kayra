@@ -10,7 +10,6 @@ import { operation, type OperationName } from "../../core/operations/catalog.ts"
 import type { Fleet } from "../../core/fleet/model.ts";
 
 /** A command's one line, as the catalog says it: the same words in every client. */
-// eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message is readonly only at the top
 const summary = (name: OperationName) => message`${text(operation(name).summary)}`;
 
 type Example = readonly [line: string, what: string];
@@ -84,10 +83,9 @@ export const parser = (fleet: Fleet) => {
     { description: message`A server` },
   );
   const app = argument(appNameParser, { description: message`An app in the server's server.yml.` });
-  // eslint-disable-next-line functional/prefer-immutable-types -- Optique's Message is readonly only at the top
   const onServer = <const N extends string>(name: N, brief: Message, more: { readonly description?: Message; readonly footer?: Message } = {}) =>
     command(name, object({ name: constant(name), server }), { brief, ...more });
-  return Object.freeze(merge(
+  return merge(
     group(
       "Options",
       object({
@@ -314,7 +312,7 @@ export const parser = (fleet: Fleet) => {
       ),
       (chosen) => ({ command: chosen }) as const,
     ),
-  ));
+  );
 };
 
 export type Args = InferValue<ReturnType<typeof parser>>;

@@ -202,7 +202,7 @@ export const isOperation = (name: string): name is OperationName => Object.hasOw
 /** An operation as every client reads it, whatever its own entry spells out. */
 const described: Readonly<Record<OperationName, Operation>> = operations;
 
-export const operation = (name: OperationName) => Object.freeze(described[name]);
+export const operation = (name: OperationName) => described[name];
 
 /** An operation, with its input as its schema has it: what every client hands the core. */
 export type Invocation = { readonly [N in OperationName]: { readonly name: N; readonly input: InputOf<N> } }[OperationName];

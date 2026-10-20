@@ -49,7 +49,7 @@ const vaultChecks = (fleet: Fleet) =>
   Object.freeze(fleet.servers.flatMap((server) =>
     server.vault.kind === "file" && server.hasVaultedSecrets
       ? Object.freeze([
-          {
+          typed<Step>({
             kind: "check",
             label: `vault password opens ${server.name}'s secrets.yml`,
             probe: {
@@ -58,7 +58,7 @@ const vaultChecks = (fleet: Fleet) =>
             },
             hint: `the password file is ${server.vault.file}`,
             onFailure: "continue",
-          } satisfies Step,
+          }),
         ])
       : Object.freeze([]),
   ));

@@ -85,7 +85,8 @@ const notifierFor = (config: NotifyConfig, platformDir: string) => {
   return githubIssues(config.repository, config.appId, {
     fetch: async (url, init) => {
       const response = await fetch(url, init);
-      return { status: response.status, json: await response.json().catch(() => undefined) };
+      const json: unknown = await response.json().catch(() => undefined);
+      return Object.freeze({ status: response.status, json });
     },
     privateKey: () => (existsSync(keyFile) ? ok(readFileSync(keyFile, "utf8")) : err(`${keyFile} is missing: notifier_github_app_key in secrets.yml`)),
     now: () => Date.now(),

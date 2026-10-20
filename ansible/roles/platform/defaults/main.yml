@@ -43,6 +43,9 @@ renovate_token: ""
 # people's releases; a server whose repos carry the operator's own images
 # runs it more often, so a new build reaches a PR soon after it is pushed.
 renovate_schedule: "0 4 * * 1"
+# Push webhooks start a deploy at once; without them, the poll below finds the push.
+webhooks: true
+deploy_poll: "17 * * * *"
 # Where those repos live: github, gitlab (gitlab.com), or forgejo with
 # renovate_endpoint, its API on platform-internal
 # (http://forgejo:3000/api/v1). With a Forgejo, also

@@ -9,7 +9,8 @@
 #     browser to the login, not a 403 from rules Authelia never loaded
 #   - every certificate is a real one (Let's Encrypt or mkcert), never
 #     Traefik's default
-#   - an unsigned webhook is refused; every app route answers, not 5xx
+#   - an unsigned webhook is refused (with webhooks: false, /hook is not
+#     served at all); every app route answers, not 5xx
 # On the server (one SSH call):
 #   - every app in server.yml is registered, and nothing else
 #   - every app's containers run, none unhealthy; its last run did not fail
@@ -37,6 +38,8 @@ pass() { echo "    ✓ $*"; }
 note() { echo "    ! $*"; }
 
 domain="$(yq -r '.domain' "${dir}/server.yml")"
+# Not yq's `//`: it takes false for missing too.
+webhooks="$( { [ -f "${dir}/vars.yml" ] && yq -r '.webhooks' "${dir}/vars.yml"; } || echo true)"
 inventory="${dir}/inventory.ini"
 [ -f "$inventory" ] || { fail "no inventory for ${name}: provision it first"; exit 1; }
 field() { awk -v key="$1" '{for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) {print substr($i, length(key) + 2); exit}}' "$inventory"; }
@@ -95,7 +98,11 @@ if [ -n "$first_app" ]; then
             -w '%{http_code}' "https://deploy.${domain}/hook/${first_app}" 2>/dev/null || echo 000
     }
     code="$(hook)"
-    [ "$code" = 401 ] && pass "an unsigned webhook is refused" || fail "an unsigned webhook to /hook/${first_app}: HTTP ${code}, not 401"
+    if [ "$webhooks" = false ]; then
+        [ "$code" = 404 ] && pass "webhooks are off: /hook is not served" || fail "webhooks: false, yet /hook/${first_app} answers HTTP ${code}, not 404"
+    else
+        [ "$code" = 401 ] && pass "an unsigned webhook is refused" || fail "an unsigned webhook to /hook/${first_app}: HTTP ${code}, not 401"
+    fi
     while read -r sub path; do
         [ -z "$sub" ] || check "${sub}.${domain}${path%/} answers" "${sub}.${domain}" GET not_5xx "$path"
     done < <(bash "${KAYRA_ROOT}/scripts/local/app-manifests.sh" --routes "$name")

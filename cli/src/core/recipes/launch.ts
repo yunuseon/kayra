@@ -4,6 +4,8 @@ import { appEntrySchema } from "../fleet/settings.ts";
 import { type Plan, run } from "../plan/model.ts";
 import { err, flatMap, map, ok, type Result } from "../../lib/result.ts";
 import { apps, deployer } from "./apps.ts";
+import { appHook, takesWebhooks } from "./app-hook.ts";
+import { forgeRepo } from "../../lib/forge-repo.ts";
 import { vaulted, type Engine } from "./steps.ts";
 import { typed } from "../../lib/typed.ts";
 
@@ -33,7 +35,9 @@ const entryOf = (server: Server, launch: Launch): Result<Readonly<Record<string,
  * An app from its repository to a URL that answers, in one plan that may be
  * run again until it ends: register it in server.yml and check that every value
  * it declares is set (kayra-app-launch.js), apply the apps (kayra apps, the new
- * entry included), then deploy it and follow the run (its readiness included).
+ * entry included), deploy it and follow the run (its readiness included), then,
+ * where the server takes webhooks and the repository is on a forge kayra knows,
+ * its push hook.
  * On a server changed only from main, the server.yml change stops the apply
  * at its guard until it is merged: the launch says so, and a rerun goes on.
  */
@@ -53,8 +57,11 @@ export const launch = (engine: Engine, root: FleetRoot, server: Server, wanted: 
       ]),
       server,
     );
+    const hook = takesWebhooks(server).ok && forgeRepo(app.repo) !== undefined ? appHook(engine, root, withApp, app.name) : ok<Plan>([]);
     return flatMap(apps(engine, withApp), (applied) =>
-      map(deployer(server, { kind: "deploy", app: app.name, more: undefined }), (deploy) => typed<Plan>([prepare, ...applied, ...deploy])),
+      flatMap(deployer(server, { kind: "deploy", app: app.name, more: undefined }), (deploy) =>
+        map(hook, (hooked) => typed<Plan>([prepare, ...applied, ...deploy, ...hooked])),
+      ),
     );
   });
 };

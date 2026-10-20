@@ -30,6 +30,7 @@ export const reaches = {
   "app.check": { tool: "app_check" },
   "app.values": { tool: "app_values" },
   "app.launch": { tool: "app_launch" },
+  "app.hook": { tool: "app_hook" },
   "app.config.set": { tool: "app_config_set" },
   "app.secret.import": { tool: "app_secret_import" },
   "app.secret.generate": { tool: "app_secret_generate" },

@@ -79,7 +79,7 @@ export const settings = (env: NodeJS.ProcessEnv) => {
     renovateImage: env["RENOVATE_IMAGE"] ?? "",
     renovate: env["PLATFORM_RENOVATE"] === "true" ? must(parseCron(env["RENOVATE_SCHEDULE"] ?? "0 4 * * 1")) : undefined,
     gc: must(parseCron("0 3 * * *")),
-    poll: must(parseCron("17 * * * *")),
+    poll: must(parseCron(env["DEPLOY_POLL"] ?? "17 * * * *")),
     env: strings,
     server: env["SERVER"] ?? env["DOMAIN"] ?? "this server",
     notifier: notifierFor(must(parseNotify(env["NOTIFIER"])), platformDir),

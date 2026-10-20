@@ -18,6 +18,7 @@ export const reaches = {
   "app.init": { label: "Prepare app repository", icon: "+" },
   "app.check": { label: "Check app repository", icon: "✓" },
   "app.launch": { label: "Launch app", icon: "▶" },
+  "app.hook": { label: "Hook app repository", icon: "↪" },
   "app.values": { label: "App configuration requirements", icon: "≡" },
   "app.config.set": { label: "Set app configuration", icon: "⚙" },
   "app.secret.import": { label: "Import app secret", icon: "+" },

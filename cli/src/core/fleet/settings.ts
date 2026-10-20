@@ -54,6 +54,8 @@ export const settings: readonly Setting[] = [
   setting("authelia_smtp_username", platform, text, "SMTP user for Authelia."),
   setting("authelia_smtp_sender", platform, text, "Sender address of Authelia's mails."),
   setting("acme_dns", platform, z.enum(["", "hetzner"]), "Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner)."),
+  setting("webhooks", platform, z.boolean(), "Whether a push webhook may start a deploy at once: true (default) serves deploy.<domain>/hook/<app>; false serves no such endpoint, and pushes deploy by deploy_poll."),
+  setting("deploy_poll", platform, text, "When the deployer looks for pushes no webhook brought, as a five-field cron spec in the server's time (default hourly: 17 * * * *)."),
   setting("renovate_repositories", platform, texts, "owner/repo of the repos this server's Renovate job keeps up to date; the job runs only where the list is not empty."),
   setting("renovate_schedule", platform, text, "When the Renovate job runs, as a five-field cron spec in the server's time (default weekly: 0 4 * * 1)."),
   setting("renovate_platform", platform, z.enum(["github", "forgejo", "gitlab"]), "Where the repos live: github (default), forgejo or gitlab."),

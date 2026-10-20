@@ -66,6 +66,7 @@ services:
     command: ["builder"]
     environment:
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - WEBHOOKS=${WEBHOOKS:-true}
       - BUILDKIT_HOST=tcp://buildkitd:1234
       - REGISTRY_PUSH_HOST=registry:5000
     volumes:
@@ -122,6 +123,7 @@ services:
       - PLATFORM_DIR=/opt/platform
       - PLATFORM_RENOVATE=${PLATFORM_RENOVATE:-false}
       - RENOVATE_SCHEDULE=${RENOVATE_SCHEDULE:-0 4 * * 1}
+      - DEPLOY_POLL=${DEPLOY_POLL:-17 * * * *}
       - RENOVATE_PLATFORM=${RENOVATE_PLATFORM:-github}
       - RENOVATE_ENDPOINT=${RENOVATE_ENDPOINT:-}
       - RENOVATE_GIT_URL=${RENOVATE_GIT_URL:-}

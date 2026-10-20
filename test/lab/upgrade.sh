@@ -19,6 +19,8 @@
 #   4  a commit the compose policy refuses: the run fails, the old one serves
 #   5  kayra app rollback to the first release after the upgrade; the
 #      registry GC; kayra verify
+#   6  webhooks: false with a short deploy_poll: verify sees no /hook, and a
+#      push nobody announces deploys by the poll alone
 #
 # The fleet lives in a temp directory, never in a real one; the app's
 # repository is served to the VM over HTTP from this Mac. Runs on the
@@ -320,6 +322,23 @@ done
 kayra_cmd app logs "$server" gc | grep -q "Total reclaimed space" || die "the registry GC did not run through"
 echo "✓ the registry GC ran"
 kayra_cmd verify "$server" || die "kayra verify after the scenario"
+
+# ── 6: a server that takes no webhooks ─────────────────────────────────────
+step "6  webhooks: false — no /hook, and the poll alone deploys a push"
+yq -i '.webhooks = false | .deploy_poll = "*/2 * * * *"' "${fleet}/servers/${server}/vars.yml"
+verified="$(kayra_cmd deploy "$server" 2>&1)" || { printf '%s\n' "$verified" >> "$log"; die "kayra deploy with webhooks: false"; }
+printf '%s\n' "$verified" >> "$log"
+grep -q "webhooks are off: /hook is not served" <<< "$verified" || die "verify does not see /hook gone"
+echo "✓ webhooks: false serves no /hook, and verify knows it"
+yq -i 'del(.services.web.volumes)' "${repo}/deploy/compose.yml"
+echo v4 > "${repo}/web/index.html"
+commit v4
+before="$run"
+run="$(await_run "$before")"
+[ "$(state_of "$run")" = success ] || die "the polled deploy of v4: ${run}"
+grep -q " poll " <<< "$run" || die "v4 deployed, but not by the poll: ${run}"
+expect_serves v4
+echo "✓ a push with no webhook deployed by deploy_poll"
 
 passed=true
 step "the upgrade from ${from} holds"

@@ -196,13 +196,3 @@ test("kayra mcp speaks only the protocol on stdout, in the newest revision as in
     strictEqual(JSON.stringify(listed.content).includes("ansible-playbook"), true, mode);
   }));
 });
-
-test("the guard lets through exactly the tools that change nothing", () => {
-  const guard = readFileSync(join(import.meta.dirname, "..", "..", "scripts", "agent", "guard.sh"), "utf8");
-  const listed = /^mcp_reads='([^']*)'$/m.exec(guard)?.[1]?.split("|") ?? [];
-  const reads = operationNames.flatMap((name) => {
-    const offer = reaches[name];
-    return "tool" in offer && operation(name).effect === "reads" ? [offer.tool] : [];
-  });
-  deepStrictEqual(listed.toSorted(), reads.toSorted());
-});

@@ -97,5 +97,3 @@ programs can use a bearer token from the private discovery file; these requests
 need no Origin. See the [local API reference](../api/). Stopping `kayra serve`
 stops whatever it runs.
 
-For an AI agent working in a fleet, starting `kayra serve` asks the operator
-first: commands run from the browser are out of the agent guard's sight.

@@ -28,7 +28,7 @@ model {
     description 'A script or client on the operator machine, authenticated by the private discovery token'
   }
   agent = tool 'Agent' {
-    description "An AI agent such as Claude Code, in the fleet; kayra's guard asks the operator before it changes a real server"
+    description 'An AI agent such as Claude Code, in the fleet, through kayra mcp or the command line'
     technology 'Claude Code'
   }
   kayra = tool 'Local kayra' {

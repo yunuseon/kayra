@@ -21,24 +21,8 @@ In the fleet, a `.mcp.json` beside `servers/`:
 }
 ```
 
-The server's name must be `kayra`: the guard (below) matches the tools by it.
 The `kayra` on `PATH` hands over to the version the fleet pins, as it does for
 every command. Claude Code asks once before it starts a project's MCP server.
-
-The fleet's `.claude/settings.json` runs kayra's guard on these tools as well as
-on Bash. Editing `.mcp.json` asks too, since it decides what the agent can
-start:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      { "matcher": "Bash|mcp__kayra__.*", "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/node_modules/@yunuseon/kayra/scripts/agent/guard.sh\"" }] }
-    ]
-  },
-  "permissions": { "ask": ["Edit(.claude/**)", "Edit(.mcp.json)"] }
-}
-```
 
 ## The tools
 
@@ -70,7 +54,7 @@ has not ended is refused. Cancelling a call stops its step, as Ctrl-C does.
 | A tool that changes nothing (`status`, `validate`, `verify`, `plan`, `doctor`, `version`, `app_check`, `app_runs`, `app_log`, `app_releases`) | Runs |
 | `dryRun: true` | Runs; changes nothing |
 | A change to a multipass server | Runs |
-| A change to any other server, or with no server (`certs`) | The guard asks the operator; in a mode that approves by itself, it refuses |
+| A change to any other server, or with no server (`certs`) | As Claude Code's permission mode decides |
 | `down`, `app_purge` | Claude Code asks every time, in every mode, with no "always allow" |
 | `down` on a Hetzner server | Also asks the operator, in a dialog, to type the server's name. The agent never sees what was typed |
 

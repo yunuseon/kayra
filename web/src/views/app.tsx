@@ -113,7 +113,7 @@ export const AppView = ({ server, app }: { readonly server: string; readonly app
   const [ref, setRef] = useState("");
   return (
     <>
-      <Header title={app} sub={`on ${server}`}>
+      <Header kicker="app" title={app} sub={`on ${server}`}>
         <form
           class="inline"
           onSubmit={(event) => {

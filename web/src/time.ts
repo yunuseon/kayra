@@ -19,5 +19,13 @@ export const ago = (ms: number) => {
   return hours < 48 ? `${String(hours)}h ago` : `${String(Math.floor(hours / 24))}d ago`;
 };
 
+/** When something started, as a log prints it: the time if today, else the day. */
+export const clock = (iso: string, now: number) => {
+  const at = new Date(iso);
+  return at.toDateString() === new Date(now).toDateString()
+    ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : at.toLocaleDateString([], { day: "numeric", month: "short" });
+};
+
 /** A run's id starts with its UTC time: 20261018T201502Z-a1b2c3. */
 export const startedAt = (iso: string) => Date.parse(iso);

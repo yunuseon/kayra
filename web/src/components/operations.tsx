@@ -2,7 +2,7 @@ import type { ServerFacts } from "../../../cli/src/clients/wire/contract.gen.ts"
 import { onServer, reaches } from "../operations.ts";
 import { catalog } from "../state.ts";
 import { openOperation } from "./operation.tsx";
-import { Problem, Waiting } from "./ui.tsx";
+import { Effect, Problem, Waiting } from "./ui.tsx";
 
 export const OperationActions = ({ server }: { readonly server?: ServerFacts }) => {
   const loaded = catalog.value;
@@ -17,15 +17,18 @@ export const OperationActions = ({ server }: { readonly server?: ServerFacts }) 
       {operations.map((operation) => (
         <button
           key={operation.name}
+          type="button"
           class={`action${operation.effect === "destroys" ? " danger" : ""}`}
           onClick={() => {
             openOperation(operation.name, server === undefined ? {} : { server: server.name });
           }}
         >
-          <strong>
-            <span aria-hidden="true">{reaches[operation.name].icon}</span> {reaches[operation.name].label}
-          </strong>
-          <span>{operation.summary}</span>
+          <span class="icon" aria-hidden="true">
+            {reaches[operation.name].icon}
+          </span>
+          <strong>{reaches[operation.name].label}</strong>
+          <Effect effect={operation.effect} />
+          <span class="about">{operation.summary}</span>
         </button>
       ))}
     </div>

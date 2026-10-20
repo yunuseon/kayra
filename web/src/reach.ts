@@ -111,3 +111,32 @@ export const health = (server: Server | undefined) => {
   if (cells.includes("warn")) return typed<Tone | "waiting">("warn");
   return cells.includes("ok") ? typed<Tone | "waiting">("ok") : typed<Tone | "waiting">("muted");
 };
+
+/** A server's state as a boot log says it: a word in brackets, and its tone. Behind the pin only when nothing else is wrong. */
+export type Verdict = { readonly word: string; readonly tone: Tone | "waiting" };
+export const verdict = (server: Server | undefined) => {
+  const tone = health(server);
+  if (tone === "waiting") return typed<Verdict>({ word: "ASKING", tone });
+  if (tone === "bad") return typed<Verdict>({ word: "FAIL", tone });
+  if (tone === "warn") return typed<Verdict>({ word: "WARN", tone });
+  if (server !== undefined && kayra(server).tone === "warn") return typed<Verdict>({ word: "BEHIND", tone: "warn" });
+  return tone === "ok" ? typed<Verdict>({ word: "OK", tone }) : typed<Verdict>({ word: "--", tone });
+};
+
+/** A word centred in a six-wide bracket, as init systems print it: `[  OK  ]`. */
+export const bracket = (word: string) => {
+  const room = Math.max(0, 6 - word.length);
+  return `[${" ".repeat(Math.floor(room / 2))}${word}${" ".repeat(Math.ceil(room / 2))}]`;
+};
+
+/** A tone as one glyph, so a state never rests on its colour alone. */
+export const glyph: Readonly<Record<Tone | "waiting", string>> = {
+  ok: "●",
+  warn: "▲",
+  bad: "✕",
+  waiting: "◌",
+  active: "◐",
+  muted: "○",
+  strong: "●",
+  accent: "◆",
+};

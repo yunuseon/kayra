@@ -97,6 +97,16 @@ export const operations = {
     kind: "plan",
     input: serverInput,
   },
+  "app.init": {
+    summary: "Make an existing project with a compose file or Dockerfile deployable: write app.yml and the platform's overlay, then check it.",
+    scope: "repo",
+    effect: "changes",
+    kind: "plan",
+    input: z.strictObject({
+      dir: z.string().min(1).default(".").describe("The project's repository"),
+      name: z.string().min(1).optional().describe("The app's name; the directory's by default"),
+    }),
+  },
   "app.check": {
     summary: "What the platform checks at deploy (app.yml, images, compose policy), in an app's repository. No fleet needed.",
     scope: "repo",

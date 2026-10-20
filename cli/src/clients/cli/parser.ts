@@ -54,7 +54,7 @@ export const runOptions = (version: string) =>
     // The option form's ARG cannot be hidden from the help page; completion scripts call the command.
     completion: { command: { group: "Help" } },
     brief: message`kayra ${text(version)}: a fleet's servers, from the machine to the apps on it.`,
-    description: message`Run it anywhere inside a fleet (the directory holding servers/); app check also outside one. Server names are the fleet's and complete in the shell.`,
+    description: message`Run it anywhere inside a fleet (the directory holding servers/); app init and app check also outside one. Server names are the fleet's and complete in the shell.`,
     examples: examples("", [
       ["kayra status", "every server, and whether it answers"],
       ["kayra up shop-test", "a server from nothing"],
@@ -160,6 +160,19 @@ export const parser = (fleet: Fleet) => {
               or(
                 group(
                   "In an app's repository",
+                  or(
+                  command(
+                    "init",
+                    object({
+                      name: constant("app init"),
+                      dir: optional(argument(string({ metavar: "DIR" }), { description: message`The project's repository; the current directory by default.` })),
+                      appName: optional(option("--name", string({ metavar: "NAME" }), { description: message`The app's name; the directory's by default.` })),
+                    }),
+                    {
+                      brief: summary("app.init"),
+                      footer: footer(["kayra app init", "in a project with a compose file or a Dockerfile, once"]),
+                    },
+                  ),
                   command(
                     "check",
                     object({
@@ -170,6 +183,7 @@ export const parser = (fleet: Fleet) => {
                       brief: summary("app.check"),
                       footer: footer(["kayra app check", "in the app's repository, before a push"]),
                     },
+                  ),
                   ),
                 ),
                 group(

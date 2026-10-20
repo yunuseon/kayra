@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName, type KayraRoot, type KayraVersion } from "../fleet/brand.ts";
-import { appCheck } from "../recipes/app-check.ts";
+import { appCheck, appInit } from "../recipes/app-check.ts";
 import { doctor } from "../recipes/doctor.ts";
 import { appPurge, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
 import type { Engine } from "../recipes/steps.ts";
@@ -58,6 +58,7 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("down"), input: operations.down.input }),
   z.strictObject({ name: z.literal("adopt"), input: operations.adopt.input }),
   z.strictObject({ name: z.literal("backup.test"), input: operations["backup.test"].input }),
+  z.strictObject({ name: z.literal("app.init"), input: operations["app.init"].input }),
   z.strictObject({ name: z.literal("app.check"), input: operations["app.check"].input }),
   z.strictObject({ name: z.literal("app.purge"), input: operations["app.purge"].input }),
   z.strictObject({ name: z.literal("app.runs"), input: operations["app.runs"].input }),
@@ -124,6 +125,7 @@ const plans: Plans = {
   "backup.test": withServer(backupTest),
   ssh: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => ssh(target, [])),
   "ssh.exec": (ctx, input) => flatMap(onServer(ctx, input.server), (target) => ssh(target, input.command)),
+  "app.init": (ctx, input) => map(absolutePath(resolve(ctx.here, input.dir)), (dir) => appInit(ctx.engine.kayra, dir, input.name)),
   "app.check": (ctx, input) =>
     flatMap(absolutePath(resolve(ctx.here, input.dir)), (dir) => appCheck(ctx.engine.kayra, dir, ctx.read(within(dir, "app.yml")))),
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),

@@ -125,7 +125,7 @@ test("run records retain their history and session identity, and only live runs 
 const samples = {
   up: { server: "lab" }, provision: { server: "lab" }, deploy: { server: "lab" }, setup: { server: "lab" }, plan: { server: "lab" }, verify: { server: "lab" }, apps: { server: "lab" }, hosts: { server: "lab" },
   down: { server: "lab" }, adopt: { server: "prod" }, "backup.test": { server: "lab" }, ssh: { server: "lab" }, "ssh.exec": { server: "lab", command: ["uptime"] },
-  "app.check": { dir: "app" }, "app.purge": { server: "lab", app: "shop" }, "app.runs": { server: "lab", app: "shop" }, "app.log": { server: "lab", app: "shop" }, "app.releases": { server: "lab", app: "shop" },
+  "app.init": { dir: "app" }, "app.check": { dir: "app" }, "app.purge": { server: "lab", app: "shop" }, "app.runs": { server: "lab", app: "shop" }, "app.log": { server: "lab", app: "shop" }, "app.releases": { server: "lab", app: "shop" },
   "app.deploy": { server: "lab", app: "shop" }, "app.rollback": { server: "lab", app: "shop", sha: "0123abc" }, job: { server: "lab", job: "gc" },
   certs: { domain: "fixture.test" }, doctor: {}, validate: {}, status: { offline: true }, version: {},
 } satisfies Readonly<Record<OperationName, unknown>>;

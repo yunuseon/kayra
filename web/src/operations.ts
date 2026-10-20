@@ -15,6 +15,7 @@ export const reaches = {
   down: { label: "Destroy", icon: "×" },
   adopt: { label: "Adopt", icon: "+" },
   "backup.test": { label: "Test backup", icon: "✓" },
+  "app.init": { label: "Prepare app repository", icon: "+" },
   "app.check": { label: "Check app repository", icon: "✓" },
   "app.purge": { label: "Purge app data", icon: "×" },
   "app.runs": { label: "App runs", icon: "≡" },

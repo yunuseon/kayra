@@ -283,5 +283,3 @@ the whole run's the worst of what is under it. `hint` is what to do, or `null`.
 | App code or compose files | nothing — push; the next deploy takes them from the commit |
 | A new kayra version in `package.json` | `npm ci`, then `kayra deploy <server>` per server — a new version may change the app role, which `setup` alone does not run |
 | Everything (a fresh server) | `kayra up <server>` |
-
-Upgrading to 0.8.0 in particular needs `kayra deploy` (or `kayra apps` after `setup`): `setup` removes the Jenkins registration, and only `apps` writes the deployer's.

@@ -170,6 +170,27 @@ rule_platform_no_private_keys() {
     private_keys "${files[@]}" | none
 }
 
+# The files CLAUDE.md names: backticked, a `/` in them and a file extension.
+# Left out, as not files of this repo: absolute paths and `.cache/` (a
+# machine's), `<placeholders>` and `*` globs (no single file), and the other
+# repos' own layouts: a fleet's `servers/`, an app's `apps/` and `docker/`, a
+# server's `releases/`.
+claude_md_paths() {
+    grep -oE '`[^` ]*/[^` ]*\.[A-Za-z0-9]+`' "$E/CLAUDE.md" | tr -d '`' | sort -u \
+        | grep -vE '^/|^\.cache|[<*]|^(servers|apps|docker|releases)/'
+}
+
+# "Every path CLAUDE.md names exists." From the repo root, or from cli/src,
+# which CLAUDE.md drops for the CLI's source (`core/…`, `clients/…`).
+rule_claude_md_paths_exist() {
+    local paths path
+    paths=$(claude_md_paths)
+    [ -n "$paths" ] || { echo "CLAUDE.md: found no paths to check"; return 1; }
+    while IFS= read -r path; do
+        [ -e "$E/$path" ] || [ -e "$E/cli/src/$path" ] || echo "CLAUDE.md names ${path}, which does not exist"
+    done <<<"$paths" | none
+}
+
 # --- the fleet, against the engine ------------------------------------------------
 
 fleet_shell() {
@@ -280,6 +301,7 @@ if [ "$platform" = true ]; then
     check platform:rule:deployer-has-no-project-name rule_deployer_has_no_project_name
     check platform:rule:images-are-pinned rule_platform_images_are_pinned
     check platform:rule:no-private-keys rule_platform_no_private_keys
+    check platform:rule:claude-md-paths-exist rule_claude_md_paths_exist
 fi
 if [ -n "$F" ]; then
     check fleet:shellcheck fleet_shell

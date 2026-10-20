@@ -5,7 +5,7 @@ import { newest } from "../overview.ts";
 import { now, recorded } from "../state.ts";
 import { ago, clock, startedAt } from "../time.ts";
 
-export const runTone: Readonly<Record<RunState, "waiting" | "ok" | "bad" | "warn">> = {
+const runTone: Readonly<Record<RunState, "waiting" | "ok" | "bad" | "warn">> = {
   running: "waiting",
   passed: "ok",
   failed: "bad",

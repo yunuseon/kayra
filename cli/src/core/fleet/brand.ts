@@ -58,7 +58,6 @@ export const serverName = minting(serverNameSchema);
 export const appName = minting(appNameSchema);
 export const subdomain = minting(subdomainSchema);
 export const domain = minting(domainSchema);
-export const repoPath = minting(repoPathSchema);
 
 /** `~/…` is the operator's home, as Ansible reads it in vault_password_file. */
 export const absolutePath = (value: string) => {

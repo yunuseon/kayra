@@ -1,5 +1,6 @@
 import type { Brand } from "../lib/brand.ts";
 import { err, ok } from "../lib/result.ts";
+import { names, type Name } from "../lib/names.ts";
 
 export type AppName = Brand<string, "AppName">;
 /** A full commit id: what gets built, deployed and recorded. */
@@ -10,8 +11,11 @@ export type JobName = "gc" | "renovate";
 /** Whose runs a directory under runs/ holds: an app, or `_<job>` (no app name starts with `_`). */
 export type Owner = Brand<string, "Owner">;
 
-export const appName = (value: string) =>
-  /^[a-z][a-z0-9-]*$/.test(value) ? ok<AppName>(value as AppName) : err(`'${value}' is not an app name`);
+/** A constructor for the brand B: the value, if it follows the name's rule (lib/names.ts, as the fleet's schemas do). */
+const matching = <B extends string>({ pattern, what }: Name) => (value: string) =>
+  pattern.test(value) ? ok<Brand<string, B>>(value as Brand<string, B>) : err(`'${value}' is not ${what}`);
+
+export const appName = matching<"AppName">(names.app);
 
 export const sha = (value: string) =>
   /^[0-9a-f]{40}$/.test(value) ? ok<Sha>(value as Sha) : err(`'${value}' is not a full commit id`);
@@ -32,20 +36,16 @@ export type RoutePath = Brand<string, "RoutePath">;
 /** A Traefik duration, such as `10m`. */
 export type Period = Brand<string, "Period">;
 
-export const subdomain = (value: string) =>
-  /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(value) ? ok<Subdomain>(value as Subdomain) : err(`'${value}' is not a subdomain`);
+export const subdomain = matching<"Subdomain">(names.subdomain);
 
-export const serviceName = (value: string) =>
-  /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value) ? ok<ServiceName>(value as ServiceName) : err(`'${value}' is not a compose service name`);
+export const serviceName = matching<"ServiceName">(names.serviceName);
 
 export const port = (value: number) =>
   Number.isInteger(value) && value >= 1 && value <= 65535 ? ok<Port>(value as Port) : err(`${String(value)} is not a port`);
 
-export const routePath = (value: string) =>
-  /^\/[A-Za-z0-9._~%/-]*$/.test(value) ? ok<RoutePath>(value as RoutePath) : err(`'${value}' is not a path (/, then letters, digits and ._~%/-)`);
+export const routePath = matching<"RoutePath">(names.routePath);
 
-export const period = (value: string) =>
-  /^[1-9][0-9]*(ms|s|m|h)$/.test(value) ? ok<Period>(value as Period) : err(`'${value}' is not a period such as 10s, 10m or 1h`);
+export const period = matching<"Period">(names.period);
 
 export const appOwner = (app: AppName) => app as string as Owner;
 export const jobOwner = (job: JobName) => `_${job}` as Owner;

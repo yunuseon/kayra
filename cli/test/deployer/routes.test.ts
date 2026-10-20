@@ -34,7 +34,7 @@ const admitted = JSON.stringify({
   services: {
     web: { image: "localhost:5000/shop/web:0123456789ab", networks: { default: null } },
     api: { image: "localhost:5000/shop/api:0123456789ab", networks: { private: { aliases: ["backend"] }, default: {} } },
-    db: { image: "postgres:16", networks: { private: null } },
+    db: { image: "postgres:16", networks: { private: null }, restart: "always" },
   },
 });
 
@@ -43,7 +43,7 @@ const override = (routes: unknown) => {
   return written;
 };
 
-test("the override: routed services join platform-public beside their own networks; the rest untouched", () => {
+test("the override: routed services join platform-public beside their own networks; every service without a restart policy gets unless-stopped", () => {
   deepStrictEqual(override([{ host: "www", service: "web", port: 3000 }]), {
     services: {
       web: {
@@ -57,7 +57,9 @@ test("the override: routed services join platform-public beside their own networ
           "traefik.http.routers.shop-0-www.service": "shop-web-3000",
           "traefik.http.services.shop-web-3000.loadbalancer.server.port": "3000",
         },
+        restart: "unless-stopped",
       },
+      api: { restart: "unless-stopped" },
     },
     networks: { "platform-public": { name: "platform-public", external: true } },
   });
@@ -96,7 +98,9 @@ test("the override: a path route with a rate limit beside its host's route, two 
             "traefik.http.routers.shop-2-metrics.service": "shop-api-9090",
             "traefik.http.services.shop-api-9090.loadbalancer.server.port": "9090",
           },
+          restart: "unless-stopped",
         },
+        web: { restart: "unless-stopped" },
       },
       networks: { "platform-public": { name: "platform-public", external: true } },
     },
@@ -104,7 +108,7 @@ test("the override: a path route with a rate limit beside its host's route, two 
 });
 
 test("the override: no routes, nothing routed; a route to a missing service refused", () => {
-  deepStrictEqual(override([]), { services: {} });
+  deepStrictEqual(override([]), { services: { web: { restart: "unless-stopped" }, api: { restart: "unless-stopped" } } });
   deepStrictEqual(routesOverride(shop, "shop.example.com", must(parseRoutes([{ host: "www", service: "cache", port: 3000 }])), admitted).ok, false);
   deepStrictEqual(routesOverride(shop, "shop.example.com", [], "not json").ok, false);
 });

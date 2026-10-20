@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ok } from "../lib/result.ts";
 import { field, registered, type App } from "./app.ts";
-import { appName, appOwner, newRunId } from "./brand.ts";
+import { appName, appOwner, newRunId, type AppName } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
 import { matches } from "./cron.ts";
 import { json, send } from "./http/http.ts";
@@ -14,6 +14,8 @@ import { ended, moved, releases, type RunMeta } from "./runs/records.ts";
 import { decide, type RunEnd } from "./forges/notify.ts";
 import { effects, runPage } from "./runs/effects.ts";
 import { deploy, renovate, type Effects, type Env, type Outcome } from "./runs/run.ts";
+import { toRestore, type Deployed } from "./runs/restore.ts";
+import { spawnLines } from "./process.ts";
 import { appendLog, meta, owners, prune, runsOf, writeMeta } from "./runs/store.ts";
 import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
@@ -161,6 +163,41 @@ const poll = async (s: Settings) => {
   );
 };
 
+/** Whether any container of an app's compose project runs (or is restarting). */
+const running = async (app: AppName) => {
+  const exit = await spawnLines(
+    ["docker", "ps", "-q", "--filter", `label=com.docker.compose.project=${app}`, "--filter", "status=running", "--filter", "status=restarting"],
+    { cwd: "/", env: {}, capture: true, timeoutMs: 30_000 },
+    () => undefined,
+  );
+  return exit.code !== 0 || exit.stdout.trim() !== "";
+};
+
+/**
+ * After the deployer starts (and Docker with it): each app that was deployed
+ * and runs no container now, deployed again at the release that ran. A Docker
+ * update or a reboot stops every container; an app deployed before the
+ * platform gave every service a restart policy would otherwise stay down.
+ */
+const restore = async (s: Settings) => {
+  const apps = registeredApps(s);
+  const states = await Promise.all(apps.map(async (app) => [app.name, await running(app.name)] as const));
+  const up = new Map(states);
+  toRestore(
+    apps.map((app) => {
+      const dir = join(s.platformDir, "releases", app.name);
+      return typed<Deployed>({ app: app.name, live: releases(existsSync(dir) ? readdirSync(dir) : [])[0]?.sha });
+    }),
+    (app) => up.get(app) ?? true,
+  ).forEach(({ app, live }) => {
+    const registration = apps.find((each) => each.name === app);
+    if (registration !== undefined) ask(s, deployRequest(registration, live, "restore"));
+  });
+};
+
+/** Long enough for Docker to have started the containers with a restart policy itself. */
+const restoreAfter = 30_000;
+
 const tick = (s: Settings, at: Date) => {
   if (matches(s.poll, at)) void poll(s);
   if (matches(s.gc, at)) ask(s, jobRequest(newId(), "gc", false, "schedule"));
@@ -241,5 +278,6 @@ export const serveDeployer = (env: NodeJS.ProcessEnv) => {
   createServer(handle((request, response) => { push(s, request, response); })).listen(8090);
   createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
   schedule(s);
+  setTimeout(() => { void restore(s); }, restoreAfter);
   console.log(`deployer: :8090 pushes, 127.0.0.1:8091 control; renovate ${s.renovate === undefined ? "off" : "on"}`);
 };

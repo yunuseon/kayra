@@ -542,6 +542,31 @@ Preview: `POST /api/operations/app.secret.generate/preview`. Returns a JSON plan
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.launch`
+
+From a repository to a URL that answers: register the app, check its values, apply the apps, deploy and follow it. Run it again after a stop.
+
+`POST /api/operations/app.launch`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `dir` | `string` | no | — | Local app directory containing app.yml; otherwise use the fleet cache Minimum length: 1. |
+| `repo` | `string` | no | — | The app's repository, https://; needed until server.yml registers it Minimum length: 1. |
+| `ref` | `string` | no | — | The branch that deploys (default main) Minimum length: 1. |
+| `path` | `string` | no | — | The app's root inside the repository (default .) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.launch/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.purge`
 
 Delete a removed app's volumes: its data, irreversibly.

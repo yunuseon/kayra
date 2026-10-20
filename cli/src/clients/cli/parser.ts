@@ -190,6 +190,12 @@ export const parser = (fleet: Fleet) => {
                 group(
                   "On a server",
                   or(
+                    command("launch", object({
+                      name: constant("app launch"), server, app, dir: valuesDir,
+                      repo: optional(option("--repo", string({ metavar: "URL" }), { description: message`The app's repository, https://; needed until server.yml registers it.` })),
+                      ref: optional(option("--ref", string({ metavar: "REF" }), { description: message`The branch that deploys; main by default.` })),
+                      path: optional(option("--path", string({ metavar: "PATH" }), { description: message`The app's root inside the repository; . by default.` })),
+                    }), { brief: summary("app.launch"), footer: footer(["kayra app launch shop-prod shop --repo https://github.com/OWNER/shop.git --dir .", "register, check values, apply, deploy; again after a stop"]) }),
                     command("values", object({ name: constant("app values"), server, app, dir: valuesDir, json: option("--json") }), { brief: summary("app.values") }),
                     command("config", command("set", object({
                       name: constant("app config set"), server, app, dir: valuesDir,

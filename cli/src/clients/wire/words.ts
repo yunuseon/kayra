@@ -11,6 +11,8 @@ const extra = (call: Invocation) => {
       return [call.input.key, ...(call.input.dir === undefined ? [] : ["--dir", call.input.dir])];
     case "app.values":
       return call.input.dir === undefined ? [] : ["--dir", call.input.dir];
+    case "app.launch":
+      return (["repo", "ref", "path", "dir"] as const).flatMap((key) => (call.input[key] === undefined ? [] : [`--${key}`, call.input[key]]));
     case "ssh.exec":
       return ["--", ...call.input.command];
     case "job":

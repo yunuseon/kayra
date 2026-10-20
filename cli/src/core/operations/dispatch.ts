@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName, type KayraRoot, type KayraVersion } from "../fleet/brand.ts";
 import { appCheck, appInit } from "../recipes/app-check.ts";
+import { launch } from "../recipes/launch.ts";
 import { doctor } from "../recipes/doctor.ts";
 import { appPurge, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
 import type { Engine } from "../recipes/steps.ts";
@@ -64,6 +65,7 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("app.init"), input: operations["app.init"].input }),
   z.strictObject({ name: z.literal("app.check"), input: operations["app.check"].input }),
   z.strictObject({ name: z.literal("app.values"), input: operations["app.values"].input }),
+  z.strictObject({ name: z.literal("app.launch"), input: operations["app.launch"].input }),
   z.strictObject({ name: z.literal("app.config.set"), input: operations["app.config.set"].input }),
   z.strictObject({ name: z.literal("app.secret.import"), input: operations["app.secret.import"].input }),
   z.strictObject({ name: z.literal("app.secret.generate"), input: operations["app.secret.generate"].input }),
@@ -144,6 +146,8 @@ const plans: Plans = {
     flatMap(appDir(ctx, input.dir), (dir) => appValues(ctx.engine, server, app, { kind: "import", key: input.key, file: input.file }, ctx.here, ctx.read, dir))),
   "app.secret.generate": (ctx, input) => flatMap(onApp(ctx, input), ([server, app]) =>
     flatMap(appDir(ctx, input.dir), (dir) => appValues(ctx.engine, server, app, { kind: "generate", key: input.key }, ctx.here, ctx.read, dir))),
+  "app.launch": (ctx, input) => flatMap(onApp(ctx, input), ([server, app]) =>
+    flatMap(appDir(ctx, input.dir), (dir) => launch(ctx.engine, ctx.fleet.root, server, { app, repo: input.repo, ref: input.ref, path: input.path, dir }))),
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),
   "app.runs": onDeployer<"app.runs">((app) => ({ kind: "runs", app, more: undefined } as const)),
   "app.log": onDeployer<"app.log">((app, input) => ({ kind: "logs", app, more: input.run } as const)),

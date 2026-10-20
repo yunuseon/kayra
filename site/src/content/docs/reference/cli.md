@@ -170,6 +170,31 @@ A failed run ends with its reason (`✗ shop a1b2c3d: refused by the compose
 policy (run …)`); `app runs` shows the newest one's under its table, and
 `app runs --json` gives every run's `error`, `urls` and readiness `checks`.
 
+## Launching an app
+
+```
+kayra app launch <server> <app> [--repo URL] [--ref REF] [--path PATH] [--dir DIR]
+```
+
+From an app's repository to a URL that answers, in one command that can be
+run again until it gets there:
+
+1. **Register and check.** Adds the app to `servers/<server>/server.yml` if it
+   is not there (`--repo` is needed then; comments are kept), and checks that
+   every value its `app.yml` declares is set. If any is missing, it stops and
+   prints the command that sets each one.
+2. **Apply.** `kayra apps <server>`, the new entry included. On a hetzner or
+   home server the main-only guard stops here until the `server.yml` change is
+   merged: commit it, merge it to `main`, run the launch again.
+3. **Deploy.** `kayra app deploy`, followed to its end, ready routes and URLs
+   included.
+
+`--dir` points at the app's checkout, for its `app.yml` before the fleet has
+cloned the app. A step already done is done again harmlessly: registering
+finds the entry, `apps` changes nothing, the deploy reuses its images. A new
+app still needs its webhook (or the hourly poll) for later pushes, and its
+hosts in DNS.
+
 ## An app's values
 
 What an app's `app.yml` declares in `config` and `secrets`, set in the fleet's

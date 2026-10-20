@@ -29,6 +29,7 @@ export const reaches = {
   "app.init": { tool: "app_init" },
   "app.check": { tool: "app_check" },
   "app.values": { tool: "app_values" },
+  "app.launch": { tool: "app_launch" },
   "app.config.set": { tool: "app_config_set" },
   "app.secret.import": { tool: "app_secret_import" },
   "app.secret.generate": { tool: "app_secret_generate" },

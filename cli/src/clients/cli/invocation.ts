@@ -31,6 +31,12 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "app.init", input: { dir: command.dir ?? ".", ...(command.appName === undefined ? {} : { name: command.appName }) } });
     case "app check":
       return plainly({ name: "app.check", input: { dir: command.dir ?? "." } });
+    case "app launch":
+      return plainly({ name: "app.launch", input: {
+        server: command.server, app: command.app,
+        ...(command.repo === undefined ? {} : { repo: command.repo }), ...(command.ref === undefined ? {} : { ref: command.ref }),
+        ...(command.path === undefined ? {} : { path: command.path }), ...(command.dir === undefined ? {} : { dir: command.dir }),
+      } });
     case "app values":
       return typed<Asked>({ invocation: { name: "app.values", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }) } }, json: command.json });
     case "app config set":
@@ -88,6 +94,7 @@ export const reaches = {
   "backup.test": ["backup", "test", "SERVER"],
   "app.init": ["app", "init", ".", "--name", "shop"],
   "app.check": ["app", "check", "."],
+  "app.launch": ["app", "launch", "SERVER", "APP", "--repo", "https://github.com/OWNER/APP.git", "--dir", "."],
   "app.values": ["app", "values", "SERVER", "APP"],
   "app.config.set": ["app", "config", "set", "SERVER", "APP", "PUBLIC_URL", "https://example.com"],
   "app.secret.import": ["app", "secret", "import", "SERVER", "APP", "API_KEY", "/tmp/credential"],

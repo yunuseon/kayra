@@ -196,6 +196,14 @@ export const secretsSchema = (kind: ServerKind) => z.looseObject(shape(settingsF
 const schemes = (target: (typeof serverTargets)[number]) => typed<readonly string[]>(target === "multipass" ? ["https://", "http://"] : ["https://"]);
 
 /** server.yml: topology only. What it says is checked here, once: the parser, the editors' schema and the docs read it. */
+/** One app in server.yml: where its code is and which branch deploys. */
+export const appEntrySchema = z.strictObject({
+  name: appNameSchema,
+  repo: repoUrlSchema.describe("The app's repository, https://."),
+  ref: z.string().optional().describe("The branch to build and deploy (default main)."),
+  path: repoPathSchema.prefault(".").describe("The app's root inside the repository (default .)."),
+});
+
 export const serverSchema = z
   .strictObject({
     kind: z
@@ -209,14 +217,7 @@ export const serverSchema = z
     vault: z.boolean().default(false).describe("secrets.yml is vault-encrypted (required outside multipass)."),
     vault_password_file: z.string().optional().describe("The vault password file; without it, Ansible asks."),
     apps: z
-      .array(
-        z.strictObject({
-          name: appNameSchema,
-          repo: repoUrlSchema.describe("The app's repository, https://."),
-          ref: z.string().optional().describe("The branch to build and deploy (default main)."),
-          path: repoPathSchema.prefault(".").describe("The app's root inside the repository (default .)."),
-        }),
-      )
+      .array(appEntrySchema)
       .default([])
       .describe("The apps this server runs (platform only)."),
   })

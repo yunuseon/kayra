@@ -1,4 +1,4 @@
-import { jobOwner, type AppName, type JobName, type Owner } from "../brand.ts";
+import { jobOwner, type AppName, type JobName, type Owner, type RunId } from "../brand.ts";
 import { typed } from "../../lib/typed.ts";
 
 export type Why = "push" | "poll" | "deploy" | "rollback";
@@ -10,10 +10,11 @@ export type Work =
   | { readonly kind: "deploy"; readonly app: AppName; readonly ref: string; readonly why: Why }
   | { readonly kind: "job"; readonly job: JobName; readonly dryRun: boolean; readonly why: JobWhy };
 
-export type Request = { readonly owner: Owner; readonly work: Work };
+/** `id` is the run's, given when it is asked for, so the asker can follow it from the start. */
+export type Request = { readonly id: RunId; readonly owner: Owner; readonly work: Work };
 
-export const jobRequest = (job: JobName, dryRun: boolean, why: JobWhy) =>
-  typed<Request>({ owner: jobOwner(job), work: { kind: "job", job, dryRun, why } });
+export const jobRequest = (id: RunId, job: JobName, dryRun: boolean, why: JobWhy) =>
+  typed<Request>({ id, owner: jobOwner(job), work: { kind: "job", job, dryRun, why } });
 
 /** A run's meta.json `what` and `why`. */
 export const describe = (request: Request) =>
@@ -55,12 +56,13 @@ const fill = (queue: Queue) => {
   });
 };
 
+/** Also says which waiting request the new one replaced: that run is superseded, never started. */
 export const enqueue = (queue: Queue, request: Request) => {
-  const waits = queue.waiting.some((waiting) => waiting.owner === request.owner);
-  const waiting = waits
+  const replaced = queue.waiting.filter((waiting) => waiting.owner === request.owner);
+  const waiting = replaced.length > 0
     ? queue.waiting.map((waiting) => (waiting.owner === request.owner ? request : waiting))
     : [...queue.waiting, request];
-  return fill({ ...queue, waiting });
+  return typed<{ readonly queue: Queue; readonly start: readonly Request[]; readonly replaced: readonly Request[] }>({ ...fill({ ...queue, waiting }), replaced });
 };
 
 export const finish = (queue: Queue, owner: Owner) =>

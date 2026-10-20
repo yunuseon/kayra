@@ -13,6 +13,8 @@ export type Route = {
   readonly service: ServiceName;
   readonly port: Port;
   readonly rateLimit: RateLimit | undefined;
+  /** A path that answers 2xx or 3xx once the app is ready. */
+  readonly check: RoutePath | undefined;
 };
 
 const unknownKey = (value: object, known: readonly string[]) => Object.keys(value).find((key) => !known.includes(key));
@@ -36,25 +38,32 @@ const rateLimit = (value: unknown) => {
   return ok<RateLimit | undefined>({ average: average.value, period: per.value, burst: burst.value });
 };
 
+const optionalPath = (value: unknown, name: string) =>
+  value === undefined ? ok<RoutePath | undefined>(undefined) : flatMap(text(value, name), routePath);
+
 const route = (value: unknown, index: number) => {
   const where = (problem: string) => `route ${String(index)}: ${problem}`;
   if (typeof value !== "object" || value === null) return err(where("not a mapping"));
-  const extra = unknownKey(value, ["host", "path", "service", "port", "rate_limit"]);
+  const extra = unknownKey(value, ["host", "path", "service", "port", "rate_limit", "check"]);
   if (extra !== undefined) return err(where(`${extra} is not a route field`));
   const host = flatMap(text(field(value, "host"), "host"), subdomain);
   const service = flatMap(text(field(value, "service"), "service"), serviceName);
   const rawPort = field(value, "port");
   const listens = typeof rawPort === "number" ? port(rawPort) : err(`port ${String(rawPort)} is not a port`);
-  const rawPath = field(value, "path");
-  const path = rawPath === undefined ? ok<RoutePath | undefined>(undefined) : flatMap(text(rawPath, "path"), routePath);
+  const path = optionalPath(field(value, "path"), "path");
+  const check = optionalPath(field(value, "check"), "check");
   const limit = rateLimit(field(value, "rate_limit"));
   if (!host.ok) return err(where(host.error));
   if (!service.ok) return err(where(service.error));
   if (!listens.ok) return err(where(listens.error));
   if (!path.ok) return err(where(path.error));
+  if (!check.ok) return err(where(check.error));
   if (!limit.ok) return err(where(limit.error));
-  return ok<Route>({ host: host.value, path: path.value, service: service.value, port: listens.value, rateLimit: limit.value });
+  return ok<Route>({ host: host.value, path: path.value, service: service.value, port: listens.value, rateLimit: limit.value, check: check.value });
 };
+
+/** A route's readiness URL: its check path, or its own path. */
+export const readinessUrl = (route: Route, domain: string) => `https://${route.host}.${domain}${route.check ?? route.path ?? "/"}`;
 
 /** app.yml's routes as the builder read them at the commit: untrusted, so every field is checked. */
 export const parseRoutes = (json: unknown) =>

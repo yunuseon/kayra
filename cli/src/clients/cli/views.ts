@@ -26,6 +26,14 @@ const states: Readonly<Record<RunAnswer["state"], Line>> = {
   success: [ok("✓ success")],
   failure: [bad("✗ failure")],
   running: [active("◆ running")],
+  queued: [muted("… queued")],
+  superseded: [muted("↷ superseded")],
+};
+
+/** Why the newest run failed, under the table: the first thing to know after a failed deploy. */
+const newestError = (answer: RunsAnswer) => {
+  const [newest] = answer.runs;
+  return typed<readonly Line[]>(newest?.state === "failure" && newest.error !== undefined ? [["  ", bad(`✗ ${newest.error}`)], []] : []);
 };
 
 const took = (run: RunAnswer, now: number) =>
@@ -47,7 +55,7 @@ export const runsView = (view: DeployerAnswer, answer: RunsAnswer, now: number) 
     [],
     ...(answer.runs.length === 0
       ? [["  ", muted("no runs yet")]]
-      : [...rows.map((row) => typed<Line>(["  ", ...row])), [], hint(`kayra app logs ${view.server} ${view.app} [RUN]`, "shows a run's log, the newest by default")]),
+      : [...rows.map((row) => typed<Line>(["  ", ...row])), [], ...newestError(answer), hint(`kayra app logs ${view.server} ${view.app} [RUN]`, "shows a run's log, the newest by default")]),
   ]);
 };
 

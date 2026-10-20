@@ -102,12 +102,12 @@ const withServer =
   (ctx: Context, input: { readonly server: string }) =>
     flatMap(onServer(ctx, input.server), (target) => make(ctx.engine, target));
 
-const onDeployer =
-  (command: (app: AppName, input: Readonly<Record<string, unknown>>) => DeployerCommand) =>
-  (ctx: Context, input: { readonly server: string; readonly app: string }) =>
-    flatMap(onApp(ctx, input), ([target, app]) => deployer(target, command(app, input)));
+type DeployerName = "app.runs" | "app.log" | "app.deploy" | "app.releases" | "app.rollback";
 
-const optional = (value: unknown) => (typeof value === "string" ? value : undefined);
+const onDeployer =
+  <N extends DeployerName>(command: (app: AppName, input: InputOf<N>) => DeployerCommand) =>
+  (ctx: Context, input: InputOf<N>) =>
+    flatMap(onApp(ctx, input), ([target, app]) => deployer(target, command(app, input)));
 
 /** Each plan operation, as the plan that does it: the compiler refuses one that has none. */
 const plans: Plans = {
@@ -127,11 +127,11 @@ const plans: Plans = {
   "app.check": (ctx, input) =>
     flatMap(absolutePath(resolve(ctx.here, input.dir)), (dir) => appCheck(ctx.engine.kayra, dir, ctx.read(within(dir, "app.yml")))),
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),
-  "app.runs": onDeployer((app) => ({ kind: "runs", app, more: undefined } as const)),
-  "app.log": onDeployer((app, input) => ({ kind: "logs", app, more: optional(input["run"]) } as const)),
-  "app.deploy": onDeployer((app, input) => ({ kind: "deploy", app, more: optional(input["ref"]) } as const)),
-  "app.releases": onDeployer((app) => ({ kind: "rollback", app, more: undefined } as const)),
-  "app.rollback": onDeployer((app, input) => ({ kind: "rollback", app, more: optional(input["sha"]) } as const)),
+  "app.runs": onDeployer<"app.runs">((app) => ({ kind: "runs", app, more: undefined } as const)),
+  "app.log": onDeployer<"app.log">((app, input) => ({ kind: "logs", app, more: input.run } as const)),
+  "app.deploy": onDeployer<"app.deploy">((app, input) => ({ kind: "deploy", app, more: input.ref } as const)),
+  "app.releases": onDeployer<"app.releases">((app) => ({ kind: "rollback", app, more: undefined } as const)),
+  "app.rollback": onDeployer<"app.rollback">((app, input) => ({ kind: "rollback", app, more: input.sha } as const)),
   job: (ctx, input) => flatMap(onServer(ctx, input.server), (target) => deployer(target, { kind: "job", job: input.job, noPrs: input.noPrs })),
   doctor: (ctx) => ok(doctor(ctx.fleet, ctx.engine)),
   certs: (ctx, input) =>

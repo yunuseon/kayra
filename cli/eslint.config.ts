@@ -33,6 +33,8 @@ export default defineConfig(
     rules: {
       "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "never" }],
       "@typescript-eslint/consistent-type-definitions": ["error", "type"],
+      // A switch over an operation's name or a union's kind names every case: a new one is a lint error where it is not handled.
+      "@typescript-eslint/switch-exhaustiveness-check": ["error", { considerDefaultExhaustiveForUnions: false, requireDefaultForNonUnion: true }],
       "@typescript-eslint/no-floating-promises": [
         "error",
         { allowForKnownSafeCalls: [{ from: "package", package: "node:test", name: ["test", "suite"] }] },

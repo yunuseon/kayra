@@ -139,32 +139,40 @@ if (args.command.name === "mcp") {
     if (!steps.ok) fail(steps.error);
     else if (args.dryRun) show(steps.value, invocation(target), short);
     else await execute(steps.value, invocation(target), operation.bare !== true);
-  } else if (call.name === "status") {
-    const { offline } = call.input;
-    const { initial, updates } = stream(context, "status", call.input);
-    // On a terminal the table is there at once, its cells filled in as the answers arrive; the report itself goes to stdout.
-    const draw = (looks: readonly Look[], frame: string) =>
-      Object.freeze(statusView(looks, { frame, room: screens.err.columns - 1, offline }).map((line) =>
-        paint(truncate(line, screens.err.columns - 1), screens.err.colors),
-      ));
-    const looks =
-      !json && screens.out.live && screens.err.live
-        ? await watch((raw) => process.stderr.write(raw), initial, updates, draw)
-        : await settle(initial, updates);
-    (json
-      ? [JSON.stringify(statusJson(looks), null, 2)]
-      : statusView(looks, { frame: "", room: screens.out.live ? screens.out.columns : Infinity, offline })
-    ).forEach(io.out);
-  } else if (call.name === "validate") {
-    const reports = await query(context, "validate", call.input);
-    if (!reports.ok) fail(reports.error);
-    else {
-      (json ? [JSON.stringify(validateJson(reports.value), null, 2)] : validateView(reports.value)).forEach(io.out);
-      // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
-      process.exitCode = reports.value.some((each) => overall(each.findings) === "problem") ? 1 : 0;
-    }
   } else {
-    // version: Optique answers `kayra version` and `--version` itself, before this.
-    io.out(version);
+    switch (call.name) {
+      case "status": {
+        const { offline } = call.input;
+        const { initial, updates } = stream(context, "status", call.input);
+        // On a terminal the table is there at once, its cells filled in as the answers arrive; the report itself goes to stdout.
+        const draw = (looks: readonly Look[], frame: string) =>
+          Object.freeze(statusView(looks, { frame, room: screens.err.columns - 1, offline }).map((line) =>
+            paint(truncate(line, screens.err.columns - 1), screens.err.colors),
+          ));
+        const looks =
+          !json && screens.out.live && screens.err.live
+            ? await watch((raw) => process.stderr.write(raw), initial, updates, draw)
+            : await settle(initial, updates);
+        (json
+          ? [JSON.stringify(statusJson(looks), null, 2)]
+          : statusView(looks, { frame: "", room: screens.out.live ? screens.out.columns : Infinity, offline })
+        ).forEach(io.out);
+        break;
+      }
+      case "validate": {
+        const reports = await query(context, "validate", call.input);
+        if (!reports.ok) fail(reports.error);
+        else {
+          (json ? [JSON.stringify(validateJson(reports.value), null, 2)] : validateView(reports.value)).forEach(io.out);
+          // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
+          process.exitCode = reports.value.some((each) => overall(each.findings) === "problem") ? 1 : 0;
+        }
+        break;
+      }
+      case "version":
+        // Optique answers `kayra version` and `--version` itself, before this.
+        io.out(version);
+        break;
+    }
   }
 }

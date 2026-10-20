@@ -569,7 +569,7 @@ Preview: `POST /api/operations/app.launch/preview`. Returns a JSON plan with sta
 
 ### `app.hook`
 
-Wire an app's GitHub repository to its server: check the platform's token reads it, create or update its push webhook.
+Wire an app's repository (GitHub, GitLab, Forgejo, Gitea) to a server that takes webhooks: check the platform's token reads it, create or update its push hook.
 
 `POST /api/operations/app.hook`
 

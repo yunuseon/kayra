@@ -3875,7 +3875,7 @@
     },
     "/operations/app.hook": {
       "post": {
-        "summary": "Wire an app's GitHub repository to its server: check the platform's token reads it, create or update its push webhook.",
+        "summary": "Wire an app's repository (GitHub, GitLab, Forgejo, Gitea) to a server that takes webhooks: check the platform's token reads it, create or update its push hook.",
         "operationId": "app.hook",
         "requestBody": {
           "required": true,
@@ -3985,7 +3985,7 @@
     },
     "/operations/app.hook/preview": {
       "post": {
-        "summary": "Preview: Wire an app's GitHub repository to its server: check the platform's token reads it, create or update its push webhook.",
+        "summary": "Preview: Wire an app's repository (GitHub, GitLab, Forgejo, Gitea) to a server that takes webhooks: check the platform's token reads it, create or update its push hook.",
         "requestBody": {
           "required": true,
           "content": {

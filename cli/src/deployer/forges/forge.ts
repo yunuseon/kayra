@@ -4,7 +4,7 @@ import type { Sha } from "../brand.ts";
 import { forgejo } from "./forgejo.ts";
 import { github } from "./github.ts";
 import { gitlab } from "./gitlab.ts";
-import { typed } from "../../lib/typed.ts";
+import type { ForgeRepo, Kind } from "../../lib/forge-repo.ts";
 
 export type State = "pending" | "success" | "failure" | "error";
 export type Context = "kayra/build" | "kayra/deploy";
@@ -22,10 +22,6 @@ export type Fetch = (
   init: { readonly method: string; readonly headers: Readonly<Record<string, string>>; readonly body: string },
 ) => Promise<{ readonly ok: boolean; readonly status: number }>;
 
-export type Kind = "github" | "forgejo" | "gitlab";
-
-/** owner is a GitLab group path where there is one (`group/subgroup`). */
-export type ForgeRepo = { readonly kind: Kind; readonly origin: string; readonly owner: string; readonly name: string };
 
 /** One forge: its API with the platform's token, and how its push webhooks prove they carry the platform's secret. */
 export type Adapter = {
@@ -34,17 +30,6 @@ export type Adapter = {
 };
 
 const adapters: Readonly<Record<Kind, Adapter>> = { github, forgejo, gitlab };
-
-const kinds: Readonly<Record<string, Kind>> = { "https://github.com": "github", "https://gitlab.com": "gitlab" };
-
-/** GitHub for https://github.com, GitLab for https://gitlab.com, a Forgejo for any other host; undefined for a URL none understands. */
-export const forgeRepo = (repo: string) => {
-  const match = /^(https?:\/\/[^/]+)\/(.+)\/([^/]+?)(\.git)?\/?$/.exec(repo);
-  if (match === null) return undefined;
-  const [, origin, owner, name] = match;
-  if (origin === undefined || owner === undefined || name === undefined) return undefined;
-  return typed<ForgeRepo | undefined>({ kind: kinds[origin] ?? "forgejo", origin, owner, name });
-};
 
 export const forge = (repo: ForgeRepo, token: string, fetch: Fetch) => adapters[repo.kind].api(repo, token, fetch);
 

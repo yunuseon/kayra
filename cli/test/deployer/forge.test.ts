@@ -1,7 +1,8 @@
 import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "node:test";
-import { forge, forgeRepo, signed, type CommitStatus, type Fetch, type ForgeRepo } from "../../src/deployer/forges/forge.ts";
+import { forge, signed, type CommitStatus, type Fetch } from "../../src/deployer/forges/forge.ts";
+import { forgeRepo, type ForgeRepo } from "../../src/lib/forge-repo.ts";
 import { err, ok } from "../../src/lib/result.ts";
 import { commit, shop } from "./support.ts";
 

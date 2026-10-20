@@ -188,8 +188,8 @@ run again until it gets there:
    merged: commit it, merge it to `main`, run the launch again.
 3. **Deploy.** `kayra app deploy`, followed to its end, ready routes and URLs
    included.
-4. **Hook.** For a GitHub repository on a server GitHub can reach (not
-   multipass): `kayra app hook`, below.
+4. **Hook.** Where the server takes webhooks and the repository is on a
+   forge kayra knows: `kayra app hook`, below.
 
 `--dir` points at the app's checkout, for its `app.yml` before the fleet has
 cloned the app. A step already done is done again harmlessly: registering
@@ -200,13 +200,23 @@ hook is updated in place. Its hosts still need DNS.
 kayra app hook <server> <app>
 ```
 
-Wires an app's GitHub repository to its server: checks that the platform's
-`git_token` can read it (as the builder will), then creates its push webhook to
-`https://deploy.<domain>/hook/<app>`, signed with the server's `webhook_secret`,
-or updates the one already there, never adding a second. The webhook is set
-with your own `gh` login (it needs a repository admin, which the platform's
-token is not); the secret reaches `gh` on stdin, never as an argument. Not for
-multipass: GitHub cannot reach a local VM.
+Wires an app's repository to its server, on GitHub, GitLab, Forgejo or Gitea
+(the forges whose webhooks the deployer verifies): checks that the platform's
+`git_token` can read it, as the builder will, then creates its push webhook to
+`https://deploy.<domain>/hook/<app>`, signed with the server's
+`webhook_secret`, or updates the one already there, never adding a second.
+It talks to the forge's REST API and needs none of its tools.
+
+Setting up a webhook needs an admin of the repository, which the platform's
+token is not: your own token, from `KAYRA_FORGE_TOKEN_<HOST>`
+(`KAYRA_FORGE_TOKEN_GITHUB_COM` for github.com), or, if you happen to have
+one, the forge CLI's login (`gh`, `tea`'s config, `glab`). None is required.
+
+A server decides whether it takes webhooks at all: `webhooks: false` in its
+`vars.yml` serves no `/hook` endpoint, and `app hook` and `launch` leave the
+repository alone; pushes then deploy when `deploy_poll` (a cron spec, hourly
+by default) finds them. Not for multipass either way: no forge reaches a local
+VM.
 
 ## An app's values
 

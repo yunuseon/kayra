@@ -65,7 +65,8 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
   esac`);
   const lab = { ...server("lab", "target: multipass\ndomain: lab.test\nvault: false\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" }), backupDir: must(remotePath("/backup")) };
   const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example\nvault: true");
-  const fleet = { root: fleetRoot(must(absolutePath(dir))), servers: [lab, prod] };
+  const store = server("store", "target: hetzner\ndomain: store.example\nvault: true\napps: [{name: shop, repo: https://git.example/shop.git}]");
+  const fleet = { root: fleetRoot(must(absolutePath(dir))), servers: [lab, prod, store] };
   const config = { kayra: kayraRoot(must(absolutePath(engine))), fleet, version: must(kayraVersion("0.0.0-test")), short: (text: string) => text, network: {
     connect: () => Promise.resolve({ kind: "skipped" as const }), get: () => Promise.resolve({ kind: "skipped" as const }), read: () => Promise.resolve(ok("")),
   }, tofu: { state: () => Promise.resolve(ok([])), output: () => Promise.resolve(undefined) } };
@@ -127,7 +128,7 @@ const samples = {
   down: { server: "lab" }, adopt: { server: "prod" }, "backup.test": { server: "lab" }, ssh: { server: "lab" }, "ssh.exec": { server: "lab", command: ["uptime"] },
   "app.values": { server: "lab", app: "shop", dir: "app" },
   "app.launch": { server: "lab", app: "shop" },
-  "app.hook": { server: "lab", app: "shop" },
+  "app.hook": { server: "store", app: "shop" },
   "app.config.set": { server: "lab", app: "shop", dir: "app", key: "FLAG", value: "on" },
   "app.secret.import": { server: "lab", app: "shop", dir: "app", key: "PASSWORD", file: "/tmp/secret" },
   "app.secret.generate": { server: "lab", app: "shop", dir: "app", key: "PASSWORD" },

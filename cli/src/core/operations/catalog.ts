@@ -148,7 +148,7 @@ export const operations = {
     }),
   },
   "app.hook": {
-    summary: "Wire an app's GitHub repository to its server: check the platform's token reads it, create or update its push webhook.",
+    summary: "Wire an app's repository (GitHub, GitLab, Forgejo, Gitea) to a server that takes webhooks: check the platform's token reads it, create or update its push hook.",
     scope: "app", effect: "changes", kind: "plan", input: appInput,
   },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },

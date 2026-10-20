@@ -9,7 +9,8 @@ import { body, json, send } from "../http/http.ts";
 import { page, runPage } from "../http/page.ts";
 import { spawnLines } from "../process.ts";
 import type { Env } from "../runs/run.ts";
-import { forgeRepo, signed } from "../forges/forge.ts";
+import { signed } from "../forges/forge.ts";
+import { forgeRepo } from "../../lib/forge-repo.ts";
 import { pushedRef } from "../http/webhook.ts";
 import { typed } from "../../lib/typed.ts";
 
@@ -30,6 +31,8 @@ type Settings = {
   readonly resolveImages: string;
   readonly webhookSecret: () => string;
   readonly gitToken: () => string;
+  /** The server's `webhooks` setting: off, /hook/<app> is no route at all. */
+  readonly webhooks: boolean;
 };
 
 const fromFile = (path: string) => () => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
@@ -43,6 +46,7 @@ const settings = (env: NodeJS.ProcessEnv) => {
     resolveImages: env["RESOLVE_IMAGES"] ?? "/opt/kayra/scripts/platform/resolve-images.sh",
     webhookSecret: () => env["WEBHOOK_SECRET"] ?? "",
     gitToken: fromFile("/run/platform-secrets/GIT_TOKEN"),
+    webhooks: env["WEBHOOKS"] !== "false",
   });
 };
 
@@ -221,7 +225,10 @@ export const serveBuilder = (env: NodeJS.ProcessEnv) => {
     failing(async (request, response) => {
       const path = new URL(request.url ?? "/", "http://builder").pathname;
       const hooked = /^\/hook\/([^/]+)\/?$/.exec(path);
-      if (request.method === "POST" && hooked?.[1] !== undefined) await hook(s, hooked[1], request, response);
+      if (request.method === "POST" && hooked?.[1] !== undefined) {
+        if (s.webhooks) await hook(s, hooked[1], request, response);
+        else send(response, 404, "this server takes no webhooks: it polls (webhooks: false)\n");
+      }
       else if (request.method === "GET") pages(s, path, response);
       else send(response, 405, "method not allowed\n");
     }),

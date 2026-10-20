@@ -38,6 +38,14 @@
       ],
       "description": "Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner)."
     },
+    "webhooks": {
+      "type": "boolean",
+      "description": "Whether a push webhook may start a deploy at once: true (default) serves deploy.<domain>/hook/<app>; false serves no such endpoint, and pushes deploy by deploy_poll."
+    },
+    "deploy_poll": {
+      "type": "string",
+      "description": "When the deployer looks for pushes no webhook brought, as a five-field cron spec in the server's time (default hourly: 17 * * * *)."
+    },
     "renovate_repositories": {
       "type": "array",
       "items": {

@@ -140,12 +140,28 @@ const networksOf = (config: unknown, service: ServiceName) => {
   return ok<Readonly<Record<string, unknown>>>(typeof networks === "object" && networks !== null ? { ...networks } : { default: null });
 };
 
+/** Each service of the admitted config without a restart policy, unless-stopped, beside what the routes give it. */
+const withRestart = (config: unknown, routed: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
+  const services = typeof config === "object" && config !== null ? field(config, "services") : undefined;
+  if (typeof services !== "object" || services === null) return routed;
+  const unset = Object.keys(services).filter((name) => {
+    const definition = field(services, name);
+    return typeof definition === "object" && definition !== null && field(definition, "restart") === undefined;
+  });
+  return Object.fromEntries([
+    ...Object.entries(routed).map(([name, entry]) => [name, unset.includes(name) && typeof entry === "object" && entry !== null ? { ...entry, restart: "unless-stopped" } : entry] as const),
+    ...unset.filter((name) => !Object.hasOwn(routed, name)).map((name) => [name, { restart: "unless-stopped" }] as const),
+  ]);
+};
+
 /**
  * The platform's part of an app's compose project, from its admitted config
  * and its routes: each routed service joins platform-public, beside the
  * networks it has (restated, or the override would replace them), and gets the
  * Traefik labels its routes become. Apps write no Traefik label themselves:
- * the policy refuses them.
+ * the policy refuses them. Every service without a restart policy of its own
+ * gets unless-stopped: a Docker update or a reboot stops every container, and
+ * one without a policy would stay down until the app's next deploy.
  */
 export const routesOverride = (app: AppName, domain: string, routes: readonly Route[], admitted: string) =>
   flatMap(
@@ -173,7 +189,7 @@ export const routesOverride = (app: AppName, domain: string, routes: readonly Ro
         ok<string>(
           `${JSON.stringify(
             {
-              services: Object.fromEntries(entries),
+              services: withRestart(config, Object.fromEntries(entries)),
               ...(entries.length === 0 ? {} : { networks: { "platform-public": { name: "platform-public", external: true } } }),
             },
             null,

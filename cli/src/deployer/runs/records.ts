@@ -48,7 +48,7 @@ export type RunMeta = {
   readonly checks?: readonly Check[];
 };
 
-const whys = ["push", "poll", "deploy", "rollback", "schedule", "manual"] as const;
+const whys = ["push", "poll", "deploy", "rollback", "restore", "schedule", "manual"] as const;
 const states = ["queued", "running", "success", "failure", "superseded"] as const;
 const isWhy = (value: unknown): value is RunMeta["why"] => whys.some((why) => why === value);
 const isState = (value: unknown): value is RunState => states.some((state) => state === value);

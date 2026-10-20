@@ -223,6 +223,10 @@ Bring your own login. The platform's login is for its own pages: your users
 belong to your app, which therefore runs the same with or without the
 platform.
 
+A service without a `restart` policy of its own gets `unless-stopped`, so a
+Docker update or a reboot of the server does not leave it down. Set
+`restart: "no"` for one that should stay stopped once it exits.
+
 Give every long-running service a `healthcheck`: the deploy waits until all
 of them report healthy, and fails if one does not within three minutes.
 

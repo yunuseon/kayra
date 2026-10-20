@@ -11,13 +11,14 @@ import { commit, name, rid } from "./support.ts";
 const deployOf = (why: Why): Request => ({ id: rid, owner: appOwner(name("shop")), work: { kind: "deploy", app: name("shop"), ref: "main", why } });
 const end = (request: Request, success: boolean): RunEnd => ({ server: "shop-prod", request, ok: success, sha: commit("a"), page: "https://deploy.x/runs/shop/1" });
 
-test("decide: a failed push or poll raises, a failed manual deploy does not, any success resolves", () => {
+test("decide: a failed push, poll or restore raises, a failed manual deploy does not, any success resolves", () => {
   const raised = decide(end(deployOf("push"), false));
   assert(raised.kind === "raise");
   strictEqual(raised.alert.key, "shop");
   strictEqual(raised.alert.title, `shop-prod: shop did not deploy at ${commit("a").slice(0, 12)}`);
   assert(raised.alert.body.includes("https://deploy.x/runs/shop/1"));
   strictEqual(decide(end(deployOf("poll"), false)).kind, "raise");
+  strictEqual(decide(end(deployOf("restore"), false)).kind, "raise");
   strictEqual(decide(end(deployOf("deploy"), false)).kind, "none");
   strictEqual(decide(end(deployOf("rollback"), false)).kind, "none");
   deepStrictEqual(decide(end(deployOf("rollback"), true)), { kind: "resolve", key: "shop", note: "Recovered: https://deploy.x/runs/shop/1" });

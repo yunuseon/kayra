@@ -27,6 +27,10 @@ export const reaches = {
   adopt: { tool: "adopt" },
   "backup.test": { tool: "backup_test" },
   "app.check": { tool: "app_check" },
+  "app.values": { tool: "app_values" },
+  "app.config.set": { tool: "app_config_set" },
+  "app.secret.import": { tool: "app_secret_import" },
+  "app.secret.generate": { tool: "app_secret_generate" },
   "app.purge": { tool: "app_purge" },
   "app.runs": { tool: "app_runs" },
   "app.log": { tool: "app_log" },
@@ -60,7 +64,7 @@ export const runOptions = z.strictObject({
 const effectSaid = (each: Operation) => {
   if (each.effect === "reads") return "Changes nothing.";
   if (each.effect === "destroys") return "Irreversible: the operator approves every call, and types the server's name before it runs.";
-  return each.scope === "fleet" || each.scope === "repo"
+  return each.local === true || each.scope === "fleet" || each.scope === "repo"
     ? "Changes files on this machine."
     : "Changes the server: on one that is not multipass, the operator approves it first.";
 };

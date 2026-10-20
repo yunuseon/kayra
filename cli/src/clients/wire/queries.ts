@@ -6,7 +6,7 @@ import { parsed, releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
 import { err, map, ok, type Result } from "../../lib/result.ts";
 import type * as wire from "./contract.gen.ts";
 
-type WireAnswers = { readonly validate: wire.Validation; readonly version: string; readonly "app.runs": wire.AppRuns; readonly "app.releases": wire.AppReleases; readonly "app.log": string };
+type WireAnswers = { readonly "app.values": wire.AppValues; readonly validate: wire.Validation; readonly version: string; readonly "app.runs": wire.AppRuns; readonly "app.releases": wire.AppReleases; readonly "app.log": string };
 type Queries = { readonly [N in QueryName]: (context: Context, input: InputOf<N>) => Promise<Result<WireAnswers[N], string>> };
 // eslint-disable-next-line functional/prefer-immutable-types -- Zod schemas are immutable; each method returns a new schema
 const data = <T>(schema: z.ZodType<T>, text: Result<string, string>) => {
@@ -15,6 +15,7 @@ const data = <T>(schema: z.ZodType<T>, text: Result<string, string>) => {
   return value === undefined ? err("the deployer returned an unreadable answer") : ok<T>(value);
 };
 const queries: Queries = {
+  "app.values": (context, input) => query(context, "app.values", input),
   validate: async (context, input) => map(await query(context, "validate", input), validateJson),
   version: (context, input) => query(context, "version", input),
   "app.runs": async (context, input) => data(runsSchema, await query(context, "app.runs", input)),

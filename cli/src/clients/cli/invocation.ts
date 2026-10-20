@@ -29,6 +29,14 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly(command.remote.length === 0 ? { name: "ssh", input: { server: command.server } } : { name: "ssh.exec", input: { server: command.server, command: command.remote } });
     case "app check":
       return plainly({ name: "app.check", input: { dir: command.dir ?? "." } });
+    case "app values":
+      return typed<Asked>({ invocation: { name: "app.values", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }) } }, json: command.json });
+    case "app config set":
+      return plainly({ name: "app.config.set", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }), key: command.key, value: command.value } });
+    case "app secret import":
+      return plainly({ name: "app.secret.import", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }), key: command.key, file: command.file } });
+    case "app secret generate":
+      return plainly({ name: "app.secret.generate", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }), key: command.key } });
     case "app purge":
       return plainly({ name: "app.purge", input: { server: command.server, app: command.app } });
     case "app runs":
@@ -77,6 +85,10 @@ export const reaches = {
   adopt: ["adopt", "SERVER"],
   "backup.test": ["backup", "test", "SERVER"],
   "app.check": ["app", "check", "."],
+  "app.values": ["app", "values", "SERVER", "APP"],
+  "app.config.set": ["app", "config", "set", "SERVER", "APP", "PUBLIC_URL", "https://example.com"],
+  "app.secret.import": ["app", "secret", "import", "SERVER", "APP", "API_KEY", "/tmp/credential"],
+  "app.secret.generate": ["app", "secret", "generate", "SERVER", "APP", "DATABASE_PASSWORD"],
   "app.purge": ["app", "purge", "SERVER", "APP"],
   "app.runs": ["app", "runs", "SERVER", "APP"],
   "app.log": ["app", "logs", "SERVER", "APP"],

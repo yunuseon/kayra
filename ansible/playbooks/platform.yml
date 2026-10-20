@@ -10,8 +10,9 @@
 # The platform lives in /opt/platform and knows no app by name. Apps live in
 # /opt/apps/<name> and register through /opt/platform/bin/app-apply.
 #
-# server, server_dir, domain and target are passed via -e. Platform vars
-# (git_token, webhook_secret, etc.) come from servers/<server>/vars.yml.
+# server, server_dir, domain, target and kayra_version are passed via -e.
+# Platform vars (git_token, webhook_secret, etc.) come from
+# servers/<server>/vars.yml.
 #
 # Usage: kayra setup <server>
 # =============================================================================
@@ -52,6 +53,11 @@
       when: forgejo_config is defined
 
   post_tasks:
+    - name: Record which kayra set this server up
+      ansible.builtin.import_role:
+        name: kayra-version
+      become: true
+
     - name: Show platform status
       ansible.builtin.debug:
         msg: |

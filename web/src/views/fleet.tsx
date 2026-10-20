@@ -2,7 +2,7 @@ import type { ServerFacts } from "../../../cli/src/clients/wire/contract.gen.ts"
 import { OperationActions } from "../components/operations.tsx";
 import { Link } from "../components/shell.tsx";
 import { Dot, Fact, Header, Pill, Problem, Waiting } from "../components/ui.tsx";
-import { health, login, machine, ssh, type Server } from "../reach.ts";
+import { health, kayra, login, machine, ssh, type Server } from "../reach.ts";
 import { fleet, refreshStatus, status } from "../state.ts";
 
 const Card = ({ facts, seen }: { readonly facts: ServerFacts; readonly seen: Server | undefined }) => (
@@ -21,6 +21,7 @@ const Card = ({ facts, seen }: { readonly facts: ServerFacts; readonly seen: Ser
         <Fact label="Address" cell={machine(seen)} />
         <Fact label="SSH" cell={ssh(seen)} />
         <Fact label="Login" cell={login(seen)} />
+        <Fact label="kayra" cell={kayra(seen)} />
       </dl>
     )}
     {facts.apps.length === 0 ? null : (

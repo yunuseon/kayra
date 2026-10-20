@@ -1,7 +1,7 @@
-import { within, type KayraRoot } from "../fleet/brand.ts";
+import { within } from "../fleet/brand.ts";
 import type { Fleet, Server } from "../fleet/model.ts";
 import type { Plan, Step } from "../plan/model.ts";
-import { homeReach, onPath } from "./steps.ts";
+import { homeReach, onPath, type Engine } from "./steps.ts";
 import { typed } from "../../lib/typed.ts";
 
 type Tool = {
@@ -76,13 +76,13 @@ const repoChecks = (fleet: Fleet) =>
       }) as const satisfies Step,
   ));
 
-const reachChecks = (fleet: Fleet, kayra: KayraRoot) =>
-  Object.freeze(fleet.servers.filter((server) => server.target === "home").map((server) => homeReach({ kayra, fleet: fleet.root }, server, "continue")));
+const reachChecks = (fleet: Fleet, engine: Engine) =>
+  Object.freeze(fleet.servers.filter((server) => server.target === "home").map((server) => homeReach(engine, server, "continue")));
 
 /** Is this Mac ready to run every command on every server? Each check reports; none stops the others. */
-export const doctor = (fleet: Fleet, kayra: KayraRoot) => typed<Plan>([
+export const doctor = (fleet: Fleet, engine: Engine) => typed<Plan>([
   ...toolChecks(fleet),
   ...vaultChecks(fleet),
   ...repoChecks(fleet),
-  ...reachChecks(fleet, kayra),
+  ...reachChecks(fleet, engine),
 ]);

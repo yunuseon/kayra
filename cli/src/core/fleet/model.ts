@@ -41,6 +41,8 @@ export type Server = {
   readonly inventory: Inventory | undefined;
   /** vars.yml's restic_backup.dir, where the backup stack runs. */
   readonly backupDir: RemotePath | undefined;
+  /** Where setup records which kayra set it up (the kayra-version role): under nas_root on a NAS, which has no default. */
+  readonly versionFile: RemotePath | undefined;
   /** What the server's own stacks route (their Traefik Host rules), relative to its domain where under it. */
   readonly stackHosts: readonly string[];
   /** vars.yml, parsed. */

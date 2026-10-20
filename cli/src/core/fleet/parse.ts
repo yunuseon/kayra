@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import { absolutePath, host, sshDefaultPort, keyFile, port, remotePath, sshUser, vaultPasswordFile, type Domain } from "./brand.ts";
-import { err, map, ok, type Result } from "../../lib/result.ts";
+import { err, flatMap, map, ok, type Result } from "../../lib/result.ts";
 import { serverSchema, varsSchema } from "./settings.ts";
 import { checkSettings, knownSettings } from "./shape.ts";
 import type { App, Inventory, Server, ServerFiles, Vault } from "./model.ts";
@@ -121,6 +121,14 @@ export const parseServer = (files: ServerFiles) => {
   const backup = mapping(vars.value["restic_backup"])?.["dir"];
   const backupDir = typeof backup === "string" ? remotePath(backup) : ok(undefined);
   if (!backupDir.ok) return err(`vars.yml: restic_backup.dir ${backupDir.error}`);
+  const nasRoot = vars.value["nas_root"];
+  const versionFile =
+    kind !== "nas"
+      ? remotePath("/opt/kayra/version")
+      : typeof nasRoot === "string"
+        ? flatMap(remotePath(nasRoot), (dir) => remotePath(`${dir}/.kayra/version`))
+        : ok(undefined);
+  if (!versionFile.ok) return err(`vars.yml: nas_root ${versionFile.error}`);
   const inventory = files.inventory === undefined ? ok(undefined) : inventoryOf(files.inventory);
   if (!inventory.ok) return inventory;
   const declared: unknown = descriptor.value["apps"];
@@ -139,6 +147,7 @@ export const parseServer = (files: ServerFiles) => {
     usesAcmeDns: typeof vars.value["acme_dns"] === "string" && vars.value["acme_dns"] !== "",
     inventory: inventory.value,
     backupDir: backupDir.value,
+    versionFile: versionFile.value,
     stackHosts: stackHosts(files.stacks.flatMap((stack) => Object.freeze(stack.compose ?? [])), domain),
     vars: vars.value,
     files: { vars: files.vars, secrets: files.secrets, stacks: files.stacks.map((stack) => stack.name), appValues: files.appValues },

@@ -10,8 +10,8 @@ import type { Network, Tofu } from "../src/core/status/ports.ts";
 import { err, ok } from "../src/lib/result.ts";
 import { flat } from "../src/core/text/spans.ts";
 import { settle } from "../src/core/status/updates.ts";
-import { fleet, server } from "./support.ts";
-import { milliseconds } from "../src/core/fleet/brand.ts";
+import { fleet, must, server } from "./support.ts";
+import { kayraVersion, milliseconds } from "../src/core/fleet/brand.ts";
 
 const hetzner = (name: string, apps = "") =>
   server(name, `target: hetzner\ndomain: ${name}.example\nvault: true${apps}`, { inventory: undefined });
@@ -44,7 +44,10 @@ const answers: Readonly<Record<string, Reach>> = {
   "203.0.113.10:22": { kind: "open", ms: milliseconds(31) },
 };
 
-const asked: Network = {
+const pin = must(kayraVersion("0.19.0"));
+
+/** The network as it answers here; forge's version file holds what `recorded` says, and only forge is asked for it. */
+const probed = (recorded: ReturnType<Network["read"]>): Network => ({
   connect: (host, port) => Promise.resolve(answers[`${host}:${String(port)}`] ?? { kind: "no-answer" }),
   get: (url) =>
     Promise.resolve(
@@ -52,10 +55,14 @@ const asked: Network = {
         ? { kind: "answered", status: 200, ms: milliseconds(84) }
         : { kind: "bad-certificate", code: "DEPTH_ZERO_SELF_SIGNED_CERT" },
     ),
-};
+  read: (inventory, path) =>
+    inventory.host === "192.0.2.3" && inventory.port === "2222" && path === "/opt/kayra/version" ? recorded : Promise.resolve(err("asked the wrong server")),
+});
+
+const asked = probed(Promise.resolve(ok("0.19.0\n")));
 
 const seen = (network: Network | undefined): Promise<readonly Look[]> => {
-  const { initial, updates } = look(fleet(broken, forge, fresh, nas, shop), tofu, network);
+  const { initial, updates } = look(fleet(broken, forge, fresh, nas, shop), pin, tofu, network);
   return settle(initial, updates);
 };
 
@@ -86,12 +93,12 @@ test("a machine is a server OpenTofu created, not a storage box or a data source
 
 test("status: one table, the probes as they answered; an SSH that refuses is off", async () => {
   deepStrictEqual(plain(await seen(asked)), [
-    "SERVER  KIND      TARGET   DOMAIN          ADDRESS           SSH        HTTPS           APPS",
-    "broken  platform  hetzner  broken.example  state unreadable  –          untrusted cert",
-    "forge   platform  home     forge.example   192.0.2.3         open 3ms   untrusted cert",
-    "fresh   platform  hetzner  fresh.example   not provisioned   –          untrusted cert",
-    "nas     nas       home     home.example    192.0.2.9         off",
-    "shop    platform  hetzner  shop.example    203.0.113.10      open 31ms  200 84ms        shop, blog",
+    "SERVER  KIND      TARGET   DOMAIN          ADDRESS           SSH        HTTPS           KAYRA   APPS",
+    "broken  platform  hetzner  broken.example  state unreadable  –          untrusted cert  –",
+    "forge   platform  home     forge.example   192.0.2.3         open 3ms   untrusted cert  0.19.0",
+    "fresh   platform  hetzner  fresh.example   not provisioned   –          untrusted cert  –",
+    "nas     nas       home     home.example    192.0.2.9         off                        –",
+    "shop    platform  hetzner  shop.example    203.0.113.10      open 31ms  200 84ms        –       shop, blog",
     "",
     "  ✗ broken: OpenTofu's state could not be read: tofu init needed",
     "    → tofu -chdir=servers/broken/terraform init",
@@ -111,19 +118,19 @@ test("--offline: no probes, and no columns for them", async () => {
 });
 
 test("while the answers come, their cells spin; on a narrow terminal the apps, then the domains, are cut", () => {
-  const { initial } = look(fleet(nas, shop), tofu, asked);
+  const { initial } = look(fleet(nas, shop), pin, tofu, asked);
   deepStrictEqual(plain(initial), [
-    "SERVER  KIND      TARGET   DOMAIN        ADDRESS          SSH        HTTPS      APPS",
-    "nas     nas       home     home.example  192.0.2.9        *        ",
-    "shop    platform  hetzner  shop.example  *                *          *          shop, blog",
+    "SERVER  KIND      TARGET   DOMAIN        ADDRESS          SSH        HTTPS      KAYRA   APPS",
+    "nas     nas       home     home.example  192.0.2.9        *                     *     ",
+    "shop    platform  hetzner  shop.example  *                *          *          *       shop, blog",
   ]);
-  deepStrictEqual(plain(initial, false, 86).slice(1), [
-    "nas     nas       home     home.example  192.0.2.9        *        ",
-    "shop    platform  hetzner  shop.example  *                *          *          shop,…",
+  deepStrictEqual(plain(initial, false, 94).slice(1), [
+    "nas     nas       home     home.example  192.0.2.9        *                     *     ",
+    "shop    platform  hetzner  shop.example  *                *          *          *       shop,…",
   ]);
-  deepStrictEqual(plain(initial, false, 70).slice(1), [
-    "nas     nas       home     home.…  192.0.2.9        *        ",
-    "shop    platform  hetzner  shop.…  *                *          *          sho…",
+  deepStrictEqual(plain(initial, false, 78).slice(1), [
+    "nas     nas       home     home.…  192.0.2.9        *                     *     ",
+    "shop    platform  hetzner  shop.…  *                *          *          *       sho…",
   ]);
 });
 
@@ -138,9 +145,38 @@ test("status --json: the documented shape", async () => {
     machine: { state: "found", address: "203.0.113.10", from: "opentofu", reason: null },
     ssh: { port: 22, state: "open", ms: 31, error: null },
     https: { url: "https://auth.shop.example/api/health", state: "answered", status: 200, ms: 84, error: null },
+    kayra: { pin: "0.19.0", state: "skipped", version: null, error: null },
   });
+  deepStrictEqual(statusJson(looks).servers[1]?.kayra, { pin: "0.19.0", state: "recorded", version: "0.19.0", error: null });
   deepStrictEqual(statusJson(looks).servers[3]?.https, null);
   deepStrictEqual(statusJson(looks).servers[0]?.machine, { state: "unreadable", address: null, from: null, reason: "tofu init needed" });
+});
+
+test("status: which kayra set each server up, read over SSH where it is open and the inventory says how; another than the pin is marked with it", async () => {
+  const forgeSays = async (recorded: ReturnType<Network["read"]>) => plain(await seen(probed(recorded))).filter((line) => line.includes("forge"));
+  deepStrictEqual(await forgeSays(Promise.resolve(ok("0.18.0\n"))), [
+    "forge   platform  home     forge.example   192.0.2.3         open 3ms   untrusted cert  0.18.0 → 0.19.0",
+  ]);
+  deepStrictEqual(await forgeSays(Promise.resolve(ok(""))), [
+    "forge   platform  home     forge.example   192.0.2.3         open 3ms   untrusted cert  unrecorded → 0.19.0",
+  ]);
+  deepStrictEqual(await forgeSays(Promise.resolve(err("deploy@192.0.2.3: Permission denied (publickey)."))), [
+    "forge   platform  home     forge.example   192.0.2.3         open 3ms   untrusted cert  unreadable",
+    "  ✗ forge: which kayra set it up could not be read: deploy@192.0.2.3: Permission denied (publickey).",
+  ]);
+  deepStrictEqual((await seen(probed(Promise.resolve(ok("latest\n")))))[1]?.kayra, { kind: "unreadable", reason: "'latest' is not a version" });
+  // An SSH that is off (nas), and an address from OpenTofu with no inventory to log in with (shop): nothing asked.
+  deepStrictEqual(
+    (await seen(asked)).map((each) => [each.server.name, each.kayra.kind]),
+    [["broken", "skipped"], ["forge", "recorded"], ["fresh", "skipped"], ["nas", "skipped"], ["shop", "skipped"]],
+  );
+});
+
+test("a NAS records which kayra set it up under nas_root, which its play writes nothing outside of", () => {
+  const box = (vars: string) => server("box", "kind: nas\ntarget: home\ndomain: home.example\nvault: true", { vars });
+  strictEqual(box("nas_root: /volume2\n").versionFile, "/volume2/.kayra/version");
+  strictEqual(box("").versionFile, undefined);
+  strictEqual(forge.versionFile, "/opt/kayra/version");
 });
 
 test("a failed connection, by Node's error code", () => {

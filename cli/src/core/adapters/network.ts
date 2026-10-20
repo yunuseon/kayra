@@ -1,9 +1,13 @@
+import { execFile } from "node:child_process";
 import { Agent, request } from "node:https";
 import { connect } from "node:net";
 import { getCACertificates } from "node:tls";
 import type { Network } from "../status/ports.ts";
 import type { Reach } from "../status/model.ts";
 import { milliseconds } from "../fleet/brand.ts";
+import { quote } from "../plan/describe.ts";
+import { sshArgv } from "../recipes/ssh.ts";
+import { err, ok } from "../../lib/result.ts";
 import { typed } from "../../lib/typed.ts";
 
 /** Why a connection failed, by Node's error code. */
@@ -21,7 +25,12 @@ const codeOf = (error: unknown) =>
 
 const since = (started: number) => milliseconds(Math.round(performance.now() - started));
 
-/** The network, as status asks it: a TCP connect, an HTTPS GET, each given up after `ms`; every answer a Reach, never an exception. */
+/**
+ * The network, as status asks it: a TCP connect, an HTTPS GET, each given up
+ * after `ms`, every answer a Reach, never an exception; and a file read over
+ * SSH, which never asks (no password, no host key to confirm: rebuilt servers
+ * come back with new ones) and is given up after three times `ms`.
+ */
 export const network = (ms: number) => {
   // A multipass server's certificates are mkcert's, whose root is in the system's store, not Node's.
   // Reading it takes a while: after the first frame, not before.
@@ -66,5 +75,18 @@ export const network = (ms: number) => {
         asked.end();
       });
     },
+    read: (inventory, path) =>
+      new Promise((resolve) => {
+        const [program, ...args] = sshArgv(
+          inventory,
+          ["-o", "BatchMode=yes", "-o", `ConnectTimeout=${String(Math.ceil(ms / 1000))}`, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR"],
+          [`cat ${quote(path)} 2>/dev/null || true`],
+        );
+        execFile(program, args, { timeout: ms * 3, killSignal: "SIGKILL" }, (error, stdout, stderr) => {
+          const said = stderr.trim().split("\n").at(-1) ?? "";
+          if (error === null) resolve(ok(stdout));
+          else resolve(err(error.killed ? "no answer" : said === "" ? `ssh exited ${String(error.code ?? "")}` : said));
+        });
+      }),
   });
 };

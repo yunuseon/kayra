@@ -1,0 +1,5 @@
+---
+# A NAS's play sets it under nas_root, which it writes nothing outside of.
+# `kayra status` reads <kayra_dir>/version from the same place (versionFile in
+# cli/src/core/fleet/parse.ts).
+kayra_dir: /opt/kayra

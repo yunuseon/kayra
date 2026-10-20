@@ -4,7 +4,7 @@ import { serverKinds } from "../../core/fleet/settings.ts";
 import { serverTargets } from "../../core/fleet/model.ts";
 import { parts } from "../../core/plan/model.ts";
 import { stopReasons } from "../../core/interpreter/progress.ts";
-import { machineStates, reachStates } from "../../core/status/model.ts";
+import { machineStates, reachStates, runningStates } from "../../core/status/model.ts";
 import { tones } from "../../core/text/spans.ts";
 import { verdicts } from "../../core/validation/findings.ts";
 import { releasesSchema, runsSchema } from "../../core/ctl/answers.ts";
@@ -60,6 +60,7 @@ export const schemas = {
     machine: z.object({ state: z.enum(machineStates), address: z.string().nullable(), from: z.enum(["inventory", "opentofu"]).nullable(), reason: z.string().nullable() }),
     ssh: z.object({ port: z.number(), state: reach, ms: z.number().nullable(), error: z.string().nullable() }),
     https: z.object({ url: z.string(), state: reach, status: z.number().nullable(), ms: z.number().nullable(), error: z.string().nullable() }).nullable(),
+    kayra: z.object({ pin: z.string(), state: z.enum(runningStates), version: z.string().nullable(), error: z.string().nullable() }),
   })) }),
   Validation: z.object({ result: verdict, servers: z.array(z.object({ name: z.string(), kind: z.string(), target: z.string(), result: verdict, findings: z.array(z.object({ result: verdict, text: z.string(), hint: z.string().nullable() })) })) }),
   AppRuns: runsSchema, AppReleases: releasesSchema,

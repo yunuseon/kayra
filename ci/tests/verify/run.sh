@@ -2,7 +2,8 @@
 # Runs scripts/local/verify.sh against a fixture server whose answers come
 # from stubs (curl, openssl, ssh), one case per way a server has broken: each
 # case changes one answer of a healthy server and names the ✗ line it must
-# produce (or "nothing"). Needs yq and jq; no network, no server.
+# produce (or "nothing"), or the "! " line it notes and passes with. Needs yq
+# and jq; no network, no server.
 #   bash ci/tests/verify/run.sh
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -54,6 +55,7 @@ healthy() {
     cat > "${tmp}/answers/facts" <<'EOF'
 registered shop
 alerts
+kayra 0.19.0
 platform traefik|running|
 platform authelia|running|healthy
 container shop shop-web-1|running|Up 2 minutes (healthy)
@@ -64,9 +66,11 @@ EOF
 
 run_case() {
     local name="$1" expect="$2" out rc ok
-    out="$(cd "$fleet" && PATH="${tmp}/bin:${PATH}" ANSWERS="${tmp}/answers" FLEET_ROOT="$fleet" VERIFY_WAIT=0 bash "$verify" shop 2>&1)" && rc=0 || rc=$?
+    out="$(cd "$fleet" && PATH="${tmp}/bin:${PATH}" ANSWERS="${tmp}/answers" FLEET_ROOT="$fleet" KAYRA_VERSION=0.19.0 VERIFY_WAIT=0 bash "$verify" shop 2>&1)" && rc=0 || rc=$?
     if [ "$expect" = nothing ]; then
         [ "$rc" = 0 ] && ok=1 || ok=0
+    elif [ "${expect#! }" != "$expect" ]; then
+        [ "$rc" = 0 ] && grep -qF -- "$expect" <<< "$out" && ok=1 || ok=0
     else
         [ "$rc" = 1 ] && grep -qF -- "✗ ${expect}" <<< "$out" && ok=1 || ok=0
     fi
@@ -96,5 +100,9 @@ healthy; sed -i.bak '/^container shop /d; /^run shop /d' "${tmp}/answers/facts"
 run_case registered-not-deployed-yet nothing
 healthy; sed -i.bak '/^container shop /d' "${tmp}/answers/facts"
 run_case containers-gone-after-a-run "shop: no containers"
+healthy; sed -i.bak 's/^kayra .*$/kayra 0.18.0/' "${tmp}/answers/facts"
+run_case older-kayra "! set up by kayra 0.18.0; the fleet pins 0.19.0 (kayra deploy shop)"
+healthy; sed -i.bak 's/^kayra .*$/kayra /' "${tmp}/answers/facts"
+run_case no-kayra-recorded "! set up by a kayra that recorded no version; the fleet pins 0.19.0 (kayra deploy shop)"
 
 exit "$failed"

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { RunEvent, Status } from "../../cli/src/clients/wire/contract.gen.ts";
 import { ranked, score } from "../src/fuzzy.ts";
-import { health, login, ssh } from "../src/reach.ts";
+import { health, kayra, login, ssh } from "../src/reach.ts";
 import { href, parse, type Route } from "../src/router.ts";
 import { empty, outcome, reduce } from "../src/run.ts";
 import { styled } from "../src/sgr.ts";
@@ -115,6 +115,7 @@ describe("status cells", () => {
     machine: { state: "found", address: "192.0.2.4", from: "inventory", reason: null },
     ssh: { port: 22, state: "refused", ms: null, error: null },
     https: null,
+    kayra: { pin: "0.19.0", state: "skipped", version: null, error: null },
   };
   test("an on-demand SSH that is off is a warning, not a failure; no login on a server without one", () => {
     expect(ssh(server)).toMatchObject({ text: "off (refused)", tone: "warn" });
@@ -123,5 +124,14 @@ describe("status cells", () => {
     expect(health({ ...server, ssh: { port: 22, state: "open", ms: 12, error: null } })).toBe("ok");
     expect(health({ ...server, ssh: { port: 22, state: "pending", ms: null, error: null } })).toBe("waiting");
     expect(health({ ...server, ssh: { port: 22, state: "unknown-host", ms: null, error: "ENOTFOUND" } })).toBe("bad");
+  });
+  test("the kayra that set it up: the pin is fine, anything else a warning naming the pin, which leaves its health alone", () => {
+    const open = { ...server, ssh: { port: 22, state: "open" as const, ms: 12, error: null } };
+    expect(kayra({ ...open, kayra: { ...open.kayra, state: "recorded", version: "0.19.0" } })).toMatchObject({ text: "0.19.0", tone: "ok" });
+    const behind = { ...open, kayra: { ...open.kayra, state: "recorded" as const, version: "0.18.0" } };
+    expect(kayra(behind)).toMatchObject({ text: "0.18.0 → 0.19.0", tone: "warn" });
+    expect(kayra({ ...open, kayra: { ...open.kayra, state: "unrecorded" } })).toMatchObject({ text: "unrecorded → 0.19.0", tone: "warn" });
+    expect(kayra(server)).toMatchObject({ text: "not asked", tone: "muted" });
+    expect(health(behind)).toBe("ok");
   });
 });

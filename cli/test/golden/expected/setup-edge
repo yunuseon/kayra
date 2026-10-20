@@ -1,5 +1,5 @@
 {"argv":["bash","<kayra>/scripts/local/require-main.sh","edge"],"env":{"FLEET_ROOT":"<fleet>"}}
 {"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
-{"argv":["ansible-playbook","-i","<fleet>/servers/edge/inventory.ini","<kayra>/ansible/playbooks/edge.yml","-e","server=edge","-e","server_dir=<fleet>/servers/edge","-e","domain=example.com","-e","target=hetzner"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"<vault-password-helper>"}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/edge/inventory.ini","<kayra>/ansible/playbooks/edge.yml","-e","server=edge","-e","server_dir=<fleet>/servers/edge","-e","domain=example.com","-e","target=hetzner","-e","kayra_version=<version>"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"<vault-password-helper>"}}
 --- stdout
 --- exit 0

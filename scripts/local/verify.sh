@@ -38,7 +38,8 @@ pass() { echo "    ✓ $*"; }
 note() { echo "    ! $*"; }
 
 domain="$(yq -r '.domain' "${dir}/server.yml")"
-webhooks="$( { [ -f "${dir}/vars.yml" ] && yq -r '.webhooks // true' "${dir}/vars.yml"; } || echo true)"
+# Not yq's `//`: it takes false for missing too.
+webhooks="$( { [ -f "${dir}/vars.yml" ] && yq -r '.webhooks' "${dir}/vars.yml"; } || echo true)"
 inventory="${dir}/inventory.ini"
 [ -f "$inventory" ] || { fail "no inventory for ${name}: provision it first"; exit 1; }
 field() { awk -v key="$1" '{for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) {print substr($i, length(key) + 2); exit}}' "$inventory"; }

@@ -282,7 +282,7 @@ const deployRequest = (app: App, ref: string, why: Why) => typed<Request>({
   work: { kind: "deploy", app: app.name, ref, why },
 });
 
-/** The webhook's fallback: an app whose ref moved to a commit no run has tried yet and no release runs (one migrated from Jenkins has releases but no runs). */
+/** The webhook's fallback: an app whose ref moved to a commit no run has tried yet and no release runs (runs are pruned, releases are not). */
 const poll = async (s: Settings) => {
   await Promise.all(
     registeredApps(s).map(async (app) => {

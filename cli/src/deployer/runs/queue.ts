@@ -24,10 +24,9 @@ export const describe = (request: Request) =>
 
 /**
  * What runs and what waits. One run per owner at a time; a request for an
- * owner that already waits replaces the waiting one (the newest push wins, as
- * Jenkins' disableConcurrentBuilds coalesced). The registry GC stops the
- * registry, so it runs alone: it waits for everything running, and nothing
- * starts while it runs.
+ * owner that already waits replaces the waiting one (the newest push wins).
+ * The registry GC stops the registry, so it runs alone: it waits for
+ * everything running, and nothing starts while it runs.
  */
 export type Queue = { readonly running: readonly Request[]; readonly waiting: readonly Request[]; readonly limit: number };
 

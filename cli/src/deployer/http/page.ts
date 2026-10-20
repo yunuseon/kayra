@@ -2,7 +2,7 @@ import type { Owner, RunId } from "../brand.ts";
 import type { RunMeta } from "../runs/records.ts";
 import { log, meta, owners, runsOf } from "../runs/store.ts";
 
-/** The read-only runs pages at deploy.<domain>, behind Authelia: what Jenkins' job pages were for. */
+/** The read-only runs pages at deploy.<domain>, behind Authelia. */
 
 const escape = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");

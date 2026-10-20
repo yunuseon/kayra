@@ -134,7 +134,9 @@
   ansible.builtin.shell:
     cmd: |
       set -euo pipefail
-      live="$(ls {{ platform_dir }}/releases/{{ app.name }} 2>/dev/null | sort | tail -1 | sed -n 's/^[0-9]\{8\}T[0-9]\{6\}Z-\([0-9a-f]\{40\}\)\.env$/\1/p')"
+      releases={{ platform_dir }}/releases/{{ app.name }}
+      if [ ! -d "$releases" ]; then echo "never deployed"; exit 0; fi
+      live="$(find "$releases" -maxdepth 1 -name '*.env' -printf '%f\n' | sort | tail -1 | sed -n 's/^[0-9]\{8\}T[0-9]\{6\}Z-\([0-9a-f]\{40\}\)\.env$/\1/p')"
       if [ -z "$live" ]; then echo "never deployed"; exit 0; fi
       if [ -n "$(docker ps -q --filter label=com.docker.compose.project={{ app.name }} --filter status=running --filter status=restarting)" ]; then echo "runs"; exit 0; fi
       cd {{ platform_dir }}

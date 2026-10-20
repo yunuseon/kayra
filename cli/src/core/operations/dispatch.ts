@@ -1,3 +1,6 @@
+import { inspectValues } from "../app-values/store.ts";
+import type { ValuesReport } from "../app-values/model.ts";
+import { appValues } from "../recipes/app-values.ts";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { absolutePath, appName, domain, subdomain, within, type AbsolutePath, type AppName, type KayraRoot, type KayraVersion } from "../fleet/brand.ts";
@@ -60,6 +63,10 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("backup.test"), input: operations["backup.test"].input }),
   z.strictObject({ name: z.literal("app.init"), input: operations["app.init"].input }),
   z.strictObject({ name: z.literal("app.check"), input: operations["app.check"].input }),
+  z.strictObject({ name: z.literal("app.values"), input: operations["app.values"].input }),
+  z.strictObject({ name: z.literal("app.config.set"), input: operations["app.config.set"].input }),
+  z.strictObject({ name: z.literal("app.secret.import"), input: operations["app.secret.import"].input }),
+  z.strictObject({ name: z.literal("app.secret.generate"), input: operations["app.secret.generate"].input }),
   z.strictObject({ name: z.literal("app.purge"), input: operations["app.purge"].input }),
   z.strictObject({ name: z.literal("app.runs"), input: operations["app.runs"].input }),
   z.strictObject({ name: z.literal("app.log"), input: operations["app.log"].input }),
@@ -95,6 +102,9 @@ const onServer = (ctx: Context, name: string) => {
 const onApp = (ctx: Context, input: { readonly server: string; readonly app: string }) =>
   flatMap(onServer(ctx, input.server), (target) => map(appName(input.app), (app) => [target, app] as const));
 
+const appDir = (ctx: Context, dir: string | undefined): Result<AbsolutePath | undefined, string> =>
+  dir === undefined ? ok(undefined) : absolutePath(resolve(ctx.here, dir));
+
 type RecipeName = PlanName | SessionName | "app.runs" | "app.log" | "app.releases";
 type Plans = { readonly [N in RecipeName]: (ctx: Context, input: InputOf<N>) => Result<Plan, string> };
 
@@ -128,6 +138,12 @@ const plans: Plans = {
   "app.init": (ctx, input) => map(absolutePath(resolve(ctx.here, input.dir)), (dir) => appInit(ctx.engine.kayra, dir, input.name)),
   "app.check": (ctx, input) =>
     flatMap(absolutePath(resolve(ctx.here, input.dir)), (dir) => appCheck(ctx.engine.kayra, dir, ctx.read(within(dir, "app.yml")))),
+  "app.config.set": (ctx, input) => flatMap(onApp(ctx, input), ([server, app]) =>
+    flatMap(appDir(ctx, input.dir), (dir) => appValues(ctx.engine, server, app, { kind: "config", key: input.key, value: input.value }, ctx.here, ctx.read, dir))),
+  "app.secret.import": (ctx, input) => flatMap(onApp(ctx, input), ([server, app]) =>
+    flatMap(appDir(ctx, input.dir), (dir) => appValues(ctx.engine, server, app, { kind: "import", key: input.key, file: input.file }, ctx.here, ctx.read, dir))),
+  "app.secret.generate": (ctx, input) => flatMap(onApp(ctx, input), ([server, app]) =>
+    flatMap(appDir(ctx, input.dir), (dir) => appValues(ctx.engine, server, app, { kind: "generate", key: input.key }, ctx.here, ctx.read, dir))),
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),
   "app.runs": onDeployer<"app.runs">((app) => ({ kind: "runs", app, more: undefined } as const)),
   "app.log": onDeployer<"app.log">((app, input) => ({ kind: "logs", app, more: input.run } as const)),
@@ -151,7 +167,7 @@ export const planOf = <N extends RecipeName>(ctx: Context, call: { readonly name
 export const hasPlan = (call: Invocation): call is RecipeCall => Object.hasOwn(plans, call.name);
 
 /** What each query answers. */
-export type Answers = { readonly validate: readonly Report[]; readonly version: KayraVersion; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
+export type Answers = { readonly "app.values": ValuesReport; readonly validate: readonly Report[]; readonly version: KayraVersion; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
 
 type Queries = { readonly [N in QueryName]: (ctx: Context, input: InputOf<N>) => Promise<Result<Answers[N], string>> };
 
@@ -170,6 +186,14 @@ const deployerAnswer = async (ctx: Context, name: "app.runs" | "app.releases" | 
 };
 
 const queries: Queries = {
+  "app.values": async (ctx, input) => {
+    const target = onApp(ctx, input);
+    if (!target.ok) return target;
+    const dir = appDir(ctx, input.dir);
+    if (!dir.ok) return dir;
+    try { return await inspectValues(ctx.fleet.root, target.value[0], target.value[1], dir.value); }
+    catch { return err("app values could not be inspected; check file access and vault configuration"); }
+  },
   "app.runs": (ctx, input) => deployerAnswer(ctx, "app.runs", input),
   "app.releases": (ctx, input) => deployerAnswer(ctx, "app.releases", input),
   "app.log": (ctx, input) => deployerAnswer(ctx, "app.log", input),

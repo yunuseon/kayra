@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -9,6 +10,7 @@ import { runId } from "../../src/deployer/brand.ts";
 import { releases, type RunMeta } from "../../src/deployer/runs/records.ts";
 import { appName, serverName } from "../../src/core/fleet/brand.ts";
 import { flat } from "../../src/core/text/spans.ts";
+import { runSchema } from "../../src/core/ctl/answers.ts";
 import { draw } from "../../src/clients/cli/views.ts";
 import { commit, must, name } from "./support.ts";
 
@@ -91,4 +93,82 @@ test("answers: an app never deployed has no live release; a release's time in IS
     app: "shop",
     releases: [{ sha: commit("a"), time: "2026-10-18T10:00:00Z", live: true }],
   });
+});
+
+/** ctl as a child that may take its time, while this process plays the control port. */
+const ctlLater = (...args: readonly string[]) =>
+  new Promise<{ readonly code: number | null; readonly stdout: string }>((resolve) => {
+    const child = spawn("node", [join(import.meta.dirname, "../../src/deployer/main.ts"), "ctl", ...args], { env: { ...process.env, PLATFORM_DIR: platform } });
+    const out = { text: "" };
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      // eslint-disable-next-line functional/immutable-data -- the child's output, gathered
+      out.text += chunk;
+    });
+    child.on("close", (code) => { resolve({ code, stdout: out.text }); });
+  });
+
+test("ctl deploy follows its run: the log as it grows, then what runs where; --json ends with the run as data", async () => {
+  const id = must(runId("20261018T120000Z-abcdef"));
+  const dir = join(platform, "runs", "shop", id);
+  const at = (state: RunMeta["state"], more: Partial<RunMeta> = {}): RunMeta =>
+    ({ id, owner: "shop", what: "deploy main", why: "deploy", state, started: "2026-10-18T12:00:00.000Z", ...more });
+  const control = createServer((_, response) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "meta.json"), JSON.stringify(at("queued")));
+    writeFileSync(join(dir, "log"), "12:00:00 Deploying shop at main\n");
+    response.writeHead(202).end(`${JSON.stringify({ id, owner: "shop", state: "queued" })}\n`);
+    setTimeout(() => {
+      appendFileSync(join(dir, "log"), "12:00:02 ready  https://www.shop.example.com/  200\n");
+      writeFileSync(join(dir, "meta.json"), JSON.stringify(at("success", {
+        sha: commit("a"), finished: "2026-10-18T12:00:03.000Z", urls: ["https://www.shop.example.com/"],
+        checks: [{ url: "https://www.shop.example.com/", status: 200, ok: true }],
+      })));
+    }, 1_500);
+  });
+  await new Promise<void>((resolve) => { control.listen(8091, "127.0.0.1", resolve); });
+  try {
+    const followed = await ctlLater("deploy", "shop");
+    strictEqual(followed.code, 0);
+    deepStrictEqual(followed.stdout.split("\n"), [
+      "12:00:00 Deploying shop at main",
+      "12:00:02 ready  https://www.shop.example.com/  200",
+      `✓ shop aaaaaaa deployed (run ${id})`,
+      "  https://www.shop.example.com/",
+      "",
+    ]);
+    const json = await ctlLater("deploy", "shop", "--json");
+    strictEqual(json.code, 0);
+    deepStrictEqual(runSchema.parse(JSON.parse(json.stdout)).urls, ["https://www.shop.example.com/"]);
+  } finally {
+    control.close();
+  }
+});
+
+test("ctl deploy: a failed run exits 1 with its reason; a superseded one says what replaced it", async () => {
+  const id = must(runId("20261018T130000Z-fa11ed"));
+  const dir = join(platform, "runs", "shop", id);
+  // eslint-disable-next-line functional/prefer-immutable-types -- the fake control port's next answer
+  const end: { value: RunMeta["state"] } = { value: "failure" };
+  const control = createServer((_, response) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "log"), "");
+    writeFileSync(join(dir, "meta.json"), JSON.stringify({
+      id, owner: "shop", what: "deploy main", why: "deploy", state: end.value, started: "2026-10-18T13:00:00.000Z", finished: "2026-10-18T13:00:01.000Z",
+      ...(end.value === "failure" ? { sha: commit("b"), error: "refused by the compose policy" } : {}),
+    }));
+    response.writeHead(202).end(JSON.stringify({ id, owner: "shop", state: "queued" }));
+  });
+  await new Promise<void>((resolve) => { control.listen(8091, "127.0.0.1", resolve); });
+  try {
+    const failed = await ctlLater("deploy", "shop");
+    strictEqual(failed.code, 1);
+    strictEqual(failed.stdout, `✗ shop bbbbbbb: refused by the compose policy (run ${id})\n`);
+    // eslint-disable-next-line functional/immutable-data -- the fake control port's next answer
+    end.value = "superseded";
+    const replaced = await ctlLater("deploy", "shop");
+    strictEqual(replaced.code, 1);
+    strictEqual(replaced.stdout, `↷ shop: a newer request replaced this one before it started (run ${id})\n`);
+  } finally {
+    control.close();
+  }
 });

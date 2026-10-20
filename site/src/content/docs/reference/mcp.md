@@ -38,7 +38,7 @@ other.
   run as text: each step, its output, how it went, and the footer. A failed or
   stopped run is a tool error. The deployer's commands (`app_deploy`,
   `app_rollback`, `job`) and `ssh_exec` answer with their output alone.
-- **Queries** (`validate`, `app_runs`, `app_releases`, `app_log`, `version`)
+- **Queries** (`validate`, `app_values`, `app_runs`, `app_releases`, `app_log`, `version`)
   and `status` answer at once. Where the answer is an object, it is structured
   content in the same shape as the [API](../api/) and `--json`.
 - **`ssh`**, the interactive shell, is not a tool: an agent cannot hold a
@@ -51,10 +51,10 @@ has not ended is refused. Cancelling a call stops its step, as Ctrl-C does.
 
 | | |
 |---|---|
-| A tool that changes nothing (`status`, `validate`, `verify`, `plan`, `doctor`, `version`, `app_check`, `app_runs`, `app_log`, `app_releases`) | Runs |
+| A tool that changes nothing (`status`, `validate`, `verify`, `plan`, `doctor`, `version`, `app_check`, `app_values`, `app_runs`, `app_log`, `app_releases`) | Runs |
 | `dryRun: true` | Runs; changes nothing |
 | A change to a multipass server | Runs |
-| A change to any other server, or with no server (`certs`, `app_init`) | As Claude Code's permission mode decides |
+| A change to any other server, with no server (`certs`, `app_init`), or to the fleet's files alone (`app_config_set`, `app_secret_import`, `app_secret_generate`) | As Claude Code's permission mode decides |
 | `down`, `app_purge` | Claude Code asks every time, in every mode, with no "always allow" |
 | `down` on a Hetzner server | Also asks the operator, in a dialog, to type the server's name. The agent never sees what was typed |
 

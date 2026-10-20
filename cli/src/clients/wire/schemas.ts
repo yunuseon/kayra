@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { valuesReportSchema } from "../../core/app-values/model.ts";
 import { effects, kinds, operationNames, scopes, type QueryName } from "../../core/operations/catalog.ts";
 import { serverKinds } from "../../core/fleet/settings.ts";
 import { serverTargets } from "../../core/fleet/model.ts";
@@ -63,10 +64,12 @@ export const schemas = {
     kayra: z.object({ pin: z.string(), state: z.enum(runningStates), version: z.string().nullable(), error: z.string().nullable() }),
   })) }),
   Validation: z.object({ result: verdict, servers: z.array(z.object({ name: z.string(), kind: z.string(), target: z.string(), result: verdict, findings: z.array(z.object({ result: verdict, text: z.string(), hint: z.string().nullable() })) })) }),
+  AppValues: valuesReportSchema,
   AppRuns: runsSchema, AppReleases: releasesSchema,
-  OperationInfo: z.object({ name: z.enum(operationNames), summary: z.string(), scope: z.enum(scopes), effect: z.enum(effects), kind: z.enum(kinds), input: z.record(z.string(), z.unknown()) }),
+  OperationInfo: z.object({ name: z.enum(operationNames), summary: z.string(), scope: z.enum(scopes), effect: z.enum(effects), kind: z.enum(kinds), local: z.boolean(), input: z.record(z.string(), z.unknown()) }),
 } as const;
 
 export const querySchemas = {
+  "app.values": schemas.AppValues,
   validate: schemas.Validation, version: z.string(), "app.runs": schemas.AppRuns, "app.releases": schemas.AppReleases, "app.log": z.string(),
 } satisfies Readonly<Record<QueryName, z.ZodType>>;

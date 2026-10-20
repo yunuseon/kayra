@@ -255,6 +255,7 @@ const OperationForm = ({
 };
 
 const realServer = (draft: Draft) => {
+  if (catalog.value.state === "ready" && catalog.value.value.some((info) => info.name === draft.name && info.local)) return undefined;
   const loaded = fleet.value;
   const facts = loaded.state === "ready" ? loaded.value.servers.find((each) => each.name === draft.input["server"]) : undefined;
   return facts?.target === "multipass" ? undefined : facts?.name;

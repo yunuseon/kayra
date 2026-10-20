@@ -48,6 +48,11 @@ const world = (overrides: Partial<Effects> = {}, fail?: string): { readonly fx: 
       note(`${context} ${state}`);
       return Promise.resolve();
     },
+    probe: (url) => {
+      note(`probe ${url}`);
+      return Promise.resolve(200);
+    },
+    pause: () => Promise.resolve(),
     ...overrides,
   };
   return { fx, did };
@@ -55,9 +60,9 @@ const world = (overrides: Partial<Effects> = {}, fail?: string): { readonly fx: 
 
 const site = { appsDir: "/opt/apps", policyScript: "/p/compose-policy.sh", domain: "shop.example.com" };
 
-test("a deploy: build, admission on the resolved config, up, record, statuses", async () => {
+test("a deploy: build, admission on the resolved config, up, record, readiness, statuses", async () => {
   const { fx, did } = world();
-  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: true, sha: commit("a") });
+  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: true, sha: commit("a"), urls: ["https://www.shop.example.com/"], checks: [{ url: "https://www.shop.example.com/", status: 200, ok: true }] });
   deepStrictEqual(did, [
     "kayra/build pending",
     "kayra/build success",
@@ -67,19 +72,20 @@ test("a deploy: build, admission on the resolved config, up, record, statuses", 
     "routes web",
     "up +secrets",
     "record a WEB_IMAGE=localhost:5000/shop/web:0123456789ab",
+    "probe https://www.shop.example.com/",
     "kayra/deploy success",
   ]);
 });
 
 test("refused by the policy: nothing starts, nothing is recorded", async () => {
   const { fx, did } = world({}, "policy");
-  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: false, sha: commit("a") });
+  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: false, sha: commit("a"), error: "refused by the compose policy" });
   deepStrictEqual(did.slice(-3), ["config +secrets", `policy <${config}`, "kayra/deploy failure"]);
 });
 
 test("a failed build never reaches deploy", async () => {
   const { fx, did } = world({ prepare: () => Promise.resolve(err("buildctl failed")) });
-  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: false, sha: commit("a") });
+  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: false, sha: commit("a"), error: "build: buildctl failed" });
   deepStrictEqual(did, ["kayra/build pending", "kayra/build failure"]);
 });
 
@@ -93,12 +99,54 @@ test("a bundle for another app's images fails the build", async () => {
 
 test("an unknown ref: no commit, no status", async () => {
   const { fx, did } = world({ resolve: () => Promise.resolve(err("nope is no branch or tag")) });
-  deepStrictEqual(await deploy(shop, "nope", site, fx), { ok: false });
+  deepStrictEqual(await deploy(shop, "nope", site, fx), { ok: false, error: "nope is no branch or tag" });
   deepStrictEqual(did, []);
 });
 
 test("a route to a service the admitted config lacks: no routes written, nothing starts", async () => {
   const { fx, did } = world({ prepare: () => Promise.resolve(ok({ ...bundle, routes: [{ host: "www", service: "api", port: 3000 }] })) });
-  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: false, sha: commit("a") });
+  deepStrictEqual(await deploy(shop, "main", site, fx), { ok: false, sha: commit("a"), error: "route to api: no such service in the compose files" });
   deepStrictEqual(did.slice(-3), ["config +secrets", `policy <${config}`, "kayra/deploy failure"]);
+});
+
+/** A probe answering each URL from a script of statuses, the last one repeating. */
+const answering = (script: Readonly<Record<string, readonly number[]>>) => {
+  const asked = new Map<string, number>();
+  return (url: string) => {
+    const times = asked.get(url) ?? 0;
+    // eslint-disable-next-line functional/immutable-data -- the fake world's counter
+    asked.set(url, times + 1);
+    const statuses = script[url] ?? [200];
+    return Promise.resolve(statuses[Math.min(times, statuses.length - 1)] ?? 0);
+  };
+};
+
+test("readiness waits out Traefik's 404 and a backend's 502, then passes", async () => {
+  const { fx } = world({ probe: answering({ "https://www.shop.example.com/": [404, 502, 200] }) });
+  deepStrictEqual((await deploy(shop, "main", site, fx)).checks, [{ url: "https://www.shop.example.com/", status: 200, ok: true }]);
+});
+
+test("without a check path, an app's own 404 counts once Traefik has had time", async () => {
+  const { fx } = world({ probe: answering({ "https://www.shop.example.com/": [404] }) });
+  deepStrictEqual((await deploy(shop, "main", site, fx)).ok, true);
+});
+
+test("a check path must answer 2xx or 3xx; a route that never does fails the run, which still runs and is recorded", async () => {
+  const routes = [{ host: "www", service: "web", port: 3000, check: "/healthz" }, { host: "www", path: "/api", service: "web", port: 3000 }];
+  const { fx, did } = world({
+    prepare: () => Promise.resolve(ok({ ...bundle, routes })),
+    probe: answering({ "https://www.shop.example.com/healthz": [404], "https://www.shop.example.com/api": [503] }),
+  });
+  const outcome = await deploy(shop, "main", site, fx);
+  deepStrictEqual(outcome, {
+    ok: false,
+    sha: commit("a"),
+    error: "running, but not ready: https://www.shop.example.com/healthz answered 404; https://www.shop.example.com/api answered 503",
+    urls: ["https://www.shop.example.com/"],
+    checks: [
+      { url: "https://www.shop.example.com/healthz", status: 404, ok: false },
+      { url: "https://www.shop.example.com/api", status: 503, ok: false },
+    ],
+  });
+  deepStrictEqual(did.slice(-2), ["record a WEB_IMAGE=localhost:5000/shop/web:0123456789ab", "kayra/deploy failure"]);
 });

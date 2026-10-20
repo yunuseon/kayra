@@ -108,7 +108,9 @@ config: [FEATURE_FLAGS]        # same, but not secret
 - Every name in `secrets` and `config` needs a value from the operator for each
   environment, or registering the app fails. Changing these lists, or adding
   a host to `routes`, needs the operator to re-register the app; compose
-  files, code and the rest of `routes` do not.
+  files, code and the rest of `routes` do not. `kayra app values` lists what
+  is still missing; `app config set`, `app secret import` and
+  `app secret generate` fill it in ([CLI](../../reference/cli/#an-apps-values)).
 - `secrets` reach the deploy as environment variables of the same name —
   reference them in compose as `${DATABASE_PASSWORD:?}`. `config` values and
   `DOMAIN` are available the same way.
@@ -127,6 +129,7 @@ routes:
     service: api
     port: 3000
     rate_limit: {average: 20, period: 10m, burst: 5}
+  - {host: app, service: web, port: 3000, check: /healthz}
 ```
 
 - `host` is a subdomain. Your app's hosts are its routes' hosts, and may not be
@@ -138,6 +141,11 @@ routes:
   none.
 - `rate_limit` caps what one client address may send: `average` requests per
   `period` (`10s`, `10m`, `1h`), and `burst` at once beyond that.
+- `check` is a path that answers 2xx or 3xx once the app is ready. After
+  `docker compose up --wait` (your healthchecks), a deploy asks every route
+  through Traefik for up to a minute: its `check`, or its own path, which must
+  then answer below 500. A route that never does fails the run, with what it
+  answered; the new release still runs.
 - Every route serves HTTPS with a real certificate and the platform's security
   headers (HSTS, `nosniff`, `X-Frame-Options: SAMEORIGIN`, a Referrer-Policy).
 

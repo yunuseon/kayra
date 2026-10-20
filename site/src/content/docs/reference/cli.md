@@ -143,14 +143,49 @@ shop on shop-prod · 2 releases
 |---|---|
 | `kayra app runs <server> <app>` | What runs now, and the latest runs: state, commit, why, when, how long, run id |
 | `kayra app logs <server> <app> [run]` | A run's log, the newest unless named (`gc` or `renovate` for the jobs' runs); errors and warnings marked on a terminal |
-| `kayra app deploy <server> <app> [ref]` | Build and deploy a branch, tag or commit; the app's ref by default |
-| `kayra app rollback <server> <app> [sha]` | Without a commit: every release, the live one marked, each with its age. With one (the 7 characters the list shows are enough): deploy it again |
+| `kayra app deploy <server> <app> [ref]` | Build and deploy a branch, tag or commit; the app's ref by default. Follows the run to its end: see below |
+| `kayra app rollback <server> <app> [sha]` | Without a commit: every release, the live one marked, each with its age. With one (the 7 characters the list shows are enough): deploy it again, followed like a deploy |
 | `kayra job <server> gc` | The registry GC now (nightly at 03:00 otherwise) |
 | `kayra job <server> renovate [--no-prs]` | Renovate now; `--no-prs` logs what would change |
 
-A run started while one runs for the same app waits for it; of several waiting,
-only the newest runs. The runs and their logs are also at
-`https://deploy.<domain>/`, behind the staff login.
+A run started while one runs for the same app waits for it (`queued`); of
+several waiting, only the newest runs, and the others end `superseded`. The
+runs and their logs are also at `https://deploy.<domain>/`, behind the staff
+login.
+
+`app deploy` and `app rollback` print the run's log as it grows and end with
+what came of it, exiting 0 only when it deployed and every route answered
+([readiness](../../concepts/app-contract/#routes)):
+
+```
+$ kayra app deploy shop-prod shop
+…
+12:00:41 ready  https://www.shop.example.com/  200
+12:00:41 Deployed a1b2c3d4…
+✓ shop a1b2c3d deployed (run 20261018T120000Z-abcdef)
+  https://www.shop.example.com/
+```
+
+A failed run ends with its reason (`✗ shop a1b2c3d: refused by the compose
+policy (run …)`); `app runs` shows the newest one's under its table, and
+`app runs --json` gives every run's `error`, `urls` and readiness `checks`.
+
+## An app's values
+
+What an app's `app.yml` declares in `config` and `secrets`, set in the fleet's
+`apps/<app>.yml` and `apps/<app>.secrets.yml` (vaulted where the server's
+secrets are). These edit files on this machine only: review the change, then
+`kayra apps <server>` applies it, from `main` on a hetzner or home server.
+
+| Command | What it does |
+|---|---|
+| `kayra app values <server> <app> [--dir DIR] [--json]` | Each declared key: `set`, `missing`, or `locked` (a vault that cannot be opened without a prompt). Never a value |
+| `kayra app config set <server> <app> KEY VALUE [--dir DIR]` | A declared configuration value, in plaintext |
+| `kayra app secret import <server> <app> KEY FILE [--dir DIR]` | A declared secret from a file (one trailing newline dropped), so it is in no argument, log or run record |
+| `kayra app secret generate <server> <app> KEY [--dir DIR]` | 32 random bytes, hex, only if the key has no value yet: a retry keeps it |
+
+`app.yml` is read from the app's clone in `.cache/`, or from `--dir`, an app
+checkout not yet cloned there. A key `app.yml` does not declare is refused.
 
 ## In an app's repository
 

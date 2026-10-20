@@ -5,7 +5,7 @@ import { must, name } from "./support.ts";
 
 const shop = name("shop");
 
-test("routes are checked, not trusted: fields, hosts, paths, ports, rate limits", () => {
+test("routes are checked, not trusted: fields, hosts, paths, ports, rate limits, checks", () => {
   const routes = must(parseRoutes([
     { host: "www", service: "web", port: 3000 },
     { host: "api", path: "/signup", service: "api", port: 8080, rate_limit: { average: 20, period: "10m", burst: 5 } },
@@ -26,6 +26,8 @@ test("routes are checked, not trusted: fields, hosts, paths, ports, rate limits"
   strictEqual(refused({ host: "www", path: "no-slash", service: "web", port: 3000 }).startsWith("route 0: 'no-slash'"), true);
   strictEqual(refused({ host: "www", service: "web", port: 3000, rate_limit: { average: 20, period: "10 minutes", burst: 5 } }).startsWith("route 0: '10 minutes'"), true);
   strictEqual(refused({ host: "www", service: "web", port: 3000, rate_limit: { average: 20, period: "10m" } }), "route 0: rate_limit.burst undefined is not a positive whole number");
+  strictEqual(must(parseRoutes([{ host: "www", service: "web", port: 3000, check: "/healthz" }]))[0]?.check, "/healthz");
+  strictEqual(refused({ host: "www", service: "web", port: 3000, check: "healthz" }).startsWith("route 0: 'healthz'"), true);
 });
 
 const admitted = JSON.stringify({

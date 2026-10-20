@@ -74,7 +74,7 @@ export const start = (served: Served, call: Invocation, settings: Settings, conf
   if (!plan.ok) return err(typed<Refusal>([400, plan.error]));
   const server = serverOf(served.context, call);
   if (busy(runs.all().map((live) => live.run), server?.name)) return err(typed<Refusal>([409, `a run on ${server?.name ?? ""} has not ended`]));
-  if (operation(call.name).effect !== "reads" && server !== undefined && server.target !== "multipass" && confirm !== server.name)
+  if (operation(call.name).local !== true && operation(call.name).effect !== "reads" && server !== undefined && server.target !== "multipass" && confirm !== server.name)
     return err(typed<Refusal>([403, `this changes ${server.name}: confirm with its name`]));
   const started = new Date().toISOString();
   const id = runId(started, randomBytes(6).toString("hex"));

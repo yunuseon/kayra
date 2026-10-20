@@ -10,11 +10,11 @@ import { builderResolve } from "./build/client.ts";
 import { matches } from "./cron.ts";
 import { json, send } from "./http/http.ts";
 import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request, type Why } from "./runs/queue.ts";
-import { moved, releases, type RunMeta } from "./runs/records.ts";
+import { ended, moved, releases, type RunMeta } from "./runs/records.ts";
 import { decide, type RunEnd } from "./forges/notify.ts";
 import { effects, runPage } from "./runs/effects.ts";
 import { deploy, renovate, type Effects, type Env, type Outcome } from "./runs/run.ts";
-import { appendLog, prune, runsOf, writeMeta } from "./runs/store.ts";
+import { appendLog, meta, owners, prune, runsOf, writeMeta } from "./runs/store.ts";
 import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
 
@@ -70,22 +70,50 @@ const work = async (s: Settings, request: Request, fx: Effects) => {
 // eslint-disable-next-line functional/prefer-immutable-types -- the daemon's state lives here, nowhere else
 const cell: { queue: Queue } = { queue: empty(2) };
 
-/** Applies a change to the queue and starts what it lets start; returns those. */
-const swap = (s: Settings, change: (queue: Queue) => { readonly queue: Queue; readonly start: readonly Request[] }) => {
+type Change = { readonly queue: Queue; readonly start: readonly Request[]; readonly replaced?: readonly Request[] };
+
+const asked = (request: Request, state: RunMeta["state"]) =>
+  typed<RunMeta>({ id: request.id, owner: request.owner, ...describe(request), state, started: new Date().toISOString() });
+
+/** Applies a change to the queue, starts what it lets start, and ends what it replaced; returns what started. */
+const swap = (s: Settings, change: (queue: Queue) => Change) => {
   const next = change(cell.queue);
   // eslint-disable-next-line functional/immutable-data -- the daemon's state lives here, nowhere else
   cell.queue = next.queue;
+  (next.replaced ?? []).forEach((request) => {
+    const was = meta(runsDir(s), request.owner, request.id);
+    writeMeta(runsDir(s), request.owner, { ...(was ?? asked(request, "superseded")), state: "superseded", finished: new Date().toISOString() });
+  });
   next.start.forEach((request) => {
     void start(s, request);
   });
   return next.start;
 };
 
-const start = async (s: Settings, request: Request) => {
-  const id = newRunId(new Date(), randomBytes(3).toString("hex"));
+/** A request on record as queued before the queue sees it, so whoever asked can follow it by its id at once. */
+const ask = (s: Settings, request: Request) => {
+  writeMeta(runsDir(s), request.owner, asked(request, "queued"));
+  return swap(s, (queue) => enqueue(queue, request)).includes(request);
+};
+
+const newId = () => newRunId(new Date(), randomBytes(3).toString("hex"));
+
+/** Runs a restart cut short: they never end otherwise, and whoever follows one would wait forever. */
+const abandon = (s: Settings) => {
   const runs = runsDir(s);
-  const { what, why } = describe(request);
-  const begun: RunMeta = { id, owner: request.owner, what, why, state: "running", started: new Date().toISOString() };
+  owners(runs).forEach((who) => {
+    runsOf(runs, who)
+      .filter((run) => !ended(run.state))
+      .forEach((run) => {
+        writeMeta(runs, who, { ...run, state: "failure", error: "the deployer restarted before this run ended", finished: new Date().toISOString() });
+      });
+  });
+};
+
+const start = async (s: Settings, request: Request) => {
+  const id = request.id;
+  const runs = runsDir(s);
+  const begun = asked(request, "running");
   writeMeta(runs, request.owner, begun);
   const log = (line: string) => {
     appendLog(runs, request.owner, id, line);
@@ -93,13 +121,16 @@ const start = async (s: Settings, request: Request) => {
   const scratch = mkdtempSync(join(tmpdir(), `${id}-`));
   const outcome = await work(s, request, effects(s, request.owner, id, scratch, log)).catch((error: unknown) => {
     log(`deployer: ${String(error)}`);
-    return typed<Outcome>({ ok: false });
+    return typed<Outcome>({ ok: false, error: "the deployer failed; see the log" });
   });
   writeMeta(runs, request.owner, {
     ...begun,
     ...(outcome.sha === undefined ? {} : { sha: outcome.sha }),
     state: outcome.ok ? "success" : "failure",
     finished: new Date().toISOString(),
+    ...(outcome.error === undefined ? {} : { error: outcome.error }),
+    ...(outcome.urls === undefined ? {} : { urls: outcome.urls }),
+    ...(outcome.checks === undefined ? {} : { checks: outcome.checks }),
   });
   await notify(
     s,
@@ -112,6 +143,7 @@ const start = async (s: Settings, request: Request) => {
 };
 
 const deployRequest = (app: App, ref: string, why: Why) => typed<Request>({
+  id: newId(),
   owner: appOwner(app.name),
   work: { kind: "deploy", app: app.name, ref, why },
 });
@@ -124,15 +156,15 @@ const poll = async (s: Settings) => {
       const lastRun = runsOf(runsDir(s), appOwner(app.name)).find((run) => run.sha !== undefined);
       const releasesDir = join(s.platformDir, "releases", app.name);
       const lastRelease = releases(existsSync(releasesDir) ? readdirSync(releasesDir) : [])[0];
-      if (commit.ok && moved(commit.value, lastRun?.sha, lastRelease?.sha)) swap(s, (queue) => enqueue(queue, deployRequest(app, app.ref, "poll")));
+      if (commit.ok && moved(commit.value, lastRun?.sha, lastRelease?.sha)) ask(s, deployRequest(app, app.ref, "poll"));
     }),
   );
 };
 
 const tick = (s: Settings, at: Date) => {
   if (matches(s.poll, at)) void poll(s);
-  if (matches(s.gc, at)) swap(s, (queue) => enqueue(queue, jobRequest("gc", false, "schedule")));
-  if (s.renovate !== undefined && matches(s.renovate, at)) swap(s, (queue) => enqueue(queue, jobRequest("renovate", false, "schedule")));
+  if (matches(s.gc, at)) ask(s, jobRequest(newId(), "gc", false, "schedule"));
+  if (s.renovate !== undefined && matches(s.renovate, at)) ask(s, jobRequest(newId(), "renovate", false, "schedule"));
 };
 
 const schedule = (s: Settings) => {
@@ -153,8 +185,8 @@ const handle =
   };
 
 const accept = (s: Settings, response: ServerResponse, request: Request) => {
-  const started = swap(s, (queue) => enqueue(queue, request)).includes(request);
-  send(response, 202, started ? `${request.owner}: started\n` : `${request.owner}: queued, after what runs now\n`);
+  const started = ask(s, request);
+  send(response, 202, `${JSON.stringify({ id: request.id, owner: request.owner, state: started ? "running" : "queued" })}\n`);
 };
 
 /** POST /push/<app>, from the builder once a webhook proved itself: a deploy of the app's own ref. */
@@ -197,7 +229,7 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
       send(response, 409, "this server has no renovate_repositories\n");
       return;
     }
-    accept(s, response, jobRequest(job, field(input, "dryRun") === true, "manual"));
+    accept(s, response, jobRequest(newId(), job, field(input, "dryRun") === true, "manual"));
     return;
   }
   send(response, 404, "not found\n");
@@ -205,6 +237,7 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
 
 export const serveDeployer = (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
+  abandon(s);
   createServer(handle((request, response) => { push(s, request, response); })).listen(8090);
   createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
   schedule(s);

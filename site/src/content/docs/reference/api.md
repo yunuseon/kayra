@@ -455,6 +455,93 @@ Preview: `POST /api/operations/app.check/preview`. Returns a JSON plan with stat
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.values`
+
+Which configuration and secrets app.yml declares, and whether each has a value; never the values.
+
+`POST /api/operations/app.values`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `dir` | `string` | no | — | Local app directory containing app.yml; otherwise use the fleet cache Minimum length: 1. |
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Which configuration and secrets app.yml declares, and whether each has a value; never the values. | `application/json` |
+
+### `app.config.set`
+
+Prepare a declared configuration value in the local fleet; apply separately with apps.
+
+`POST /api/operations/app.config.set`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `dir` | `string` | no | — | Local app directory containing app.yml; otherwise use the fleet cache Minimum length: 1. |
+| `key` | `string` | yes | — | Pattern: `^[A-Za-z_][A-Za-z0-9_]*$`. |
+| `value` | `string` | yes | — | Minimum length: 1. |
+
+Preview: `POST /api/operations/app.config.set/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.secret.import`
+
+Import a declared secret from a local file into the fleet vault; never print its value.
+
+`POST /api/operations/app.secret.import`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `dir` | `string` | no | — | Local app directory containing app.yml; otherwise use the fleet cache Minimum length: 1. |
+| `key` | `string` | yes | — | Pattern: `^[A-Za-z_][A-Za-z0-9_]*$`. |
+| `file` | `string` | yes | — | Local file containing the secret, not YAML; one trailing newline is removed Minimum length: 1. |
+
+Preview: `POST /api/operations/app.secret.import/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.secret.generate`
+
+Generate a 32-byte random secret in the fleet only if missing; preserve existing values.
+
+`POST /api/operations/app.secret.generate`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `dir` | `string` | no | — | Local app directory containing app.yml; otherwise use the fleet cache Minimum length: 1. |
+| `key` | `string` | yes | — | Pattern: `^[A-Za-z_][A-Za-z0-9_]*$`. |
+
+Preview: `POST /api/operations/app.secret.generate/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.purge`
 
 Delete a removed app's volumes: its data, irreversibly.

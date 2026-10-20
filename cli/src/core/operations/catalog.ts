@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { valueKeySchema } from "../app-values/model.ts";
 
 /**
  * Every kayra operation, once: what each client (the command line, the API,
@@ -30,6 +31,8 @@ export type Operation = {
   readonly kind: Kind;
   /** Its output is its answer (ssh, a deployer's): a client draws nothing around it. */
   readonly bare?: true;
+  /** Edits this machine’s fleet files, without changing a running server. */
+  readonly local?: true;
   readonly input: z.ZodType;
 };
 
@@ -37,6 +40,7 @@ const server = z.string().min(1).describe("A server of the fleet (servers/<name>
 const app = z.string().min(1).describe("An app name, including a removed app whose records or data remain");
 const serverInput = z.strictObject({ server });
 const appInput = z.strictObject({ server, app });
+const dir = z.string().min(1).optional().describe("Local app directory containing app.yml; otherwise use the fleet cache");
 
 export const operations = {
   up: {
@@ -113,6 +117,25 @@ export const operations = {
     effect: "reads",
     kind: "plan",
     input: z.strictObject({ dir: z.string().min(1).default(".").describe("The app's repository") }),
+  },
+  "app.values": {
+    summary: "Which configuration and secrets app.yml declares, and whether each has a value; never the values.",
+    scope: "app", effect: "reads", kind: "query", input: z.strictObject({ server, app, dir }),
+  },
+  "app.config.set": {
+    summary: "Prepare a declared configuration value in the local fleet; apply separately with apps.",
+    scope: "app", effect: "changes", kind: "plan", local: true,
+    input: z.strictObject({ server, app, dir, key: valueKeySchema, value: z.string().min(1).refine((value) => !value.includes("\0"), "NUL is not an environment value") }),
+  },
+  "app.secret.import": {
+    summary: "Import a declared secret from a local file into the fleet vault; never print its value.",
+    scope: "app", effect: "changes", kind: "plan", local: true,
+    input: z.strictObject({ server, app, dir, key: valueKeySchema, file: z.string().min(1).describe("Local file containing the secret, not YAML; one trailing newline is removed") }),
+  },
+  "app.secret.generate": {
+    summary: "Generate a 32-byte random secret in the fleet only if missing; preserve existing values.",
+    scope: "app", effect: "changes", kind: "plan", local: true,
+    input: z.strictObject({ server, app, dir, key: valueKeySchema }),
   },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
   "app.runs": {

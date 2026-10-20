@@ -1,24 +1,21 @@
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { createInterface } from "node:readline";
-import { Readable } from "node:stream";
-import { all, err, ok, type Result } from "../lib/result.ts";
+import { join } from "node:path";
+import { ok } from "../lib/result.ts";
 import { field, registered, type App } from "./app.ts";
-import { appName, appOwner, newRunId, sha, type Owner, type RunId, type Sha } from "./brand.ts";
-import { matches, parseCron, type Cron } from "./cron.ts";
-import { appFiles, imagesFile, routesFile } from "./build/compose.ts";
-import { forge, forgeRepo } from "./forges/forge.ts";
+import { appName, appOwner, newRunId } from "./brand.ts";
+import { builderResolve } from "./build/client.ts";
+import { matches } from "./cron.ts";
 import { json, send } from "./http/http.ts";
-import { spawnLines } from "./process.ts";
 import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request, type Why } from "./runs/queue.ts";
-import { expired, moved, releaseName, releases, type RunMeta } from "./runs/records.ts";
-import { githubIssues } from "./forges/issues.ts";
-import { decide, parseNotify, silent, type Notifier, type NotifyConfig, type RunEnd } from "./forges/notify.ts";
+import { moved, releases, type RunMeta } from "./runs/records.ts";
+import { decide, type RunEnd } from "./forges/notify.ts";
+import { effects, runPage } from "./runs/effects.ts";
 import { deploy, renovate, type Effects, type Env, type Outcome } from "./runs/run.ts";
-import { runsOf } from "./runs/store.ts";
+import { appendLog, prune, runsOf, writeMeta } from "./runs/store.ts";
+import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
 
 /**
@@ -30,78 +27,6 @@ import { typed } from "../lib/typed.ts";
  *   :8090  platform-internal: POST /push/<app> (the builder, after a webhook)
  *   :8091  inside the container only: POST /deploy, POST /job (kayra app …, kayra job …)
  */
-type Settings = {
-  readonly platformDir: string;
-  readonly appsDir: string;
-  readonly builder: string;
-  readonly domain: string;
-  readonly policyScript: string;
-  readonly gcScript: string;
-  readonly renovateImage: string;
-  readonly renovate: Cron | undefined;
-  readonly gc: Cron;
-  readonly poll: Cron;
-  readonly env: Env;
-  /** The server's name in the fleet, for alerts that may come from several. */
-  readonly server: string;
-  readonly notifier: Notifier;
-};
-
-const token = (name: string) => {
-  const path = `/run/platform-secrets/${name}`;
-  return existsSync(path) ? readFileSync(path, "utf8").trim() : "";
-};
-
-const must = <T>(result: Result<T, string>) => {
-  if (!result.ok) throw new Error(result.error);
-  return result.value;
-};
-
-const settings = (env: NodeJS.ProcessEnv) => {
-  const scripts = env["PLATFORM_SCRIPTS"] ?? "/opt/kayra/scripts/platform";
-  const strings = Object.fromEntries(Object.entries(env).flatMap(([key, value]) => typed<readonly (readonly [string, string])[]>(value === undefined ? [] : [[key, value]])));
-  return typed<Settings>({
-    platformDir: env["PLATFORM_DIR"] ?? "/opt/platform",
-    appsDir: env["APPS_DIR"] ?? "/opt/apps",
-    builder: env["BUILDER_URL"] ?? "http://builder:8081",
-    domain: env["DOMAIN"] ?? "localhost",
-    policyScript: join(scripts, "compose-policy.sh"),
-    gcScript: join(scripts, "registry-gc.sh"),
-    renovateImage: env["RENOVATE_IMAGE"] ?? "",
-    renovate: env["PLATFORM_RENOVATE"] === "true" ? must(parseCron(env["RENOVATE_SCHEDULE"] ?? "0 4 * * 1")) : undefined,
-    gc: must(parseCron("0 3 * * *")),
-    poll: must(parseCron("17 * * * *")),
-    env: strings,
-    server: env["SERVER"] ?? env["DOMAIN"] ?? "this server",
-    notifier: notifierFor(must(parseNotify(env["NOTIFIER"])), env["PLATFORM_DIR"] ?? "/opt/platform"),
-  });
-};
-
-/** The configured notifier; its open alerts are kept in <platformDir>/alerts/<key>. */
-const notifierFor = (config: NotifyConfig, platformDir: string) => {
-  if (config.kind === "none") return silent;
-  const alerts = join(platformDir, "alerts");
-  const keyFile = "/run/deployer-secrets/NOTIFIER_GITHUB_APP_KEY";
-  return githubIssues(config.repository, config.appId, {
-    fetch: async (url, init) => {
-      const response = await fetch(url, init);
-      const json: unknown = await response.json().catch(() => undefined);
-      return Object.freeze({ status: response.status, json });
-    },
-    privateKey: () => (existsSync(keyFile) ? ok(readFileSync(keyFile, "utf8")) : err(`${keyFile} is missing: notifier_github_app_key in secrets.yml`)),
-    now: () => Date.now(),
-    openIssue: (key) => {
-      const path = join(alerts, key);
-      const number = existsSync(path) ? Number(readFileSync(path, "utf8")) : Number.NaN;
-      return Number.isInteger(number) ? number : undefined;
-    },
-    remember: (key, issue) => {
-      mkdirSync(alerts, { recursive: true });
-      if (issue === undefined) rmSync(join(alerts, key), { force: true });
-      else writeFileSync(join(alerts, key), String(issue));
-    },
-  });
-};
 
 /** Raises or resolves what the finished run means; a notifier's failure is logged, never the run's. */
 const notify = async (s: Settings, end: RunEnd, log: (line: string) => void) => {
@@ -115,7 +40,6 @@ const notify = async (s: Settings, end: RunEnd, log: (line: string) => void) => 
   if (!done.ok) log(`(alert not sent: ${done.error})`);
 };
 
-const runsDir = (s: Settings) => join(s.platformDir, "runs");
 const keepRuns = 50;
 
 const registeredApps = (s: Settings) => {
@@ -126,89 +50,6 @@ const registeredApps = (s: Settings) => {
     return app?.ok === true ? Object.freeze([app.value]) : Object.freeze([]);
   }));
 };
-
-const builderResolve = async (s: Settings, app: App, ref: string) => {
-  const response = await fetch(`${s.builder}/resolve`, { method: "POST", body: JSON.stringify({ app: app.name, ref }) }).catch(() => undefined);
-  if (response === undefined) return err("the builder did not answer");
-  const answer: unknown = await response.json().catch(() => undefined);
-  const given = typeof answer === "object" && answer !== null ? field(answer, "sha") : undefined;
-  const problem = typeof answer === "object" && answer !== null ? field(answer, "error") : undefined;
-  return typeof given === "string" ? sha(given) : err(typeof problem === "string" ? problem : `resolve: HTTP ${String(response.status)}`);
-};
-
-/** The builder's NDJSON: log lines as they come, then the bundle or an error. */
-const builderPrepare = async (s: Settings, app: App, commit: Sha, log: (line: string) => void) => {
-  const response = await fetch(`${s.builder}/prepare`, {
-    method: "POST",
-    body: JSON.stringify({ app: app.name, sha: commit }),
-    signal: AbortSignal.timeout(45 * 60_000),
-  }).catch(() => undefined);
-  if (response?.body == null || !response.ok) return err("the builder did not prepare a bundle");
-  const lines = createInterface({ input: Readable.fromWeb(response.body) });
-  const outcome = await Array.fromAsync(lines, (line: string) => {
-    try {
-      const message: unknown = JSON.parse(line);
-      if (typeof message !== "object" || message === null) return undefined;
-      const text = field(message, "log");
-      if (typeof text === "string") log(text);
-      const bundle = field(message, "bundle");
-      const problem = field(message, "error");
-      return bundle !== undefined ? ok(bundle) : typeof problem === "string" ? err(problem) : undefined;
-    } catch {
-      return undefined;
-    }
-  });
-  return outcome.findLast((item) => item !== undefined) ?? err("the builder stopped without a bundle");
-};
-
-const appSecrets = (app: App) => {
-  const read = all(
-    app.secrets.map((key) => {
-      const path = join("/run/app-secrets", app.name, key);
-      return existsSync(path) ? ok<readonly [string, string]>([key, readFileSync(path, "utf8")]) : err(`${app.name}: secret ${key} is missing; run kayra apps`);
-    }),
-  );
-  return read.ok ? ok<Env>(Object.fromEntries(read.value)) : read;
-};
-
-const target = (s: Settings, who: Owner, id: RunId) => `https://deploy.${s.domain}/runs/${who}/${id}`;
-
-const effects = (s: Settings, who: Owner, id: RunId, log: (line: string) => void) => typed<Effects>({
-  log,
-  resolve: (app, ref) => builderResolve(s, app, ref),
-  prepare: (app, commit) => builderPrepare(s, app, commit, log),
-  exec: (argv, options) => spawnLines(argv, { ...options, timeoutMs: 20 * 60_000 }, log),
-  secrets: appSecrets,
-  workdir: (bundle, images) => {
-    const dir = mkdtempSync(join(tmpdir(), `${id}-`));
-    writeFileSync(join(dir, imagesFile), images);
-    bundle.compose.forEach((file) => {
-      const path = join(dir, appFiles, file.path);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, file.content);
-    });
-    return Promise.resolve(dir);
-  },
-  writeRoutes: (cwd, content) => {
-    writeFileSync(join(cwd, routesFile), content);
-    return Promise.resolve();
-  },
-  record: (app, commit, images) => {
-    const dir = join(s.platformDir, "releases", app.name);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, releaseName(new Date(), commit)), images);
-    return Promise.resolve();
-  },
-  status: async (app, commit, context, state, description) => {
-    const repo = forgeRepo(app.repo);
-    if (repo === undefined) {
-      log(`(no commit status: ${app.repo} is on no forge kayra knows)`);
-      return;
-    }
-    const posted = await forge(repo, token("GIT_TOKEN"), fetch).postStatus(commit, { context, state, description, target: target(s, who, id) });
-    if (!posted.ok) log(`(commit status ${context} not posted: ${posted.error})`);
-  },
-});
 
 const work = async (s: Settings, request: Request, fx: Effects) => {
   if (request.work.kind === "deploy") {
@@ -242,38 +83,31 @@ const swap = (s: Settings, change: (queue: Queue) => { readonly queue: Queue; re
 
 const start = async (s: Settings, request: Request) => {
   const id = newRunId(new Date(), randomBytes(3).toString("hex"));
-  const dir = join(runsDir(s), request.owner, id);
-  mkdirSync(dir, { recursive: true });
+  const runs = runsDir(s);
   const { what, why } = describe(request);
   const begun: RunMeta = { id, owner: request.owner, what, why, state: "running", started: new Date().toISOString() };
-  writeFileSync(join(dir, "meta.json"), JSON.stringify(begun));
+  writeMeta(runs, request.owner, begun);
   const log = (line: string) => {
-    appendFileSync(join(dir, "log"), `${new Date().toISOString().slice(11, 19)} ${line}\n`);
+    appendLog(runs, request.owner, id, line);
   };
-  const outcome = await work(s, request, effects(s, request.owner, id, log)).catch((error: unknown) => {
+  const scratch = mkdtempSync(join(tmpdir(), `${id}-`));
+  const outcome = await work(s, request, effects(s, request.owner, id, scratch, log)).catch((error: unknown) => {
     log(`deployer: ${String(error)}`);
     return typed<Outcome>({ ok: false });
   });
-  const ended: RunMeta = {
+  writeMeta(runs, request.owner, {
     ...begun,
     ...(outcome.sha === undefined ? {} : { sha: outcome.sha }),
     state: outcome.ok ? "success" : "failure",
     finished: new Date().toISOString(),
-  };
-  writeFileSync(join(dir, "meta.json"), JSON.stringify(ended));
+  });
   await notify(
     s,
-    { server: s.server, request, ok: outcome.ok, ...(outcome.sha === undefined ? {} : { sha: outcome.sha }), page: target(s, request.owner, id) },
+    { server: s.server, request, ok: outcome.ok, ...(outcome.sha === undefined ? {} : { sha: outcome.sha }), page: runPage(s, request.owner, id) },
     log,
   );
-  expired(readdirSync(join(runsDir(s), request.owner)), keepRuns).forEach((old) => {
-    rmSync(join(runsDir(s), request.owner, old), { recursive: true, force: true });
-  });
-  readdirSync(tmpdir())
-    .filter((name) => name.startsWith(`${id}-`))
-    .forEach((name) => {
-      rmSync(join(tmpdir(), name), { recursive: true, force: true });
-    });
+  prune(runs, request.owner, keepRuns);
+  rmSync(scratch, { recursive: true, force: true });
   swap(s, (queue) => finish(queue, request.owner));
 };
 
@@ -282,11 +116,11 @@ const deployRequest = (app: App, ref: string, why: Why) => typed<Request>({
   work: { kind: "deploy", app: app.name, ref, why },
 });
 
-/** The webhook's fallback: an app whose ref moved to a commit no run has tried yet and no release runs (one migrated from Jenkins has releases but no runs). */
+/** The webhook's fallback: an app whose ref moved to a commit no run has tried yet and no release runs (runs are pruned, releases are not). */
 const poll = async (s: Settings) => {
   await Promise.all(
     registeredApps(s).map(async (app) => {
-      const commit = await builderResolve(s, app, app.ref);
+      const commit = await builderResolve(s.builder, app, app.ref);
       const lastRun = runsOf(runsDir(s), appOwner(app.name)).find((run) => run.sha !== undefined);
       const releasesDir = join(s.platformDir, "releases", app.name);
       const lastRelease = releases(existsSync(releasesDir) ? readdirSync(releasesDir) : [])[0];
@@ -310,9 +144,9 @@ const schedule = (s: Settings) => {
 };
 
 const handle =
-  (handler: (request: IncomingMessage, response: ServerResponse) => Promise<void>) =>
+  (handler: (request: IncomingMessage, response: ServerResponse) => Promise<void> | void) =>
   (request: IncomingMessage, response: ServerResponse) => {
-    handler(request, response).catch((error: unknown) => {
+    Promise.resolve(handler(request, response)).catch((error: unknown) => {
       console.error(error);
       if (!response.headersSent) send(response, 500, "internal error\n");
     });
@@ -321,6 +155,21 @@ const handle =
 const accept = (s: Settings, response: ServerResponse, request: Request) => {
   const started = swap(s, (queue) => enqueue(queue, request)).includes(request);
   send(response, 202, started ? `${request.owner}: started\n` : `${request.owner}: queued, after what runs now\n`);
+};
+
+/** POST /push/<app>, from the builder once a webhook proved itself: a deploy of the app's own ref. */
+const push = (s: Settings, request: IncomingMessage, response: ServerResponse) => {
+  const name = /^\/push\/([^/]+)$/.exec(new URL(request.url ?? "/", "http://deployer").pathname)?.[1];
+  const app = name === undefined || !appName(name).ok ? undefined : registered(s.platformDir, name);
+  if (request.method !== "POST" || app === undefined) {
+    send(response, 404, "not found\n");
+    return;
+  }
+  if (!app.ok) {
+    send(response, 404, `${app.error}\n`);
+    return;
+  }
+  accept(s, response, deployRequest(app.value, app.value.ref, "push"));
 };
 
 const control = async (s: Settings, request: IncomingMessage, response: ServerResponse) => {
@@ -356,22 +205,7 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
 
 export const serveDeployer = (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
-  createServer(
-    handle(async (request, response) => {
-      const name = /^\/push\/([^/]+)$/.exec(new URL(request.url ?? "/", "http://deployer").pathname)?.[1];
-      const app = name === undefined || !appName(name).ok ? undefined : registered(s.platformDir, name);
-      if (request.method !== "POST" || app === undefined) {
-        send(response, 404, "not found\n");
-        return;
-      }
-      if (!app.ok) {
-        send(response, 404, `${app.error}\n`);
-        return;
-      }
-      accept(s, response, deployRequest(app.value, app.value.ref, "push"));
-      return Promise.resolve();
-    }),
-  ).listen(8090);
+  createServer(handle((request, response) => { push(s, request, response); })).listen(8090);
   createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
   schedule(s);
   console.log(`deployer: :8090 pushes, 127.0.0.1:8091 control; renovate ${s.renovate === undefined ? "off" : "on"}`);

@@ -43,6 +43,12 @@ none() {
     return 1
 }
 
+# SOPS writes its files, comments too (as #ENC[…]), so yamllint's style is not theirs.
+sops_encrypted() { grep -q '^sops:[[:space:]]*$' "$1"; }
+
+# Reads paths, prints those that are not SOPS files.
+not_sops() { local f; while IFS= read -r f; do sops_encrypted "$f" || echo "$f"; done; }
+
 # The fleet's files: everything under it but the engine, which may live inside
 # it (a fleet repo that still carries a copy) or anywhere else.
 fleet_find() {
@@ -84,7 +90,7 @@ platform_shell() {
 
 platform_yaml() {
     local files
-    mapfile -t files < <(find "$E" -path '*/node_modules' -prune -o \( -name '*.yml' -o -name '*.yaml' \) -print)
+    mapfile -t files < <(find "$E" -path '*/node_modules' -prune -o \( -name '*.yml' -o -name '*.yaml' \) -print | not_sops)
     yamllint --strict -c "$E/ci/checks/yamllint.yml" "${files[@]}"
 }
 
@@ -206,7 +212,7 @@ fleet_shell() {
 
 fleet_yaml() {
     local files
-    mapfile -t files < <(fleet_find \( -name '*.yml' -o -name '*.yaml' \))
+    mapfile -t files < <(fleet_find \( -name '*.yml' -o -name '*.yaml' \) | not_sops)
     yamllint --strict -c "$E/ci/checks/yamllint.yml" "${files[@]}"
 }
 

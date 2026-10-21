@@ -1,11 +1,15 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { findings, type Facts, type Finding } from "../src/core/validation/findings.ts";
 import { summary, validateView } from "../src/clients/cli/validate.ts";
 import { validateJson } from "../src/clients/wire/validate.ts";
 import { flat } from "../src/core/text/spans.ts";
 import { gather } from "../src/core/validation/facts.ts";
-import { root, server } from "./support.ts";
+import { absolutePath, fleetRoot, serverDir, serverName } from "../src/core/fleet/brand.ts";
+import { must, server } from "./support.ts";
 
 const shop = server("shop", "target: multipass\ndomain: shop.test\napps: [{name: shop, repo: https://x.test/s.git}]", {
   secrets: "admin: admin\n",
@@ -144,7 +148,7 @@ test("secrets.yml is encrypted to exactly the recipients .sops.yaml names for it
   ]);
 });
 
-test("validate reads secrets.yml without its key: every key, each value a stand-in of its type", async () => {
+test("validate reads secrets.yml without its key: every key, each value a stand-in of its type, and its .sops.yaml rule", async (t) => {
   const encrypted = [
     "git_token: ENC[AES256_GCM,data:AA==,iv:AA==,tag:AA==,type:str]",
     "app_secrets:",
@@ -159,10 +163,14 @@ test("validate reads secrets.yml without its key: every key, each value a stand-
     "        - recipient: age1a",
     "",
   ].join("\n");
-  const prod = server("shop", "target: hetzner\ndomain: shop.test\napps: [{name: shop, repo: https://x.test/s.git}]", { secrets: encrypted });
-  const gathered = await gather(root, prod);
+  const dir = mkdtempSync(join(tmpdir(), "kayra-validate-"));
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); });
+  writeFileSync(join(dir, ".sops.yaml"), "creation_rules:\n  - path_regex: ^dns/secrets\\.yml$\n    age: age1dns\n  - path_regex: ^servers/[^/]+/secrets\\.yml$\n    age: >-\n      age1b,\n      age1a\n");
+  const fleetDir = fleetRoot(must(absolutePath(dir)));
+  const prod = server("shop", "target: hetzner\ndomain: shop.test\napps: [{name: shop, repo: https://x.test/s.git}]", { secrets: encrypted, dir: serverDir(fleetDir, must(serverName("shop"))) });
+  const gathered = await gather(fleetDir, prod);
   deepStrictEqual(gathered.secrets, { kind: "readable", values: { git_token: "(encrypted)" } });
   deepStrictEqual(gathered.appSecrets, { shop: { kind: "readable", values: { PASSWORD: "(encrypted)" } } });
   deepStrictEqual(gathered.terraform, { hcloud_token: "(encrypted)", servers: 0 });
-  deepStrictEqual(gathered.recipients, { wanted: undefined, actual: ["age1a", "age1b"] });
+  deepStrictEqual(gathered.recipients, { wanted: ["age1a", "age1b"], actual: ["age1a", "age1b"] });
 });

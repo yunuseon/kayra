@@ -1,7 +1,7 @@
 import type { Server } from "../fleet/model.ts";
 import { partOf, run, type Plan, type Step } from "../plan/model.ts";
 import { err, map, ok } from "../../lib/result.ts";
-import { ansibleEnv, ansiblePath, appSubdomains, certs, collections, fleetEnv, fromMain, inventory, latestState, needing, reachable, script, sequence, terraform, vault, vaulted, type Engine } from "./steps.ts";
+import { ansibleEnv, ansiblePath, appSubdomains, certs, collections, fleetEnv, fromMain, inventory, latestState, needing, reachable, script, sequence, terraform, withSecrets, withVariables, type Engine } from "./steps.ts";
 import { apps } from "./apps.ts";
 import { typed } from "../../lib/typed.ts";
 
@@ -13,8 +13,8 @@ export const provision = (engine: Engine, server: Server) =>
       ...(server.hasTerraform
         ? [
             latestState(engine, server),
-            run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]),
-            run("OpenTofu apply", ["tofu", terraform(server), "apply", "-auto-approve"]),
+            withVariables(run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]), server),
+            withVariables(run("OpenTofu apply", ["tofu", terraform(server), "apply", "-auto-approve"]), server),
           ]
         : []),
     ]),
@@ -22,7 +22,7 @@ export const provision = (engine: Engine, server: Server) =>
 
 /** The playbook for the server's kind, as setup runs it; plan adds check mode. It records which kayra ran it (the kayra-version role). */
 const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] = []) =>
-  vaulted(run(
+  withSecrets(run(
     `Host layer · ${server.kind}.yml${extra.includes("--check") ? ", check mode" : ""}`,
     [
       "ansible-playbook",
@@ -54,7 +54,7 @@ export const setup = (engine: Engine, server: Server) =>
         ? [certs(engine, server.domain, [appSubdomains(engine, server), ...server.stackHosts])]
         : []),
       ...reachable(engine, server),
-      collections(engine, vault(server).env),
+      collections(engine, {}),
       hostPlaybook(engine, server),
     ]),
   );
@@ -70,11 +70,11 @@ export const preview = (engine: Engine, server: Server) =>
     ...(server.hasTerraform
       ? [
           latestState(engine, server),
-          run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]),
-          run("OpenTofu plan", ["tofu", terraform(server), "plan", "-input=false", "-lock=false"]),
+          withVariables(run("OpenTofu init", ["tofu", terraform(server), "init", "-input=false"]), server),
+          withVariables(run("OpenTofu plan", ["tofu", terraform(server), "plan", "-input=false", "-lock=false"]), server),
         ]
       : []),
-    collections(engine, vault(server).env),
+    collections(engine, {}),
     hostPlaybook(engine, server, ["--check", "--diff"]),
     { kind: "note", text: `kayra plan changed nothing on ${server.name}: the changed tasks above are what kayra setup would do.` },
   ]);
@@ -85,13 +85,13 @@ export const hosts = (engine: Engine, server: Server) =>
       "hosts",
       server.target === "multipass"
         ? [
-            needing(run("/etc/hosts", [
+            withVariables(needing(run("/etc/hosts", [
               "bash",
               script(engine, "setup-hosts.sh"),
               server.domain,
               { kind: "substitution", argv: ["tofu", terraform(server), "output", "-raw", "server_ip"], words: "one" },
               appSubdomains(engine, server),
-            ]), [{ kind: "sudo" }])
+            ]), [{ kind: "sudo" }]), server)
           ]
         : [{ kind: "note", text: `hosts: ${server.target} uses real DNS, nothing to do.` }],
     ),
@@ -133,7 +133,7 @@ export const down = (engine: Engine, server: Server) =>
               } satisfies Step,
             ]
           : []),
-        run("OpenTofu destroy", ["tofu", terraform(server), "destroy", "-auto-approve"]),
+        withVariables(run("OpenTofu destroy", ["tofu", terraform(server), "destroy", "-auto-approve"]), server),
       ])
     : err(`${server.name} has no terraform/: nothing here creates it, so nothing destroys it`);
 

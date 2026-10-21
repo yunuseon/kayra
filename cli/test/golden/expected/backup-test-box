@@ -1,5 +1,5 @@
 {"argv":["bash","<kayra>/scripts/local/home-reach.sh","box","nas"],"env":{"FLEET_ROOT":"<fleet>"}}
-{"argv":["ansible","servers","-i","<fleet>/servers/box/inventory.ini","--become","-e","@<fleet>/servers/box/secrets.yml","-m","ansible.builtin.command","-a","docker compose -f /volume2/docker/backup/docker-compose.yml exec -d -T backup /etc/backup/restore-test.sh"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/box/inventory.ini","<kayra>/ansible/playbooks/restore-test.yml","-e","server_dir=<fleet>/servers/box"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
 {"argv":["ssh","-p","22","-i","~/.ssh/id_ed25519","-o","StrictHostKeyChecking=accept-new","ops@192.0.2.2","sh","/volume2/docker/backup/follow-restore-test.sh"]}
 --- stdout
 Following the restore test. Ctrl-C stops following, not the test.

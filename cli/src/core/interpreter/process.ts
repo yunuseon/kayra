@@ -112,11 +112,11 @@ export const answer = (probe: Probe, plumbing: Plumbing) =>
   );
 
 /** Each query's answer in place of it, as `$(…)` would: one word, or split into many. */
-export const resolve = async (argv: readonly [string, ...Arg[]], plumbing: Plumbing) => {
+export const resolve = async (argv: readonly [string, ...Arg[]], plumbing: Plumbing, env: Env = {}) => {
   const words = await Promise.all(
     argv.map(async (value) => {
       if (typeof value === "string") return ok<readonly string[]>([value]);
-      const exit = await capture(value.argv, "show", value.env, plumbing);
+      const exit = await capture(value.argv, "show", { ...env, ...value.env }, plumbing);
       if (exit.code !== 0) return err(`$(${value.argv.join(" ")}) failed: exit ${String(exit.code)}`);
       const output = exit.stdout.replace(/\n+$/, "");
       return ok<readonly string[]>(value.words === "one" ? [output] : output.split(/\s+/).filter((word) => word !== ""));

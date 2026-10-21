@@ -26,13 +26,8 @@
       "type": "string",
       "pattern": "^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z][a-z0-9-]*$"
     },
-    "vault": {
-      "default": false,
-      "description": "secrets.yml is vault-encrypted (required outside multipass).",
-      "type": "boolean"
-    },
-    "vault_password_file": {
-      "description": "The vault password file; without it, Ansible asks.",
+    "age_key_file": {
+      "description": "The age identity that opens secrets.yml (SOPS); without it, SOPS's own default (SOPS_AGE_KEY_FILE, ~/.config/sops/age/keys.txt).",
       "type": "string"
     },
     "apps": {

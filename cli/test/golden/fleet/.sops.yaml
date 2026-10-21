@@ -1,0 +1,4 @@
+# The fixture fleet's servers, encrypted to kayra's test key (cli/test/fixtures/age-key.txt).
+creation_rules:
+  - path_regex: ^servers/[^/]+/secrets\.yml$
+    age: age1wft9wjn3wjlyx36208t8led6haveep4ls6wp8yvu5s8hvycwz5ms75qpz5

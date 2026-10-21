@@ -11,19 +11,27 @@ export type Secrets =
   | { readonly kind: "readable"; readonly values: Readonly<Record<string, unknown>> }
   | { readonly kind: "locked"; readonly reason: string; readonly hint?: string };
 
+/** Whom secrets.yml is encrypted to, and whom .sops.yaml wants (undefined where no rule matches it). */
+export type Recipients = { readonly wanted: readonly string[] | undefined; readonly actual: readonly string[] };
+
 /** What validate reads of one server, beyond what loading the fleet already checked. */
 export type Facts = {
   readonly server: Server;
   readonly vars: Readonly<Record<string, unknown>>;
   /** vars.yml as written, to see which secrets it uses. */
   readonly varsText: string;
+  /** secrets.yml's own (the host's) secrets, each value a stand-in of its type. */
   readonly secrets: Secrets;
+  /** undefined where secrets.yml is plaintext (a multipass server's). */
+  readonly recipients: Recipients | undefined;
   /** Folders under stacks/. */
   readonly stackDirs: readonly string[];
   /** apps/<app>.yml (config), parsed. */
   readonly appConfig: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-  /** apps/<app>.secrets.yml, where readable. */
+  /** secrets.yml's app_secrets, by app. */
   readonly appSecrets: Readonly<Record<string, Secrets>>;
+  /** secrets.yml's terraform: OpenTofu's variables. */
+  readonly terraform: Readonly<Record<string, unknown>>;
   /** Each app's app.yml from the fleet's clone (.cache/apps), where cloned. */
   readonly manifests: Readonly<Record<string, unknown>>;
 };
@@ -76,6 +84,32 @@ const secretsFindings = (facts: Facts) => {
     });
   return holds([...typeProblems, ...unused], `secrets.yml: ${count(Object.keys(values).length, "secret")}, each a setting or used by vars.yml`);
 };
+
+/** secrets.yml is encrypted to exactly the age recipients .sops.yaml names for it. */
+const recipientFindings = (facts: Facts) => {
+  const recipients = facts.recipients;
+  if (recipients === undefined) return typed<readonly Finding[]>([]);
+  if (recipients.wanted === undefined)
+    return typed<readonly Finding[]>([problem("secrets.yml: no creation rule in .sops.yaml matches it", "add a rule whose path_regex matches it, with its age recipients")]);
+  const missing = recipients.wanted.filter((each) => !recipients.actual.includes(each));
+  const extra = recipients.actual.filter((each) => !recipients.wanted?.includes(each));
+  const fix = `sops updatekeys servers/${facts.server.name}/secrets.yml`;
+  return holds(
+    [
+      ...missing.map((each) => problem(`secrets.yml is not encrypted to ${each}, which .sops.yaml names`, fix)),
+      ...extra.map((each) => problem(`secrets.yml is encrypted to ${each}, which .sops.yaml no longer names`, `${fix}, then rotate what that key could read`)),
+    ],
+    `secrets.yml: encrypted to the ${count(recipients.wanted.length, "recipient")} .sops.yaml names`,
+  );
+};
+
+/** secrets.yml's terraform: OpenTofu's variables are flat values. */
+const terraformFindings = (facts: Facts) =>
+  typed<readonly Finding[]>(
+    Object.entries(facts.terraform)
+      .filter(([, value]) => !["string", "number", "boolean"].includes(typeof value))
+      .map(([key]) => problem(`secrets.yml: terraform.${key} must be a string, number or boolean`)),
+  );
 
 /** compose_stacks.stacks and stacks/ name the same stacks. */
 const stackFindings = (facts: Facts) => {
@@ -132,12 +166,12 @@ const appFindings = (facts: Facts) =>
     const secretKeys = parsed.data.secrets ?? [];
     const config = facts.appConfig[app.name] ?? {};
     const valuesFile = `apps/${app.name}.yml`;
-    const secretsFile = `apps/${app.name}.secrets.yml`;
+    const secretsFile = "secrets.yml";
     const missingConfig = configKeys
       .filter((key) => !(key in config))
       .map((key) => problem(`${valuesFile}: no value for ${key}, which app.yml asks for`, `add ${key}: … to servers/${facts.server.name}/${valuesFile}`));
     const secrets = facts.appSecrets[app.name] ?? { kind: "readable", values: {} };
-    const edit = facts.server.target === "multipass" ? "add it to" : "ansible-vault edit";
+    const edit = `kayra app secret generate ${facts.server.name} ${app.name}`;
     const missingSecrets =
       secrets.kind === "locked"
         ? secretKeys.length === 0
@@ -145,7 +179,7 @@ const appFindings = (facts: Facts) =>
           : [unchecked(`${secretsFile} not checked: ${secrets.reason}`, secrets.hint)]
         : secretKeys
             .filter((key) => !(key in secrets.values))
-            .map((key) => problem(`${secretsFile}: no value for ${key}, which app.yml asks for`, `${edit} servers/${facts.server.name}/${secretsFile}`));
+            .map((key) => problem(`${secretsFile}: no app_secrets.${app.name}.${key}, which app.yml asks for`, `${edit} ${key} (or app secret import)`));
     return holds(
       [...missingConfig, ...missingSecrets],
       `app ${app.name}: ${count(configKeys.length, "config value")} and ${count(secretKeys.length, "secret")}, as its app.yml asks`,
@@ -156,7 +190,7 @@ const rank: Readonly<Record<Verdict, number>> = { problem: 0, unchecked: 1, pass
 
 /** Everything validate finds for one server: problems first, then what it could not check, then what holds. */
 export const findings = (facts: Facts) =>
-  Object.freeze([...secretsFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...appFindings(facts)].toSorted(
+  Object.freeze([...secretsFindings(facts), ...recipientFindings(facts), ...terraformFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...appFindings(facts)].toSorted(
     (a, b) => rank[a.result] - rank[b.result],
   ));
 

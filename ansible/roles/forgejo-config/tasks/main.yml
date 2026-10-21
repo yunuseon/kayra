@@ -320,7 +320,7 @@
   no_log: true
 
 # Tokens for the platform's services on this server (builder and deployer, Renovate), into
-# the files the platform role would otherwise fill from the vault. Nobody ever
+# the files the platform role would otherwise fill from secrets.yml. Nobody ever
 # sees one: kept only in that file, minted again when it is missing, wrong or
 # revoked. Unique names, since the admin token cannot delete a user's tokens.
 - name: Read service tokens

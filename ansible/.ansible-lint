@@ -1,7 +1,7 @@
 # ansible-lint, run by the platform checks (ci/checks).
 skip_list:
-  # Variable names are the contract with every server's vars.yml (several
-  # vaulted) and are shared across roles (domain, apps_dir); prefixing them
+  # Variable names are the contract with every server's vars.yml and
+  # secrets.yml, and are shared across roles (domain, apps_dir); prefixing them
   # per role would rename that contract for nothing.
   - var-naming[no-role-prefix]
   # edge-proxy predates the check; renaming a role is churn, not safety.

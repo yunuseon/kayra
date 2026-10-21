@@ -1,4 +1,4 @@
-import type { AppName, ServerName } from "../fleet/brand.ts";
+import type { AbsolutePath, AgeKeyFile, AppName, ServerName } from "../fleet/brand.ts";
 import { typed } from "../../lib/typed.ts";
 
 /** A value only known when the step runs: the stdout of a command, as `$(…)` would give it. */
@@ -25,12 +25,14 @@ export type Probe =
 export type DeployerAnswer = { readonly view: "runs" | "releases" | "log"; readonly app: AppName; readonly server: ServerName };
 
 /**
- * What a step needs from the operator before it can run, asked by kayra
- * (on the terminal, or in the client that started it) and never written
- * down: a server's vault password, or sudo's password where sudo has none
- * cached.
+ * What a step needs before it can run, met by kayra and never written down
+ * beyond the run: a server's secrets.yml opened (SOPS, once per run; for
+ * Ansible as a file, for OpenTofu as its variables), or sudo's password,
+ * asked where sudo has none cached.
  */
-export type Need = { readonly kind: "vault"; readonly server: ServerName } | { readonly kind: "sudo" };
+export type Need =
+  | { readonly kind: "secrets"; readonly server: ServerName; readonly file: AbsolutePath; readonly key: AgeKeyFile | undefined; readonly encrypted: boolean; readonly for: "ansible" | "opentofu" }
+  | { readonly kind: "sudo" };
 
 /** The kayra commands a longer one is made of, each of which runs its part alone. */
 export const parts = ["provision", "setup", "apps", "verify", "hosts"] as const;

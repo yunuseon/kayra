@@ -3,13 +3,12 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, wri
 import { dirname, join } from "node:path";
 import { parseDocument } from "yaml";
 import { appValuesSchema } from "../fleet/settings.ts";
-import { isVaulted } from "../fleet/parse.ts";
+import { appSecretsIn, isEncrypted, secretsShape } from "../fleet/secrets.ts";
 import { within, type AbsolutePath, type AppName, type FleetRoot } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { textAt } from "../adapters/fs.ts";
-import { spawned } from "../interpreter/process.ts";
-import { vault } from "../recipes/steps.ts";
-import { attempt, err, ok } from "../../lib/result.ts";
+import { sops } from "../adapters/sops.ts";
+import { attempt, err, flatMap, map, ok } from "../../lib/result.ts";
 import { fields } from "../../lib/yaml.ts";
 import { requirements, type Edit, type ValuesReport } from "./model.ts";
 
@@ -24,41 +23,23 @@ const parsedValues = (text: string) => {
 const present = (values: Readonly<Record<string, unknown>>, key: string) =>
   Object.hasOwn(values, key) && values[key] !== "";
 
-const fileOf = (server: Server, name: AppName, secret: boolean) =>
-  within(server.dir, "apps", `${name}${secret ? ".secrets" : ""}.yml`);
+const configFile = (server: Server, name: AppName) => within(server.dir, "apps", `${name}.yml`);
 
-const opened = async (server: Server, file: string, source: string | undefined) => {
-  if (source === undefined) return ok("");
-  if (!isVaulted(source)) {
-    if (server.vault.kind !== "none") return err("secrets must be Ansible Vault encrypted for this server");
-    return ok(source);
-  }
-  const result = await spawned(
-    ["ansible-vault", "view", file],
-    { stdout: "capture", stderr: "capture", stdin: { kind: "none" } },
-    vault(server).env,
-  );
-  return result.code === 0 ? ok(result.stdout) : err("cannot open app secrets; configure vault_password_file or provide the vault password through the client");
-};
+/** An app's secrets as secrets.yml holds them: without its key, each value a stand-in. */
+const secretsShapeOf = (server: Server, name: AppName) => map(secretsShape(textAt(server.secrets.file) ?? ""), (secrets) => appSecretsIn(secrets, name));
 
 export const inspectValues = async (root: FleetRoot, server: Server, name: AppName, dir?: AbsolutePath) => {
   const required = requirements(root, server, name, textAt, dir);
   if (!required.ok) return required;
-  const config = parsedValues(textAt(fileOf(server, name, false)) ?? "");
+  const config = parsedValues(textAt(configFile(server, name)) ?? "");
   if (!config.ok) return config;
-  const file = fileOf(server, name, true);
-  const source = textAt(file);
-  const secret = source !== undefined && isVaulted(source) && server.vault.kind === "ask"
-    ? err("configure vault_password_file to inspect encrypted secret presence without prompting")
-    : await opened(server, file, source);
-  const values = secret.ok ? parsedValues(secret.value) : secret;
-  if (secret.ok && !values.ok) return values;
-  return ok<ValuesReport>({
+  const secrets = secretsShapeOf(server, name);
+  return Promise.resolve(ok<ValuesReport>({
     server: server.name, app: name, manifest: required.value.manifest,
     config: required.value.config.map((key) => ({ key, state: present(config.value, key) ? "set" : "missing" } as const)),
-    secrets: required.value.secrets.map((key) => ({ key, state: values.ok ? (present(values.value, key) ? "set" : "missing") : "locked" } as const)),
-    hint: values.ok ? null : values.error,
-  });
+    secrets: required.value.secrets.map((key) => ({ key, state: secrets.ok ? (present(secrets.value, key) ? "set" : "missing") : "locked" } as const)),
+    hint: secrets.ok ? null : `secrets.yml ${secrets.error}`,
+  }));
 };
 
 const store = (file: string, original: string | undefined, content: string) => {
@@ -73,35 +54,37 @@ const store = (file: string, original: string | undefined, content: string) => {
   }
 };
 
-const editFile = async (server: Server, name: AppName, edit: Edit) => {
-  const file = fileOf(server, name, edit.kind !== "config");
+const saved = (key: string, server: Server) => ok(`${key} saved in the fleet; apply with kayra apps ${server.name} after reviewing the change`);
+
+const editConfig = (server: Server, name: AppName, key: string, value: string) => {
+  const file = configFile(server, name);
   if (existsSync(file) && lstatSync(file).isSymbolicLink()) return err("refusing to replace a symlinked values file");
   const original = textAt(file);
-  if (edit.kind === "config" && original !== undefined && isVaulted(original)) return err("configuration belongs in plaintext, not a vault");
-  const source = edit.kind === "config" ? ok(original ?? "") : await opened(server, file, original);
-  if (!source.ok) return source;
-  const existing = parsedValues(source.value);
+  if (original !== undefined && isEncrypted(original)) return err("configuration belongs in plaintext, not encrypted");
+  const existing = parsedValues(original ?? "");
   if (!existing.ok) return existing;
+  if (existing.value[key] === value) return ok(`${key} is unchanged`);
+  const document = parseDocument(original ?? "{}\n");
+  document.set(key, value);
+  return flatMap(store(file, original, document.toString()), () => saved(key, server));
+};
+
+/** A secret into secrets.yml's app_secrets.<app>: SOPS sets it in place (one Touch ID where the key asks), a multipass server's plaintext is written. */
+const editSecret = async (server: Server, name: AppName, edit: Exclude<Edit, { readonly kind: "config" }>) => {
+  const { file } = server.secrets;
+  if (existsSync(file) && lstatSync(file).isSymbolicLink()) return err("refusing to replace a symlinked secrets.yml");
+  const existing = secretsShapeOf(server, name);
+  if (!existing.ok) return err(`secrets.yml ${existing.error}`);
   if (edit.kind === "generate" && present(existing.value, edit.key)) return ok(`${edit.key} already exists; kept it`);
-  const value = edit.kind === "config" ? edit.value : edit.kind === "generate" ? randomBytes(32).toString("hex") : readFileSync(edit.file, "utf8").replace(/\r?\n$/, "");
-  if (value.includes("\0") || (edit.kind !== "config" && value === "")) return err("secret input must be nonempty text without NUL bytes");
-  if (existing.value[edit.key] === value) return ok(`${edit.key} is unchanged`);
-  const document = parseDocument(source.value || "{}\n");
-  document.set(edit.key, value);
-  const plaintext = document.toString();
-  if (edit.kind === "config" || (server.vault.kind === "none" && (original === undefined || !isVaulted(original)))) {
-    const saved = store(file, original, plaintext);
-    return saved.ok ? ok(`${edit.key} saved in the fleet; apply with kayra apps ${server.name} after reviewing the change`) : saved;
-  }
-  // Vault receives plaintext over stdin; only ciphertext reaches a temporary file.
-  const encrypted = await spawned(
-    ["ansible-vault", "encrypt", "--output", "-"],
-    { stdout: "capture", stderr: "capture", stdin: { kind: "given", text: plaintext } },
-    vault(server).env,
-  );
-  if (encrypted.code !== 0 || !isVaulted(encrypted.stdout)) return err("could not encrypt app secrets; the existing file was not changed");
-  const saved = store(file, original, encrypted.stdout);
-  return saved.ok ? ok(`${edit.key} saved in the fleet; apply with kayra apps ${server.name} after reviewing the change`) : saved;
+  const value = edit.kind === "generate" ? randomBytes(32).toString("hex") : readFileSync(edit.file, "utf8").replace(/\r?\n$/, "");
+  if (value.includes("\0") || value === "") return err("secret input must be nonempty text without NUL bytes");
+  const path = ["app_secrets", name, edit.key];
+  if (server.secrets.encrypted) return flatMap(await sops.set(file, path, value, server.secrets.key), () => saved(edit.key, server));
+  const original = textAt(file);
+  const document = parseDocument(original ?? "{}\n");
+  if (document.getIn(path) === value) return ok(`${edit.key} is unchanged`);
+  document.setIn(path, value);
+  return flatMap(store(file, original, document.toString()), () => saved(edit.key, server));
 };
 
 export const editValues = async (root: FleetRoot, server: Server, name: AppName, edit: Edit, dir?: AbsolutePath) => {
@@ -109,14 +92,14 @@ export const editValues = async (root: FleetRoot, server: Server, name: AppName,
   if (!required.ok) return required;
   const keys = edit.kind === "config" ? required.value.config : required.value.secrets;
   if (!keys.includes(edit.key)) return err(`${edit.key} is not a declared ${edit.kind === "config" ? "configuration" : "secret"} key`);
-  const directory = dirname(fileOf(server, name, edit.kind !== "config"));
+  const directory = edit.kind === "config" ? dirname(configFile(server, name)) : server.dir;
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  if (lstatSync(directory).isSymbolicLink()) return err("refusing a symlinked apps directory");
+  if (lstatSync(directory).isSymbolicLink()) return err(`refusing a symlinked ${edit.kind === "config" ? "apps directory" : "server directory"}`);
   const lock = join(directory, ".kayra-values.lock");
-  const acquired = attempt(() => { mkdirSync(lock, { mode: 0o700 }); return ok(true); }, () => "app values are being edited; retry, or remove apps/.kayra-values.lock if its writer was interrupted");
+  const acquired = attempt(() => { mkdirSync(lock, { mode: 0o700 }); return ok(true); }, () => `app values are being edited; retry, or remove ${lock} if its writer was interrupted`);
   if (!acquired.ok) return acquired;
   try {
-    return await editFile(server, name, edit);
+    return edit.kind === "config" ? editConfig(server, name, edit.key, edit.value) : await editSecret(server, name, edit);
   } finally {
     rmSync(lock, { recursive: true, force: true });
   }

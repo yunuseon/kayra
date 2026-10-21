@@ -42,7 +42,7 @@ since the server runs what that release copies to it, on every server.
 ## First server
 
 ```bash
-kayra doctor              # tools, vault passwords, what is still missing
+kayra doctor              # tools, age keys, what is still missing
 kayra up shop-test        # provision, set up the host, register the apps
 kayra status              # every server and whether a machine exists
 ```

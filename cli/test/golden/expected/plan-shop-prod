@@ -1,8 +1,8 @@
 {"argv":["bash","<kayra>/scripts/local/require-latest-state.sh","<fleet>/servers/shop-prod/terraform"]}
 {"argv":["tofu","-chdir=<fleet>/servers/shop-prod/terraform","init","-input=false"]}
 {"argv":["tofu","-chdir=<fleet>/servers/shop-prod/terraform","plan","-input=false","-lock=false"]}
-{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/platform.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","target=hetzner","-e","kayra_version=<version>","--check","--diff"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/platform.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","target=hetzner","-e","kayra_version=<version>","--check","--diff"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
 --- stdout
 kayra plan changed nothing on shop-prod: the changed tasks above are what kayra setup would do.
 --- exit 0

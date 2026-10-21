@@ -14,11 +14,11 @@ import { fleet, must, server } from "./support.ts";
 import { kayraVersion, milliseconds } from "../src/core/fleet/brand.ts";
 
 const hetzner = (name: string, apps = "") =>
-  server(name, `target: hetzner\ndomain: ${name}.example\nvault: true${apps}`, { inventory: undefined });
+  server(name, `target: hetzner\ndomain: ${name}.example${apps}`, { inventory: undefined });
 
 // A NAS at home: a hand-written inventory, and a terraform/ holding its backup's storage box.
-const nas = server("nas", "kind: nas\ntarget: home\ndomain: home.example\nvault: true");
-const forge = server("forge", "target: home\ndomain: forge.example\nvault: true", {
+const nas = server("nas", "kind: nas\ntarget: home\ndomain: home.example");
+const forge = server("forge", "target: home\ndomain: forge.example", {
   hasTerraform: false,
   inventory: "[servers]\nforge ansible_host=192.0.2.3 ansible_port=2222 ansible_user=deploy\n",
 });
@@ -173,7 +173,7 @@ test("status: which kayra set each server up, read over SSH where it is open and
 });
 
 test("a NAS records which kayra set it up under nas_root, which its play writes nothing outside of", () => {
-  const box = (vars: string) => server("box", "kind: nas\ntarget: home\ndomain: home.example\nvault: true", { vars });
+  const box = (vars: string) => server("box", "kind: nas\ntarget: home\ndomain: home.example", { vars });
   strictEqual(box("nas_root: /volume2\n").versionFile, "/volume2/.kayra/version");
   strictEqual(box("").versionFile, undefined);
   strictEqual(forge.versionFile, "/opt/kayra/version");

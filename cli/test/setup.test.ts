@@ -7,7 +7,7 @@ import { render } from "../src/core/plan/describe.ts";
 import { must, root, server } from "./support.ts";
 
 const engine = { kayra: kayraRoot(must(absolutePath("/kayra"))), fleet: root, version: must(kayraVersion("0.19.0")) };
-const home = "target: home\ndomain: forge.test\nvault: true";
+const home = "target: home\ndomain: forge.test";
 const mkcert = (vars: string): boolean =>
   render(must(setup(engine, server("forge", home, { vars })))).some((line) => line.includes("certs.sh"));
 

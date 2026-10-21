@@ -20,7 +20,7 @@ const run = async () => {
     return await editValues(fleet.value.root, target, app, edit, directory?.value);
   } catch {
     // Errors may contain YAML or imported secret text. None reaches a run record.
-    return err("app values could not be updated; check file access and vault configuration");
+    return err("app values could not be updated; check file access and secrets.yml");
   }
 };
 const result = await run();

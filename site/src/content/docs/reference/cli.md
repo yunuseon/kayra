@@ -80,8 +80,8 @@ read the actual API URL and bearer token from the fleet's `.cache/serve.json`
 See the [API reference](../api/) for authentication, operation requests, run
 events and terminal sessions.
 
-Commands share the same plans and guards across clients. Vault and sudo
-questions use hidden terminal input on the CLI, password fields in the browser,
+Commands share the same plans and guards across clients. Sudo questions use
+hidden terminal input on the CLI, password fields in the browser,
 and secret question events in the API. Interactive `kayra ssh` inherits the
 terminal; the browser/API use a terminal session.
 
@@ -221,13 +221,13 @@ VM.
 ## An app's values
 
 What an app's `app.yml` declares in `config` and `secrets`, set in the fleet's
-`apps/<app>.yml` and `apps/<app>.secrets.yml` (vaulted where the server's
-secrets are). These edit files on this machine only: review the change, then
+`apps/<app>.yml` and, for secrets, `app_secrets.<app>` in the server's
+`secrets.yml` (SOPS). These edit files on this machine only: review the change, then
 `kayra apps <server>` applies it, from `main` on a hetzner or home server.
 
 | Command | What it does |
 |---|---|
-| `kayra app values <server> <app> [--dir DIR] [--json]` | Each declared key: `set`, `missing`, or `locked` (a vault that cannot be opened without a prompt). Never a value |
+| `kayra app values <server> <app> [--dir DIR] [--json]` | Each declared key: `set`, `missing`, or `locked` (a `secrets.yml` that cannot be read). Read without the key; never a value |
 | `kayra app config set <server> <app> KEY VALUE [--dir DIR]` | A declared configuration value, in plaintext |
 | `kayra app secret import <server> <app> KEY FILE [--dir DIR]` | A declared secret from a file (one trailing newline dropped), so it is in no argument, log or run record |
 | `kayra app secret generate <server> <app> KEY [--dir DIR]` | 32 random bytes, hex, only if the key has no value yet: a retry keeps it |
@@ -247,8 +247,8 @@ checkout not yet cloned there. A key `app.yml` does not declare is refused.
 | Command | What it does |
 |---|---|
 | `kayra status [--offline] [--json]` | Every server: where it is, whether its SSH answers, which kayra set it up and, on a platform server, its login. See below |
-| `kayra validate [server] [--json]` | The fleet beyond its schemas: secrets (unknown keys must be helpers `vars.yml` uses), each app's `app.yml` against the fleet's values, `compose_stacks` against `stacks/`, `edge_routes`. Exits 1 on a problem |
-| `kayra doctor` | Check that this machine can run every command on every server: tools, vault passwords, app repositories, home servers' SSH |
+| `kayra validate [server] [--json]` | The fleet beyond its schemas: secrets, read without their key (unknown keys must be helpers `vars.yml` uses; encrypted to exactly the recipients `.sops.yaml` names), each app's `app.yml` against the fleet's values, `compose_stacks` against `stacks/`, `edge_routes`. Exits 1 on a problem |
+| `kayra doctor` | Check that this machine can run every command on every server: tools (`sops`, and `age-plugin-se` where a key lives in the Secure Enclave), each `age_key_file`, app repositories, home servers' SSH |
 | `kayra certs <domain> [subdomain…]` | mkcert certificates for local development |
 | `kayra version`, `kayra --version` | The version of the kayra that runs: in a fleet, the one it pins. Needs no fleet |
 
@@ -292,8 +292,8 @@ nas     nas       home     example.com               192.168.1.141    off       
   probes or the version.
 
 `kayra validate` lists each server's checks under it: `✓` holds, `✗` a
-problem, with what to do about it on the line below, `·` not checked (a vault
-without its password file, an app not cloned yet). The last line sums it up:
+problem, with what to do about it on the line below, `·` not checked (a
+`secrets.yml` that is not YAML, an app not cloned yet). The last line sums it up:
 
 ```
 ✗ edge  edge on hetzner

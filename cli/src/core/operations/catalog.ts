@@ -128,7 +128,7 @@ export const operations = {
     input: z.strictObject({ server, app, dir, key: valueKeySchema, value: z.string().min(1).refine((value) => !value.includes("\0"), "NUL is not an environment value") }),
   },
   "app.secret.import": {
-    summary: "Import a declared secret from a local file into the fleet vault; never print its value.",
+    summary: "Import a declared secret from a local file into the server's secrets.yml; never print its value.",
     scope: "app", effect: "changes", kind: "plan", local: true,
     input: z.strictObject({ server, app, dir, key: valueKeySchema, file: z.string().min(1).describe("Local file containing the secret, not YAML; one trailing newline is removed") }),
   },

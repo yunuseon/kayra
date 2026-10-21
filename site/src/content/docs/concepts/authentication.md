@@ -41,7 +41,7 @@ mail, or the operator relaying the code below).
      --variant argon2id --iterations 3 --memory 32768 --parallelism 2
    ```
 
-2. Add them to `authelia_users` in `servers/<server>/secrets.yml` (vault), with
+2. Add them to `authelia_users` in `servers/<server>/secrets.yml` (`sops edit`), with
    `groups: ['admin']`, through a PR (hetzner servers only change from `main`).
 
 3. Apply: `kayra setup <server>`.

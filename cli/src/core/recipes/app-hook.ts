@@ -2,7 +2,7 @@ import type { Server } from "../fleet/model.ts";
 import { within, type AppName, type FleetRoot } from "../fleet/brand.ts";
 import { type Plan, run } from "../plan/model.ts";
 import { err, flatMap, ok, type Result } from "../../lib/result.ts";
-import { vaulted, type Engine } from "./steps.ts";
+import { withSecrets, type Engine } from "./steps.ts";
 
 /** Whether a server takes push webhooks: its vars.yml's `webhooks` (default true), and a forge able to reach it. */
 export const takesWebhooks = (server: Server): Result<true, string> => {
@@ -21,6 +21,6 @@ export const appHook = (engine: Engine, root: FleetRoot, server: Server, app: Ap
   flatMap(takesWebhooks(server), () => {
     if (!server.apps.some((each) => each.name === app)) return err(`${app} is not in ${server.name}'s server.yml`);
     return ok<Plan>([
-      vaulted(run(`Hook ${app}'s repository to ${server.name}`, [process.execPath, within(engine.kayra, "bin", "kayra-app-hook.js"), JSON.stringify({ root, server: server.name, app })]), server),
+      withSecrets(run(`Hook ${app}'s repository to ${server.name}`, [process.execPath, within(engine.kayra, "bin", "kayra-app-hook.js"), JSON.stringify({ root, server: server.name, app })]), server),
     ]);
   });

@@ -10,7 +10,7 @@ model {
   }
 
   fleet = external 'Fleet repository' {
-    description 'servers/<name>/: server.yml, vars.yml, vault secrets, terraform/; package.json pins kayra'
+    description 'servers/<name>/: server.yml, vars.yml, secrets.yml (SOPS), terraform/; package.json pins kayra'
   }
   appRepo = external 'App repository' {
     technology 'GitHub or Forgejo'

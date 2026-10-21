@@ -29,8 +29,8 @@ with the plans whichever client starts them.
 The command line calls the core directly. The browser and local programs use
 the same local API, which calls the core and streams events, secret questions
 and terminal sessions. `kayra serve --ui --api` runs both clients on the
-operator's machine, where the fleet, SSH keys, vault passwords and OpenTofu
-state already live.
+operator's machine, where the fleet, SSH keys and the age key that opens its
+secrets already live.
 
 <LikeC4View viewId="clients" client:only="react" />
 

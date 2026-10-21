@@ -43,6 +43,8 @@ stub() {
     chmod +x "${tmp}/bin/$1"
 }
 for program in ansible ansible-playbook ansible-galaxy ssh docker; do echo 'record "$@"' | stub "$program"; done
+# The fixture fleet's secrets.yml files are SOPS-encrypted to the tests' own key.
+export SOPS_AGE_KEY_FILE="${here}/../fixtures/age-key.txt"
 # Password readiness is part of the interpreter; never invoke the operator's sudo.
 echo 'exit 0' | stub sudo
 stub tofu <<'STUB'
@@ -75,6 +77,6 @@ grep -v '^#' "${here}/cases" | while IFS='|' read -r case stdin arguments; do
     status=0
     stdout="$(cd "$fleet" && echo "$stdin" | PATH="${tmp}/bin:${PATH}" "${command[@]}" 2>/dev/null)" || status=$?
     { echo "--- stdout"; [ -z "$stdout" ] || echo "$stdout"; echo "--- exit ${status}"; } >> "$TRACE"
-    sed -i.bak -e 's|/[^" ]*/kayra-[^/" ]*/vault-password|<vault-password-helper>|g' -e "s/kayra_version=${version}/kayra_version=<version>/g" -e "s/KAYRA_VERSION=${version}/KAYRA_VERSION=<version>/g" -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" "$TRACE"
+    sed -i.bak -e "s/kayra_version=${version}/kayra_version=<version>/g" -e "s/KAYRA_VERSION=${version}/KAYRA_VERSION=<version>/g" -e "s|${infrastructure}|<kayra>|g" -e "s|${fleet}|<fleet>|g" -e "s|${HOME}|~|g" "$TRACE"
     rm "${TRACE}.bak"
 done

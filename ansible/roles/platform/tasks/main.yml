@@ -148,7 +148,7 @@
   become: true
   register: traefik_static_config
 
-# Vault values rendered to files rather than .env lines, which Authelia reads
+# Secrets rendered to files rather than .env lines, which Authelia reads
 # via *_FILE. Authelia never writes the user database back — password change
 # and reset are disabled — so rendering it every run is safe.
 - name: Render Authelia user database

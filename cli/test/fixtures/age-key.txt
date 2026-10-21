@@ -1,0 +1,4 @@
+# A key for kayra's tests only: it opens nothing but what the tests encrypt with it.
+# created: 2026-10-21T14:47:05+02:00
+# public key: age1wft9wjn3wjlyx36208t8led6haveep4ls6wp8yvu5s8hvycwz5ms75qpz5
+AGE-SECRET-KEY-1LLP9SDH5SES0A220KR67TN6PVHT24PVNVLMW2PKSQV4S3NZVYU3QD5YAP0

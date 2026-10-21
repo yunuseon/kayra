@@ -85,7 +85,7 @@
       }
     },
     "secrets": {
-      "description": "Secret keys; their values come from the fleet's apps/<app>.secrets.yml.",
+      "description": "Secret keys; their values come from the fleet's secrets.yml, under app_secrets.<app>.",
       "type": "array",
       "items": {
         "type": "string"

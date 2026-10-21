@@ -1,8 +1,7 @@
-import { within } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { run, type Plan } from "../plan/model.ts";
 import { err, ok } from "../../lib/result.ts";
-import { ansibleEnv, inventory, reachable, vaulted, type Engine } from "./steps.ts";
+import { ansibleEnv, ansiblePath, inventory, reachable, withSecrets, type Engine } from "./steps.ts";
 import { sshArgv } from "./ssh.ts";
 
 /**
@@ -15,21 +14,9 @@ export const backupTest = (engine: Engine, server: Server) => {
   if (server.inventory === undefined) return err(`no inventory for '${server.name}' — provision it first.`);
   return ok<Plan>([
     ...reachable(engine, server),
-    vaulted(run(
+    withSecrets(run(
       "Start the restore test",
-      [
-        "ansible",
-        "servers",
-        "-i",
-        inventory(server),
-        "--become",
-        "-e",
-        `@${within(server.dir, "secrets.yml")}`,
-        "-m",
-        "ansible.builtin.command",
-        "-a",
-        `docker compose -f ${server.backupDir}/docker-compose.yml exec -d -T backup /etc/backup/restore-test.sh`,
-      ],
+      ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", "restore-test.yml"), "-e", `server_dir=${server.dir}`],
       ansibleEnv(engine, {}),
     ), server),
     { kind: "note", text: "Following the restore test. Ctrl-C stops following, not the test." },

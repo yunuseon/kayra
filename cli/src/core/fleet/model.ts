@@ -1,14 +1,12 @@
-import type { AppName, Domain, FleetRoot, Host, KeyFile, Port, RemotePath, RepoPath, RepoUrl, ServerDir, ServerName, SshUser, VaultPasswordFile } from "./brand.ts";
+import type { AgeKeyFile, AbsolutePath, AppName, Domain, FleetRoot, Host, KeyFile, Port, RemotePath, RepoPath, RepoUrl, ServerDir, ServerName, SshUser } from "./brand.ts";
 import type { ServerKind } from "./settings.ts";
 
 export const serverTargets = ["multipass", "hetzner", "home"] as const;
 
 export type ServerTarget = (typeof serverTargets)[number];
 
-export type Vault =
-  | { readonly kind: "none" }
-  | { readonly kind: "ask" }
-  | { readonly kind: "file"; readonly file: VaultPasswordFile };
+/** secrets.yml: SOPS-encrypted (required outside multipass), opened with age_key_file or SOPS's own default identity. */
+export type Secrets = { readonly file: AbsolutePath; readonly encrypted: boolean; readonly key: AgeKeyFile | undefined };
 
 export type App = {
   readonly name: AppName;
@@ -28,9 +26,7 @@ export type Server = {
   readonly kind: ServerKind;
   readonly target: ServerTarget;
   readonly domain: Domain;
-  readonly vault: Vault;
-  /** The whole secrets.yml is a vault, rather than plaintext with values vaulted inline. */
-  readonly hasVaultedSecrets: boolean;
+  readonly secrets: Secrets;
   readonly apps: readonly App[];
   /** It has a terraform/ next to it, so OpenTofu provisions something. */
   readonly hasTerraform: boolean;
@@ -73,6 +69,6 @@ export type ServerFiles = {
   readonly hasTerraform: boolean;
   /** Each folder under stacks/, by name, with its compose.yaml where it has one. */
   readonly stacks: readonly { readonly name: string; readonly compose: string | undefined }[];
-  /** apps/: each app's values, `<app>.yml` (config) and `<app>.secrets.yml`, by file name. */
+  /** apps/: each app's config, `<app>.yml`, by file name (its secrets are in secrets.yml). */
   readonly appValues: readonly { readonly file: string; readonly text: string }[];
 };

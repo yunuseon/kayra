@@ -37,7 +37,8 @@ export type KayraRoot = Brand<AbsolutePath, "KayraRoot">;
 /** The configuration: the directory holding servers/. */
 export type FleetRoot = Brand<AbsolutePath, "FleetRoot">;
 export type ServerDir = Brand<AbsolutePath, "ServerDir">;
-export type VaultPasswordFile = Brand<AbsolutePath, "VaultPasswordFile">;
+/** The age identity SOPS opens a server's secrets.yml with. */
+export type AgeKeyFile = Brand<AbsolutePath, "AgeKeyFile">;
 /** A machine's name or address, as ssh and the network take it. */
 export type Host = Brand<string, "Host">;
 /** A TCP port, as its digits. */
@@ -58,7 +59,7 @@ export const appName = minting(appNameSchema);
 export const subdomain = minting(subdomainSchema);
 export const domain = minting(domainSchema);
 
-/** `~/…` is the operator's home, as Ansible reads it in vault_password_file. */
+/** `~/…` is the operator's home, as a shell reads it. */
 export const absolutePath = (value: string) => {
   const expanded = value === "~" || value.startsWith("~/") ? join(homedir(), value.slice(1)) : value;
   return isAbsolute(expanded) ? ok<AbsolutePath>(normalize(expanded) as AbsolutePath) : err(`'${value}' is not an absolute path`);
@@ -68,7 +69,7 @@ export const kayraRoot = (path: AbsolutePath) => path as KayraRoot;
 export const fleetRoot = (path: AbsolutePath) => path as FleetRoot;
 export const serverDir = (root: FleetRoot, name: ServerName) =>
   join(root, "servers", name) as ServerDir;
-export const vaultPasswordFile = (path: AbsolutePath) => path as VaultPasswordFile;
+export const ageKeyFile = (path: AbsolutePath) => path as AgeKeyFile;
 
 export const within = (base: AbsolutePath, ...segments: readonly string[]) =>
   join(base, ...segments) as AbsolutePath;

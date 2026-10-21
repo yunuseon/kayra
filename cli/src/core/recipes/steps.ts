@@ -19,31 +19,17 @@ export const inventory = (server: Server) => within(server.dir, "inventory.ini")
 
 export const terraform = (server: Server) => `-chdir=${within(server.dir, "terraform")}`;
 
-/** What a step needs to open a server's vault: Ansible's environment, and what kayra must ask. */
-type VaultAccess = { readonly env: Env; readonly needs: readonly Need[] };
+/** secrets.yml opened for a step: for Ansible as a file (KAYRA_SECRETS), for OpenTofu as its variables. */
+export const secretsFor = (server: Server, use: "ansible" | "opentofu") =>
+  typed<Need>({ kind: "secrets", server: server.name, file: server.secrets.file, key: server.secrets.key, encrypted: server.secrets.encrypted, for: use });
 
-/**
- * How Ansible gets the vault password: from the server's password file, or
- * from kayra, which asks the operator once per run (Need "vault").
- */
-export const vault = (server: Server) => {
-  switch (server.vault.kind) {
-    case "file":
-      return typed<VaultAccess>({ env: { ANSIBLE_VAULT_PASSWORD_FILE: server.vault.file }, needs: [] });
-    case "ask":
-      return typed<VaultAccess>({ env: {}, needs: [{ kind: "vault", server: server.name }] });
-    case "none":
-      return typed<VaultAccess>({ env: {}, needs: [] });
-  }
-};
+export const needing = (step: RunStep, needs: readonly Need[]) => typed<RunStep>({ ...step, needs: [...(step.needs ?? []), ...needs] });
 
-export const needing = (step: RunStep, needs: readonly Need[]) => typed<RunStep>({ ...step, needs });
+/** A step that reads the server's secrets.yml: Ansible's playbooks load it from KAYRA_SECRETS. */
+export const withSecrets = (step: RunStep, server: Server) => needing(step, [secretsFor(server, "ansible")]);
 
-/** The vault's environment, and its need where kayra must ask for the password. */
-export const vaulted = (step: RunStep, server: Server) => {
-  const { env, needs } = vault(server);
-  return typed<RunStep>({ ...step, env: { ...env, ...step.env }, ...(needs.length === 0 ? {} : { needs }) });
-};
+/** An OpenTofu step: its variables from secrets.yml's terraform mapping (the state's passphrase among them). */
+export const withVariables = (step: RunStep, server: Server) => needing(step, [secretsFor(server, "opentofu")]);
 
 export const ansibleEnv = (engine: Engine, env: Env) => typed<Env>({ ...env, ANSIBLE_CONFIG: ansiblePath(engine, "ansible.cfg") });
 

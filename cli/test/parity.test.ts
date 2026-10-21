@@ -16,7 +16,7 @@ import { fleet, server } from "./support.ts";
 
 const shop = server(
   "shop",
-  "target: multipass\ndomain: shop.test\nvault: false\napps: [{name: shop, repo: https://git.example/shop.git}]",
+  "target: multipass\ndomain: shop.test\napps: [{name: shop, repo: https://git.example/shop.git}]",
   {
     secrets: "a: b\n",
   },

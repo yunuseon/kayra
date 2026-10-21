@@ -10,7 +10,7 @@ import { valuesReportSchema } from "../src/core/app-values/model.ts";
 import { inspectValues, editValues } from "../src/core/app-values/store.ts";
 import { appValues } from "../src/core/recipes/app-values.ts";
 import { textAt } from "../src/core/adapters/fs.ts";
-import { must } from "./support.ts";
+import { must, sealed, testKey } from "./support.ts";
 
 const app = must(appName("demo"));
 const engine = kayraRoot(must(absolutePath(resolve(import.meta.dirname, "../.."))));
@@ -23,20 +23,20 @@ const fixture = () => {
   mkdirSync(join(serverDir, "terraform"));
   mkdirSync(repo);
   writeFileSync(join(directory, "servers/defaults.yml"), "{}\n");
-  writeFileSync(join(serverDir, "server.yml"), "target: multipass\ndomain: lab.test\nvault: false\napps: [{name: demo, repo: https://example.com/demo.git}]\n");
+  writeFileSync(join(serverDir, "server.yml"), "target: multipass\ndomain: lab.test\napps: [{name: demo, repo: https://example.com/demo.git}]\n");
   writeFileSync(join(serverDir, "vars.yml"), "{}\n");
   writeFileSync(join(serverDir, "secrets.yml"), "{}\n");
   writeFileSync(join(repo, "app.yml"), "name: demo\ncompose: [compose.yml]\nconfig: [FLAG, COUNT]\nsecrets: [PASSWORD, TOKEN]\n");
   const server = must(loadFleet(root)).servers[0];
   if (server === undefined) throw new Error("missing fixture server");
-  return { root, server, repo, config: join(serverDir, "apps/demo.yml"), secret: join(serverDir, "apps/demo.secrets.yml"),
+  return { root, server, repo, config: join(serverDir, "apps/demo.yml"), secret: join(serverDir, "secrets.yml"),
     clean: () => { rmSync(directory, { recursive: true, force: true }); } };
 };
 
 test("requirements report distinguishes false and zero from missing values without returning contents", async (t) => {
   const f = fixture(); t.after(f.clean);
   writeFileSync(f.config, "FLAG: false\nCOUNT: 0\n");
-  writeFileSync(f.secret, "PASSWORD: fixture-private-password\n");
+  writeFileSync(f.secret, "app_secrets:\n  demo:\n    PASSWORD: fixture-private-password\n");
   const report = must(await inspectValues(f.root, f.server, app, f.repo));
   deepStrictEqual(report.config, [{ key: "FLAG", state: "set" }, { key: "COUNT", state: "set" }]);
   deepStrictEqual(report.secrets, [{ key: "PASSWORD", state: "set" }, { key: "TOKEN", state: "missing" }]);
@@ -66,13 +66,14 @@ test("secret generation preserves existing values and file bytes on retry", asyn
 
 test("imports treat contents as data, preserve other secrets, and never return the value", async (t) => {
   const f = fixture(); t.after(f.clean);
-  writeFileSync(f.secret, "PASSWORD: keep-me\n");
+  writeFileSync(f.secret, "git_token: keep-me-too\napp_secrets:\n  demo:\n    PASSWORD: keep-me\n");
   const file = join(f.root, "credential");
   const value = "token: with # YAML and $(shell) `characters`\nsecond line";
   writeFileSync(file, `${value}\n`);
   const result = must(await editValues(f.root, f.server, app, { kind: "import", key: "TOKEN", file }, f.repo));
   strictEqual(result.includes(value), false);
   match(readFileSync(f.secret, "utf8"), /PASSWORD: keep-me/);
+  match(readFileSync(f.secret, "utf8"), /git_token: keep-me-too/);
   const report = must(await inspectValues(f.root, f.server, app, f.repo));
   strictEqual(report.secrets.every((each) => each.state === "set"), true);
   strictEqual(readFileSync(file, "utf8"), `${value}\n`);
@@ -132,26 +133,31 @@ const inspectFixture = (f: Readonly<{ root: string; repo: string }>) => {
   return { ok: true, value: valuesReportSchema.parse(JSON.parse(result.stdout)) } as const;
 };
 
-const vaultAvailable = spawnSync("ansible-vault", ["--version"], { stdio: "ignore" }).status === 0;
-test("real Ansible Vault: encrypt, inspect, preserve on retry, and fail closed with a wrong password", { skip: !vaultAvailable }, async (t) => {
+test("real SOPS: set in place, kept on retry, read without the key, and a wrong key changes nothing", async (t) => {
   const f = fixture(); t.after(f.clean);
-  const password = join(f.root, "vault-password");
-  writeFileSync(password, "fixture-vault-password\n", { mode: 0o600 });
-  // Use the parsed server to obtain the branded password path.
-  writeFileSync(join(f.server.dir, "server.yml"), `target: multipass\ndomain: lab.test\nvault: true\nvault_password_file: ${password}\napps: [{name: demo, repo: https://example.com/demo.git}]\n`);
-  const server = must(loadFleet(f.root)).servers[0];
-  if (server === undefined) throw new Error("missing fixture server");
+  sealed(f.secret, "git_token: keep-me\n");
+  const withKey = (key: string) => {
+    writeFileSync(join(f.server.dir, "server.yml"), `target: multipass\ndomain: lab.test\nage_key_file: ${key}\napps: [{name: demo, repo: https://example.com/demo.git}]\n`);
+    const server = must(loadFleet(f.root)).servers[0];
+    if (server === undefined) throw new Error("missing fixture server");
+    return server;
+  };
+  const server = withKey(testKey);
+  strictEqual(server.secrets.encrypted, true);
+  const before = readFileSync(f.secret, "utf8");
   must(await editValues(f.root, server, app, { kind: "generate", key: "PASSWORD" }, f.repo));
   const ciphertext = readFileSync(f.secret, "utf8");
-  match(ciphertext, /^\$ANSIBLE_VAULT;/);
-  const plaintext = execFileSync("ansible-vault", ["view", "--vault-password-file", password, f.secret], { encoding: "utf8" });
+  strictEqual(ciphertext.split("\n")[0], before.split("\n")[0]);
+  match(ciphertext, /^ {8}PASSWORD: ENC\[AES256_GCM,/m);
+  const plaintext = execFileSync("sops", ["decrypt", f.secret], { encoding: "utf8", env: { ...process.env, SOPS_AGE_KEY_FILE: testKey } });
   match(plaintext, /PASSWORD: [a-f0-9]{64}/);
   must(await editValues(f.root, server, app, { kind: "generate", key: "PASSWORD" }, f.repo));
   strictEqual(readFileSync(f.secret, "utf8"), ciphertext);
-  strictEqual(must(await inspectValues(f.root, server, app, f.repo)).secrets[0]?.state, "set");
-  writeFileSync(password, "wrong-password\n");
-  strictEqual((await editValues(f.root, server, app, { kind: "generate", key: "TOKEN" }, f.repo)).ok, false);
+  const other = join(f.root, "other-key.txt");
+  execFileSync("age-keygen", ["-o", other], { stdio: "pipe" });
+  const locked = withKey(other);
+  deepStrictEqual(must(await inspectValues(f.root, locked, app, f.repo)).secrets, [{ key: "PASSWORD", state: "set" }, { key: "TOKEN", state: "missing" }]);
+  strictEqual((await editValues(f.root, locked, app, { kind: "generate", key: "TOKEN" }, f.repo)).ok, false);
   strictEqual(readFileSync(f.secret, "utf8"), ciphertext);
-  strictEqual(must(await inspectValues(f.root, server, app, f.repo)).secrets[0]?.state, "locked");
-  deepStrictEqual(readdirSync(join(f.server.dir, "apps")), ["demo.secrets.yml"]);
+  deepStrictEqual(readdirSync(join(f.server.dir, "apps")), []);
 });

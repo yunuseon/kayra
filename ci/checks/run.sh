@@ -43,17 +43,11 @@ none() {
     return 1
 }
 
-# Vault-encrypted files are not YAML; nothing can read them without the key.
-vaulted() { head -c 14 "$1" | grep -q '^\$ANSIBLE_VAULT'; }
-
 # The fleet's files: everything under it but the engine, which may live inside
 # it (a fleet repo that still carries a copy) or anywhere else.
 fleet_find() {
     find "$F" \( -path "$E" -o -path '*/node_modules' -o -path "$F/.git" -o -path "$F/.cache" \) -prune -o "$@" -print
 }
-
-# Reads paths, prints those that are not vaults.
-not_vaulted() { local f; while IFS= read -r f; do vaulted "$f" || echo "$f"; done; }
 
 # The compose files the engine deploys, and the fleet's stacks (apps' own are
 # admitted at deploy, from their repos).
@@ -77,7 +71,7 @@ unpinned() {
 }
 compose_images() { local f; for f in "$@"; do yq '.services[].image // ""' "$f" | sed "s#^#${f}|#"; done; }
 
-# A key in the repo is a key published: vault it or keep it out (gitignored).
+# A key in the repo is a key published: encrypt it into secrets.yml or keep it out (gitignored).
 private_keys() { grep -lE -e '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' "$@" | sed 's/$/: holds a private key/'; }
 
 # --- the platform (the engine) ---------------------------------------------------
@@ -90,7 +84,7 @@ platform_shell() {
 
 platform_yaml() {
     local files
-    mapfile -t files < <(find "$E" -path '*/node_modules' -prune -o \( -name '*.yml' -o -name '*.yaml' \) -print | not_vaulted)
+    mapfile -t files < <(find "$E" -path '*/node_modules' -prune -o \( -name '*.yml' -o -name '*.yaml' \) -print)
     yamllint --strict -c "$E/ci/checks/yamllint.yml" "${files[@]}"
 }
 
@@ -212,7 +206,7 @@ fleet_shell() {
 
 fleet_yaml() {
     local files
-    mapfile -t files < <(fleet_find \( -name '*.yml' -o -name '*.yaml' \) | not_vaulted)
+    mapfile -t files < <(fleet_find \( -name '*.yml' -o -name '*.yaml' \))
     yamllint --strict -c "$E/ci/checks/yamllint.yml" "${files[@]}"
 }
 
@@ -247,8 +241,8 @@ fleet_tofu_validate() {
 }
 
 # The fleet against the engine's schemas and cross-checks (kayra validate):
-# without the vault password or the apps' clones, what needs them is noted
-# as not checked, never failed.
+# secrets.yml's keys need no key (SOPS leaves them readable); without the
+# apps' clones, what needs them is noted as not checked, never failed.
 fleet_kayra_validate() { (cd "$F" && node "$E/cli/src/main.ts" validate); }
 
 rule_fleet_no_tls_true() {

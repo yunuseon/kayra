@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# =============================================================================
+# app-restore <app> — an app that was deployed, yet runs no container now,
+# deployed again at the release that ran.
+#
+# A Docker update or a reboot stops every container; one deployed before the
+# platform gave each service a restart policy stays down. The deployer's ctl
+# follows the run to its end, so this exits as the run did. An app never
+# deployed (no release record) and one that runs are left alone.
+#
+# Installed by the platform role at <platform_dir>/bin; run by the app role
+# after it registers the app. Run as root. Prints what it did on its last line:
+# "never deployed", "runs", or "restored <sha>".
+# =============================================================================
+set -euo pipefail
+
+app="${1:?Usage: app-restore <app>}"
+platform_dir="${PLATFORM_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+releases="${platform_dir}/releases/${app}"
+
+# releases/<app>/<UTC time>-<sha>.env, newest last; the deployer writes them.
+live=""
+if [ -d "$releases" ]; then
+    live="$(find "$releases" -maxdepth 1 -name '*.env' -exec basename {} \; | sort | tail -1 \
+        | sed -n 's/^[0-9]\{8\}T[0-9]\{6\}Z-\([0-9a-f]\{40\}\)\.env$/\1/p')"
+fi
+if [ -z "$live" ]; then
+    echo "never deployed"
+    exit 0
+fi
+
+if [ -n "$(docker ps -q --filter "label=com.docker.compose.project=${app}" --filter status=running --filter status=restarting)" ]; then
+    echo "runs"
+    exit 0
+fi
+
+cd "$platform_dir"
+docker compose exec -T deployer kayra-deployer ctl deploy "$app" "$live"
+echo "restored ${live}"

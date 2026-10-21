@@ -111,6 +111,7 @@ platform_tofu_test() {
 
 compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.sh"; }
 verify_cases() { bash "$E/ci/tests/verify/run.sh"; }
+app_restore_cases() { bash "$E/ci/tests/app-restore/run.sh"; }
 ansible_output() { bash "$E/ci/tests/ansible-output/run.sh"; }
 
 # The kayra CLI: strictest types, its lint rules, its tests.
@@ -296,6 +297,7 @@ if [ "$platform" = true ]; then
     check platform:tofu-test platform_tofu_test
     check platform:compose-policy compose_policy
     check platform:verify verify_cases
+    check platform:app-restore app_restore_cases
     check platform:ansible-output ansible_output
     check platform:cli-typecheck cli_typecheck
     check platform:cli-lint cli_lint

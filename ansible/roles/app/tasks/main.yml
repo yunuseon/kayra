@@ -6,6 +6,8 @@
 # registers the app:
 #   {{ apps_dir }}/<app>/.env                 operator config for compose
 #   app-apply                                  secrets → app-secrets/<app>/
+#   app-restore                                a deployed app that runs
+#                                              nothing, deployed again
 #   {{ platform_dir }}/apps/<app>.json         the registration the deployer
 #                                              and the builder read
 #
@@ -127,22 +129,11 @@
   become: true
 
 # A Docker update or a reboot stops every container, and one deployed before
-# the platform gave each service a restart policy stays down: its live
-# release, deployed again. ctl follows the run to its end; the retries wait
-# out a deployer the host layer has just restarted.
+# the platform gave each service a restart policy stays down (bin/app-restore).
+# The retries wait out a deployer the host layer has just restarted.
 - name: Restore the app if it was deployed but runs nothing
-  ansible.builtin.shell:
-    cmd: |
-      set -euo pipefail
-      releases={{ platform_dir }}/releases/{{ app.name }}
-      if [ ! -d "$releases" ]; then echo "never deployed"; exit 0; fi
-      live="$(find "$releases" -maxdepth 1 -name '*.env' -printf '%f\n' | sort | tail -1 | sed -n 's/^[0-9]\{8\}T[0-9]\{6\}Z-\([0-9a-f]\{40\}\)\.env$/\1/p')"
-      if [ -z "$live" ]; then echo "never deployed"; exit 0; fi
-      if [ -n "$(docker ps -q --filter label=com.docker.compose.project={{ app.name }} --filter status=running --filter status=restarting)" ]; then echo "runs"; exit 0; fi
-      cd {{ platform_dir }}
-      docker compose exec -T deployer kayra-deployer ctl deploy {{ app.name }} "$live"
-      echo "restored ${live}"
-    executable: /bin/bash
+  ansible.builtin.command:
+    cmd: "{{ platform_dir }}/bin/app-restore {{ app.name }}"
   register: app_restored
   retries: 5
   delay: 3

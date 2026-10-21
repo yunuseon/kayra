@@ -62,7 +62,7 @@ renovate_host_rules: []
 renovate_github_com_token: ""
 
 # --- Authelia ---------------------------------------------------------------
-# Secrets are per server and belong in servers/<server>/vars.yml (vault for prod).
+# Secrets are per server and belong in servers/<server>/secrets.yml.
 authelia_session_secret: ""
 authelia_storage_encryption_key: ""
 # Leave the address empty to fall the notifier back to a file, which is what

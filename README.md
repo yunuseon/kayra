@@ -14,7 +14,7 @@ kayra is the engine that turns that description into running machines.
  ┌──────────────────────────────┐      ┌───────────────────────┐    ┌──────────────────┐
  │ CLI: kayra up/setup/apps/…   │◀─────│ servers/<name>/       │    │ app.yml          │
  │ Ansible, OpenTofu, compose   │ pins │   server.yml, vars,   │    │ Dockerfiles      │
- │ the deployer: build, deploy  │      │   vault secrets       │    └────────┬─────────┘
+ │ the deployer: build, deploy  │      │   secrets (SOPS)      │    └────────┬─────────┘
  │ compose admission policy     │      │ package.json → kayra  │             │ built & deployed
  └──────────────────────────────┘      └───────────────────────┘             ▼ by the platform
 ```
@@ -29,7 +29,7 @@ kayra is the engine that turns that description into running machines.
   pipeline, no Ansible. It runs without the platform locally and can leave
   with its customer at any time.
 - **One server per customer, reproducible.** Everything about a server lives in
-  its folder of the fleet; secrets per server in Ansible Vault; machines from
+  its folder of the fleet; secrets per server in SOPS, reviewable and checked without the key; machines from
   OpenTofu; every version pinned and kept current by Renovate.
 - **Small and self-hosted.** No cloud provider beyond a VPS; it runs on a
   single Hetzner box or at home.

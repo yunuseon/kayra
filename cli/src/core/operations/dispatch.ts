@@ -199,7 +199,7 @@ const queries: Queries = {
     const dir = appDir(ctx, input.dir);
     if (!dir.ok) return dir;
     try { return await inspectValues(ctx.fleet.root, target.value[0], target.value[1], dir.value); }
-    catch { return err("app values could not be inspected; check file access and vault configuration"); }
+    catch { return err("app values could not be inspected; check file access and secrets.yml"); }
   },
   "app.runs": (ctx, input) => deployerAnswer(ctx, "app.runs", input),
   "app.releases": (ctx, input) => deployerAnswer(ctx, "app.releases", input),

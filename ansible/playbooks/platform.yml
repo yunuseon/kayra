@@ -24,7 +24,7 @@
   vars_files:
     - "{{ server_dir }}/../defaults.yml"
     - "{{ server_dir }}/vars.yml"
-    - "{{ server_dir }}/secrets.yml"
+    - "{{ lookup('ansible.builtin.env', 'KAYRA_SECRETS', default=undef('kayra opens secrets.yml: run this playbook through kayra')) }}"
 
   roles:
     - common
@@ -41,7 +41,7 @@
   vars_files:
     - "{{ server_dir }}/../defaults.yml"
     - "{{ server_dir }}/vars.yml"
-    - "{{ server_dir }}/secrets.yml"
+    - "{{ lookup('ansible.builtin.env', 'KAYRA_SECRETS', default=undef('kayra opens secrets.yml: run this playbook through kayra')) }}"
 
   roles:
     - platform

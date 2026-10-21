@@ -51,10 +51,14 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
   mkdirSync(bin);
   mkdirSync(join(dir, "app"));
   writeFileSync(join(dir, "app/app.yml"), "name: shop\ncompose: [deploy/compose.yml]\nconfig: [FLAG]\nsecrets: [PASSWORD]\n");
-  ["require-main.sh", "require-latest-state.sh", "home-reach.sh", "certs.sh", "app-check.sh"].forEach((name) => { writeFileSync(join(engine, "scripts/local", name), "exit 0\n"); });
+  ["require-main.sh", "require-latest-state.sh", "home-reach.sh", "certs.sh", "app-check.sh", "app-manifests.sh"].forEach((name) => { writeFileSync(join(engine, "scripts/local", name), "exit 0\n"); });
+  writeFileSync(join(engine, "scripts/local/setup-hosts.sh"), 'read -r password; [ "$password" = test-api-password ] || exit 7\n');
+  writeFileSync(join(dir, "lab-secrets.yml"), "a: b\n");
   const program = (name: string, text: string): void => { writeFileSync(join(bin, name), `#!/bin/sh\n${text}\n`, { mode: 0o700 }); };
   program("ansible-galaxy", "exit 0");
-  program("ansible-playbook", '[ -z "$ANSIBLE_VAULT_PASSWORD_FILE" ] || [ "$("$ANSIBLE_VAULT_PASSWORD_FILE")" = test-api-password ] || exit 7\necho "playbook finished"');
+  program("ansible-playbook", '[ -f "$KAYRA_SECRETS" ] || exit 7\necho "playbook finished"');
+  program("sops", "echo 'a: b'");
+  program("sudo", "exit 1");
   program("tofu", 'case "$*" in *output*) echo 192.0.2.1;; *state*) echo hcloud_server.this;; esac');
   program("ssh", `case "$*" in
     *'ctl runs'*) echo '{"app":"shop","runs":[]}' ;;
@@ -63,9 +67,10 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
     *wait*) exec sleep 30 ;;
     *) echo READY; read -r line; printf 'answer:%s\\n' "$line" ;;
   esac`);
-  const lab = { ...server("lab", "target: multipass\ndomain: lab.test\nvault: false\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" }), backupDir: must(remotePath("/backup")) };
-  const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example\nvault: true");
-  const store = server("store", "target: hetzner\ndomain: store.example\nvault: true\napps: [{name: shop, repo: https://git.example/shop.git}]");
+  const labServer = server("lab", "target: multipass\ndomain: lab.test\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" });
+  const lab = { ...labServer, secrets: { ...labServer.secrets, file: must(absolutePath(join(dir, "lab-secrets.yml"))) }, backupDir: must(remotePath("/backup")) };
+  const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example");
+  const store = server("store", "target: hetzner\ndomain: store.example\napps: [{name: shop, repo: https://git.example/shop.git}]");
   const fleet = { root: fleetRoot(must(absolutePath(dir))), servers: [lab, prod, store] };
   const config = { kayra: kayraRoot(must(absolutePath(engine))), fleet, version: must(kayraVersion("0.0.0-test")), short: (text: string) => text, network: {
     connect: () => Promise.resolve({ kind: "skipped" as const }), get: () => Promise.resolve({ kind: "skipped" as const }), read: () => Promise.resolve(ok("")),
@@ -231,7 +236,8 @@ const follow = (port: number, path: string, token: string, each: (event: RunEven
 test("real changes require the server name; secrets can be answered or cancelled without entering SSE or records", { timeout: 10_000 }, async (t) => {
   const api = await fixture(); t.after(api.cleanup);
   strictEqual((await api.post("setup", { server: "prod" })).status, 403);
-  const id = idOf(await api.post("setup", { server: "prod" }, { confirm: "prod" }));
+  strictEqual(idOf(await api.post("setup", { server: "prod" }, { confirm: "prod" })).length > 0, true);
+  const id = idOf(await api.post("hosts", { server: "lab" }));
   const events = await follow(api.port, `/api/runs/${id}/events`, api.token, async (event) => {
     if (event.kind === "ask") {
       strictEqual(event.secret, true);
@@ -240,7 +246,7 @@ test("real changes require the server name; secrets can be answered or cancelled
   });
   strictEqual(events.some((event) => event.kind === "ended" && event.failures === 0), true);
   strictEqual(JSON.stringify(events).includes("test-api-password"), false);
-  const second = idOf(await api.post("setup", { server: "prod" }, { confirm: "prod" }));
+  const second = idOf(await api.post("hosts", { server: "lab" }));
   const cancelled = await follow(api.port, `/api/runs/${second}/events`, api.token, async (event) => {
     if (event.kind === "ask") strictEqual((await call(api.port, `/api/runs/${second}/cancel`, { method: "POST", token: api.token })).status, 204);
   });

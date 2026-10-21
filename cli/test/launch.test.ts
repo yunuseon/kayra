@@ -67,7 +67,7 @@ test("prepare: registers the app once, keeping server.yml's comments, and names 
   match(written, /# kept/);
   match(written, /name: shop/);
   writeFileSync(join(f.serverDir, "apps", "shop.yml"), "MODE: live\n");
-  writeFileSync(join(f.serverDir, "apps", "shop.secrets.yml"), "PASSWORD: fixture\n");
+  writeFileSync(join(f.serverDir, "secrets.yml"), "app_secrets:\n  shop:\n    PASSWORD: fixture\n");
   const again = prepare(f);
   strictEqual(again.status, 0, again.stderr);
   match(again.stdout, /✓ shop is registered in lab's server\.yml/);
@@ -77,7 +77,7 @@ test("prepare: registers the app once, keeping server.yml's comments, and names 
 });
 
 test("launch: a GitHub repository on a server GitHub reaches gets its push hook last; multipass and other forges none", () => {
-  const prod = server("prod", "kind: platform\ntarget: hetzner\ndomain: shop.example.com\nvault: true\n");
+  const prod = server("prod", "kind: platform\ntarget: hetzner\ndomain: shop.example.com\n");
   const onGithub = render(must(launch(engine, root, prod, { ...wanted, repo: "https://github.com/acme/shop.git" })));
   assert((onGithub.at(-1) ?? "").includes("kayra-app-hook.js"));
   const elsewhere = render(must(launch(engine, root, prod, wanted)));

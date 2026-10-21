@@ -31,7 +31,7 @@ export type Watching = {
 
 const secretNote = (question: Text, server: string | undefined) => [
   `kayra mcp passes no password, and this step needed one: ${flat(question).trim().replace(/^\?\s*/, "").replace(/:$/, "")}.`,
-  `Name a vault_password_file in ${server === undefined ? "the server's" : `servers/${server}/`}server.yml, have sudo's cached (sudo -v), or run the command in a terminal.`,
+  `Have sudo's cached (sudo -v)${server === undefined ? "" : ` for ${server}`}, or run the command in a terminal.`,
 ].join(" ");
 
 /** The run as text: the heading, each step with its output and how it went, the footer. */

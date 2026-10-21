@@ -77,7 +77,7 @@ the server's name is typed. Then the run's page shows:
   confirmation comes on top.
 - Hetzner and home servers still change only from a clean `main` with the
   pinned kayra: the plans carry the same guards.
-- Vault and sudo passwords use password fields. Answers are cleared after
+- Sudo passwords use password fields. Answers are cleared after
   submission and never enter the run record.
 - Each run is recorded as JSON lines in the fleet's `.cache/ui/runs/`; the
   Runs page lists them after a restart too.

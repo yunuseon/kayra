@@ -44,7 +44,7 @@ In a worktree of the fleet:
 
 ```bash
 npm install --prefix "$W" --silent -D -E @yunuseon/kayra@<version>
-# …the fleet changes the release asks for (vault edits: decrypt in memory, never print a value)
+# …the fleet changes the release asks for (secrets.yml edits: sops set, never print a value)
 cd "$W" && kayra validate
 ```
 

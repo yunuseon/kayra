@@ -1,6 +1,5 @@
 kind: platform
 target: hetzner
 domain: example.com
-vault: true
 apps:
   - {name: missing, repo: https://github.com/acme/missing.git}

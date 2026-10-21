@@ -63,10 +63,10 @@ clean `main` with the pinned kayra, exactly as from the command line.
 
 ## Passwords
 
-No password passes through MCP. A step that needs a vault password or sudo's
-stops, and the result says which and how to give it another way:
+No password passes through MCP. A server's `secrets.yml` needs none: SOPS
+opens it with the operator's age key, which may ask for Touch ID on the
+operator's Mac (see [Secrets](../../concepts/fleet/#secrets)). A step that
+needs sudo's password stops, and the result says how to give it another way:
 
-- `vault_password_file` in the server's `server.yml` (kayra reads the file;
-  nothing is asked);
 - sudo's cached first (`sudo -v`) for the few steps that need it (`hosts`);
 - or the command, run in a terminal.

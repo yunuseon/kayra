@@ -3207,7 +3207,7 @@
     },
     "/operations/app.secret.import": {
       "post": {
-        "summary": "Import a declared secret from a local file into the fleet vault; never print its value.",
+        "summary": "Import a declared secret from a local file into the server's secrets.yml; never print its value.",
         "operationId": "app.secret.import",
         "requestBody": {
           "required": true,
@@ -3333,7 +3333,7 @@
     },
     "/operations/app.secret.import/preview": {
       "post": {
-        "summary": "Preview: Import a declared secret from a local file into the fleet vault; never print its value.",
+        "summary": "Preview: Import a declared secret from a local file into the server's secrets.yml; never print its value.",
         "requestBody": {
           "required": true,
           "content": {

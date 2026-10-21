@@ -29,7 +29,7 @@ export const jsonSchemas = () => typed<Readonly<Record<string, unknown>>>({
     serverKinds.map((kind) => [`vars-${kind}.json`, jsonSchema(`vars.yml (kind ${kind})`, varsSchema(kind))] as const),
   ),
   "app.json": jsonSchema("app.yml", appManifestSchema),
-  "app-values.json": jsonSchema("apps/<app>.yml and apps/<app>.secrets.yml", appValuesSchema),
+  "app-values.json": jsonSchema("apps/<app>.yml", appValuesSchema),
 });
 
 const kindsOf = (each: Setting) => each.kinds.join(", ");

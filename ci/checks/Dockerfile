@@ -33,6 +33,10 @@ ARG TOFU_VERSION=v1.13.1
 ARG YQ_VERSION=v4.54.1
 # renovate: datasource=github-releases depName=docker/compose
 ARG COMPOSE_VERSION=v5.6.0
+# renovate: datasource=github-releases depName=getsops/sops
+ARG SOPS_VERSION=v3.13.3
+# renovate: datasource=github-releases depName=FiloSottile/age
+ARG AGE_VERSION=v1.3.2
 # renovate: datasource=pypi depName=ansible-lint
 ARG ANSIBLE_LINT_VERSION=26.9.0
 # renovate: datasource=pypi depName=ansible-core
@@ -55,7 +59,10 @@ RUN set -eux; \
       | tar -xz -C /usr/local/bin tofu; \
     curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${go}"; \
     curl -fsSL -o /usr/local/bin/docker-compose "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${dc}"; \
-    chmod +x /usr/local/bin/yq /usr/local/bin/docker-compose
+    curl -fsSL -o /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.${go}"; \
+    curl -fsSL "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-${go}.tar.gz" \
+      | tar -xz --strip-components=1 -C /usr/local/bin age/age-keygen; \
+    chmod +x /usr/local/bin/yq /usr/local/bin/docker-compose /usr/local/bin/sops
 
 RUN pip install --no-cache-dir \
       "ansible-core==${ANSIBLE_CORE_VERSION}" \

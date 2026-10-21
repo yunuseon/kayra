@@ -56,7 +56,7 @@ identity_validation:
 authentication_backend:
   refresh_interval: 'always'
   # Both disabled so Authelia never writes back to users_database.yml. That
-  # file is rendered from vault on every platform run and would otherwise be
+  # file is rendered from secrets.yml on every platform run and would otherwise be
   # silently reverted.
   password_reset:
     disable: true

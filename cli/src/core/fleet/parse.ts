@@ -1,20 +1,15 @@
 import type { z } from "zod";
-import { absolutePath, host, sshDefaultPort, keyFile, port, remotePath, sshUser, vaultPasswordFile, type Domain } from "./brand.ts";
+import { absolutePath, ageKeyFile, host, sshDefaultPort, keyFile, port, remotePath, sshUser, within, type Domain } from "./brand.ts";
 import { err, flatMap, map, ok, type Result } from "../../lib/result.ts";
 import { serverSchema, varsSchema } from "./settings.ts";
 import { checkSettings, knownSettings } from "./shape.ts";
-import type { App, Inventory, Server, ServerFiles, Vault } from "./model.ts";
+import type { App, Inventory, Server, ServerFiles } from "./model.ts";
+import { isEncrypted } from "./secrets.ts";
 import { typed } from "../../lib/typed.ts";
 import { fields, mapping, type Fields } from "../../lib/yaml.ts";
 
-export const isVaulted = (text: string) => text.startsWith("$ANSIBLE_VAULT");
-
-const vault = (descriptor: z.output<typeof serverSchema>) => {
-  const file = descriptor.vault_password_file;
-  if (!descriptor.vault) return ok<Vault>({ kind: "none" });
-  if (file === undefined) return ok<Vault>({ kind: "ask" });
-  return map(absolutePath(file), (path) => typed<Vault>({ kind: "file", file: vaultPasswordFile(path) }));
-};
+const ageKey = (descriptor: z.output<typeof serverSchema>) =>
+  descriptor.age_key_file === undefined ? ok(undefined) : map(absolutePath(descriptor.age_key_file), ageKeyFile);
 
 /** What Zod's expected types are called in a fleet's YAML. */
 const expected: Readonly<Record<string, string>> = { string: "a string", boolean: "true or false", array: "a list", object: "a mapping" };
@@ -76,19 +71,14 @@ const stackHosts = (stacks: readonly string[], serverDomain: Domain) =>
     .flatMap((compose) => Object.freeze([...compose.matchAll(/Host\(`([^`]*)`\)/g)].map((match) => match[1] ?? "")))
     .map((host) => (host.endsWith(`.${serverDomain}`) ? host.slice(0, -serverDomain.length - 1) : host)));
 
-/** An app's config is plaintext, to be read and diffed; its secrets are vaulted wherever secrets.yml is. */
-const appValuesProblem = (
-  appValues: ServerFiles["appValues"],
-  secretsMustBeVaulted: boolean,
-) =>
+/** An app's config is plaintext, to be read and diffed; its secrets are in secrets.yml, under app_secrets. */
+const appValuesProblem = (appValues: ServerFiles["appValues"]) =>
   appValues
     .map(({ file, text }) =>
       file.endsWith(".secrets.yml")
-        ? secretsMustBeVaulted && !isVaulted(text)
-          ? `apps/${file} must be vault-encrypted`
-          : undefined
-        : isVaulted(text)
-          ? `apps/${file} is vault-encrypted; it holds config only — secrets go in apps/${file.replace(/\.yml$/, ".secrets.yml")}`
+        ? `apps/${file}: an app's secrets go in secrets.yml, under app_secrets.${file.replace(/\.secrets\.yml$/, "")}`
+        : isEncrypted(text)
+          ? `apps/${file} is encrypted; it holds config only — secrets go in secrets.yml, under app_secrets.${file.replace(/\.yml$/, "")}`
           : undefined,
     )
     .find((problem) => problem !== undefined);
@@ -100,19 +90,19 @@ export const parseServer = (files: ServerFiles) => {
   const parsed = serverSchema.safeParse(descriptor.value);
   if (!parsed.success) return err(serverProblem(parsed.error, descriptor.value));
   const { kind, target, domain, apps } = parsed.data;
-  const serverVault = vault(parsed.data);
-  if (!serverVault.ok) return serverVault;
+  const key = ageKey(parsed.data);
+  if (!key.ok) return err(`age_key_file ${key.error}`);
   if (target === "home" && files.inventory === undefined)
     return err("target home needs a hand-written inventory.ini next to it");
   if (target !== "home" && !files.hasTerraform) return err("no terraform/ next to it");
   if (files.vars === undefined) return err("no vars.yml next to it");
   if (files.secrets === undefined) return err("no secrets.yml next to it");
-  if (isVaulted(files.vars)) return err("vars.yml is vault-encrypted; it holds settings only — secrets go in secrets.yml");
-  if (target !== "multipass" && serverVault.value.kind === "none")
-    return err(`target ${target} requires vault: true`);
-  if (target !== "multipass" && !isVaulted(files.secrets))
-    return err(`target ${target} requires a vault-encrypted secrets.yml`);
-  const appValues = appValuesProblem(files.appValues, target !== "multipass");
+  if (isEncrypted(files.vars)) return err("vars.yml is encrypted; it holds settings only — secrets go in secrets.yml");
+  if (files.secrets.startsWith("$ANSIBLE_VAULT"))
+    return err("secrets.yml is an Ansible Vault; kayra reads SOPS now (see Upgrading to 0.21 in kayra's docs)");
+  if (target !== "multipass" && !isEncrypted(files.secrets))
+    return err(`target ${target} requires a SOPS-encrypted secrets.yml`);
+  const appValues = appValuesProblem(files.appValues);
   if (appValues !== undefined) return err(appValues);
   const vars = fields(files.vars);
   if (!vars.ok) return err(`vars.yml ${vars.error}`);
@@ -139,8 +129,7 @@ export const parseServer = (files: ServerFiles) => {
     kind,
     target,
     domain,
-    vault: serverVault.value,
-    hasVaultedSecrets: isVaulted(files.secrets),
+    secrets: { file: within(files.dir, "secrets.yml"), encrypted: isEncrypted(files.secrets), key: key.value },
     apps: apps.map((app, index) => typed<App>({ name: app.name, repo: app.repo, path: app.path, entry: mapping(entries[index]) ?? {} })),
     hasTerraform: files.hasTerraform,
     buildsVm: target === "home" && vars.value["vm"] !== undefined,

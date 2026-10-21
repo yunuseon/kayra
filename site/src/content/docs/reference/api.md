@@ -107,8 +107,8 @@ Follow a run's events. An `ask` event carries `prompt`, `secret` and, for a
 confirmation, `expect`. Answer through
 `POST /api/runs/<id>/answers` with `{"text":"..."}`. Answers are not recorded;
 a secret belongs in a password field and should be cleared after submission.
-Vault passwords are requested once per server per run when no password file is
-configured. Sudo passwords reach the local hosts helper through stdin.
+Secrets are never asked: SOPS opens a server's secrets.yml with the operator's
+age key (once per run). Sudo passwords reach the local hosts helper through stdin.
 
 ### Events and cancellation
 
@@ -497,7 +497,7 @@ Preview: `POST /api/operations/app.config.set/preview`. Returns a JSON plan with
 
 ### `app.secret.import`
 
-Import a declared secret from a local file into the fleet vault; never print its value.
+Import a declared secret from a local file into the server's secrets.yml; never print its value.
 
 `POST /api/operations/app.secret.import`
 

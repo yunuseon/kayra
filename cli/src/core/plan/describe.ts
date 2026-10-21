@@ -37,11 +37,11 @@ export const titleOf = (step: Step) => {
   }
 };
 
-/** What --dry-run says a step will ask for: kayra asks it when the step runs. */
+/** What --dry-run says a step will need: kayra meets it when the step runs. */
 const asks = (needs: readonly Need[] = []) =>
   needs.length === 0
     ? ""
-    : `  # asks for ${needs.map((need) => (need.kind === "vault" ? `${need.server}'s vault password` : "sudo's password, unless cached")).join(" and ")}`;
+    : `  # needs ${needs.map((need) => (need.kind === "secrets" ? `${need.server}'s secrets.yml${need.for === "opentofu" ? " (terraform, as TF_VAR_*)" : ""}` : "sudo's password, unless cached")).join(" and ")}`;
 
 /** The shell command a step runs, or undefined if it runs none. */
 export const commandOf = (step: Step) => {

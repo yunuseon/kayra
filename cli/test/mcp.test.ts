@@ -17,7 +17,7 @@ import { must, server } from "./support.ts";
 
 type Elicited = { readonly message: string; readonly answer: "accept" | "decline"; readonly typed?: string };
 
-/** A fleet of two servers (lab on multipass, prod on hetzner, vaulted with no password file), every tool a stub. */
+/** A fleet of two servers (lab on multipass, prod on hetzner), every tool a stub. */
 const fixture = async (elicit: (message: string) => Elicited = (message) => ({ message, answer: "decline" }), era: "2025" | "2026" = "2025") => {
   const dir = mkdtempSync(join(tmpdir(), "kayra-mcp-"));
   const engine = join(dir, "engine");
@@ -28,6 +28,9 @@ const fixture = async (elicit: (message: string) => Elicited = (message) => ({ m
   ["require-main.sh", "require-latest-state.sh", "home-reach.sh", "certs.sh", "app-check.sh", "verify.sh", "app-manifests.sh"].forEach((name) => { writeFileSync(join(engine, "scripts/local", name), "exit 0\n"); });
   const program = (name: string, text: string): void => { writeFileSync(join(bin, name), `#!/bin/sh\n${text}\n`, { mode: 0o700 }); };
   program("ansible-galaxy", "exit 0");
+  program("sops", "echo 'terraform: {}'");
+  program("sudo", "exit 1");
+  writeFileSync(join(engine, "scripts/local/setup-hosts.sh"), "exit 0\n");
   program("ansible-playbook", `[ ! -f "${join(dir, "fail")}" ] || { echo "TASK [broken] fatal: it broke"; exit 3; }\necho "playbook finished"`);
   program("tofu", `case "$*" in *destroy*) echo "destroyed" > "${join(dir, "destroyed")}";; *output*) echo 192.0.2.1;; *state*) echo hcloud_server.this;; esac`);
   program("ssh", `case "$*" in
@@ -35,8 +38,8 @@ const fixture = async (elicit: (message: string) => Elicited = (message) => ({ m
     *wait*) exec sleep 30 ;;
     *) echo "ran: $*" ;;
   esac`);
-  const lab = server("lab", "target: multipass\ndomain: lab.test\nvault: false\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" });
-  const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example\nvault: true");
+  const lab = server("lab", "target: multipass\ndomain: lab.test\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" });
+  const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example");
   const fleet = { root: fleetRoot(must(absolutePath(dir))), servers: [lab, prod] };
   const context = contextFor({
     kayra: kayraRoot(must(absolutePath(engine))), fleet, version: must(kayraVersion("0.0.0-test")), here: must(absolutePath(dir)),
@@ -144,11 +147,11 @@ test("a failing step is a tool error carrying its output", async (t) => {
   });
 });
 
-test("no password passes through MCP: a vaulted server without a password file stops, and says how to give one", async (t) => {
+test("no password passes through MCP: a step that needs one stops, and says how else to give it", async (t) => {
   const mcp = await fixture(); t.after(mcp.cleanup);
-  const ran = await mcp.client.callTool({ name: "setup", arguments: { server: "prod" } });
+  const ran = await mcp.client.callTool({ name: "hosts", arguments: { server: "lab" } });
   strictEqual(ran.isError, true);
-  strictEqual(mcp.text(ran).includes("vault_password_file in servers/prod/server.yml"), true);
+  strictEqual(mcp.text(ran).includes("Have sudo's cached (sudo -v) for lab, or run the command in a terminal."), true, mcp.text(ran));
   strictEqual(mcp.asked.length, 0);
 });
 

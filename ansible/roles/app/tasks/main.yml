@@ -2,7 +2,7 @@
 # =============================================================================
 # App role — the same for every app. Reads the app's app.yml and the
 # operator's values for it, servers/<server>/apps/<app>.yml (config,
-# plaintext) and <app>.secrets.yml (secrets, vault on real servers), and
+# plaintext) and app_secrets.<app> in its secrets.yml (SOPS), and
 # registers the app:
 #   {{ apps_dir }}/<app>/.env                 operator config for compose
 #   app-apply                                  secrets → app-secrets/<app>/
@@ -45,16 +45,17 @@
     file: "{{ app_root }}/app.yml"
     name: manifest
 
-# Either file may be missing: an app without config or without secrets.
-- name: Read the operator's values for this app
+# Either may be missing: an app without config or without secrets.
+- name: Read the operator's config for this app
   ansible.builtin.include_vars:
-    file: "{{ server_dir }}/apps/{{ app.name }}{{ item.suffix }}"
-    name: "{{ item.name }}"
-  when: (server_dir ~ '/apps/' ~ app.name ~ item.suffix) is file
-  loop:
-    - {name: app_config, suffix: .yml}
-    - {name: app_secrets, suffix: .secrets.yml}
-  loop_control: {label: "{{ app.name }}{{ item.suffix }}"}
+    file: "{{ server_dir }}/apps/{{ app.name }}.yml"
+    name: app_config
+  when: (server_dir ~ '/apps/' ~ app.name ~ '.yml') is file
+
+- name: Take this app's secrets from secrets.yml
+  ansible.builtin.set_fact:
+    app_secret_values: "{{ (app_secrets | default({}))[app.name] | default({}) }}"
+  no_log: true
 
 # An app's hosts are its routes' hosts; the routes themselves are read at
 # each commit, by the builder.
@@ -74,11 +75,11 @@
       {{ app.name }}: app.yml name={{ manifest.name }};
       {{ 'subdomains is gone: declare routes instead (the app contract);' if manifest.subdomains is defined else '' }}
       missing config {{ missing_config }} in servers/{{ server }}/apps/{{ app.name }}.yml,
-      missing secrets {{ missing_secrets }} in servers/{{ server }}/apps/{{ app.name }}.secrets.yml;
+      missing secrets {{ missing_secrets }} in servers/{{ server }}/secrets.yml under app_secrets.{{ app.name }};
       hosts reserved by the platform {{ reserved_subdomains }}
     quiet: true
   vars:
-    missing_secrets: "{{ manifest.secrets | default([]) | difference(app_secrets | default({}) | list) }}"
+    missing_secrets: "{{ manifest.secrets | default([]) | difference(app_secret_values | list) }}"
     missing_config: "{{ manifest.config | default([]) | difference(app_config | default({}) | list) }}"
     reserved_subdomains: "{{ app_subdomains | intersect(lookup('file', kayra_root ~ '/hosts.conf').splitlines() | reject('match', '^\\s*(#|$)') | list) }}"
 
@@ -104,7 +105,7 @@
 - name: Apply secrets
   ansible.builtin.command:
     cmd: "{{ platform_dir }}/bin/app-apply {{ app.name }}"
-    stdin: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secrets[key] }}\n{% endfor %}"
+    stdin: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secret_values[key] }}\n{% endfor %}"
   no_log: true
   become: true
   changed_when: true

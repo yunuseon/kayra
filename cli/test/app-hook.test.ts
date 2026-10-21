@@ -94,7 +94,7 @@ test("the operator's token: KAYRA_FORGE_TOKEN_<HOST> first, then tea's login fil
 });
 
 test("takesWebhooks: a platform server by default; not with webhooks: false, not on multipass", () => {
-  const prod = "kind: platform\ntarget: hetzner\ndomain: shop.example.com\nvault: true\n";
+  const prod = "kind: platform\ntarget: hetzner\ndomain: shop.example.com\n";
   strictEqual(takesWebhooks(server("prod", prod)).ok, true);
   const polling = takesWebhooks(server("prod", prod, { vars: "webhooks: false\n" }));
   assert(!polling.ok && polling.error.includes("deploy_poll"));

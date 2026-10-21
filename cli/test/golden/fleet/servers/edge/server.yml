@@ -2,4 +2,3 @@
 kind: edge
 target: hetzner
 domain: example.com
-vault: true

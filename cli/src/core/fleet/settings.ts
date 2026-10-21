@@ -187,7 +187,10 @@ export const varsSchema = (kind: ServerKind) => z.strictObject(shape(settingsFor
 /** defaults.yml: settings shared by every server, so any kind's. */
 export const defaultsSchema = z.strictObject(shape(settings.filter((each) => !each.secret)));
 
-/** secrets.yml: the known secrets typed; other keys may be helpers that vars.yml references. */
+/** apps/<app>.yml, and an app's mapping in secrets.yml's app_secrets: flat key → value. */
+export const appValuesSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
+
+/** secrets.yml's own (the host's) secrets: the known ones typed; other keys may be helpers that vars.yml references. */
 // eslint-disable-next-line functional/prefer-immutable-types -- a Zod schema: immutable once built, but a class the rule cannot see into
 export const secretsSchema = (kind: ServerKind) => z.looseObject(shape(settingsFor(kind, true)));
 
@@ -216,8 +219,7 @@ export const serverSchema = z
       .enum(serverTargets, { error: (issue) => `target must be ${serverTargets.join(", ")}, not '${String(issue.input)}'` })
       .describe("Where it runs: hetzner, multipass (a local VM) or home (a machine nothing creates)."),
     domain: domainSchema.describe("The server's domain; platform subdomains and the apps' hang off it."),
-    vault: z.boolean().default(false).describe("secrets.yml is vault-encrypted (required outside multipass)."),
-    vault_password_file: z.string().optional().describe("The vault password file; without it, Ansible asks."),
+    age_key_file: z.string().optional().describe("The age identity that opens secrets.yml (SOPS); without it, SOPS's own default (SOPS_AGE_KEY_FILE, ~/.config/sops/age/keys.txt)."),
     apps: z
       .array(appEntrySchema)
       .default([])
@@ -260,9 +262,7 @@ export const appManifestSchema = z.strictObject({
   name: appNameSchema.describe("The app's name, as in the server.yml entry."),
   compose: z.array(z.string()).describe("Compose files, relative to the app root, in order. No Traefik label, no platform network: routes say how the app is reached."),
   routes: z.array(routeSchema).optional().describe("How the app is reached: each route a host (and path) to a service's port. Read at the commit being deployed; a new host needs kayra apps."),
-  secrets: z.array(z.string()).optional().describe("Secret keys; their values come from the fleet's apps/<app>.secrets.yml."),
+  secrets: z.array(z.string()).optional().describe("Secret keys; their values come from the fleet's secrets.yml, under app_secrets.<app>."),
   config: z.array(z.string()).optional().describe("Config keys; their values come from the fleet's apps/<app>.yml."),
 });
 
-/** apps/<app>.yml and apps/<app>.secrets.yml: flat key → value. */
-export const appValuesSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));

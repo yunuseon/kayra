@@ -11,5 +11,5 @@
       "boolean"
     ]
   },
-  "title": "apps/<app>.yml and apps/<app>.secrets.yml"
+  "title": "apps/<app>.yml"
 }

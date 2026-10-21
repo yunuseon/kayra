@@ -1,6 +1,5 @@
 kind: platform
 target: hetzner
 domain: shop.example.com
-vault: true
 apps:
   - {name: shop, repo: https://github.com/acme/shop.git}

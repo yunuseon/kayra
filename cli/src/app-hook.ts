@@ -1,26 +1,20 @@
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { z } from "zod";
 import { forgeRepo } from "./lib/forge-repo.ts";
 import { ensureHook, hookApi, hookUrl, type Answer, type Http } from "./core/app-hook/hooks.ts";
 import { operatorToken, tokenVariable } from "./core/app-hook/token.ts";
 import { absolutePath, appNameSchema, fleetRoot, serverNameSchema } from "./core/fleet/brand.ts";
 import { loadFleet } from "./core/fleet/load.ts";
-import { isVaulted } from "./core/fleet/parse.ts";
 import { takesWebhooks } from "./core/recipes/app-hook.ts";
 import { err, flatMap, type Result } from "./lib/result.ts";
 import { fields } from "./lib/yaml.ts";
 
 const input = z.strictObject({ root: z.string(), server: serverNameSchema, app: appNameSchema });
 
-/** secrets.yml, opened with the password the step was given (ANSIBLE_VAULT_PASSWORD_FILE) where it is a vault. */
-const secretsOf = (dir: string): Result<Readonly<Record<string, unknown>>, string> => {
-  const file = join(dir, "secrets.yml");
-  const text = readFileSync(file, "utf8");
-  if (!isVaulted(text)) return fields(text);
-  const opened = spawnSync("ansible-vault", ["view", file], { encoding: "utf8" });
-  return opened.status === 0 ? fields(opened.stdout) : err("cannot open secrets.yml; configure vault_password_file or give the vault password");
+/** secrets.yml as kayra opened it for this step (KAYRA_SECRETS). */
+const secretsOf = (): Result<Readonly<Record<string, unknown>>, string> => {
+  const file = process.env["KAYRA_SECRETS"];
+  return file === undefined ? err("kayra opened no secrets.yml for this step") : fields(readFileSync(file, "utf8"));
 };
 
 const parsedJson = (text: string): unknown => {
@@ -51,7 +45,7 @@ const run = async (): Promise<Result<readonly string[], string>> => {
   if (repo === undefined) return err(`${app.repo} is on no forge kayra knows (GitHub, GitLab, Forgejo or Gitea): add the hook by hand, or let deploy_poll find pushes`);
   const operator = operatorToken(repo);
   if (operator === undefined) return err(`no token for ${new URL(repo.origin).host}: set ${tokenVariable(new URL(repo.origin).host)} to one with admin rights on ${repo.owner}/${repo.name}`);
-  const secrets = secretsOf(server.dir);
+  const secrets = secretsOf();
   if (!secrets.ok) return secrets;
   const platform = secrets.value["git_token"];
   const webhook = secrets.value["webhook_secret"];
@@ -60,7 +54,7 @@ const run = async (): Promise<Result<readonly string[], string>> => {
   return done.ok ? { ok: true, value: [...done.value, `  (as you, with ${operator.from})`] } : done;
 };
 
-const result = await run().catch(() => err("the hook could not be set up; check the forge's address, the tokens and the vault"));
+const result = await run().catch(() => err("the hook could not be set up; check the forge's address, the tokens and secrets.yml"));
 if (result.ok) process.stdout.write(`${result.value.join("\n")}\n`);
 else {
   process.stderr.write(`${result.error}\n`);

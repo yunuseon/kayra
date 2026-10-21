@@ -1,4 +1,3 @@
-import { within } from "../fleet/brand.ts";
 import type { Fleet, Server } from "../fleet/model.ts";
 import type { Plan, Step } from "../plan/model.ts";
 import { homeReach, onPath, type Engine } from "./steps.ts";
@@ -19,7 +18,8 @@ const tools: readonly Tool[] = [
   { program: "jq", install: "brew install jq", neededBy: everyServer },
   { program: "ansible-playbook", install: "brew install ansible", neededBy: everyServer },
   { program: "ansible-galaxy", install: "brew install ansible", neededBy: everyServer },
-  { program: "ansible-vault", install: "brew install ansible", neededBy: (server) => server.vault.kind !== "none" },
+  { program: "sops", install: "brew install sops", neededBy: (server) => server.secrets.encrypted },
+  { program: "age-plugin-se", install: "brew install age-plugin-se", neededBy: (server) => server.files.secrets.includes("recipient: age1se1") },
   { program: "tofu", install: "brew install opentofu", neededBy: (server) => server.hasTerraform },
   {
     program: "mkcert",
@@ -44,19 +44,16 @@ const toolChecks = (fleet: Fleet) =>
         ]);
   }));
 
-// ansible-vault opens whole-file vaults only; values vaulted inline are opened by setup.
-const vaultChecks = (fleet: Fleet) =>
+// The key is only looked for, never used: opening secrets.yml may ask for Touch ID.
+const keyChecks = (fleet: Fleet) =>
   Object.freeze(fleet.servers.flatMap((server) =>
-    server.vault.kind === "file" && server.hasVaultedSecrets
+    server.secrets.encrypted && server.secrets.key !== undefined
       ? Object.freeze([
           typed<Step>({
             kind: "check",
-            label: `vault password opens ${server.name}'s secrets.yml`,
-            probe: {
-              kind: "exits-zero",
-              argv: ["ansible-vault", "view", "--vault-password-file", server.vault.file, within(server.dir, "secrets.yml")],
-            },
-            hint: `the password file is ${server.vault.file}`,
+            label: `${server.name}'s age_key_file is here`,
+            probe: { kind: "exits-zero", argv: ["test", "-f", server.secrets.key] },
+            hint: `age_key_file in its server.yml is ${server.secrets.key}`,
             onFailure: "continue",
           }),
         ])
@@ -82,7 +79,7 @@ const reachChecks = (fleet: Fleet, engine: Engine) =>
 /** Is this Mac ready to run every command on every server? Each check reports; none stops the others. */
 export const doctor = (fleet: Fleet, engine: Engine) => typed<Plan>([
   ...toolChecks(fleet),
-  ...vaultChecks(fleet),
+  ...keyChecks(fleet),
   ...repoChecks(fleet),
   ...reachChecks(fleet, engine),
 ]);

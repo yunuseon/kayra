@@ -38,7 +38,7 @@ const instructions = (fleet: Fleet) =>
     "",
     "- dryRun: true on a plan's tool lists its steps and runs nothing: use it before a change.",
     "- A change to a server whose target is not multipass is approved by the operator first; down and app_purge every time, with the server's name typed.",
-    "- No password passes through here: a vaulted server needs vault_password_file in its server.yml.",
+    "- No password passes through here: SOPS opens secrets.yml with the operator's age key, which may ask for Touch ID on their Mac.",
     "- verify, plan, status and validate change nothing.",
   ].join("\n").slice(0, 4000);
 

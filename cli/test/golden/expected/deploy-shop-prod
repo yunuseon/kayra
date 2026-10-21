@@ -1,11 +1,11 @@
 {"argv":["bash","<kayra>/scripts/local/require-main.sh","shop-prod"],"env":{"FLEET_ROOT":"<fleet>"}}
-{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/platform.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","target=hetzner","-e","kayra_version=<version>"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/platform.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","target=hetzner","-e","kayra_version=<version>"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
 {"argv":["bash","<kayra>/scripts/local/require-main.sh","shop-prod"],"env":{"FLEET_ROOT":"<fleet>"}}
-{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/app.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","{\"app\": {\"name\":\"shop\",\"repo\":\"https://git.example.com/shop.git\",\"ref\":\"main\",\"path\":\".\"}}"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{"ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
-{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/apps-prune.yml","-e","{\"keep\": [\"shop\"]}"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg","ANSIBLE_VAULT_PASSWORD_FILE":"~/.vault_pass"}}
+{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/app.yml","-e","server=shop-prod","-e","server_dir=<fleet>/servers/shop-prod","-e","domain=shop.example.com","-e","{\"app\": {\"name\":\"shop\",\"repo\":\"https://git.example.com/shop.git\",\"ref\":\"main\",\"path\":\".\"}}"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
+{"argv":["ansible-galaxy","collection","install","-r","<kayra>/ansible/requirements.yml"],"env":{}}
+{"argv":["ansible-playbook","-i","<fleet>/servers/shop-prod/inventory.ini","<kayra>/ansible/playbooks/apps-prune.yml","-e","{\"keep\": [\"shop\"]}"],"env":{"ANSIBLE_CONFIG":"<kayra>/ansible/ansible.cfg"}}
 {"argv":["bash","<kayra>/scripts/local/verify.sh","shop-prod"],"env":{"FLEET_ROOT":"<fleet>"}}
 --- stdout
 --- exit 0

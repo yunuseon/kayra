@@ -6,7 +6,7 @@ import { fleet, server } from "./support.ts";
 
 const servers = fleet(
   server("shop-test", "target: multipass\ndomain: shop.test\n"),
-  server("shop-prod", "target: hetzner\ndomain: shop.example\nvault: true"),
+  server("shop-prod", "target: hetzner\ndomain: shop.example"),
 );
 
 type Ran = { readonly value: unknown; readonly out: string; readonly err: string; readonly exit: number | undefined };

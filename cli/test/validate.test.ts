@@ -4,7 +4,8 @@ import { findings, type Facts, type Finding } from "../src/core/validation/findi
 import { summary, validateView } from "../src/clients/cli/validate.ts";
 import { validateJson } from "../src/clients/wire/validate.ts";
 import { flat } from "../src/core/text/spans.ts";
-import { server } from "./support.ts";
+import { gather } from "../src/core/validation/facts.ts";
+import { root, server } from "./support.ts";
 
 const shop = server("shop", "target: multipass\ndomain: shop.test\napps: [{name: shop, repo: https://x.test/s.git}]", {
   secrets: "admin: admin\n",
@@ -16,9 +17,11 @@ const facts = (overrides: Partial<Facts>): Facts => ({
   vars: {},
   varsText: "",
   secrets: { kind: "readable", values: {} },
+  recipients: undefined,
   stackDirs: [],
   appConfig: { shop: { FLAG: "on" } },
   appSecrets: { shop: { kind: "readable", values: { PASSWORD: "x" } } },
+  terraform: {},
   manifests: { shop: { name: "shop", compose: ["compose.yml"], routes: [{ host: "www", service: "web", port: 3000 }], secrets: ["PASSWORD"], config: ["FLAG"] } },
   ...overrides,
 });
@@ -41,8 +44,8 @@ test("a secret is a known one, or a helper vars.yml uses", () => {
     "✗ secrets.yml: 'gti_token' is no secret of a platform server, and vars.yml does not use it → did you mean 'git_token'?",
     "✗ secrets.yml: 'stray' is no secret of a platform server, and vars.yml does not use it → remove it, or use it in vars.yml",
   ]);
-  deepStrictEqual(problems({ secrets: { kind: "locked", reason: "vaulted, and server.yml names no vault_password_file", hint: "set it" } }), [
-    "· secrets.yml not checked: vaulted, and server.yml names no vault_password_file → set it",
+  deepStrictEqual(problems({ secrets: { kind: "locked", reason: "is not valid YAML", hint: "fix it" } }), [
+    "· secrets.yml not checked: is not valid YAML → fix it",
   ]);
 });
 
@@ -67,10 +70,10 @@ test("edge routes name subdomains and an upstream host:port", () => {
   );
 });
 
-test("an app's values match what its app.yml asks for; a missing secrets file holds none", () => {
+test("an app's values match what its app.yml asks for; an app without app_secrets has none", () => {
   deepStrictEqual(said({ appConfig: { shop: {} }, appSecrets: {} }), [
     "✗ apps/shop.yml: no value for FLAG, which app.yml asks for → add FLAG: … to servers/shop/apps/shop.yml",
-    "✗ apps/shop.secrets.yml: no value for PASSWORD, which app.yml asks for → add it to servers/shop/apps/shop.secrets.yml",
+    "✗ secrets.yml: no app_secrets.shop.PASSWORD, which app.yml asks for → kayra app secret generate shop shop PASSWORD (or app secret import)",
     "✓ secrets.yml: 0 secrets, each a setting or used by vars.yml",
   ]);
   deepStrictEqual(problems({ manifests: {} }), ["· app shop not checked: not cloned yet → kayra apps shop clones it"]);
@@ -128,4 +131,38 @@ test("validate --json: the documented shape", () => {
       },
     ],
   });
+});
+
+test("secrets.yml is encrypted to exactly the recipients .sops.yaml names for it", () => {
+  deepStrictEqual(problems({ recipients: { wanted: ["age1a", "age1b"], actual: ["age1a", "age1b"] } }), []);
+  deepStrictEqual(problems({ recipients: { wanted: ["age1a", "age1b"], actual: ["age1a", "age1old"] } }), [
+    "✗ secrets.yml is not encrypted to age1b, which .sops.yaml names → sops updatekeys servers/shop/secrets.yml",
+    "✗ secrets.yml is encrypted to age1old, which .sops.yaml no longer names → sops updatekeys servers/shop/secrets.yml, then rotate what that key could read",
+  ]);
+  deepStrictEqual(problems({ recipients: { wanted: undefined, actual: ["age1a"] } }), [
+    "✗ secrets.yml: no creation rule in .sops.yaml matches it → add a rule whose path_regex matches it, with its age recipients",
+  ]);
+});
+
+test("validate reads secrets.yml without its key: every key, each value a stand-in of its type", async () => {
+  const encrypted = [
+    "git_token: ENC[AES256_GCM,data:AA==,iv:AA==,tag:AA==,type:str]",
+    "app_secrets:",
+    "    shop:",
+    "        PASSWORD: ENC[AES256_GCM,data:AA==,iv:AA==,tag:AA==,type:str]",
+    "terraform:",
+    "    hcloud_token: ENC[AES256_GCM,data:AA==,iv:AA==,tag:AA==,type:str]",
+    "    servers: ENC[AES256_GCM,data:AA==,iv:AA==,tag:AA==,type:int]",
+    "sops:",
+    "    age:",
+    "        - recipient: age1b",
+    "        - recipient: age1a",
+    "",
+  ].join("\n");
+  const prod = server("shop", "target: hetzner\ndomain: shop.test\napps: [{name: shop, repo: https://x.test/s.git}]", { secrets: encrypted });
+  const gathered = await gather(root, prod);
+  deepStrictEqual(gathered.secrets, { kind: "readable", values: { git_token: "(encrypted)" } });
+  deepStrictEqual(gathered.appSecrets, { shop: { kind: "readable", values: { PASSWORD: "(encrypted)" } } });
+  deepStrictEqual(gathered.terraform, { hcloud_token: "(encrypted)", servers: 0 });
+  deepStrictEqual(gathered.recipients, { wanted: undefined, actual: ["age1a", "age1b"] });
 });

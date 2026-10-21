@@ -36,7 +36,7 @@ const check = async (step: Extract<Step, { kind: "check" }>, plumbing: Plumbing)
 };
 
 const runStep = async (step: Extract<Step, { kind: "run" | "session" }>, io: Io, met: Met) => {
-  const argv = await resolve(step.argv, io);
+  const argv = await resolve(step.argv, io, met.env);
   if (!argv.ok) return typed<Outcome>({ failed: true, stopped: true, why: "a query failed", out: [], err: [detail(argv.error)] });
   const { stdout } = step;
   const talks = step.kind === "session" && io.output !== undefined;
@@ -98,11 +98,16 @@ export const interpret = async (
         if (so.stop !== undefined) return so;
         if (interrupted() || isStopped(io.signal)) return { ...so, stop: { index, step, why: "interrupted" } };
         // What a step needs is asked before its frame opens: a prompt, then the step.
-        const met = (step.kind === "run" || step.kind === "session") && step.needs !== undefined ? await meet(step.needs, so.asked, io, made) : { met: { env: {} }, asked: so.asked };
-        if (met === undefined) {
+        const meeting = (step.kind === "run" || step.kind === "session") && step.needs !== undefined ? await meet(step.needs, so.asked, io, made) : { kind: "met", meeting: { met: { env: {} }, given: so.asked } } as const;
+        if (meeting.kind === "declined") {
           io.err(["    ", muted("Nothing given: stopped before it ran.")]);
           return { ...so, stop: { index, step, why: isStopped(io.signal) ? "interrupted" : "declined" } };
         }
+        if (meeting.kind === "failed") {
+          io.err(["    ", muted(meeting.why)]);
+          return { failures: so.failures + 1, asked: so.asked, stop: { index, step, why: isStopped(io.signal) ? "interrupted" : "failed" } };
+        }
+        const met = { met: meeting.meeting.met, asked: meeting.meeting.given };
         const done = await progress.step(step, position(plan, index), () => perform(step, io, met.met));
         // Ctrl-C reached the step's program too: how it ended says nothing about the server.
         if (interrupted() || isStopped(io.signal)) return { failures: so.failures, asked: met.asked, stop: { index, step, why: "interrupted" } };

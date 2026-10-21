@@ -2,23 +2,22 @@ import type { AppName } from "../fleet/brand.ts";
 import type { Server } from "../fleet/model.ts";
 import { partOf, type Plan, run, type RunStep } from "../plan/model.ts";
 import { err, map, ok } from "../../lib/result.ts";
-import { ansibleEnv, ansiblePath, collections, fromMain, inventory, vault, vaulted, type Engine } from "./steps.ts";
+import { ansibleEnv, ansiblePath, collections, fromMain, inventory, withSecrets, type Engine } from "./steps.ts";
 import { sshTo } from "./ssh.ts";
 import { typed } from "../../lib/typed.ts";
 
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server) => {
-  const { env } = vault(server);
   const playbook = (title: string, name: string, ...extra: readonly string[]) =>
-    vaulted(run(title, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, {})), server);
+    run(title, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, {}));
   return ok<Plan>(
     partOf("apps", [
       fromMain(engine, server),
       ...(server.kind === "platform"
         ? [
             ...server.apps.flatMap((app) => Object.freeze([
-              collections(engine, env),
-              playbook(
+              collections(engine, {}),
+              withSecrets(playbook(
                 `App ${app.name}`,
                 "app.yml",
                 "-e",
@@ -29,9 +28,9 @@ export const apps = (engine: Engine, server: Server) => {
                 `domain=${server.domain}`,
                 "-e",
                 `{"app": ${JSON.stringify(app.entry)}}`,
-              ),
+              ), server),
             ])),
-            collections(engine, env),
+            collections(engine, {}),
             playbook(
               "Remove apps not in server.yml",
               "apps-prune.yml",

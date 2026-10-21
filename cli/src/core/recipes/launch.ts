@@ -6,7 +6,7 @@ import { err, flatMap, map, ok, type Result } from "../../lib/result.ts";
 import { apps, deployer } from "./apps.ts";
 import { appHook, takesWebhooks } from "./app-hook.ts";
 import { forgeRepo } from "../../lib/forge-repo.ts";
-import { vaulted, type Engine } from "./steps.ts";
+import type { Engine } from "./steps.ts";
 import { typed } from "../../lib/typed.ts";
 
 export type Launch = {
@@ -49,14 +49,12 @@ export const launch = (engine: Engine, root: FleetRoot, server: Server, wanted: 
     const app = typed<App>({ name: parsed.data.name, repo: parsed.data.repo, path: parsed.data.path, entry: raw });
     const registered = server.apps.some((each) => each.name === app.name);
     const withApp = registered ? server : { ...server, apps: [...server.apps, app] };
-    const prepare = vaulted(
-      run(`Register ${app.name} and check its values`, [
-        process.execPath,
-        within(engine.kayra, "bin", "kayra-app-launch.js"),
-        JSON.stringify({ root, server: server.name, entry: raw, ...(wanted.dir === undefined ? {} : { dir: wanted.dir }) }),
-      ]),
-      server,
-    );
+    // Which secrets are set shows without the key: SOPS leaves secrets.yml's keys readable.
+    const prepare = run(`Register ${app.name} and check its values`, [
+      process.execPath,
+      within(engine.kayra, "bin", "kayra-app-launch.js"),
+      JSON.stringify({ root, server: server.name, entry: raw, ...(wanted.dir === undefined ? {} : { dir: wanted.dir }) }),
+    ]);
     const hook = takesWebhooks(server).ok && forgeRepo(app.repo) !== undefined ? appHook(engine, root, withApp, app.name) : ok<Plan>([]);
     return flatMap(apps(engine, withApp), (applied) =>
       flatMap(deployer(server, { kind: "deploy", app: app.name, more: undefined }), (deploy) =>

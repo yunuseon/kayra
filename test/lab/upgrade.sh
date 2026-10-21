@@ -116,8 +116,14 @@ cat > "${fleet}/servers/defaults.yml" <<'EOF'
 ---
 acme_email: lab@kayra.test
 EOF
+# Before 0.21 a fleet's secrets were Ansible Vault (vault: in server.yml, an
+# app's in apps/<app>.secrets.yml); since, secrets.yml is SOPS, opened with an
+# age key, an app's under app_secrets.
+sops_fleet=false
+[ "$(printf '%s\n0.21.0\n' "$from" | sort -V | head -1)" = 0.21.0 ] && sops_fleet=true
 descriptor() {
-    printf -- '---\nkind: platform\ntarget: multipass\ndomain: %s\nvault: false\n' "$domain"
+    printf -- '---\nkind: platform\ntarget: multipass\ndomain: %s\n' "$domain"
+    if [ "$sops_fleet" = true ]; then printf 'age_key_file: %s\n' "${work}/age-key.txt"; else printf 'vault: false\n'; fi
     [ "$1" = without-app ] || # owner/name, as on a forge: the builder knows a repo's forge, and its webhooks, by that shape.
     printf 'apps:\n  - {name: sample, repo: "http://%s:%s/lab/sample.git", ref: main, path: .}\n' "$host_ip" "$port"
 }
@@ -142,6 +148,16 @@ authelia_users:
 EOF
 printf 'MODE: lab\n' > "${fleet}/servers/${server}/apps/sample.yml"
 printf 'GREETING: hello\n' > "${fleet}/servers/${server}/apps/sample.secrets.yml"
+# What an operator does once on the way to 0.21 (Upgrading to 0.21): an age
+# key, .sops.yaml naming it, the app's secrets into secrets.yml, encrypted.
+to_sops() {
+    age-keygen -o "${work}/age-key.txt" 2> /dev/null
+    printf 'creation_rules:\n  - path_regex: ^servers/[^/]+/secrets\\.yml$\n    age: %s\n' "$(age-keygen -y "${work}/age-key.txt")" > "${fleet}/.sops.yaml"
+    yq -i ".app_secrets.sample = load(\"${fleet}/servers/${server}/apps/sample.secrets.yml\")" "${fleet}/servers/${server}/secrets.yml"
+    rm "${fleet}/servers/${server}/apps/sample.secrets.yml"
+    (cd "$fleet" && sops encrypt --in-place "servers/${server}/secrets.yml")
+}
+[ "$sops_fleet" = false ] || to_sops
 cat > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
 terraform {
   required_providers {
@@ -230,6 +246,12 @@ upgrade() {
     grep -E '^(    )?(✓|✗|!)' <<< "$upgraded" || true
     [ "$ok" = true ] || die "kayra $1 after the upgrade"
 }
+if [ "$sops_fleet" = false ]; then
+    sops_fleet=true
+    to_sops
+    descriptor "$([ "$app_at_release" = true ] && echo with-app || echo without-app)" > "servers/${server}/server.yml"
+    echo "✓ the fleet's secrets moved to SOPS, as Upgrading to 0.21 says"
+fi
 [ "$app_at_release" = true ] || descriptor with-app > "servers/${server}/server.yml"
 kayra_cmd plan "$server" >> "$log" 2>&1 || die "kayra plan after the upgrade, before its deploy (check mode)"
 echo "✓ kayra plan: the upgraded playbook in check mode"

@@ -72,7 +72,7 @@ const run = async (): Promise<Result<readonly string[], string>> => {
   return ok([...lines, `✓ every value ${app} declares is set (${String(values.value.config.length)} config, ${String(values.value.secrets.length)} secret)`]);
 };
 
-const result = await run().catch(() => err("the launch could not prepare the app; check file access and vault configuration"));
+const result = await run().catch(() => err("the launch could not prepare the app; check file access and secrets.yml"));
 if (result.ok) process.stdout.write(`${result.value.join("\n")}\n`);
 else {
   process.stderr.write(`${result.error}\n`);

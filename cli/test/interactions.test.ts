@@ -1,97 +1,125 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { serverName } from "../src/core/fleet/brand.ts";
+import { absolutePath, ageKeyFile, serverName } from "../src/core/fleet/brand.ts";
 import { interpret } from "../src/core/interpreter/loop.ts";
-import type { Io, Question } from "../src/core/interpreter/io.ts";
+import type { Io } from "../src/core/interpreter/io.ts";
 import { render } from "../src/core/plan/describe.ts";
 import { run } from "../src/core/plan/model.ts";
 import { reporting, type Event } from "../src/core/interpreter/events.ts";
-import { must } from "./support.ts";
+import { must, sealed, testKey } from "./support.ts";
 
 const server = must(serverName("box"));
 const quiet = { out: () => undefined, err: () => undefined, ask: () => Promise.resolve("") };
 const scratch = () => mkdtempSync(join(tmpdir(), "kayra-interactions-"));
 const node = (script: string) => run("test program", [process.execPath, "-e", script]);
 
-test("vault passwords are asked once per server and run, absent from plans and records, and their helper is removed", async () => {
-  // eslint-disable-next-line functional/prefer-immutable-types -- capturing interpreter output and questions
-  const seen: { questions: Question[]; output: string[]; events: Event[] } = { questions: [], output: [], events: [] };
-  const secret = "a test password ' $ with spaces";
-  const step = {
-    ...node(`const fs = require('node:fs'); const cp = require('node:child_process');
-      const helper = process.env.ANSIBLE_VAULT_PASSWORD_FILE;
-      const password = cp.execFileSync(helper, {encoding:'utf8'}).trimEnd();
-      if (require("node:crypto").createHash("sha256").update(password).digest("hex") !== ${JSON.stringify(createHash("sha256").update(secret).digest("hex"))}) process.exit(1);
-      process.stdout.write(JSON.stringify({helper, mode:fs.statSync(helper).mode & 0o777, dirMode:fs.statSync(require('node:path').dirname(helper)).mode & 0o777}));`),
-    needs: [{ kind: "vault", server }] as const,
-  };
-  const passed = await interpret([step, step, node("if (process.env.KAYRA_VAULT_PASSWORD) process.exit(1)")], {
-    ...quiet,
-    ask: (question) => {
-      // eslint-disable-next-line functional/immutable-data -- capturing
-      seen.questions.push(question);
-      return Promise.resolve(secret);
-    },
-    // eslint-disable-next-line functional/immutable-data -- capturing
-    output: (chunk) => { seen.output.push(chunk); },
-  }, reporting((event) => {
-    // eslint-disable-next-line functional/immutable-data -- capturing
-    seen.events.push(event);
-  }, { command: "test", about: [] }, (value) => value));
-  strictEqual(passed, true);
-  deepStrictEqual(seen.questions.map((question) => question.kind), ["secret"]);
-  const data: unknown = JSON.parse(seen.output[0] ?? "");
-  if (typeof data !== "object" || data === null || !("helper" in data) || typeof data.helper !== "string") throw new Error("no helper path");
-  strictEqual(existsSync(data.helper), false);
-  strictEqual("mode" in data && data.mode, 0o700);
-  strictEqual("dirMode" in data && data.dirMode, 0o700);
-  strictEqual(JSON.stringify(seen.events).includes(secret), false);
-  strictEqual(render([step]).join("\n").includes(secret), false);
-});
+const secretsNeed = (file: string, use: "ansible" | "opentofu" = "ansible", key = testKey) =>
+  ({ kind: "secrets", server, file: must(absolutePath(file)), key, encrypted: true, for: use }) as const;
 
-test("a real Ansible vault is opened through the environment-backed password helper", () => {
+test("secrets.yml is opened once per server and run, into a private file removed when the run ends", async () => {
   const dir = scratch();
   try {
-    const helper = join(dir, "test-password");
-    const vault = join(dir, "vault.yml");
-    writeFileSync(helper, '#!/bin/sh\nprintf "%s\\n" "$TEST_VAULT_PASSWORD"\n', { mode: 0o700 });
-    writeFileSync(vault, "answer: opened\n");
-    const env = { ...process.env, ANSIBLE_LOCAL_TEMP: join(dir, "ansible"), TEST_VAULT_PASSWORD: "test-vault-password" };
-    execFileSync("ansible-vault", ["encrypt", "--vault-password-file", helper, vault], { env, stdio: "pipe" });
-    // The fixture password only creates the test vault; the interpreter must supply its own helper.
-    return interpret([{ ...run("open vault", ["ansible-vault", "view", vault], { ANSIBLE_LOCAL_TEMP: join(dir, "ansible") }), needs: [{ kind: "vault", server }] }], {
+    const file = sealed(join(dir, "secrets.yml"), "answer: opened\nterraform: {hcloud_token: t0ken}\n");
+    // eslint-disable-next-line functional/prefer-immutable-types -- capturing output
+    const seen: { output: string[]; events: Event[] } = { output: [], events: [] };
+    const step = {
+      ...node(`const fs = require('node:fs'); const file = process.env.KAYRA_SECRETS;
+        process.stdout.write(JSON.stringify({file, text: fs.readFileSync(file, 'utf8'), mode: fs.statSync(file).mode & 0o777, dirMode: fs.statSync(require('node:path').dirname(file)).mode & 0o777}) + '\\n');`),
+      needs: [secretsNeed(file)],
+    };
+    const passed = await interpret([step, step], {
       ...quiet,
-      ask: () => Promise.resolve("test-vault-password"),
-      output: (chunk) => { strictEqual(chunk, "answer: opened\n"); },
-    }).then((passed) => { strictEqual(passed, true); }).finally(() => { rmSync(dir, { recursive: true, force: true }); });
-  } catch (error) {
-    rmSync(dir, { recursive: true, force: true });
-    throw error;
-  }
-});
-
-test("declining a secret does not start its step", async () => {
-  const dir = scratch();
-  try {
-    const marker = join(dir, "ran");
-    const step = { ...node(`require('node:fs').writeFileSync(${JSON.stringify(marker)}, '')`), needs: [{ kind: "vault", server }] as const };
-    await interpret([step], quiet);
-    strictEqual(existsSync(marker), false);
+      // eslint-disable-next-line functional/immutable-data -- capturing
+      output: (chunk) => { seen.output.push(chunk); },
+    }, reporting((event) => {
+      // eslint-disable-next-line functional/immutable-data -- capturing
+      seen.events.push(event);
+    }, { command: "test", about: [] }, (value) => value));
+    strictEqual(passed, true);
+    const [first, second] = seen.output.map((line): unknown => JSON.parse(line));
+    deepStrictEqual(first, second);
+    if (typeof first !== "object" || first === null || !("file" in first) || typeof first.file !== "string") throw new Error("no secrets file");
+    strictEqual("text" in first && typeof first.text === "string" && first.text.includes("answer: opened"), true);
+    strictEqual("mode" in first && first.mode, 0o600);
+    strictEqual("dirMode" in first && first.dirMode, 0o700);
+    strictEqual(existsSync(first.file), false);
+    strictEqual(JSON.stringify(seen.events).includes("t0ken"), false);
+    strictEqual(render([step]).join("\n").includes("t0ken"), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
+test("OpenTofu gets secrets.yml's terraform mapping as TF_VAR_*", async () => {
+  const dir = scratch();
+  try {
+    const file = sealed(join(dir, "secrets.yml"), "host_only: x\nterraform: {hcloud_token: t0ken, state_passphrase: long enough}\n");
+    const step = {
+      ...node("if (process.env.TF_VAR_hcloud_token !== 't0ken' || process.env.TF_VAR_state_passphrase !== 'long enough' || process.env.TF_VAR_host_only || process.env.KAYRA_SECRETS) process.exit(1)"),
+      needs: [secretsNeed(file, "opentofu")],
+    };
+    strictEqual(await interpret([step], quiet), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a secrets.yml its key cannot open fails before its step starts", async () => {
+  const dir = scratch();
+  try {
+    const marker = join(dir, "ran");
+    const other = join(dir, "other-key.txt");
+    execFileSync("age-keygen", ["-o", other], { stdio: "pipe" });
+    const file = sealed(join(dir, "secrets.yml"), "answer: opened\n");
+    // eslint-disable-next-line functional/prefer-immutable-types -- capturing what kayra says
+    const said: string[] = [];
+    const step = { ...node(`require('node:fs').writeFileSync(${JSON.stringify(marker)}, '')`), needs: [secretsNeed(file, "ansible", ageKeyFile(must(absolutePath(other))))] };
+    // eslint-disable-next-line functional/immutable-data -- capturing
+    strictEqual(await interpret([step], { ...quiet, err: (text) => { said.push(JSON.stringify(text)); } }), false);
+    strictEqual(existsSync(marker), false);
+    strictEqual(said.some((line) => line.includes("cannot open")), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A sudo that has no password cached, for the length of a test. */
+const uncachedSudo = (dir: string) => {
+  const path = process.env["PATH"];
+  writeFileSync(join(dir, "sudo"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  // eslint-disable-next-line functional/immutable-data -- the stub shadows sudo only for this test
+  process.env["PATH"] = `${dir}:${path ?? ""}`;
+  return () => {
+    // eslint-disable-next-line functional/immutable-data -- restore the operator's environment
+    if (path === undefined) delete process.env["PATH"]; else process.env["PATH"] = path;
+  };
+};
+
+test("declining a password does not start its step", async () => {
+  const dir = scratch();
+  const restore = uncachedSudo(dir);
+  try {
+    const marker = join(dir, "ran");
+    const step = { ...node(`require('node:fs').writeFileSync(${JSON.stringify(marker)}, '')`), needs: [{ kind: "sudo" }] as const };
+    await interpret([step], quiet);
+    strictEqual(existsSync(marker), false);
+  } finally {
+    restore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("cancelling a question ends the run and ignores a late answer", async () => {
+  const dir = scratch();
+  const restore = uncachedSudo(dir);
   const stop = new AbortController();
   // eslint-disable-next-line functional/prefer-immutable-types -- the pending answer and collected progress
   const pending: { answer?: (text: string) => void; events: Event[] } = { events: [] };
-  const done = interpret([{ ...run("never", ["false"]), needs: [{ kind: "vault", server }] }], {
+  const done = interpret([{ ...run("never", ["false"]), needs: [{ kind: "sudo" }] }], {
     ...quiet,
     signal: stop.signal,
     ask: () => new Promise((resolve) => {
@@ -108,6 +136,8 @@ test("cancelling a question ends the run and ignores a late answer", async () =>
   const ended = pending.events.at(-1);
   strictEqual(ended?.kind === "ended" && ended.stop?.why, "interrupted");
   strictEqual(pending.events.some((event) => event.kind === "started"), false);
+  restore();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("sudo readiness is checked without stdin; an uncached password is sent only on the step's stdin", async () => {
@@ -118,7 +148,7 @@ test("sudo readiness is checked without stdin; an uncached password is sent only
     // eslint-disable-next-line functional/immutable-data -- the stub shadows sudo only for this test
     process.env["PATH"] = `${dir}:${path ?? ""}`;
     const io: Io = { ...quiet, ask: () => Promise.resolve("test-sudo-password"), output: () => undefined };
-    strictEqual(await interpret([{ ...node(`let text=''; process.stdin.on('data', chunk => text+=chunk); process.stdin.on('end', () => {if(text !== 'test-sudo-password\\n' || process.env.KAYRA_SUDO_STDIN !== '1' || process.env.KAYRA_VAULT_PASSWORD) process.exit(1)});`), needs: [{ kind: "sudo" }] }], io), true);
+    strictEqual(await interpret([{ ...node(`let text=''; process.stdin.on('data', chunk => text+=chunk); process.stdin.on('end', () => {if(text !== 'test-sudo-password\\n' || process.env.KAYRA_SUDO_STDIN !== '1') process.exit(1)});`), needs: [{ kind: "sudo" }] }], io), true);
     writeFileSync(join(dir, "sudo"), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
     strictEqual(await interpret([{ ...run("cached", ["true"]), needs: [{ kind: "sudo" }] }], {
       ...io,

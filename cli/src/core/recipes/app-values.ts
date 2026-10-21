@@ -4,7 +4,7 @@ import type { Edit } from "../app-values/model.ts";
 import type { Server } from "../fleet/model.ts";
 import { within, type AbsolutePath, type AppName } from "../fleet/brand.ts";
 import { run, type Plan } from "../plan/model.ts";
-import { vaulted, type Engine } from "./steps.ts";
+import type { Engine } from "./steps.ts";
 import { err, ok } from "../../lib/result.ts";
 
 export const appValues = (engine: Engine, server: Server, app: AppName, edit: Edit, here: AbsolutePath, read: (path: AbsolutePath) => string | undefined, dir?: AbsolutePath) => {
@@ -17,5 +17,5 @@ export const appValues = (engine: Engine, server: Server, app: AppName, edit: Ed
   const step = run(`Prepare ${app}'s ${edit.kind === "config" ? "configuration" : "secret"} ${edit.key} in the fleet`, [
     process.execPath, within(engine.kayra, "bin", "kayra-app-values.js"), JSON.stringify(input),
   ]);
-  return ok<Plan>([edit.kind === "config" ? step : vaulted(step, server)]);
+  return ok<Plan>([step]);
 };

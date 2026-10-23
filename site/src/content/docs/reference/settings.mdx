@@ -51,6 +51,7 @@ the first line of a platform server's `vars.yml`:
 |---|---|---|
 | `notifier_ntfy_token` | platform, edge | With notifier kind ntfy: the access token alerts are published with. |
 | `git_token` | platform | Token the builder clones app repos with and the deployer posts commit statuses with. |
+| `health_token` | platform | Bearer token a monitor reads deploy.&lt;domain>/health with: the platform's and every app's containers, the disk and memory. Unset, there is no such page. |
 | `webhook_secret` | platform | HMAC secret the apps' push webhooks (deploy.&lt;domain>/hook/&lt;app>) are signed with. |
 | `renovate_token` | platform | Token the Renovate job opens PRs with. |
 | `renovate_github_com_token` | platform | Public-read GitHub token for Renovate's lookups off GitHub. |

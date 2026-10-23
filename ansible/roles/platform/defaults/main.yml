@@ -27,6 +27,8 @@ acme_dns_token: ""
 git_token: ""
 # The secret forges sign webhooks with (deploy.<domain>/hook/<app>).
 webhook_secret: ""
+# What a monitor shows to read deploy.<domain>/health; empty, there is no such page.
+health_token: ""
 # Where the deployer raises alerts: {} for nowhere, or {kind: ntfy, url: …,
 # topic: …} with notifier_ntfy_token in secrets.yml.
 notifier: {}

@@ -254,6 +254,7 @@
   loop:
     - {name: GIT_TOKEN, value: "{{ git_token }}"}
     - {name: RENOVATE_TOKEN, value: "{{ renovate_token }}"}
+    - {name: HEALTH_TOKEN, value: "{{ health_token }}"}
   loop_control:
     label: "{{ item.name }}"
   no_log: true

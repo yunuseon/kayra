@@ -19,6 +19,7 @@ import { spawnLines } from "./process.ts";
 import { appendLog, meta, owners, prune, runsOf, writeMeta } from "./runs/store.ts";
 import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
+import { assess, gather } from "./health.ts";
 
 /**
  * The deployer: the half that holds the docker socket and the app secrets.
@@ -26,7 +27,8 @@ import { typed } from "../lib/typed.ts";
  * admits and starts them, records releases, posts commit statuses, and runs
  * the platform's scheduled jobs (registry GC, Renovate, the hourly poll).
  *
- *   :8090  platform-internal: POST /push/<app> (the builder, after a webhook)
+ *   :8090  platform-internal: POST /push/<app> (the builder, after a webhook),
+ *          GET /health (the builder, for deploy.<domain>/health)
  *   :8091  inside the container only: POST /deploy, POST /job (kayra app …, kayra job …)
  */
 
@@ -227,7 +229,20 @@ const accept = (s: Settings, response: ServerResponse, request: Request) => {
 };
 
 /** POST /push/<app>, from the builder once a webhook proved itself: a deploy of the app's own ref. */
-const push = (s: Settings, request: IncomingMessage, response: ServerResponse) => {
+const health = async (s: Settings, response: ServerResponse) => {
+  const apps = registeredApps(s).map((app) => {
+    const dir = join(s.platformDir, "releases", app.name);
+    return Object.freeze({ name: app.name, released: existsSync(dir) && readdirSync(dir).length > 0 });
+  });
+  const assessed = assess(await gather(apps, runsDir(s)));
+  send(response, assessed.healthy ? 200 : 503, JSON.stringify(assessed), "application/json");
+};
+
+const push = async (s: Settings, request: IncomingMessage, response: ServerResponse) => {
+  if (request.method === "GET" && new URL(request.url ?? "/", "http://deployer").pathname === "/health") {
+    await health(s, response);
+    return;
+  }
   const name = /^\/push\/([^/]+)$/.exec(new URL(request.url ?? "/", "http://deployer").pathname)?.[1];
   const app = name === undefined || !appName(name).ok ? undefined : registered(s.platformDir, name);
   if (request.method !== "POST" || app === undefined) {
@@ -275,9 +290,9 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
 export const serveDeployer = (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
   abandon(s);
-  createServer(handle((request, response) => { push(s, request, response); })).listen(8090);
+  createServer(handle((request, response) => push(s, request, response))).listen(8090);
   createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
   schedule(s);
   setTimeout(() => { void restore(s); }, restoreAfter);
-  console.log(`deployer: :8090 pushes, 127.0.0.1:8091 control; renovate ${s.renovate === undefined ? "off" : "on"}`);
+  console.log(`deployer: :8090 pushes and health, 127.0.0.1:8091 control; renovate ${s.renovate === undefined ? "off" : "on"}`);
 };

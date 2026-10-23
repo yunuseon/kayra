@@ -3,8 +3,9 @@
 # Edge playbook — a server that exposes services from a private network (the
 # home NAS behind a Fritzbox) to the internet: a WireGuard tunnel to the LAN
 # and Caddy terminating TLS in front of it, plus the outside check on that
-# network's backups. No platform, no apps. Its firewall is Hetzner's
-# (servers/<server>/terraform/); nothing on the host filters on top.
+# network's backups and, with ntfy set, the fleet's ntfy server. No platform,
+# no apps. Its firewall is Hetzner's (servers/<server>/terraform/); nothing on
+# the host filters on top.
 #
 # Usage: kayra setup <server>  (for servers with kind: edge)
 # =============================================================================
@@ -23,6 +24,8 @@
     - docker
     - wireguard
     - edge-proxy
+    - role: ntfy
+      when: ntfy is defined
     - backup-check
 
   # ufw predates the repo on adopted servers: a second, drifting copy of the

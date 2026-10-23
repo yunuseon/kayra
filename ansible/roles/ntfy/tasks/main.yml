@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# ntfy role — an ntfy server for the fleet's alerts, behind the edge's Caddy:
+# its users, their access and their tokens as code (ntfy reads them at
+# start), everything else denied. Caddy reaches it as ntfy:80 on the edge
+# proxy's network, through an edge_routes entry like any other upstream.
+# =============================================================================
+
+- name: Create ntfy directories
+  ansible.builtin.file:
+    path: "/opt/ntfy/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: ["", etc, cache, lib]
+
+- name: Copy compose file
+  ansible.builtin.copy:
+    src: docker-compose.yml
+    dest: /opt/ntfy/docker-compose.yml
+    mode: "0644"
+  notify: Restart ntfy
+
+# Into etc/, mounted as a directory, for the same reason as the Caddyfile.
+- name: Render ntfy's server.yml
+  ansible.builtin.template:
+    src: server.yml.j2
+    dest: /opt/ntfy/etc/server.yml
+    mode: "0600"
+  diff: false
+  notify: Restart ntfy
+
+- name: Start ntfy
+  community.docker.docker_compose_v2:
+    project_src: /opt/ntfy
+    wait: true

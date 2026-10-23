@@ -96,6 +96,14 @@ export const appSubdomains = (engine: Engine, server: Server) => typed<Substitut
   env: fleetEnv(engine),
 });
 
+/** What the server's monitor checks (scripts/local/monitor-endpoints.sh), one JSON argument for ansible-playbook -e. */
+export const monitorEndpoints = (engine: Engine, server: Server) => typed<Substitution>({
+  kind: "substitution",
+  argv: ["bash", script(engine, "monitor-endpoints.sh"), server.name],
+  words: "one",
+  env: fleetEnv(engine),
+});
+
 export const certs = (engine: Engine, domain: string, subdomains: readonly Arg[]) =>
   run("mkcert certificates", ["bash", script(engine, "certs.sh"), domain, within(engine.fleet, ".cache", "certs"), ...subdomains]);
 

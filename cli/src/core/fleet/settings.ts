@@ -136,6 +136,15 @@ export const settings: readonly Setting[] = [
     "An ntfy server for alerts, behind Caddy (an edge_routes entry to ntfy:80): its public base_url, who may read or publish which topic (everything else denied), and upstream_base_url (https://ntfy.sh) for iPhones, whose instant push only ntfy.sh can wake.",
   ),
   setting(
+    "monitor",
+    ["platform", "edge"],
+    record({
+      watch: texts,
+      extra: z.array(record({ name: text, url: text, group: text.optional(), server: text.optional(), conditions: texts.optional() })).optional(),
+    }),
+    "Gatus on this server, alerting through the notifier: every minute, what kayra derives for each server in watch (its logins, pages, app routes, deploy.<domain>/health; an edge's routes; certificates) with each name pinned to that server's address, plus extra checks (Gatus conditions, default [STATUS] == 200; server pins the name to that server's address).",
+  ),
+  setting(
     "notifier",
     ["platform", "edge"],
     z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("ntfy"), url: text, topic: z.string().regex(/^[\w-]{1,64}$/) })]),
@@ -174,6 +183,7 @@ export const settings: readonly Setting[] = [
   secret("restic_backup_postgres_passwords", nas, z.record(z.string(), text), "Per database container: the password its dump connects with."),
   secret("ntfy_password_hashes", edge, z.record(z.string(), z.string().regex(/^\$2[aby]\$\d{2}\$/)), "Per ntfy user: the bcrypt hash of its password (ntfy user hash)."),
   secret("ntfy_tokens", edge, z.record(z.string(), z.string().regex(/^tk_[a-z0-9]{29}$/)), "Per ntfy user: an access token (ntfy token generate), e.g. the one monitors publish with."),
+  secret("monitor_health_tokens", ["platform", "edge"], z.record(z.string(), text), "Per watched platform server: its health_token, which the monitor reads deploy.<domain>/health with."),
   secret("wireguard_private_key", edge, text, "The edge's WireGuard private key."),
   secret("wireguard_peer_psk", edge, text, "The tunnel's preshared key."),
   secret("backup_check_passwords", edge, z.record(z.string(), text), "Per watched repository: its read-only password."),

@@ -1,0 +1,119 @@
+{
+  "edge": {
+    "monitor_endpoints": [
+      {
+        "conditions": [
+          "[STATUS] == 200",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "auth.shop.test",
+        "redirects": false,
+        "url": "https://auth.shop.test/"
+      },
+      {
+        "conditions": [
+          "[STATUS] == 302",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "deploy.shop.test",
+        "redirects": false,
+        "url": "https://deploy.shop.test/"
+      },
+      {
+        "conditions": [
+          "[STATUS] == 302",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "traefik.shop.test",
+        "redirects": false,
+        "url": "https://traefik.shop.test/"
+      },
+      {
+        "conditions": [
+          "[STATUS] == 200"
+        ],
+        "group": "shop",
+        "health": true,
+        "name": "deploy.shop.test/health",
+        "redirects": false,
+        "url": "https://deploy.shop.test/health"
+      },
+      {
+        "conditions": [
+          "[STATUS] < 500",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "www.shop.test",
+        "redirects": true,
+        "url": "https://www.shop.test/"
+      },
+      {
+        "conditions": [
+          "[STATUS] < 500",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "api.shop.test/signup",
+        "redirects": true,
+        "url": "https://api.shop.test/signup"
+      },
+      {
+        "conditions": [
+          "[STATUS] < 500"
+        ],
+        "group": "extra",
+        "health": false,
+        "name": "photos",
+        "redirects": true,
+        "url": "https://photos.nas.test/"
+      }
+    ],
+    "monitor_hosts": {
+      "api.shop.test": "192.0.2.9",
+      "auth.shop.test": "192.0.2.9",
+      "deploy.shop.test": "192.0.2.9",
+      "photos.nas.test": "10.0.0.2",
+      "traefik.shop.test": "192.0.2.9",
+      "www.shop.test": "192.0.2.9"
+    }
+  },
+  "shop": {
+    "monitor_endpoints": [
+      {
+        "conditions": [
+          "[STATUS] < 500",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "edge",
+        "health": false,
+        "name": "git.edge.test",
+        "redirects": true,
+        "url": "https://git.edge.test/"
+      },
+      {
+        "conditions": [
+          "[STATUS] < 500",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "edge",
+        "health": false,
+        "name": "media.edge.test",
+        "redirects": true,
+        "url": "https://media.edge.test/"
+      }
+    ],
+    "monitor_hosts": {
+      "git.edge.test": "192.0.2.1",
+      "media.edge.test": "192.0.2.1"
+    }
+  }
+}

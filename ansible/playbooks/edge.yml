@@ -26,6 +26,8 @@
     - edge-proxy
     - role: ntfy
       when: ntfy is defined
+    - role: monitor
+      when: monitor is defined
     - backup-check
 
   # ufw predates the repo on adopted servers: a second, drifting copy of the

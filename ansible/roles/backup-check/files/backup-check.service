@@ -1,6 +1,6 @@
 # Managed by Ansible (backup-check role).
 [Unit]
-Description=Report stale backups as GitHub issues
+Description=Report stale backups to the notifier
 After=network-online.target
 Wants=network-online.target
 

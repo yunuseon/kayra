@@ -331,27 +331,25 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "github-issue"
+              "const": "ntfy"
             },
-            "repository": {
+            "url": {
               "type": "string"
             },
-            "app_id": {
-              "type": [
-                "string",
-                "number"
-              ]
+            "topic": {
+              "type": "string",
+              "pattern": "^[\\w-]{1,64}$"
             }
           },
           "required": [
             "kind",
-            "repository",
-            "app_id"
+            "url",
+            "topic"
           ],
           "additionalProperties": false
         }
       ],
-      "description": "Where the deployer raises alerts (a failed deploy of an app's ref, a failed job) and resolves them: kind github-issue, an issue in repository (owner/name) opened by the GitHub App app_id; the key in notifier_github_app_key."
+      "description": "Where alerts go — the deployer's (a failed deploy of an app's ref, a failed job) and the backup check's: kind ntfy, a message to topic on the ntfy server at url when an alert opens and when it is resolved; the token in notifier_ntfy_token."
     }
   },
   "additionalProperties": false,

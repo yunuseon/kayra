@@ -127,26 +127,22 @@ export const settings: readonly Setting[] = [
   ),
   setting(
     "notifier",
-    platform,
-    z.discriminatedUnion("kind", [
-      z.strictObject({ kind: z.literal("github-issue"), repository: text, app_id: z.union([text, z.number()]) }),
-    ]),
-    "Where the deployer raises alerts (a failed deploy of an app's ref, a failed job) and resolves them: kind github-issue, an issue in repository (owner/name) opened by the GitHub App app_id; the key in notifier_github_app_key.",
+    ["platform", "edge"],
+    z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("ntfy"), url: text, topic: z.string().regex(/^[\w-]{1,64}$/) })]),
+    "Where alerts go — the deployer's (a failed deploy of an app's ref, a failed job) and the backup check's: kind ntfy, a message to topic on the ntfy server at url when an alert opens and when it is resolved; the token in notifier_ntfy_token.",
   ),
   setting(
     "backup_check",
     edge,
     record({
       stale_after_hours: z.number(),
-      github_repository: text,
-      github_app_id: text,
       repositories: z.array(record({ name: text, url: text, user: text, restore_test_max_days: z.number().optional() })),
     }),
-    "The hourly check of the private network's backups: when a snapshot is stale, where issues go, which repositories.",
+    "The hourly check of the private network's backups: when a snapshot is stale, which repositories. Its alerts go to the notifier.",
   ),
 
   // Secrets
-  secret("notifier_github_app_key", platform, text, "With notifier kind github-issue: the GitHub App's private key (PEM) the deployer opens issues with."),
+  secret("notifier_ntfy_token", ["platform", "edge"], text, "With notifier kind ntfy: the access token alerts are published with."),
   secret("git_token", platform, text, "Token the builder clones app repos with and the deployer posts commit statuses with."),
   secret("webhook_secret", platform, text, "HMAC secret the apps' push webhooks (deploy.<domain>/hook/<app>) are signed with."),
   secret("renovate_token", platform, text, "Token the Renovate job opens PRs with."),
@@ -167,7 +163,6 @@ export const settings: readonly Setting[] = [
   secret("restic_backup_postgres_passwords", nas, z.record(z.string(), text), "Per database container: the password its dump connects with."),
   secret("wireguard_private_key", edge, text, "The edge's WireGuard private key."),
   secret("wireguard_peer_psk", edge, text, "The tunnel's preshared key."),
-  secret("backup_check_github_app_key", edge, text, "The GitHub App's private key the backup check opens issues with."),
   secret("backup_check_passwords", edge, z.record(z.string(), text), "Per watched repository: its read-only password."),
 ];
 

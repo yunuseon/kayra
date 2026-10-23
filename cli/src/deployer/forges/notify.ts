@@ -27,7 +27,7 @@ export const silent: Notifier = {
 /** The `notifier` setting, as the platform role passes it (NOTIFIER, JSON). */
 export type NotifyConfig =
   | { readonly kind: "none" }
-  | { readonly kind: "github-issue"; readonly repository: string; readonly appId: string };
+  | { readonly kind: "ntfy"; readonly url: string; readonly topic: string };
 
 export const parseNotify = (raw: string | undefined) => {
   if (raw === undefined || raw.trim() === "") return ok<NotifyConfig>({ kind: "none" });
@@ -35,12 +35,12 @@ export const parseNotify = (raw: string | undefined) => {
     const json: unknown = JSON.parse(raw);
     if (typeof json !== "object" || json === null) return err("notifier: not an object");
     const kind = field(json, "kind");
-    const repository = field(json, "repository");
-    const appId = field(json, "app_id");
-    if (kind !== "github-issue") return err(`notifier: unknown kind ${String(kind)}`);
-    if (typeof repository !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(repository)) return err(`notifier: repository ${String(repository)}`);
-    if (typeof appId !== "string" && typeof appId !== "number") return err("notifier: app_id missing");
-    return ok<NotifyConfig>({ kind, repository, appId: String(appId) });
+    const url = field(json, "url");
+    const topic = field(json, "topic");
+    if (kind !== "ntfy") return err(`notifier: unknown kind ${String(kind)}`);
+    if (typeof url !== "string" || !/^https?:\/\/[^\s/]+\/?$/.test(url)) return err(`notifier: url ${String(url)}`);
+    if (typeof topic !== "string" || !/^[\w-]{1,64}$/.test(topic)) return err(`notifier: topic ${String(topic)}`);
+    return ok<NotifyConfig>({ kind, url: url.replace(/\/$/, ""), topic });
   } catch {
     return err("notifier: not JSON");
   }

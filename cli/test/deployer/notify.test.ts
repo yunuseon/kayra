@@ -1,11 +1,10 @@
 import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
-import { createVerify, generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
 import { appOwner, jobOwner } from "../../src/deployer/brand.ts";
-import { appJwt, githubIssues, type GithubIssueWorld } from "../../src/deployer/forges/issues.ts";
 import { decide, parseNotify, type RunEnd } from "../../src/deployer/forges/notify.ts";
+import { ntfy, type NtfyWorld } from "../../src/deployer/forges/ntfy.ts";
 import type { Request, Why } from "../../src/deployer/runs/queue.ts";
-import { ok } from "../../src/lib/result.ts";
+import { err, ok } from "../../src/lib/result.ts";
 import { commit, name, rid } from "./support.ts";
 
 const deployOf = (why: Why): Request => ({ id: rid, owner: appOwner(name("shop")), work: { kind: "deploy", app: name("shop"), ref: "main", why } });
@@ -28,68 +27,69 @@ test("decide: a failed push, poll or restore raises, a failed manual deploy does
   strictEqual(failedJob.alert.key, "_gc");
 });
 
-test("parseNotify: none without a setting, github-issue with repository and app_id, anything else refused", () => {
+test("parseNotify: none without a setting, ntfy with url and topic, anything else refused", () => {
   deepStrictEqual(parseNotify(undefined), ok({ kind: "none" }));
   deepStrictEqual(parseNotify(""), ok({ kind: "none" }));
-  deepStrictEqual(parseNotify('{"kind":"github-issue","repository":"o/r","app_id":42}'), ok({ kind: "github-issue", repository: "o/r", appId: "42" }));
-  strictEqual(parseNotify('{"kind":"ntfy"}').ok, false);
-  strictEqual(parseNotify('{"kind":"github-issue","repository":"nope","app_id":1}').ok, false);
+  deepStrictEqual(parseNotify('{"kind":"ntfy","url":"https://ntfy.example/","topic":"alerts"}'), ok({ kind: "ntfy", url: "https://ntfy.example", topic: "alerts" }));
+  strictEqual(parseNotify('{"kind":"ntfy","url":"https://ntfy.example"}').ok, false);
+  strictEqual(parseNotify('{"kind":"ntfy","url":"https://ntfy.example/alerts","topic":"alerts"}').ok, false);
+  strictEqual(parseNotify('{"kind":"ntfy","url":"https://ntfy.example","topic":"a/b"}').ok, false);
+  strictEqual(parseNotify('{"kind":"github-issue","repository":"o/r","app_id":42}').ok, false);
   strictEqual(parseNotify("{").ok, false);
 });
 
-const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-
-test("appJwt: RS256 over header.payload, the app as issuer, nine minutes", () => {
-  const [header = "", payload = "", signature = ""] = appJwt("42", pem, 1000).split(".");
-  const claims: unknown = JSON.parse(Buffer.from(payload, "base64url").toString());
-  deepStrictEqual(claims, { iat: 940, exp: 1540, iss: "42" });
-  assert(createVerify("RSA-SHA256").update(`${header}.${payload}`).verify(publicKey, Buffer.from(signature, "base64url")));
-});
-
-/** A fake GitHub that records calls; the app is installed, issues get number 7. */
-const fakeGithub = (): { readonly world: GithubIssueWorld; readonly calls: readonly string[] } => {
+/** A fake ntfy that records what was published; `status` is what it answers. */
+const fakeNtfy = (status: number): { readonly world: NtfyWorld; readonly sent: readonly unknown[]; readonly auth: readonly string[] } => {
   // eslint-disable-next-line functional/prefer-immutable-types -- the fake's recorder
-  const calls: string[] = [];
-  const open = new Map<string, number>();
-  const world: GithubIssueWorld = {
-    fetch: (url, init) => {
-      const path = url.replace("https://api.github.com", "");
+  const sent: unknown[] = [];
+  // eslint-disable-next-line functional/prefer-immutable-types -- the fake's recorder
+  const auth: string[] = [];
+  const open = new Map<string, string>();
+  const world: NtfyWorld = {
+    fetch: (_url, init) => {
       // eslint-disable-next-line functional/immutable-data -- the fake's recorder
-      calls.push(`${init.method} ${path}`);
-      if (path.endsWith("/installation")) return Promise.resolve({ status: 200, json: { id: 5 } });
-      if (path.endsWith("/access_tokens")) return Promise.resolve({ status: 201, json: { token: "t" } });
-      if (init.method === "POST" && path.endsWith("/issues")) return Promise.resolve({ status: 201, json: { number: 7 } });
-      return Promise.resolve({ status: 200, json: {} });
+      sent.push(JSON.parse(init.body));
+      // eslint-disable-next-line functional/immutable-data -- the fake's recorder
+      auth.push(init.headers["Authorization"] ?? "");
+      return Promise.resolve({ status });
     },
-    privateKey: () => ok(pem),
-    now: () => 1_000_000,
-    openIssue: (key) => open.get(key),
-    remember: (key, issue) => {
+    token: () => ok("tk"),
+    openAlert: (key) => open.get(key),
+    remember: (key, title) => {
       // eslint-disable-next-line functional/immutable-data -- the fake's state file
-      if (issue === undefined) open.delete(key);
+      if (title === undefined) open.delete(key);
       // eslint-disable-next-line functional/immutable-data -- the fake's state file
-      else open.set(key, issue);
+      else open.set(key, title);
     },
   };
-  return { world, calls };
+  return { world, sent, auth };
 };
 
-test("github issues: one issue per key while it lasts; resolve comments and closes it", async () => {
-  const { world, calls } = fakeGithub();
-  const notifier = githubIssues("o/r", "42", world);
+test("ntfy: one message when an alert opens, one when it is resolved, none in between", async () => {
+  const { world, sent, auth } = fakeNtfy(200);
+  const notifier = ntfy("https://ntfy.example", "alerts", world);
   deepStrictEqual(await notifier.resolve("shop", "fine"), ok(undefined));
-  deepStrictEqual(calls, []);
-  await notifier.raise({ key: "shop", title: "t", body: "b" });
-  await notifier.raise({ key: "shop", title: "t again", body: "b" });
-  deepStrictEqual(calls, ["GET /repos/o/r/installation", "POST /app/installations/5/access_tokens", "POST /repos/o/r/issues"]);
-  strictEqual(world.openIssue("shop"), 7);
+  deepStrictEqual(sent, []);
+  await notifier.raise({ key: "shop", title: "shop-prod: shop did not deploy", body: "b" });
+  await notifier.raise({ key: "shop", title: "again", body: "b" });
+  deepStrictEqual(sent, [{ topic: "alerts", title: "shop-prod: shop did not deploy", message: "b", priority: 4, tags: ["rotating_light"] }]);
+  strictEqual(world.openAlert("shop"), "shop-prod: shop did not deploy");
   await notifier.resolve("shop", "Recovered");
-  deepStrictEqual(calls.slice(3), [
-    "GET /repos/o/r/installation",
-    "POST /app/installations/5/access_tokens",
-    "POST /repos/o/r/issues/7/comments",
-    "PATCH /repos/o/r/issues/7",
-  ]);
-  strictEqual(world.openIssue("shop"), undefined);
+  deepStrictEqual(sent.slice(1), [{ topic: "alerts", title: "Resolved: shop-prod: shop did not deploy", message: "Recovered", priority: 3, tags: ["white_check_mark"] }]);
+  deepStrictEqual(auth, ["Bearer tk", "Bearer tk"]);
+  strictEqual(world.openAlert("shop"), undefined);
+});
+
+test("ntfy: a message ntfy refuses leaves the alert unsent, so the next run tries again", async () => {
+  const { world } = fakeNtfy(403);
+  const notifier = ntfy("https://ntfy.example", "alerts", world);
+  deepStrictEqual(await notifier.raise({ key: "shop", title: "t", body: "b" }), err("ntfy POST https://ntfy.example: 403"));
+  strictEqual(world.openAlert("shop"), undefined);
+});
+
+test("ntfy: without its token nothing is sent", async () => {
+  const { world, sent } = fakeNtfy(200);
+  const notifier = ntfy("https://ntfy.example", "alerts", { ...world, token: () => err("no token") });
+  deepStrictEqual(await notifier.raise({ key: "shop", title: "t", body: "b" }), err("no token"));
+  deepStrictEqual(sent, []);
 });

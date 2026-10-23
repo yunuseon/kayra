@@ -67,17 +67,38 @@
       },
       "description": "Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to."
     },
+    "notifier": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ntfy"
+            },
+            "url": {
+              "type": "string"
+            },
+            "topic": {
+              "type": "string",
+              "pattern": "^[\\w-]{1,64}$"
+            }
+          },
+          "required": [
+            "kind",
+            "url",
+            "topic"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "description": "Where alerts go — the deployer's (a failed deploy of an app's ref, a failed job) and the backup check's: kind ntfy, a message to topic on the ntfy server at url when an alert opens and when it is resolved; the token in notifier_ntfy_token."
+    },
     "backup_check": {
       "type": "object",
       "properties": {
         "stale_after_hours": {
           "type": "number"
-        },
-        "github_repository": {
-          "type": "string"
-        },
-        "github_app_id": {
-          "type": "string"
         },
         "repositories": {
           "type": "array",
@@ -108,12 +129,10 @@
       },
       "required": [
         "stale_after_hours",
-        "github_repository",
-        "github_app_id",
         "repositories"
       ],
       "additionalProperties": {},
-      "description": "The hourly check of the private network's backups: when a snapshot is stale, where issues go, which repositories."
+      "description": "The hourly check of the private network's backups: when a snapshot is stale, which repositories. Its alerts go to the notifier."
     }
   },
   "additionalProperties": false,

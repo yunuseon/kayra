@@ -42,14 +42,14 @@ the first line of a platform server's `vars.yml`:
 | `restic_backup` | nas | The nightly restic backup: what, where to (SFTP), when, how long kept, and the monthly restore test. |
 | `wireguard` | edge | The tunnel into the private network: the edge's address, port, and the one peer (its key, what it may reach). |
 | `edge_routes` | edge | Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to. |
-| `notifier` | platform | Where the deployer raises alerts (a failed deploy of an app's ref, a failed job) and resolves them: kind github-issue, an issue in repository (owner/name) opened by the GitHub App app_id; the key in notifier_github_app_key. |
-| `backup_check` | edge | The hourly check of the private network's backups: when a snapshot is stale, where issues go, which repositories. |
+| `notifier` | platform, edge | Where alerts go — the deployer's (a failed deploy of an app's ref, a failed job) and the backup check's: kind ntfy, a message to topic on the ntfy server at url when an alert opens and when it is resolved; the token in notifier_ntfy_token. |
+| `backup_check` | edge | The hourly check of the private network's backups: when a snapshot is stale, which repositories. Its alerts go to the notifier. |
 
 ## Secrets
 
 | Setting | Kinds | What it is |
 |---|---|---|
-| `notifier_github_app_key` | platform | With notifier kind github-issue: the GitHub App's private key (PEM) the deployer opens issues with. |
+| `notifier_ntfy_token` | platform, edge | With notifier kind ntfy: the access token alerts are published with. |
 | `git_token` | platform | Token the builder clones app repos with and the deployer posts commit statuses with. |
 | `webhook_secret` | platform | HMAC secret the apps' push webhooks (deploy.&lt;domain>/hook/&lt;app>) are signed with. |
 | `renovate_token` | platform | Token the Renovate job opens PRs with. |
@@ -70,7 +70,6 @@ the first line of a platform server's `vars.yml`:
 | `restic_backup_postgres_passwords` | nas | Per database container: the password its dump connects with. |
 | `wireguard_private_key` | edge | The edge's WireGuard private key. |
 | `wireguard_peer_psk` | edge | The tunnel's preshared key. |
-| `backup_check_github_app_key` | edge | The GitHub App's private key the backup check opens issues with. |
 | `backup_check_passwords` | edge | Per watched repository: its read-only password. |
 
 Ansible's own variables (`ansible_*`) are allowed everywhere.

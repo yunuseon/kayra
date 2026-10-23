@@ -484,39 +484,31 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "github-issue"
+              "const": "ntfy"
             },
-            "repository": {
+            "url": {
               "type": "string"
             },
-            "app_id": {
-              "type": [
-                "string",
-                "number"
-              ]
+            "topic": {
+              "type": "string",
+              "pattern": "^[\\w-]{1,64}$"
             }
           },
           "required": [
             "kind",
-            "repository",
-            "app_id"
+            "url",
+            "topic"
           ],
           "additionalProperties": false
         }
       ],
-      "description": "Where the deployer raises alerts (a failed deploy of an app's ref, a failed job) and resolves them: kind github-issue, an issue in repository (owner/name) opened by the GitHub App app_id; the key in notifier_github_app_key."
+      "description": "Where alerts go — the deployer's (a failed deploy of an app's ref, a failed job) and the backup check's: kind ntfy, a message to topic on the ntfy server at url when an alert opens and when it is resolved; the token in notifier_ntfy_token."
     },
     "backup_check": {
       "type": "object",
       "properties": {
         "stale_after_hours": {
           "type": "number"
-        },
-        "github_repository": {
-          "type": "string"
-        },
-        "github_app_id": {
-          "type": "string"
         },
         "repositories": {
           "type": "array",
@@ -547,12 +539,10 @@
       },
       "required": [
         "stale_after_hours",
-        "github_repository",
-        "github_app_id",
         "repositories"
       ],
       "additionalProperties": {},
-      "description": "The hourly check of the private network's backups: when a snapshot is stale, where issues go, which repositories."
+      "description": "The hourly check of the private network's backups: when a snapshot is stale, which repositories. Its alerts go to the notifier."
     }
   },
   "additionalProperties": false,

@@ -14,12 +14,12 @@
     fail_msg: renovate_repositories is set, so renovate_token must be set in servers/{{ server }}/secrets.yml
   when: renovate_repositories | length > 0
 
-- name: Check the notifier has its key
+- name: Check the notifier has its token
   ansible.builtin.assert:
-    that: notifier_github_app_key | length > 0
-    fail_msg: notifier is a github-issue notifier, so notifier_github_app_key must be set in servers/{{ server }}/secrets.yml
+    that: notifier_ntfy_token | length > 0
+    fail_msg: notifier is an ntfy notifier, so notifier_ntfy_token must be set in servers/{{ server }}/secrets.yml
     quiet: true
-  when: notifier.kind | default('') == 'github-issue'
+  when: notifier.kind | default('') == 'ntfy'
 
 - name: Create platform directories
   ansible.builtin.file:
@@ -270,15 +270,22 @@
     mode: "0500"
   become: true
 
-- name: Render the notifier's key
+- name: Render the notifier's token
   ansible.builtin.copy:
-    content: "{{ notifier_github_app_key }}"
-    dest: "{{ platform_dir }}/deployer-secrets/NOTIFIER_GITHUB_APP_KEY"
+    content: "{{ notifier_ntfy_token }}"
+    dest: "{{ platform_dir }}/deployer-secrets/NOTIFIER_NTFY_TOKEN"
     owner: "1000"
     group: "1000"
     mode: "0400"
-  when: notifier_github_app_key | length > 0
+  when: notifier_ntfy_token | length > 0
   no_log: true
+  become: true
+
+# Left by kayra before 0.22, when alerts were GitHub issues.
+- name: Remove the GitHub App key
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/deployer-secrets/NOTIFIER_GITHUB_APP_KEY"
+    state: absent
   become: true
 
 - name: Render platform .env

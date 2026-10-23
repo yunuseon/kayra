@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { err, ok, type Result } from "../lib/result.ts";
 import { parseCron, type Cron } from "./cron.ts";
-import { githubIssues } from "./forges/issues.ts";
 import { parseNotify, silent, type Notifier, type NotifyConfig } from "./forges/notify.ts";
+import { ntfy } from "./forges/ntfy.ts";
 import type { Env } from "./runs/run.ts";
 import { typed } from "../lib/typed.ts";
 
@@ -39,28 +39,22 @@ const must = <T>(result: Result<T, string>) => {
   return result.value;
 };
 
-/** The configured notifier; its open alerts are kept in <platformDir>/alerts/<key>. */
+/** The configured notifier; its open alerts are kept in <platformDir>/alerts/<key>, each holding its title. */
 const notifierFor = (config: NotifyConfig, platformDir: string) => {
   if (config.kind === "none") return silent;
   const alerts = join(platformDir, "alerts");
-  const keyFile = join(mounts.deployer, "NOTIFIER_GITHUB_APP_KEY");
-  return githubIssues(config.repository, config.appId, {
-    fetch: async (url, init) => {
-      const response = await fetch(url, init);
-      const json: unknown = await response.json().catch(() => undefined);
-      return Object.freeze({ status: response.status, json });
-    },
-    privateKey: () => (existsSync(keyFile) ? ok(readFileSync(keyFile, "utf8")) : err(`${keyFile} is missing: notifier_github_app_key in secrets.yml`)),
-    now: () => Date.now(),
-    openIssue: (key) => {
+  const tokenFile = join(mounts.deployer, "NOTIFIER_NTFY_TOKEN");
+  return ntfy(config.url, config.topic, {
+    fetch: async (url, init) => Object.freeze({ status: (await fetch(url, init)).status }),
+    token: () => (existsSync(tokenFile) ? ok(readFileSync(tokenFile, "utf8").trim()) : err(`${tokenFile} is missing: notifier_ntfy_token in secrets.yml`)),
+    openAlert: (key) => {
       const path = join(alerts, key);
-      const number = existsSync(path) ? Number(readFileSync(path, "utf8")) : Number.NaN;
-      return Number.isInteger(number) ? number : undefined;
+      return existsSync(path) ? readFileSync(path, "utf8") : undefined;
     },
-    remember: (key, issue) => {
+    remember: (key, title) => {
       mkdirSync(alerts, { recursive: true });
-      if (issue === undefined) rmSync(join(alerts, key), { force: true });
-      else writeFileSync(join(alerts, key), String(issue));
+      if (title === undefined) rmSync(join(alerts, key), { force: true });
+      else writeFileSync(join(alerts, key), title);
     },
   });
 };

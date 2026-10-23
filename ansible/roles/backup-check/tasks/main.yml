@@ -2,10 +2,18 @@
 # =============================================================================
 # backup-check role — hourly, asks each of backup_check.repositories (a restic
 # repository served read-only over HTTPS) for its newest snapshot, and
-# reports one older than stale_after_hours as a GitHub issue, and likewise a
+# reports one older than stale_after_hours to the notifier, and likewise a
 # failed or overdue restore test (restore_test_max_days). Runs off the
 # backed-up network on purpose: it notices a source that has gone quiet.
 # =============================================================================
+
+- name: Check the backup check has a notifier
+  ansible.builtin.assert:
+    that:
+      - notifier.kind | default('') == 'ntfy'
+      - notifier_ntfy_token | default('') | length > 0
+    fail_msg: the backup check sends its alerts to the notifier, so servers/{{ server }} needs notifier (kind ntfy) in vars.yml and notifier_ntfy_token in secrets.yml
+    quiet: true
 
 - name: Install jq
   ansible.builtin.apt:
@@ -20,12 +28,18 @@
     mode: "0700"
   loop: ["", bin, state]
 
-- name: Install GitHub App key
+- name: Install the notifier's token
   ansible.builtin.copy:
-    content: "{{ backup_check_github_app_key }}"
-    dest: /opt/backup-check/github-app.pem
+    content: "{{ notifier_ntfy_token }}"
+    dest: /opt/backup-check/ntfy-token
     mode: "0600"
   no_log: true
+
+# Left by kayra before 0.22, when alerts were GitHub issues.
+- name: Remove the GitHub App key
+  ansible.builtin.file:
+    path: /opt/backup-check/github-app.pem
+    state: absent
 
 # curl reads the logins from here, so they never show in a process list.
 - name: Render repository logins

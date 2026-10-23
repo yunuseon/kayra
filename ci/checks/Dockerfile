@@ -23,7 +23,7 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json web/.npmrc ./
 RUN npm ci --ignore-scripts
 
-FROM python:3.14.9-slim-trixie AS tools
+FROM python:3.15.1-slim-trixie AS tools
 
 # renovate: datasource=github-releases depName=koalaman/shellcheck
 ARG SHELLCHECK_VERSION=v0.11.0

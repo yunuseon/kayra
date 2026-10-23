@@ -12,33 +12,33 @@
 # =============================================================================
 # The kayra CLI's dependencies, from the package's lockfile; the checks need
 # only node itself.
-FROM node:24.21.0-trixie-slim AS cli
+FROM node:24.22.1-trixie-slim AS cli
 WORKDIR /cli
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --ignore-scripts
 
 # kayra ui's browser side (web/), from its own lockfile.
-FROM node:24.21.0-trixie-slim AS web
+FROM node:24.22.1-trixie-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json web/.npmrc ./
 RUN npm ci --ignore-scripts
 
-FROM python:3.14.8-slim-trixie AS tools
+FROM python:3.14.9-slim-trixie AS tools
 
 # renovate: datasource=github-releases depName=koalaman/shellcheck
 ARG SHELLCHECK_VERSION=v0.11.0
 # renovate: datasource=github-releases depName=opentofu/opentofu
-ARG TOFU_VERSION=v1.13.1
+ARG TOFU_VERSION=v1.13.2
 # renovate: datasource=github-releases depName=mikefarah/yq
 ARG YQ_VERSION=v4.54.1
 # renovate: datasource=github-releases depName=docker/compose
-ARG COMPOSE_VERSION=v5.6.0
+ARG COMPOSE_VERSION=v5.6.1
 # renovate: datasource=github-releases depName=getsops/sops
 ARG SOPS_VERSION=v3.13.3
 # renovate: datasource=github-releases depName=FiloSottile/age
 ARG AGE_VERSION=v1.3.2
 # renovate: datasource=pypi depName=ansible-lint
-ARG ANSIBLE_LINT_VERSION=26.9.0
+ARG ANSIBLE_LINT_VERSION=26.10.1
 # renovate: datasource=pypi depName=ansible-core
 ARG ANSIBLE_CORE_VERSION=2.21.5
 # renovate: datasource=pypi depName=yamllint

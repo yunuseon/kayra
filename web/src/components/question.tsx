@@ -1,3 +1,4 @@
+import type { TargetedInputEvent } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { RunEvent } from "../../../cli/src/clients/wire/contract.gen.ts";
 import { answerRun, type Failure } from "../api.ts";
@@ -20,6 +21,18 @@ export const Question = ({ id, question }: { readonly id: string; readonly quest
       setPending(false);
     }
   };
+  // Preact types an input's attributes by its type: one literal type per element.
+  const field = {
+    id: "run-answer",
+    ref: input,
+    autoComplete: "off",
+    value: typed,
+    disabled: pending,
+    onInput: (event: TargetedInputEvent<HTMLInputElement>) => {
+      setTyped(event.currentTarget.value);
+    },
+    spellcheck: false,
+  };
   return (
     <form
       class="ask"
@@ -31,18 +44,7 @@ export const Question = ({ id, question }: { readonly id: string; readonly quest
       <label for="run-answer">
         <Spans text={question.prompt} />
       </label>
-      <input
-        id="run-answer"
-        ref={input}
-        type={question.secret ? "password" : "text"}
-        autoComplete="off"
-        value={typed}
-        disabled={pending}
-        onInput={(event) => {
-          setTyped(event.currentTarget.value);
-        }}
-        spellcheck={false}
-      />
+      {question.secret ? <input type="password" {...field} /> : <input type="text" {...field} />}
       <button type="submit" class="button primary" disabled={pending}>
         {pending ? "Sending…" : "Answer"}
       </button>

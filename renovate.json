@@ -8,5 +8,24 @@
   "labels": [
     "dependencies"
   ],
-  "commitBody": "Signed-off-by: {{{gitAuthor}}}"
+  "commitBody": "Signed-off-by: {{{gitAuthor}}}",
+  "packageRules": [
+    {
+      "description": "The checks image runs ansible-core, which supports Python 3.15 only from 2.22 (3.15 removed dataclasses._is_type, which ansible-galaxy 2.21 calls). Lift this once ansible-core 2.22 is out.",
+      "matchFileNames": [
+        "ci/checks/Dockerfile"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "allowedVersions": "<3.15"
+    },
+    {
+      "description": "TypeScript 7 compiles kayra, but typescript-eslint (and the immutability rules built on it) supports TypeScript below 6.1 only. Lift this once typescript-eslint supports 7.",
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<7"
+    }
+  ]
 }

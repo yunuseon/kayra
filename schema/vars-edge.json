@@ -67,6 +67,52 @@
       },
       "description": "Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to."
     },
+    "ntfy": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string"
+        },
+        "upstream_base_url": {
+          "type": "string"
+        },
+        "access": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "user": {
+                "type": "string"
+              },
+              "topic": {
+                "type": "string"
+              },
+              "permission": {
+                "type": "string",
+                "enum": [
+                  "rw",
+                  "ro",
+                  "wo",
+                  "deny"
+                ]
+              }
+            },
+            "required": [
+              "user",
+              "topic",
+              "permission"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "base_url",
+        "access"
+      ],
+      "additionalProperties": {},
+      "description": "An ntfy server for alerts, behind Caddy (an edge_routes entry to ntfy:80): its public base_url, who may read or publish which topic (everything else denied), and upstream_base_url (https://ntfy.sh) for iPhones, whose instant push only ntfy.sh can wake."
+    },
     "notifier": {
       "oneOf": [
         {

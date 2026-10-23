@@ -42,6 +42,7 @@ the first line of a platform server's `vars.yml`:
 | `restic_backup` | nas | The nightly restic backup: what, where to (SFTP), when, how long kept, and the monthly restore test. |
 | `wireguard` | edge | The tunnel into the private network: the edge's address, port, and the one peer (its key, what it may reach). |
 | `edge_routes` | edge | Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to. |
+| `ntfy` | edge | An ntfy server for alerts, behind Caddy (an edge_routes entry to ntfy:80): its public base_url, who may read or publish which topic (everything else denied), and upstream_base_url (https://ntfy.sh) for iPhones, whose instant push only ntfy.sh can wake. |
 | `notifier` | platform, edge | Where alerts go — the deployer's (a failed deploy of an app's ref, a failed job) and the backup check's: kind ntfy, a message to topic on the ntfy server at url when an alert opens and when it is resolved; the token in notifier_ntfy_token. |
 | `backup_check` | edge | The hourly check of the private network's backups: when a snapshot is stale, which repositories. Its alerts go to the notifier. |
 
@@ -69,6 +70,8 @@ the first line of a platform server's `vars.yml`:
 | `restic_backup_password` | nas | The restic repository's password. |
 | `restic_backup_ssh_key` | nas | The SSH key the backup reaches the Storage Box with. |
 | `restic_backup_postgres_passwords` | nas | Per database container: the password its dump connects with. |
+| `ntfy_password_hashes` | edge | Per ntfy user: the bcrypt hash of its password (ntfy user hash). |
+| `ntfy_tokens` | edge | Per ntfy user: an access token (ntfy token generate), e.g. the one monitors publish with. |
 | `wireguard_private_key` | edge | The edge's WireGuard private key. |
 | `wireguard_peer_psk` | edge | The tunnel's preshared key. |
 | `backup_check_passwords` | edge | Per watched repository: its read-only password. |

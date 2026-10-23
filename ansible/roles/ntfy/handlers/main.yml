@@ -1,0 +1,6 @@
+---
+# ntfy reads server.yml, its users and tokens included, only when it starts.
+- name: Restart ntfy
+  community.docker.docker_compose_v2:
+    project_src: /opt/ntfy
+    state: restarted

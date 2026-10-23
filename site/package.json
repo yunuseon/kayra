@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@astrojs/react": "7.0.0",
-    "@astrojs/starlight": "0.42.4",
+    "@astrojs/starlight": "0.42.7",
     "astro": "7.3.5",
     "likec4": "1.59.4",
     "react": "19.3.0",

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "kayra local API",
-    "version": "0.22.1",
+    "version": "0.22.2",
     "description": "127.0.0.1 only. Compatibility follows the fleet's pinned kayra version."
   },
   "servers": [

@@ -21,9 +21,14 @@ export const releases = (names: readonly string[]) =>
     })
     .filter((release, i, all) => all.findIndex((other) => other.sha === release.sha) === i));
 
-/** The poll's question: has the ref moved to a commit neither the newest run tried nor the newest release runs? */
-export const moved = (resolved: Sha, lastRun: Sha | undefined, lastRelease: Sha | undefined) =>
-  resolved !== lastRun && resolved !== lastRelease;
+/**
+ * The poll's question: has the ref moved to a commit no kept run has tried and
+ * the newest release does not run? Every run, not only the newest: after a
+ * rollback the newest is the rollback, and the commit it rolled back from
+ * would be tried again.
+ */
+export const moved = (resolved: Sha, tried: readonly Sha[], lastRelease: Sha | undefined) =>
+  !tried.includes(resolved) && resolved !== lastRelease;
 
 /** queued until it starts; superseded when a newer request for its owner replaced it before it began. */
 export type RunState = "queued" | "running" | "success" | "failure" | "superseded";

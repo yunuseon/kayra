@@ -62,3 +62,18 @@ run "app_not_cloned" {
 
   expect_failures = [hcloud_zone_rrset.a]
 }
+
+# A server running a monitor serves its page, status.<domain>, too.
+run "monitor_page" {
+  command = plan
+
+  variables {
+    server = "watching"
+    zone   = "example.com"
+  }
+
+  assert {
+    condition     = contains(output.hosts, "status.example.com")
+    error_message = "status should be a host where the server runs a monitor"
+  }
+}

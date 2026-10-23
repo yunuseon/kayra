@@ -36,6 +36,17 @@
       },
       {
         "conditions": [
+          "[STATUS] == 302",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "status.shop.test",
+        "redirects": false,
+        "url": "https://status.shop.test/"
+      },
+      {
+        "conditions": [
           "[STATUS] == 200"
         ],
         "group": "shop",
@@ -82,6 +93,7 @@
       "auth.shop.test": "192.0.2.9",
       "deploy.shop.test": "192.0.2.9",
       "photos.nas.test": "10.0.0.2",
+      "status.shop.test": "192.0.2.9",
       "traefik.shop.test": "192.0.2.9",
       "www.shop.test": "192.0.2.9"
     }

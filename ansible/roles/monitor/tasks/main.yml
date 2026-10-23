@@ -5,7 +5,8 @@
 # monitor_endpoints and monitor_hosts) plus monitor.extra, and alerting through
 # the notifier's ntfy after three failures, again once it has recovered.
 # Watched names are pinned to their servers' addresses (extra_hosts), so home
-# names resolve through the tunnel from the edge as they do at home.
+# names resolve through the tunnel from the edge as they do at home. On a
+# platform server (monitor_page) its page is status.<domain>, behind the login.
 # =============================================================================
 
 - name: Check the monitor has a notifier and its tokens

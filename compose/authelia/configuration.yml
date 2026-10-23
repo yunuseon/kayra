@@ -94,6 +94,11 @@ access_control:
       policy: '{{ env "AUTH_POLICY" }}'
       subject:
         - 'group:admin'
+    # The monitor's page, where the server runs one.
+    - domain: 'status.{{ env "DOMAIN" }}'
+      policy: '{{ env "AUTH_POLICY" }}'
+      subject:
+        - 'group:admin'
 
 session:
   name: 'authelia_session'

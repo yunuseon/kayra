@@ -96,12 +96,14 @@ test("releases: newest first, one per commit; retention drops the oldest", () =>
   deepStrictEqual(expired(["1"], 2), []);
 });
 
-test("poll: only a commit neither the newest run nor the newest release has", () => {
-  assert(moved(commit("c"), commit("a"), commit("b")));
-  assert(moved(commit("c"), undefined, undefined));
-  assert(!moved(commit("a"), commit("a"), commit("b")));
-  assert(!moved(commit("b"), undefined, commit("b")));
-  assert(!moved(commit("b"), commit("a"), commit("b")));
+test("poll: only a commit no kept run tried and the newest release does not run", () => {
+  assert(moved(commit("c"), [commit("a")], commit("b")));
+  assert(moved(commit("c"), [], undefined));
+  assert(!moved(commit("a"), [commit("a")], commit("b")));
+  assert(!moved(commit("b"), [], commit("b")));
+  assert(!moved(commit("b"), [commit("a")], commit("b")));
+  // A rollback to v1 after v2 was refused: the newest run is the rollback, v2 stays tried.
+  assert(!moved(commit("2"), [commit("1"), commit("2"), commit("1")], commit("1")));
 });
 
 test("renovate: the optional settings only when set", () => {

@@ -157,10 +157,10 @@ const poll = async (s: Settings) => {
   await Promise.all(
     registeredApps(s).map(async (app) => {
       const commit = await builderResolve(s.builder, app, app.ref);
-      const lastRun = runsOf(runsDir(s), appOwner(app.name)).find((run) => run.sha !== undefined);
+      const tried = runsOf(runsDir(s), appOwner(app.name)).flatMap((run) => Object.freeze(run.sha === undefined ? [] : [run.sha]));
       const releasesDir = join(s.platformDir, "releases", app.name);
       const lastRelease = releases(existsSync(releasesDir) ? readdirSync(releasesDir) : [])[0];
-      if (commit.ok && moved(commit.value, lastRun?.sha, lastRelease?.sha)) ask(s, deployRequest(app, app.ref, "poll"));
+      if (commit.ok && moved(commit.value, tried, lastRelease?.sha)) ask(s, deployRequest(app, app.ref, "poll"));
     }),
   );
 };

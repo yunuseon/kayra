@@ -12,7 +12,7 @@ Open work lives in GitHub issues.
 
 - **A change:** branch off `main`, push, open a PR (`gh pr create`). The checks (`.github/workflows/checks.yml`: `run.sh --platform`) run on the PR. Commits carry a DCO sign-off (`git commit -s`, see `CONTRIBUTING.md`).
 - **Releases** are tags `vMAJOR.MINOR.PATCH`, cut from `main` after bumping `version` in `package.json`: `release.yml` publishes `@yunuseon/kayra` to npmjs.org through trusted publishing (no token; provenance included). `0.x` while the fleet contract may still change in any release; a fleet pins the version it runs.
-- **Dependencies** arrive as Renovate PRs (`renovate.json`).
+- **Dependencies** arrive as Renovate PRs (`renovate.json`): Renovate runs daily as a workflow here (`.github/workflows/renovate.yml`), self-hosted with the secret `RENOVATE_TOKEN` (a fine-grained token on this repository), not as the hosted app. Its commits carry the DCO sign-off (`commitBody`).
 
 ---
 

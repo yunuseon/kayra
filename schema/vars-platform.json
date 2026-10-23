@@ -324,6 +324,53 @@
       "additionalProperties": {},
       "description": "The server's own compose stacks: their directory on the server and the names under stacks/ to run."
     },
+    "monitor": {
+      "type": "object",
+      "properties": {
+        "watch": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "group": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "url"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "watch"
+      ],
+      "additionalProperties": {},
+      "description": "Gatus on this server, alerting through the notifier: every minute, what kayra derives for each server in watch (its logins, pages, app routes, deploy.<domain>/health; an edge's routes; certificates) with each name pinned to that server's address, plus extra checks (Gatus conditions, default [STATUS] == 200; server pins the name to that server's address)."
+    },
     "notifier": {
       "oneOf": [
         {

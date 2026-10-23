@@ -523,6 +523,53 @@
       "additionalProperties": {},
       "description": "An ntfy server for alerts, behind Caddy (an edge_routes entry to ntfy:80): its public base_url, who may read or publish which topic (everything else denied), and upstream_base_url (https://ntfy.sh) for iPhones, whose instant push only ntfy.sh can wake."
     },
+    "monitor": {
+      "type": "object",
+      "properties": {
+        "watch": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "group": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "url"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "watch"
+      ],
+      "additionalProperties": {},
+      "description": "Gatus on this server, alerting through the notifier: every minute, what kayra derives for each server in watch (its logins, pages, app routes, deploy.<domain>/health; an edge's routes; certificates) with each name pinned to that server's address, plus extra checks (Gatus conditions, default [STATUS] == 200; server pins the name to that server's address)."
+    },
     "notifier": {
       "oneOf": [
         {

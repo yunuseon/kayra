@@ -1,7 +1,7 @@
 import type { Server } from "../fleet/model.ts";
 import { partOf, run, type Plan, type Step } from "../plan/model.ts";
 import { err, map, ok } from "../../lib/result.ts";
-import { ansibleEnv, ansiblePath, appSubdomains, certs, collections, fleetEnv, fromMain, inventory, latestState, needing, reachable, script, sequence, terraform, withSecrets, withVariables, type Engine } from "./steps.ts";
+import { ansibleEnv, ansiblePath, appSubdomains, certs, collections, fleetEnv, fromMain, inventory, latestState, monitorEndpoints, needing, reachable, script, sequence, terraform, withSecrets, withVariables, type Engine } from "./steps.ts";
 import { apps } from "./apps.ts";
 import { typed } from "../../lib/typed.ts";
 
@@ -39,6 +39,7 @@ const hostPlaybook = (engine: Engine, server: Server, extra: readonly string[] =
       `target=${server.target}`,
       "-e",
       `kayra_version=${engine.version}`,
+      ...(server.vars["monitor"] === undefined ? [] : ["-e", monitorEndpoints(engine, server)]),
       ...extra,
     ],
     ansibleEnv(engine, {}),

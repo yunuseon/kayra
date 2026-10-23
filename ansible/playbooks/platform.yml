@@ -51,6 +51,9 @@
       when: compose_stacks is defined
     - role: forgejo-config
       when: forgejo_config is defined
+    - role: monitor
+      become: true
+      when: monitor is defined
 
   post_tasks:
     - name: Record which kayra set this server up

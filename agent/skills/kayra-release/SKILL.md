@@ -16,7 +16,9 @@ The user works in the same checkouts in parallel: their own branch,
 uncommitted changes, sometimes mid-task. Do all of this in a **separate git
 worktree off `origin/main`**, and run every step with absolute paths inside
 it. Write the steps as one script under `set -euo pipefail` with one command
-per line. A guard such as `[ -z "$(git status --short)" ] && …` protects only
+per line. The worktree gets its own `npm ci`: never a symlink to the
+user's `node_modules`. 0.22.3's `npm ci` in a linked worktree emptied the
+checkout's, and the next lab failed with `ERR_MODULE_NOT_FOUND`. A guard such as `[ -z "$(git status --short)" ] && …` protects only
 what is inside its `&&` chain: anything after a `;` runs regardless, and that
 is how writes once landed in the user's working tree. If a step needs the
 user's checkout (it rarely does here), stop and ask.

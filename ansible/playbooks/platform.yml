@@ -54,6 +54,8 @@
     - role: monitor
       become: true
       when: monitor is defined
+      vars:
+        monitor_page: true
 
   post_tasks:
     - name: Record which kayra set this server up

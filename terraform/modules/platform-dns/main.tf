@@ -28,9 +28,14 @@ locals {
   }
   uncloned = [for name, manifest in local.manifests : name if !fileexists(manifest)]
 
+  # status only where the server runs a monitor, which serves it.
+  vars_file = "${var.fleet_root}/servers/${var.server}/vars.yml"
+  monitored = fileexists(local.vars_file) ? try(yamldecode(file(local.vars_file)).monitor, null) != null : false
   platform_subdomains = [
-    for line in split("\n", file("${path.module}/../../../hosts.conf")) :
-    split(" ", trimspace(line))[0] if trimspace(line) != "" && !startswith(trimspace(line), "#")
+    for sub in [
+      for line in split("\n", file("${path.module}/../../../hosts.conf")) :
+      split(" ", trimspace(line))[0] if trimspace(line) != "" && !startswith(trimspace(line), "#")
+    ] : sub if sub != "status" || local.monitored
   ]
   app_subdomains = flatten([
     for name, manifest in local.manifests :

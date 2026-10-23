@@ -85,6 +85,12 @@ run_case() {
 }
 
 healthy; run_case healthy nothing
+# A server with a monitor serves status.<domain> behind the login; one without is not asked.
+healthy; echo 'monitor: {watch: []}' > "${fleet}/servers/shop/vars.yml"; answer issuer-status.shop.test "R13"; answer status.shop.test "302 https://auth.shop.test/?rd=z 0"
+run_case monitor-page nothing
+healthy; answer issuer-status.shop.test "R13"; answer status.shop.test "404  0"
+run_case monitor-page-missing "status.shop.test sends a browser to the login: HTTP 404"
+rm -f "${fleet}/servers/shop/vars.yml"
 healthy; answer deploy.shop.test "403  0"
 run_case authelia-without-the-rule "deploy.shop.test sends a browser to the login: HTTP 403"
 healthy; answer www.shop.test "200  20"; answer issuer-www.shop.test "TRAEFIK DEFAULT CERT"

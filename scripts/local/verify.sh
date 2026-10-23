@@ -5,8 +5,9 @@
 #
 # From here, the way the world reaches it (each name pinned to the server's
 # address, so neither DNS nor /etc/hosts has to be in place yet):
-#   - auth.<domain> answers; the platform's own pages (hosts.conf) send a
-#     browser to the login, not a 403 from rules Authelia never loaded
+#   - auth.<domain> answers; the platform's own pages (hosts.conf; status only
+#     where a monitor runs) send a browser to the login, not a 403 from rules
+#     Authelia never loaded
 #   - every certificate is a real one (Let's Encrypt or mkcert), never
 #     Traefik's default
 #   - an unsigned webhook is refused (with webhooks: false, /hook is not
@@ -87,8 +88,13 @@ check() {
 }
 
 check "auth.${domain} answers" "auth.${domain}" GET answers
+monitored="$( [ -f "${dir}/vars.yml" ] && yq -r '.monitor != null' "${dir}/vars.yml" || echo false)"
 while IFS= read -r sub; do
-    [ "$sub" = auth ] || check "${sub}.${domain} sends a browser to the login" "${sub}.${domain}" GET to_login
+    case "$sub" in
+        auth) ;;
+        status) [ "$monitored" != true ] || check "${sub}.${domain} sends a browser to the login" "${sub}.${domain}" GET to_login ;;
+        *) check "${sub}.${domain} sends a browser to the login" "${sub}.${domain}" GET to_login ;;
+    esac
 done < <(awk '!/^[[:space:]]*(#|$)/ {print $1}' "${KAYRA_ROOT}/hosts.conf")
 
 first_app="$(head -1 <<< "$registered_wanted")"

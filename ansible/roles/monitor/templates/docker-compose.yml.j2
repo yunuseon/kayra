@@ -9,9 +9,28 @@ services:
     volumes:
       - ./config:/config:ro
     mem_limit: 128m
+{% if monitor_page | default(false) %}
+    # status.<domain>, for staff only: Traefik reaches it on platform-internal.
+    networks: [default, platform-internal]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=platform-internal"
+      - "traefik.http.routers.status.rule=Host(`status.{{ domain }}`)"
+      - "traefik.http.routers.status.entrypoints=websecure"
+      - "traefik.http.routers.status.tls.certresolver=le"
+      - "traefik.http.routers.status.middlewares=authelia@file"
+      - "traefik.http.services.status.loadbalancer.server.port=8080"
+{% endif %}
 {% if monitor_hosts | length > 0 %}
     extra_hosts:
 {% for host, address in monitor_hosts | dictsort %}
       - "{{ host }}:{{ address }}"
 {% endfor %}
+{% endif %}
+{% if monitor_page | default(false) %}
+
+networks:
+  platform-internal:
+    name: platform-internal
+    external: true
 {% endif %}

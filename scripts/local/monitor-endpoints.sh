@@ -3,8 +3,8 @@
 # monitor-endpoints.sh <server> — what the server's monitor (Gatus, the
 # monitor role) checks, from the same sources as verify.sh: for each server in
 # its vars.yml's monitor.watch,
-#   platform: auth.<domain> answers; the platform's pages (hosts.conf) send a
-#             browser to the login; every app route answers, not 5xx;
+#   platform: auth.<domain> answers; the platform's pages (hosts.conf, status
+#             where it runs a monitor) send a browser to the login; every app route answers, not 5xx;
 #             deploy.<domain>/health is 200 (monitor_health_tokens.<server>)
 #   edge:     every edge_routes name answers, not 5xx
 #   nas:      nothing of its own: its stacks are monitor.extra
@@ -50,7 +50,9 @@ watched() {
     case "$kind" in
         platform)
             endpoint "auth.${domain}" "$server" "https://auth.${domain}/" false false '[STATUS] == 200' "$cert"
+            monitored="$( [ -f "${dir}/vars.yml" ] && yq -r '.monitor != null' "${dir}/vars.yml" || echo false)"
             awk '!/^[[:space:]]*(#|$)/ {print $1}' "${KAYRA_ROOT}/hosts.conf" | while IFS= read -r sub; do
+                [ "$sub" != status ] || [ "$monitored" = true ] || continue
                 [ "$sub" = auth ] || endpoint "${sub}.${domain}" "$server" "https://${sub}.${domain}/" false false '[STATUS] == 302' "$cert"
             done
             endpoint "deploy.${domain}/health" "$server" "https://deploy.${domain}/health" false true '[STATUS] == 200'

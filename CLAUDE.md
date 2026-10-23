@@ -232,8 +232,10 @@ without the platform, and hiring or firing staff never needs an operator.
 - **The registry has no public router.** Builds push to `registry:5000` on
   `platform-internal`, the host daemon pulls from `localhost:5000`; nothing
   outside the server needs it. Do not route it again.
-- **`deploy.<domain>` sits behind `authelia@file`**, except `/hook/` (its own
-  higher-priority router; the builder checks the HMAC). The pages are
+- **`deploy.<domain>` sits behind `authelia@file`**, except `/hook/` and
+  `/health` (their own higher-priority routers; the builder checks the HMAC,
+  and `health_token` for `/health`, which it asks the deployer for over
+  platform-internal: `cli/src/deployer/health.ts`). The pages are
   read-only: anything that starts a run goes through `kayra app …` over SSH,
   into the deployer's control port, which listens on its loopback only.
 - **Do not set `forwardedHeaders.trustedIPs`** on a Traefik entrypoint. Authelia

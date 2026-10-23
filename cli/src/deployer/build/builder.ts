@@ -11,7 +11,7 @@ import { spawnLines } from "../process.ts";
 import type { Env } from "../runs/run.ts";
 import { signed } from "../forges/forge.ts";
 import { forgeRepo } from "../../lib/forge-repo.ts";
-import { pushedRef } from "../http/webhook.ts";
+import { header, pushedRef, secretMatches } from "../http/webhook.ts";
 import { typed } from "../../lib/typed.ts";
 
 /**
@@ -31,6 +31,8 @@ type Settings = {
   readonly resolveImages: string;
   readonly webhookSecret: () => string;
   readonly gitToken: () => string;
+  /** health_token: what a monitor shows to read deploy.<domain>/health; empty, it is no route at all. */
+  readonly healthToken: () => string;
   /** The server's `webhooks` setting: off, /hook/<app> is no route at all. */
   readonly webhooks: boolean;
 };
@@ -46,6 +48,7 @@ const settings = (env: NodeJS.ProcessEnv) => {
     resolveImages: env["RESOLVE_IMAGES"] ?? "/opt/kayra/scripts/platform/resolve-images.sh",
     webhookSecret: () => env["WEBHOOK_SECRET"] ?? "",
     gitToken: fromFile("/run/platform-secrets/GIT_TOKEN"),
+    healthToken: fromFile("/run/platform-secrets/HEALTH_TOKEN"),
     webhooks: env["WEBHOOKS"] !== "false",
   });
 };
@@ -171,6 +174,18 @@ const hook = async (s: Settings, name: string, request: IncomingMessage, respons
   send(response, forwarded?.ok === true ? 202 : 502, forwarded?.ok === true ? "queued\n" : "the deployer did not answer\n");
 };
 
+/** The deployer's view of the server, for a monitor that shows the health token; Traefik routes /health past the login. */
+const health = async (s: Settings, request: IncomingMessage, response: ServerResponse) => {
+  const given = /^Bearer (.+)$/.exec(header(request.headers, "authorization") ?? "")?.[1];
+  if (!secretMatches(s.healthToken(), given)) {
+    send(response, 404, "not found\n");
+    return;
+  }
+  const answer = await fetch(`${s.deployer}/health`).catch(() => undefined);
+  if (answer === undefined) send(response, 503, JSON.stringify({ healthy: false, problems: ["the deployer did not answer"], warnings: [] }), "application/json");
+  else send(response, answer.status, await answer.text(), "application/json");
+};
+
 const pages = (s: Settings, path: string, response: ServerResponse) => {
   const [, runs, who, id] = path.split("/");
   if (path === "/") {
@@ -229,6 +244,7 @@ export const serveBuilder = (env: NodeJS.ProcessEnv) => {
         if (s.webhooks) await hook(s, hooked[1], request, response);
         else send(response, 404, "this server takes no webhooks: it polls (webhooks: false)\n");
       }
+      else if (request.method === "GET" && path === "/health") await health(s, request, response);
       else if (request.method === "GET") pages(s, path, response);
       else send(response, 405, "method not allowed\n");
     }),

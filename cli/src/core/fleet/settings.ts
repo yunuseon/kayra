@@ -144,6 +144,7 @@ export const settings: readonly Setting[] = [
   // Secrets
   secret("notifier_ntfy_token", ["platform", "edge"], text, "With notifier kind ntfy: the access token alerts are published with."),
   secret("git_token", platform, text, "Token the builder clones app repos with and the deployer posts commit statuses with."),
+  secret("health_token", platform, text, "Bearer token a monitor reads deploy.<domain>/health with: the platform's and every app's containers, the disk and memory. Unset, there is no such page."),
   secret("webhook_secret", platform, text, "HMAC secret the apps' push webhooks (deploy.<domain>/hook/<app>) are signed with."),
   secret("renovate_token", platform, text, "Token the Renovate job opens PRs with."),
   secret("renovate_github_com_token", platform, text, "Public-read GitHub token for Renovate's lookups off GitHub."),

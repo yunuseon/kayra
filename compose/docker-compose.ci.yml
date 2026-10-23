@@ -73,7 +73,7 @@ services:
       - builder-work:/work
       - ./apps:/opt/platform/apps:ro
       - ./runs:/opt/platform/runs:ro
-      # GIT_TOKEN, to clone. Files, so a new one needs no restart.
+      # GIT_TOKEN, to clone; HEALTH_TOKEN, for /health. Files, so a new one needs no restart.
       - ./platform-secrets:/run/platform-secrets:ro
     mem_limit: 512m
     labels:
@@ -90,6 +90,12 @@ services:
       - "traefik.http.routers.deploy-hook.tls.certresolver=le"
       - "traefik.http.routers.deploy-hook.priority=100"
       - "traefik.http.routers.deploy-hook.service=deploy"
+      # A monitor cannot log in either; the builder checks health_token.
+      - "traefik.http.routers.deploy-health.rule=Host(`deploy.${DOMAIN:-localhost}`) && Path(`/health`)"
+      - "traefik.http.routers.deploy-health.entrypoints=websecure"
+      - "traefik.http.routers.deploy-health.tls.certresolver=le"
+      - "traefik.http.routers.deploy-health.priority=100"
+      - "traefik.http.routers.deploy-health.service=deploy"
       - "traefik.http.services.deploy.loadbalancer.server.port=8080"
     networks:
       - internal

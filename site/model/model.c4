@@ -91,7 +91,7 @@ model {
     }
     registry = store 'Image registry' {
       #internal
-      technology 'Distribution (registry:2)'
+      technology 'Distribution (registry:3)'
       description 'Content-addressed app images; no router; GC keeps the last 10 releases'
     }
     appContainers = app 'App containers' {

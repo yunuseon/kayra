@@ -80,7 +80,7 @@ ensure() {
     read_manifest "$manifest"
 
     # Every manifest type a push may leave, as registry-gc.sh asks: BuildKit
-    # pushes OCI manifests, and registry:2 answers 404 to a request that does
+    # pushes OCI manifests, and the registry answers 404 to a request that does
     # not accept the type it holds — every image would look missing.
     local status
     status=$(curl -s -o /dev/null -w '%{http_code}' \

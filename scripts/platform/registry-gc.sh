@@ -91,7 +91,7 @@ if [ "$deleted" -gt 0 ]; then
     docker stop "$registry" >/dev/null
     trap 'docker start "$registry" >/dev/null; rm -rf "$work"' EXIT
     docker run --rm --volumes-from "$registry" "$image" \
-        garbage-collect /etc/docker/registry/config.yml | tail -n 3
+        garbage-collect /etc/distribution/config.yml | tail -n 3
 fi
 
 # ── Build cache and host images ─────────────────────────────────────────────

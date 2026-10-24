@@ -13,7 +13,7 @@ FROM node:24.22.1-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e05
 ARG BUILDKIT_VERSION=v0.34.1
 # What the Renovate job runs, pinned here so Renovate keeps it current itself.
 # renovate: datasource=docker depName=renovate/renovate
-ARG RENOVATE_VERSION=44.181.0
+ARG RENOVATE_VERSION=44.181.1
 ENV RENOVATE_IMAGE=renovate/renovate:${RENOVATE_VERSION}
 
 RUN apt-get update && \

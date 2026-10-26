@@ -117,6 +117,16 @@ const remote = (argv, options) => run('ssh', [...ssh, commandText(argv)], option
 const docker = (argv, options) => remote(['sudo', 'docker', ...argv], options);
 const parseRemote = async (argv) => JSON.parse((await docker(argv)).stdout);
 
+async function pull(image) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const result = await docker(['pull', image], { timeout: 300000, allowFailure: true });
+    if (result.code === 0) return;
+    if (attempt === 3) throw new Error(`image download failed after three attempts: ${image}: ${result.stderr.slice(-1500)}`);
+    progress(`image download attempt ${attempt} failed; retrying before measurement`);
+    await sleep(attempt * 3000);
+  }
+}
+
 function collect(argv, name) {
   const stdout = createWriteStream(join(output, name));
   const stderr = createWriteStream(join(output, `${name}.stderr`));
@@ -327,8 +337,9 @@ async function main() {
     await run('multipass', ['transfer', join(directory, name), `${vm}:/home/ubuntu/swarm-lab/${name}`]);
   }
   await remote(['tee', '/home/ubuntu/swarm-lab/Dockerfile'], { input: `FROM ${nodeImage}\nWORKDIR /app\nCOPY fixture.mjs .\nUSER node\nCMD ["node", "/app/fixture.mjs"]\n` });
-  await docker(['pull', metadata.images.traefik], { timeout: 300000 });
-  await docker(['pull', metadata.images.socketProxy], { timeout: 300000 });
+  await pull(metadata.images.traefik);
+  await pull(metadata.images.socketProxy);
+  await pull(nodeImage);
   await docker(['build', '-t', metadata.images.fixture, '/home/ubuntu/swarm-lab'], { timeout: 600000 });
   await docker(['swarm', 'init', '--advertise-addr', ip]);
   await docker(['swarm', 'update', '--task-history-limit', '20']);

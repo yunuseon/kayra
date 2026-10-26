@@ -74,6 +74,8 @@ with `node test/lab/swarm/analyze.mjs /absolute/output/directory`.
 Proxy logs are streamed for the entire experiment, so Docker's log rotation
 cannot discard early routing evidence. Missing routing evidence marks the
 measurement incomplete.
+Image downloads may retry up to three times during provisioning, before any
+measurement. Application requests and proxy routing have no added retries.
 
 Failed requests remain failures even when a later request succeeds. The
 longest failure interval is sampled at the request rate; it is not an exact

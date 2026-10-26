@@ -5,7 +5,8 @@
 # its vars.yml's monitor.watch,
 #   platform: auth.<domain> answers; the platform's pages (hosts.conf, status
 #             where it runs a monitor) send a browser to the login; every app route answers, not 5xx;
-#             deploy.<domain>/health is 200 (monitor_health_tokens.<server>)
+#             deploy.<domain>/health is 200 (monitor_health_tokens.<server>);
+#             with apex_redirect, the bare domain redirects (301)
 #   edge:     every edge_routes name answers, not 5xx
 #   nas:      nothing of its own: its stacks are monitor.extra
 # plus monitor.extra as given. Every certificate must have 10 days left. Each
@@ -56,6 +57,8 @@ watched() {
                 [ "$sub" = auth ] || endpoint "${sub}.${domain}" "$server" "https://${sub}.${domain}/" false false '[STATUS] == 302' "$cert"
             done
             endpoint "deploy.${domain}/health" "$server" "https://deploy.${domain}/health" false true '[STATUS] == 200'
+            apex="$( [ -f "${dir}/vars.yml" ] && yq -r '.apex_redirect // ""' "${dir}/vars.yml" || true)"
+            [ -z "$apex" ] || endpoint "$domain" "$server" "https://${domain}/" false false '[STATUS] == 301' "$cert"
             bash "${KAYRA_ROOT}/scripts/local/app-manifests.sh" --routes "$server" | while read -r sub path; do
                 [ -z "$sub" ] || endpoint "${sub}.${domain}${path%/}" "$server" "https://${sub}.${domain}${path}" true false '[STATUS] < 500' "$cert"
             done

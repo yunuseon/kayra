@@ -153,6 +153,23 @@ const routeFindings = (facts: Facts) => {
   );
 };
 
+/** apex_redirect: the bare domain redirects to a host one of the server's apps serves. */
+const apexFindings = (facts: Facts) => {
+  const target = facts.vars["apex_redirect"];
+  if (typeof target !== "string" || target === "") return typed<readonly Finding[]>([]);
+  const hosts = facts.server.apps.flatMap((app) => {
+    const parsed = appManifestSchema.safeParse(facts.manifests[app.name]);
+    return typed<readonly string[]>(parsed.success ? (parsed.data.routes ?? []).map((route) => String(route.host)) : []);
+  });
+  const domain = facts.server.domain;
+  if (hosts.includes(target)) return typed<readonly Finding[]>([passed(`apex_redirect: ${domain} redirects to ${target}.${domain}, which app routes serve`)]);
+  if (facts.server.apps.some((app) => facts.manifests[app.name] === undefined))
+    return typed<readonly Finding[]>([unchecked(`apex_redirect not checked: not every app is cloned yet`, `kayra apps ${facts.server.name} clones them`)]);
+  return typed<readonly Finding[]>([
+    problem(`apex_redirect: no app routes ${target}.${domain}, so ${domain} would redirect to nothing`, "name a route host of one of the server's apps"),
+  ]);
+};
+
 /** Each app's contract against the fleet's values for it. */
 const appFindings = (facts: Facts) =>
   Object.freeze(facts.server.apps.flatMap((app) => {
@@ -190,7 +207,7 @@ const rank: Readonly<Record<Verdict, number>> = { problem: 0, unchecked: 1, pass
 
 /** Everything validate finds for one server: problems first, then what it could not check, then what holds. */
 export const findings = (facts: Facts) =>
-  Object.freeze([...secretsFindings(facts), ...recipientFindings(facts), ...terraformFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...appFindings(facts)].toSorted(
+  Object.freeze([...secretsFindings(facts), ...recipientFindings(facts), ...terraformFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...apexFindings(facts), ...appFindings(facts)].toSorted(
     (a, b) => rank[a.result] - rank[b.result],
   ));
 

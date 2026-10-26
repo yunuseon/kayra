@@ -45,6 +45,10 @@ renovate_token: ""
 # people's releases; a server whose repos carry the operator's own images
 # runs it more often, so a new build reaches a PR soon after it is pushed.
 renovate_schedule: "0 4 * * 1"
+# The host the bare domain redirects to, permanently, path and query kept:
+# www sends https://<domain>/x?y to https://www.<domain>/x?y. Empty, the bare
+# domain is not served.
+apex_redirect: ""
 # Push webhooks start a deploy at once; without them, the poll below finds the push.
 webhooks: true
 deploy_poll: "17 * * * *"

@@ -74,6 +74,19 @@ test("edge routes name subdomains and an upstream host:port", () => {
   );
 });
 
+test("apex_redirect names a host one of the server's apps routes", () => {
+  deepStrictEqual(said({ vars: { apex_redirect: "www" } }).filter((each) => each.includes("apex_redirect")), [
+    "✓ apex_redirect: shop.test redirects to www.shop.test, which app routes serve",
+  ]);
+  deepStrictEqual(problems({ vars: { apex_redirect: "shop" } }), [
+    "✗ apex_redirect: no app routes shop.shop.test, so shop.test would redirect to nothing → name a route host of one of the server's apps",
+  ]);
+  deepStrictEqual(problems({ vars: { apex_redirect: "www" }, manifests: {} }), [
+    "· apex_redirect not checked: not every app is cloned yet → kayra apps shop clones them",
+    "· app shop not checked: not cloned yet → kayra apps shop clones it",
+  ]);
+});
+
 test("an app's values match what its app.yml asks for; an app without app_secrets has none", () => {
   deepStrictEqual(said({ appConfig: { shop: {} }, appSecrets: {} }), [
     "✗ apps/shop.yml: no value for FLAG, which app.yml asks for → add FLAG: … to servers/shop/apps/shop.yml",

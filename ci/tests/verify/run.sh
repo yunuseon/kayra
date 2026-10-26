@@ -91,6 +91,14 @@ run_case monitor-page nothing
 healthy; answer issuer-status.shop.test "R13"; answer status.shop.test "404  0"
 run_case monitor-page-missing "status.shop.test sends a browser to the login: HTTP 404"
 rm -f "${fleet}/servers/shop/vars.yml"
+# A bare domain redirected (apex_redirect) answers 301 to that host, path and query kept.
+healthy; echo 'apex_redirect: www' > "${fleet}/servers/shop/vars.yml"; answer issuer-shop.test "R13"; answer "shop.test_x?y" "301 https://www.shop.test/x?y 0"
+run_case apex-redirect nothing
+healthy; answer issuer-shop.test "TRAEFIK DEFAULT CERT"; answer "shop.test_x?y" "301 https://www.shop.test/x?y 20"
+run_case apex-default-cert "shop.test redirects to www.shop.test: HTTP 301, certificate by TRAEFIK DEFAULT CERT"
+healthy; answer issuer-shop.test "R13"; answer "shop.test_x?y" "302 https://www.shop.test/ 0"
+run_case apex-redirect-loses-the-path "shop.test redirects to www.shop.test: HTTP 302"
+rm -f "${fleet}/servers/shop/vars.yml"
 healthy; answer deploy.shop.test "403  0"
 run_case authelia-without-the-rule "deploy.shop.test sends a browser to the login: HTTP 403"
 healthy; answer www.shop.test "200  20"; answer issuer-www.shop.test "TRAEFIK DEFAULT CERT"

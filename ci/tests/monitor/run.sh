@@ -35,7 +35,7 @@ monitor:
     - {name: photos, url: "https://photos.nas.test/", server: nas, conditions: ["[STATUS] < 500"]}
 YAML
 printf 'kind: nas\ntarget: home\ndomain: nas.test\n' > "${fleet}/servers/nas/server.yml"
-printf 'monitor:\n  watch: [edge, nas]\n' > "${fleet}/servers/shop/vars.yml"
+printf 'apex_redirect: www\nmonitor:\n  watch: [edge, nas]\n' > "${fleet}/servers/shop/vars.yml"
 echo 'shop ansible_host=192.0.2.9 ansible_user=deploy' > "${fleet}/servers/shop/inventory.ini"
 echo 'edge ansible_host=192.0.2.1 ansible_user=deploy' > "${fleet}/servers/edge/inventory.ini"
 echo 'nas ansible_host=10.0.0.2 ansible_user=deploy' > "${fleet}/servers/nas/inventory.ini"

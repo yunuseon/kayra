@@ -1,0 +1,19 @@
+# The bare domain, {{ domain }}: a permanent redirect to {{ apex_redirect }}.{{ domain }},
+# path and query kept (apex_redirect in vars.yml). Its certificate comes like
+# every other host's; plain HTTP reaches it through the web entrypoint's
+# redirect to HTTPS first, as HSTS preloading wants.
+http:
+  routers:
+    apex:
+      rule: "Host(`{{ domain }}`)"
+      entryPoints: [websecure]
+      tls:
+        certResolver: le
+      middlewares: [apex-redirect]
+      service: noop@internal
+  middlewares:
+    apex-redirect:
+      redirectRegex:
+        regex: "^https?://[^/]+(.*)$"
+        replacement: "https://{{ apex_redirect }}.{{ domain }}${1}"
+        permanent: true

@@ -7,6 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { isCurrentTask, request, traffic } from './probe.mjs';
 import { assess, settlement, trafficEvidence, verdict } from './results.mjs';
 import { analyze } from './analyze.mjs';
+import { prepareMigrations, runMigrations, scenarios as migrationScenarios } from './migrations/runner.mjs';
+import { analyzeMigrations, migrationVerdict } from './migrations/results.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const root = resolve(directory, '../../..');
@@ -43,33 +45,42 @@ if (process.argv[2] === '--observe') {
 }
 
 function options(argv) {
-  const value = { keep: false, repeats: 3, modes: ['tasks', 'vip'], scenarios: ['healthy', 'slow-ready', 'never-ready', 'crash-after-ready', 'long-request', 'observer-interruption'] };
+  const value = { suite: 'http', keep: false, repeats: 3, modes: ['tasks', 'vip'], scenarios: ['healthy', 'slow-ready', 'never-ready', 'crash-after-ready', 'long-request', 'observer-interruption'] };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === '--keep') value.keep = true;
-    else if (['--output', '--repeats', '--mode', '--scenario'].includes(arg)) {
+    else if (['--output', '--repeats', '--mode', '--scenario', '--suite'].includes(arg)) {
       const next = argv[++index];
       if (!next) throw new Error(`${arg} requires a value`);
+      if (arg === '--suite') value.suite = next;
       if (arg === '--output') value.output = resolve(next);
       if (arg === '--repeats') value.repeats = Number(next);
       if (arg === '--mode') value.modes = [next];
       if (arg === '--scenario') value.scenarios = [next];
     } else if (arg === '--help') {
-      console.log('Usage: bash test/lab/swarm/run.sh [--keep] [--output DIR] [--repeats N] [--mode tasks|vip] [--scenario NAME]');
+      console.log('Usage: bash test/lab/swarm/run.sh [--suite http|migrations] [--keep] [--output DIR] [--repeats N] [--mode tasks|vip] [--scenario NAME]');
       process.exit(0);
     } else throw new Error(`unknown option ${arg}`);
   }
   if (!Number.isInteger(value.repeats) || value.repeats < 1 || value.repeats > 10) throw new Error('--repeats must be 1..10');
   if (value.modes.some((mode) => !['tasks', 'vip'].includes(mode))) throw new Error('unknown discovery mode');
-  const allowed = ['healthy', 'slow-ready', 'never-ready', 'crash-after-ready', 'long-request', 'observer-interruption'];
+  if (!['http', 'migrations'].includes(value.suite)) throw new Error('unknown suite');
+  if (value.suite === 'migrations') {
+    if (argv.includes('--mode') && value.modes[0] !== 'vip') throw new Error('migration suite requires VIP routing');
+    value.modes = ['vip'];
+    if (!argv.includes('--scenario')) value.scenarios = [...migrationScenarios];
+  }
+  const allowed = value.suite === 'migrations' ? migrationScenarios : ['healthy', 'slow-ready', 'never-ready', 'crash-after-ready', 'long-request', 'observer-interruption'];
   if (value.scenarios.some((scenario) => !allowed.includes(scenario))) throw new Error('unknown scenario');
-  value.fullMatrix = value.repeats === 3 && value.modes.length === 2 && value.scenarios.length === 6;
+  value.fullMatrix = value.repeats === 3 && (value.suite === 'migrations' ? value.scenarios.length === 8 : value.modes.length === 2 && value.scenarios.length === 6);
   return value;
 }
 
 const settings = options(process.argv.slice(2));
+const summarize = settings.suite === 'migrations' ? migrationVerdict : verdict;
+const analyzeOutput = settings.suite === 'migrations' ? analyzeMigrations : analyze;
 const stamp = new Date().toISOString().replaceAll(/[-:.]/g, '').replace('Z', '').toLowerCase();
-const output = settings.output ?? join(root, '.cache', 'swarm-lab', stamp);
+const output = settings.output ?? join(root, '.cache', settings.suite === 'migrations' ? 'swarm-migration-lab' : 'swarm-lab', stamp);
 if (existsSync(output)) throw new Error(`output directory already exists: ${output}`);
 mkdirSync(output, { recursive: true });
 const scratch = mkdtempSync('/tmp/kayra-swarm-');
@@ -290,10 +301,12 @@ async function experiment(mode, scenario, repeat) {
   const result = { mode, repeat, updateAt, finishedAt: Date.now(), ...assess({ scenario, records, outcome, updateAt, longRequest, observer: observerResult }) };
   results.push(result);
   json(join(path, 'result.json'), result);
-  json(join(output, 'summary.json'), { ...metadata, verdict: verdict(results), finishedAt: null });
+  json(join(output, 'summary.json'), { ...metadata, verdict: summarize(results), finishedAt: null });
   progress(`${name}: ${result.passed ? 'PASS' : 'FAIL'} (${result.failedRequests}/${result.requests} failed; ${result.outcome.state})`);
   if (!result.traffic.passed) throw new Error('load-generator interruption or insufficient traffic invalidated the measurement');
 }
+
+const migrationContext = () => ({ metadata, docker, remote, run, pull, sleep, parseRemote, waitForA, snapshot, progress, results, settings, output, target });
 
 async function main() {
   progress(`lab ${vm}; results ${output}`);
@@ -367,12 +380,18 @@ async function main() {
   const checks = await docker(['run', '--rm', '--network', 'lab-socket', '--entrypoint', 'node', metadata.images.fixture, '-e',
     "const base='http://socket-proxy:2375'; const get=await fetch(base+'/version'); const post=await fetch(base+'/containers/create',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});console.log(JSON.stringify({get:get.status,post:post.status}));if(!get.ok||post.status!==403)process.exit(1)"]);
   metadata.socketProxyChecks = JSON.parse(checks.stdout);
+  if (settings.suite === 'migrations') await prepareMigrations(migrationContext());
   json(join(output, 'metadata.json'), metadata);
   collect(['sudo', 'docker', 'events', '--format', '{{json .}}'], 'docker-events.ndjson');
   collect(['sudo', 'python3', '-u', '/home/ubuntu/swarm-lab/telemetry.py'], 'metrics.ndjson');
   collect(['sudo', 'docker', 'logs', '--follow', '--timestamps', 'traefik'], 'traefik.log');
   collect(['sudo', 'docker', 'logs', '--follow', '--timestamps', 'socket-proxy'], 'socket-proxy.log');
   setupComplete = true;
+  if (settings.suite === 'migrations') {
+    await runMigrations(migrationContext());
+    passed = results.every((result) => result.passed);
+    return;
+  }
   for (const mode of settings.modes) {
     progress(`${mode}: 30-second baseline`);
     await createService(mode);
@@ -439,10 +458,10 @@ try {
   const collection = collectors.map(({ name, exitedAt, code, signal }) => ({ name, exitedAt, code, signal, unexpectedExit: exitedAt < collectorStopAt }));
   if (setupComplete && (!resources.samples || collection.some((collector) => collector.unexpectedExit))) infrastructureError ??= 'telemetry collection failed; results need investigation';
   if (setupComplete && (!metrics.at(-1) || collectorStopAt - metrics.at(-1).at > 30000)) infrastructureError ??= 'telemetry does not cover the end of the run';
-  const summary = { ...metadata, verdict: verdict(results), resources, collection, infrastructureError, finishedAt: new Date().toISOString() };
+  const summary = { ...metadata, verdict: summarize(results), resources, collection, infrastructureError, finishedAt: new Date().toISOString() };
   json(join(output, 'summary.json'), summary);
   try {
-    const analyzed = analyze(output);
+    const analyzed = analyzeOutput(output);
     passed = passed && analyzed.results.every((row) => row.passed);
   } catch (error) {
     infrastructureError ??= `evidence analysis failed: ${error.message}`;

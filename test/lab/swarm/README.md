@@ -92,3 +92,6 @@ HTTP routing is the scope. Passing does not establish TLS/auth integration,
 migration safety, worker or singleton behavior, full-platform capacity,
 multi-node availability, or production readiness. If neither mode passes,
 compare the equivalent K3s experiment before adding custom traffic control.
+
+The [shared-database migration suite](migrations/README.md) builds on the VIP
+result: `bash test/lab/swarm/run.sh --suite migrations`.

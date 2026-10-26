@@ -1,13 +1,16 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { isCurrentTask, request } from './probe.mjs';
 import { assess, verdict } from './results.mjs';
+import { analyze, routingEvidence } from './analyze.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const sample = (at, release = 'B', fields = {}) => ({ kind: 'short', at, endedAt: at + 5, latencyMs: 5, status: 200, body: { release, ready: true, readyAt: 0, requestStartedAt: at }, ...fields });
@@ -20,6 +23,40 @@ test('case readiness rejects a previous service task with the same release label
   const response = { status: 200, body: { release: 'A', ready: true, task: 'aaaaaaaaaaaa' } };
   assert.equal(isCurrentTask(response, ['bbbbbbbbbbbb0123456789']), false);
   assert.equal(isCurrentTask(response, ['aaaaaaaaaaaa0123456789']), true);
+});
+
+test('routing evidence distinguishes actual task addresses, VIPs, and hidden retries', () => {
+  const service = { Endpoint: { VirtualIPs: [{ Addr: '10.0.1.2/24' }] }, Spec: { Labels: { 'traefik.swarm.lbswarm': 'true' } } };
+  const row = { at: 10, RequestHost: 'probe.swarm-lab.test', ServiceURL: 'http://10.0.1.2:8080', RetryAttempts: 0 };
+  assert.equal(routingEvidence([row], service, 0, 20, 'vip').passed, true);
+  assert.equal(routingEvidence([{ ...row, ServiceURL: 'http://10.0.1.3:8080' }], service, 0, 20, 'vip').passed, false);
+  assert.equal(routingEvidence([{ ...row, RetryAttempts: 1 }], service, 0, 20, 'vip').passed, false);
+  service.Spec.Labels['traefik.swarm.lbswarm'] = 'false';
+  assert.equal(routingEvidence([{ ...row, ServiceURL: 'http://10.0.1.3:8080' }], service, 0, 20, 'tasks').passed, true);
+  assert.equal(routingEvidence([row], service, 0, 20, 'tasks').passed, false);
+  assert.equal(routingEvidence([], service, 0, 20, 'tasks').passed, false);
+});
+
+test('raw artifact analysis verifies actual proxy mode and keeps partial runs incomplete', (t) => {
+  const output = mkdtempSync(join(tmpdir(), 'swarm-analysis-'));
+  t.after(() => rmSync(output, { recursive: true, force: true }));
+  const path = join(output, 'vip-healthy-1');
+  const source = passing();
+  const previous = { mode: 'vip', repeat: 1, scenario: 'healthy', updateAt: source.updateAt, outcome: source.outcome, finishedAt: 40000 };
+  const put = (file, value) => writeFileSync(file, JSON.stringify(value));
+  put(join(output, 'summary.json'), { output, settings: { fullMatrix: false }, results: [previous], resources: {} });
+  mkdirSync(path);
+  put(join(path, 'initial-task.json'), { at: 1000 });
+  put(join(path, 'service.json'), [{ Endpoint: { VirtualIPs: [{ Addr: '10.0.1.2/24' }] }, Spec: { Labels: { 'traefik.swarm.lbswarm': 'true' } } }]);
+  writeFileSync(join(path, 'requests.ndjson'), source.records.map((row) => JSON.stringify(row)).join('\n'));
+  const proxy = { StartUTC: new Date(2500).toISOString(), RequestHost: 'probe.swarm-lab.test', ServiceURL: 'http://10.0.1.2:8080', RetryAttempts: 0 };
+  writeFileSync(join(output, 'traefik.log'), `2026-10-26T00:00:00Z ${JSON.stringify(proxy)}\n`);
+  const result = analyze(output);
+  assert.equal(result.results[0].passed, true);
+  assert.equal(result.verdict.viable, false);
+  assert.match(readFileSync(join(output, 'report.md'), 'utf8'), /INCOMPLETE/);
+  writeFileSync(join(output, 'traefik.log'), JSON.stringify({ ...proxy, ServiceURL: 'http://10.0.1.3:8080' }));
+  assert.equal(analyze(output).results[0].passed, false);
 });
 
 test('assessment rejects lost requests, early exposure, wrong tails and late recovery', () => {

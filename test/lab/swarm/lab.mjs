@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isCurrentTask, request, traffic } from './probe.mjs';
 import { assess, verdict } from './results.mjs';
+import { analyze } from './analyze.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const root = resolve(directory, '../../..');
@@ -87,7 +88,7 @@ const collectors = [];
 const activeCommands = new Set();
 const activeObservers = new Set();
 const results = [];
-const metadata = { startedAt: new Date().toISOString(), vm, output, scratch, settings, results };
+const metadata = { startedAt: new Date().toISOString(), sourceRoot: root, vm, output, scratch, settings, results };
 
 async function run(program, args, { input, timeout = 120000, allowFailure = false, env, log = join(output, 'lab.log') } = {}) {
   line(commands, { at: Date.now(), program, args });
@@ -282,15 +283,6 @@ async function experiment(mode, scenario, repeat) {
   progress(`${name}: ${result.passed ? 'PASS' : 'FAIL'} (${result.failedRequests}/${result.requests} failed; ${result.outcome.state})`);
 }
 
-function report(summary) {
-  const rows = results.map((row) => `| ${row.mode} | ${row.scenario} | ${row.repeat} | ${row.passed ? 'PASS' : 'FAIL'} | ${row.failedRequests}/${row.requests} | ${row.prematureRequests} | ${(row.convergenceMs / 1000).toFixed(1)} | ${(row.longestObservedFailureIntervalMs / 1000).toFixed(2)} |`).join('\n');
-  const failed = results.filter((row) => !row.passed).map((row) => `- ${row.mode}/${row.scenario}/${row.repeat}: ${row.reasons.join('; ')}`).join('\n');
-  const decision = !settings.fullMatrix || !summary.verdict.complete ? 'INCOMPLETE: a full 36-case matrix is required for a feasibility verdict.'
-    : summary.verdict.viable ? 'At least one discovery mode passed all three repetitions of all six scenarios. Advance that mode to migration/worker/admission experiments; this does not select Swarm for production.'
-      : 'Neither discovery mode met the continuity and recovery criteria. Compare a K3s readiness/rolling-update experiment before extending Swarm integration.';
-  return `# Swarm rollout experiment\n\n${decision}\n\nStarted: ${metadata.startedAt}. Finished: ${summary.finishedAt}.\n\nVM: ${vm}, Ubuntu 24.04, 2 CPUs, 4 GB RAM, 20 GB disk.\n\nCheckout: ${metadata.commit}. Source tree: ${root}. Source hashes are recorded in summary.json.\n\n## Versions\n\n\`\`\`json\n${JSON.stringify(metadata.versions, null, 2)}\n\`\`\`\n\n## Images\n\n\`\`\`json\n${JSON.stringify(metadata.images, null, 2)}\n\`\`\`\n\n## Results\n\n| Discovery | Scenario | Repeat | Result | Failed requests | Premature | Convergence s | Longest observed failure interval s |\n|---|---|---:|---|---:|---:|---:|---:|\n${rows}\n\n${failed || 'No scenario failures.'}\n\n## Resource samples\n\n\`\`\`json\n${JSON.stringify(summary.resources, null, 2)}\n\`\`\`\n\nThese are total VM samples during the minimal experiment, not estimates for a complete Kayra server. Raw per-container samples are retained.\n\n## Reproduction and evidence\n\n\`\`\`bash\ncd ${quote(root)}\nbash test/lab/swarm/run.sh --output /tmp/kayra-swarm-reproduction\n\`\`\`\n\nThe full argv sequence is commands.ndjson. Per-case requests.ndjson records every request with no retries; timeline and observer logs record update and recovery boundaries. Container inspections/logs, docker-events.ndjson, traefik.log, socket-proxy.log, and metrics.ndjson provide raw evidence. summary.json is machine-readable. Default provider refresh behavior is unchanged.\n\nA 30-second healthy baseline precedes each discovery mode. Each case includes five seconds of traffic before update and at least 30 seconds after the observed outcome. Short requests run at 20/s split equally between fresh and persistent connections, with two-second deadlines and no retries. The failure interval is sampled at that traffic rate, not a claim of a mathematically exact outage duration.\n\n## Limits\n\nHTTP only. No TLS, Authelia, database migrations, workers, full-platform load, multi-node scheduling, or production changes. These are runtime/ingress experiments; the killed observer is a lab process, not Kayra's current deployer. A passing crash-after-readiness case establishes bounded recovery, not uninterrupted rollback. Minimal-lab memory does not establish full-platform capacity.\n\n${infrastructureError ? `Infrastructure error: ${infrastructureError}\n` : ''}`;
-}
-
 async function main() {
   progress(`lab ${vm}; results ${output}`);
   metadata.commit = (await run('git', ['-C', root, 'rev-parse', 'HEAD'])).stdout.trim();
@@ -328,7 +320,7 @@ async function main() {
   writeFileSync(play, `---\n- name: Prepare isolated Swarm lab\n  hosts: all\n  become: true\n  pre_tasks:\n    - name: Install Docker role prerequisites\n      ansible.builtin.apt:\n        name: [python3-debian, apparmor]\n        state: present\n        update_cache: true\n    - name: Create the Docker role deploy user\n      ansible.builtin.user:\n        name: deploy\n        create_home: true\n  roles:\n    - docker\n`);
   progress('provisioning with Kayra Docker role');
   await run('ansible-playbook', ['-i', inventory, play], { timeout: 900000, env: {
-    ANSIBLE_CONFIG: join(root, 'ansible/ansible.cfg'), ANSIBLE_ROLES_PATH: join(root, 'ansible/roles'), ANSIBLE_STDOUT_CALLBACK: 'default',
+    ANSIBLE_CONFIG: join(root, 'ansible/ansible.cfg'), ANSIBLE_ROLES_PATH: join(root, 'ansible/roles'), ANSIBLE_STDOUT_CALLBACK: 'default', PYTHONDONTWRITEBYTECODE: '1',
   } });
   await remote(['mkdir', '-p', '/home/ubuntu/swarm-lab']);
   for (const name of ['fixture.mjs', 'telemetry.py']) {
@@ -371,8 +363,8 @@ async function main() {
     await createService(mode);
     const baseline = [];
     const stop = traffic(`${target}/version`, (row) => { baseline.push(row); line(join(output, `baseline-${mode}.ndjson`), row); });
-    await sleep(31000);
-    await stop();
+    try { await sleep(31000); }
+    finally { await stop(); }
     if (baseline.some((row) => row.error || row.status !== 200 || !row.body?.ready)) throw new Error(`${mode} baseline is unhealthy; scenario measurements would be invalid`);
     for (let repeat = 1; repeat <= settings.repeats; repeat++) {
       for (const scenario of settings.scenarios) await experiment(mode, scenario, repeat);
@@ -431,7 +423,14 @@ try {
   if (setupComplete && (!metrics.at(-1) || collectorStopAt - metrics.at(-1).at > 30000)) infrastructureError ??= 'telemetry does not cover the end of the run';
   const summary = { ...metadata, verdict: verdict(results), resources, collection, infrastructureError, finishedAt: new Date().toISOString() };
   json(join(output, 'summary.json'), summary);
-  writeFileSync(join(output, 'report.md'), report(summary));
+  try {
+    const analyzed = analyze(output);
+    passed = passed && analyzed.results.every((row) => row.passed);
+  } catch (error) {
+    infrastructureError ??= `evidence analysis failed: ${error.message}`;
+    json(join(output, 'summary.json'), { ...summary, infrastructureError });
+    writeFileSync(join(output, 'report.md'), `# Swarm rollout experiment\n\nINCOMPLETE: ${infrastructureError}\n`);
+  }
   if (vmCreated && passed && !infrastructureError && !settings.keep) {
     progress(`destroying successful lab ${vm}`);
     await run('multipass', ['delete', '--purge', vm]);

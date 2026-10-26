@@ -13,7 +13,7 @@ node --test test/lab/swarm/lab.test.mjs
 bash test/lab/swarm/run.sh
 ```
 
-Allow about 45 minutes for provisioning and the full matrix. Progress is
+Allow about an hour for provisioning and the full matrix. Progress is
 printed after each phase and scenario. Results remain under
 `.cache/swarm-lab/<timestamp>/` even when a successful VM is deleted.
 Use `--output /absolute/new/directory` to choose another artifact directory.
@@ -66,6 +66,11 @@ preserving the VM and all diagnostic evidence.
 - `traefik.log`, `socket-proxy.log`: proxy and API-access evidence.
 - Per-case directories: every request, observer/timeline logs, service/task
   snapshots, and fixture container inspections/logs.
+
+Assessment checks the actual backend addresses in Traefik access logs against
+the service VIPs, so ignored/misapplied discovery labels cannot silently make
+both modes test the same routing behavior. Reassess preserved raw evidence
+with `node test/lab/swarm/analyze.mjs /absolute/output/directory`.
 
 Failed requests remain failures even when a later request succeeds. The
 longest failure interval is sampled at the request rate; it is not an exact

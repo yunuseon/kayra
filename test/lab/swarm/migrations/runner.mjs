@@ -142,8 +142,8 @@ async function runCase(ctx, scenario, repeat) {
       await Promise.all([finishMigration(first), finishMigration(second)]);
     } else if (scenario === 'interrupted-before-commit' || scenario === 'interrupted-after-commit') {
       const after = scenario === 'interrupted-after-commit';
-      const attempt = await startMigration('expand', after ? { HOLD_AFTER_COMMIT_MS: 15000 } : { HOLD_BEFORE_MS: 15000 });
-      await awaitEvent(attempt, after ? 'committed' : 'migration-lock-held');
+      const attempt = await startMigration('expand', after ? { HOLD_AFTER_COMMIT_MS: 15000 } : { HOLD_BEFORE_COMMIT_MS: 15000 });
+      await awaitEvent(attempt, after ? 'committed' : 'before-commit-paused');
       await ctx.docker(['kill', '--signal', 'KILL', attempt.id]);
       await finishMigration(attempt);
       intermediate = await databaseState(ctx);

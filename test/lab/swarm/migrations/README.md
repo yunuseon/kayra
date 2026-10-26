@@ -27,7 +27,7 @@ context remain untouched.
 | expand-rollback | Expand schema, deploy dual-writing B, roll back to A; zero HTTP failures and all acknowledged values readable by A |
 | transaction-failure | Intentional SQL failure rolls back DDL/ledger; service unchanged and zero HTTP failures |
 | concurrent-migrations | Two overlapping attempts serialize through an app-owned advisory lock; exactly one application/ledger row and one idempotent skip |
-| interrupted-before-commit | Kill after transaction lock acquisition; schema unchanged, retry applies once, A remains available |
+| interrupted-before-commit | Kill after DDL/ledger insert but before commit; both roll back, retry commits once, A remains available |
 | interrupted-after-commit | Kill after commit but before process success; schema/ledger persist, retry skips, A remains available |
 | lock-contention | Hold an application read transaction; migration hits its 500 ms DDL lock timeout; schema/service unchanged and no failed HTTP requests |
 | candidate-crash | B becomes Docker-healthy, writes data, then crashes; native rollback to A within 90 seconds, expanded schema and all acknowledged values retained |

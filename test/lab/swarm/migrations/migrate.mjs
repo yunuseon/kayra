@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import pg from 'pg';
+import { setTimeout as pause } from 'node:timers/promises';
 
 const name = process.env.MIGRATION ?? 'expand';
 const queries = {
@@ -35,10 +36,14 @@ try {
       event('applied');
     }
   }
+  if (Number(process.env.HOLD_BEFORE_COMMIT_MS) > 0) {
+    event('before-commit-paused');
+    await pause(Number(process.env.HOLD_BEFORE_COMMIT_MS));
+  }
   await client.query('COMMIT');
   transaction = false;
   event('committed');
-  if (Number(process.env.HOLD_AFTER_COMMIT_MS) > 0) await client.query('SELECT pg_sleep($1)', [Number(process.env.HOLD_AFTER_COMMIT_MS) / 1000]);
+  if (Number(process.env.HOLD_AFTER_COMMIT_MS) > 0) await pause(Number(process.env.HOLD_AFTER_COMMIT_MS));
 } catch (error) {
   if (transaction) await client.query('ROLLBACK').catch(() => {});
   event('failed', { code: error.code ?? error.message });

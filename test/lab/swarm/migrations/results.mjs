@@ -38,7 +38,7 @@ export function assessMigration(evidence, records) {
   const expanded = database.columns.includes('nickname');
   const legacy = database.columns.includes('display_name');
   const ledger = database.ledger.map((row) => row.version);
-  const applied = migrations.flatMap((attempt) => eventsOf(attempt, 'applied'));
+  const applied = migrations.filter((attempt) => attempt.exitCode === 0 || eventsOf(attempt, 'committed').length > 0).flatMap((attempt) => eventsOf(attempt, 'applied'));
   const skipped = migrations.flatMap((attempt) => eventsOf(attempt, 'already-applied'));
   const unchanged = before.Version.Index === after.Version.Index && !timeline.some((row) => row.kind === 'update-submitted');
   const settledInMs = settled.recoveredAt === null ? null : settled.recoveredAt - evidence.updateAt;
@@ -66,7 +66,7 @@ export function assessMigration(evidence, records) {
       const killed = migrations.find((attempt) => attempt.exitCode === 137);
       const retried = migrations.find((attempt) => attempt.exitCode === 0);
       require(killed && retried && unchanged, 'missing killed attempt, successful retry, or unchanged service');
-      if (scenario === 'interrupted-before-commit') require(intermediate && !intermediate.columns.includes('nickname') && intermediate.ledger.length === 0 && killed?.events.some((row) => row.kind === 'migration-lock-held') && !killed?.events.some((row) => row.kind === 'committed') && skipped.length === 0, 'pre-commit interruption was not rolled back and reapplied');
+      if (scenario === 'interrupted-before-commit') require(intermediate && !intermediate.columns.includes('nickname') && intermediate.ledger.length === 0 && killed?.events.some((row) => row.kind === 'applied') && killed?.events.some((row) => row.kind === 'before-commit-paused') && !killed?.events.some((row) => row.kind === 'committed') && skipped.length === 0, 'pre-commit interruption was not rolled back and reapplied');
       else require(intermediate?.columns.includes('nickname') && intermediate.ledger.length === 1 && killed?.events.some((row) => row.kind === 'committed') && skipped.length === 1, 'post-commit interruption was not recovered from the ledger');
     } else if (scenario === 'candidate-crash') {
       require(outcome.state === 'rollback_completed' && releaseOf(after) === 'A' && !timeline.some((row) => row.kind === 'rollback-submitted'), 'candidate failure did not cause native automatic rollback');

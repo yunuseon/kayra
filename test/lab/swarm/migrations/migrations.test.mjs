@@ -75,3 +75,15 @@ test('destructive rollback PASS means positively demonstrated incompatibility, n
 test('a partial migration matrix cannot establish feasibility', () => {
   assert.equal(migrationVerdict([{ scenario: 'expand-rollback', repeat: 1, passed: true }]).passed, false);
 });
+
+
+test('killed uncommitted DDL must disappear before a single committed retry', () => {
+  const { evidence, records } = fixture('interrupted-before-commit');
+  evidence.intermediate = structuredClone(evidence.database);
+  evidence.database.columns.push('nickname');
+  evidence.database.ledger.push({ version: 'expand' });
+  evidence.migrations = [{ exitCode: 137, events: [{ kind: 'applied', migration: 'expand' }, { kind: 'before-commit-paused' }] }, { exitCode: 0, events: [{ kind: 'applied', migration: 'expand' }, { kind: 'committed' }] }];
+  assert.equal(assessMigration(evidence, records).passed, true);
+  evidence.intermediate.columns.push('nickname');
+  assert.equal(assessMigration(evidence, records).passed, false);
+});

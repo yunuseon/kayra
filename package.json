@@ -1,6 +1,6 @@
 {
   "name": "@yunuseon/kayra",
-  "version": "0.22.4",
+  "version": "0.23.0",
   "description": "A self-hosted app platform and the CLI that runs it: Traefik, Authelia, a registry, rootless BuildKit and a small deployer per server, set up with OpenTofu and Ansible.",
   "license": "MIT",
   "author": "Yunus Öztürk",

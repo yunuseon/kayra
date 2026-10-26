@@ -35,7 +35,7 @@ are not changed.
 
 The full matrix runs six scenarios three times in each discovery mode:
 healthy replacement, 15-second readiness delay, permanent readiness failure,
-crash five seconds after readiness, a 20-second request during replacement,
+crash five seconds after the first successful health response, a 20-second request during replacement,
 and actual termination/restart of the lab update observer.
 
 Each mode starts with a 30-second healthy baseline. Cases start traffic five
@@ -50,7 +50,8 @@ monitoring is five seconds. The declared container health check has a
 
 Continuity cases require no failed requests or premature candidate exposure.
 The post-readiness crash permits disruption but requires native rollback
-within 90 seconds and a stable old release afterward. Every case requires
+within 90 seconds and a stable old release afterward. Docker events must prove
+the candidate became healthy before its injected exit (code 42). Every case requires
 a stable expected release throughout the post-convergence window. A mode
 is viable only if all 18 of its cases pass. Failure in the other mode does
 not invalidate it. The command still exits nonzero if any case fails,

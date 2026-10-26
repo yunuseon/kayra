@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assess, verdict } from './results.mjs';
@@ -13,6 +13,17 @@ export function routingEvidence(access, service, start, end, mode) {
   const addressesMatch = addresses.length > 0 && vips.length > 0 && addresses.every((address) => mode === 'vip' ? vips.includes(address) : !vips.includes(address));
   const retried = selected.filter((entry) => Number(entry.RetryAttempts ?? 0) !== 0).length;
   return { passed: labelMatches && addressesMatch && retried === 0, requests: selected.length, addresses, vips, labelMatches, addressesMatch, retried };
+}
+
+export function crashEvidence(events, containers, start, end) {
+  const candidates = containers.filter((container) => container.Config?.Env?.includes('RELEASE=B'));
+  const faults = candidates.flatMap((container) => {
+    const selected = events.filter((event) => event.Actor?.ID === container.Id && event.timeNano / 1e6 >= start && event.timeNano / 1e6 <= end);
+    const healthy = selected.find((event) => event.Action === 'health_status: healthy');
+    const death = selected.find((event) => event.Action === 'die' && event.Actor.Attributes?.exitCode === '42');
+    return healthy && death ? [{ container: container.Id, healthyAt: healthy.timeNano / 1e6, diedAt: death.timeNano / 1e6 }] : [];
+  });
+  return { passed: faults.some((fault) => fault.healthyAt < fault.diedAt), faults };
 }
 
 function accessLog(path) {
@@ -30,6 +41,8 @@ function accessLog(path) {
 export function analyze(output) {
   const summary = JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8'));
   const access = accessLog(join(output, 'traefik.log'));
+  const eventPath = join(output, 'docker-events.ndjson');
+  const events = existsSync(eventPath) ? readFileSync(eventPath, 'utf8').split('\n').filter(Boolean).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } }) : [];
   const results = summary.results.map((previous) => {
     const path = join(output, `${previous.mode}-${previous.scenario}-${previous.repeat}`);
     const records = readFileSync(join(path, 'requests.ndjson'), 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
@@ -38,13 +51,15 @@ export function analyze(output) {
     const routing = routingEvidence(access, service, initial.at, previous.finishedAt, previous.mode);
     const measured = assess({ ...previous, records, observer: previous.observer });
     if (!routing.passed) measured.reasons.push('proxy access logs did not prove the declared discovery mode without retries');
-    const result = { ...previous, ...measured, routing, passed: measured.passed && routing.passed };
+    const fault = previous.scenario === 'crash-after-ready' ? crashEvidence(events, readdirSync(path).filter((name) => /^container-.*\.json$/.test(name)).flatMap((name) => JSON.parse(readFileSync(join(path, name), 'utf8'))), previous.updateAt, previous.finishedAt) : { passed: true };
+    if (!fault.passed) measured.reasons.push('missing Docker evidence that candidate became healthy before injected exit 42');
+    const result = { ...previous, ...measured, routing, fault, passed: measured.passed && routing.passed && fault.passed };
     writeFileSync(join(path, 'result.json'), `${JSON.stringify(result, null, 2)}\n`);
     return result;
   });
   const directory = dirname(fileURLToPath(import.meta.url));
   const analysisSourceHashes = Object.fromEntries(['analyze.mjs', 'results.mjs'].map((name) => [name, createHash('sha256').update(readFileSync(join(directory, name))).digest('hex')]));
-  const evidenceComplete = results.every((row) => row.routing.requests > 0);
+  const evidenceComplete = results.every((row) => row.routing.requests > 0 && row.fault.passed);
   const updated = { ...summary, results, verdict: verdict(results), evidenceComplete, analysisSourceHashes, analyzedAt: new Date().toISOString() };
   writeFileSync(join(output, 'summary.json'), `${JSON.stringify(updated, null, 2)}\n`);
   writeFileSync(join(output, 'report.md'), render(updated));

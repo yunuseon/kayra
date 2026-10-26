@@ -16,6 +16,8 @@ const neverReady = process.env.NEVER_READY === 'true';
 const release = process.env.RELEASE ?? 'A';
 const task = os.hostname();
 let draining = false;
+const failAfter = Number(process.env.FAIL_AFTER_READY_MS ?? 0);
+let failureScheduled = false;
 const event = (kind, fields = {}) => console.log(JSON.stringify({ at: Date.now(), kind, release, task, ...fields }));
 const ready = () => !neverReady && Date.now() >= readyAt && !draining;
 
@@ -24,6 +26,11 @@ const server = http.createServer((request, response) => {
   const requestStartedAt = Date.now();
   const body = { release, task, startedAt, readyAt: neverReady ? null : readyAt, requestStartedAt, ready: ready() };
   const health = url.pathname === '/health';
+  if (health && body.ready && failAfter > 0 && !failureScheduled) {
+    failureScheduled = true;
+    event('health-failure-armed', { failAfter });
+    setTimeout(() => { event('crash'); process.exit(42); }, failAfter);
+  }
   const status = health && !body.ready ? 503 : 200;
   if (draining) response.shouldKeepAlive = false;
   response.once('finish', () => { if (draining) setImmediate(() => server.closeIdleConnections()); });
@@ -44,8 +51,6 @@ const server = http.createServer((request, response) => {
 server.listen(Number(process.env.PORT ?? 8080), '0.0.0.0', () => event('listening', { port: server.address().port, readyAt: neverReady ? null : readyAt }));
 if (!neverReady) {
   setTimeout(() => event('ready'), Math.max(0, readyAt - Date.now()));
-  const failAfter = Number(process.env.FAIL_AFTER_READY_MS ?? 0);
-  if (failAfter > 0) setTimeout(() => { event('crash'); process.exit(42); }, Math.max(0, readyAt - Date.now()) + failAfter);
 }
 process.on('SIGTERM', () => {
   draining = true;

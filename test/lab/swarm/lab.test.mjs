@@ -10,7 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { isCurrentTask, request, traffic } from './probe.mjs';
 import { assess, verdict } from './results.mjs';
-import { analyze, routingEvidence } from './analyze.mjs';
+import { analyze, routingEvidence, crashEvidence } from './analyze.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const sample = (at, release = 'B', fields = {}) => ({ kind: 'short', at, endedAt: at + 5, latencyMs: 5, status: 200, body: { release, ready: true, readyAt: 0, requestStartedAt: at }, ...fields });
@@ -184,4 +184,22 @@ test('request deadlines are failures and are never retried', { timeout: 5000 }, 
   assert.equal(result.error, 'request deadline exceeded');
   await sleep(250);
   assert.equal(requests, 1);
+});
+
+
+test('post-readiness fault requires Docker healthy before injected exit', () => {
+  const containers = [{ Id: 'candidate', Config: { Env: ['RELEASE=B'] } }];
+  const event = (Action, at) => ({ Action, timeNano: at * 1e6, Actor: { ID: 'candidate', Attributes: { exitCode: '42' } } });
+  assert.equal(crashEvidence([event('die', 20)], containers, 0, 100).passed, false);
+  assert.equal(crashEvidence([event('health_status: healthy', 30), event('die', 20)], containers, 0, 100).passed, false);
+  assert.equal(crashEvidence([event('health_status: healthy', 10), event('die', 20)], containers, 0, 100).passed, true);
+});
+
+test('fixture failure waits for successful health check', { timeout: 5000 }, async (t) => {
+  const { child, url } = await fixture(t, { FAIL_AFTER_READY_MS: '200' });
+  await sleep(300);
+  assert.equal(child.exitCode, null);
+  const exited = once(child, 'exit');
+  assert.equal((await request(`${url}/health`)).status, 200);
+  assert.equal((await exited)[0], 42);
 });

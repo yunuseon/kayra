@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isCurrentTask, request, traffic } from './probe.mjs';
-import { assess, settlement, verdict } from './results.mjs';
+import { assess, settlement, trafficEvidence, verdict } from './results.mjs';
 import { analyze } from './analyze.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -292,6 +292,7 @@ async function experiment(mode, scenario, repeat) {
   json(join(path, 'result.json'), result);
   json(join(output, 'summary.json'), { ...metadata, verdict: verdict(results), finishedAt: null });
   progress(`${name}: ${result.passed ? 'PASS' : 'FAIL'} (${result.failedRequests}/${result.requests} failed; ${result.outcome.state})`);
+  if (!result.traffic.passed) throw new Error('load-generator interruption or insufficient traffic invalidated the measurement');
 }
 
 async function main() {
@@ -379,6 +380,7 @@ async function main() {
     const stop = traffic(`${target}/version`, (row) => { baseline.push(row); line(join(output, `baseline-${mode}.ndjson`), row); });
     try { await sleep(31000); }
     finally { await stop(); }
+    if (!trafficEvidence(baseline).passed) throw new Error(`${mode} baseline load-generator interruption invalidated the measurement`);
     if (baseline.some((row) => row.error || row.status !== 200 || !row.body?.ready)) throw new Error(`${mode} baseline is unhealthy; scenario measurements would be invalid`);
     for (let repeat = 1; repeat <= settings.repeats; repeat++) {
       for (const scenario of settings.scenarios) await experiment(mode, scenario, repeat);

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { isCurrentTask, request, traffic } from './probe.mjs';
-import { assess, settlement, verdict } from './results.mjs';
+import { assess, settlement, trafficEvidence, verdict } from './results.mjs';
 import { analyze, routingEvidence, crashEvidence } from './analyze.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -216,4 +216,15 @@ test('HTTP recovery can follow runtime completion and needs its own stable windo
   assert.ok(result.convergenceMs > result.nativeConvergenceMs);
   input.records[100] = sample(7100, 'B', { error: 'ECONNRESET' });
   assert.equal(assess(input).passed, false);
+});
+
+
+test('host suspension or insufficient request rate invalidates measurements', () => {
+  const input = passing();
+  assert.equal(trafficEvidence(input.records).passed, true);
+  input.records.forEach((row, index) => { if (index >= 100) { row.at += 274000; row.endedAt += 274000; } });
+  assert.equal(trafficEvidence(input.records).passed, false);
+  assert.ok(trafficEvidence(input.records).maxGapMs > 274000);
+  assert.equal(assess(input).passed, false);
+  assert.equal(trafficEvidence(Array.from({ length: 640 }, (_, index) => sample(index * 100))).passed, false);
 });

@@ -42,7 +42,10 @@ Each mode starts with a 30-second healthy baseline. Cases start traffic five
 seconds before the update and continue for at least 30 seconds after its
 HTTP convergence (a stable expected release), recording native runtime
 completion separately. Short requests run at 20/s, alternating fresh and persistent
-connections. They have two-second deadlines and no retries. The same image
+connections. They have two-second deadlines and no retries. A sampling gap
+over one second or an average below 18 requests/s invalidates the measurement
+and stops the run as an infrastructure failure. Keep the host awake: suspending
+Multipass also suspends the VM and invalidates deadline measurements. The same image
 and runtime/provider settings are used in both modes, except for
 `traefik.swarm.lbswarm`. Image pins are read from this checkout rather than
 copied into another version list. Update monitoring is 30 seconds; rollback

@@ -1,6 +1,15 @@
 const good = (request) => !request.error && request.status === 200 && typeof request.body?.release === 'string';
 const percentile = (values, fraction) => values.length === 0 ? null : values.toSorted((a, b) => a - b)[Math.ceil(values.length * fraction) - 1];
 
+export function trafficEvidence(records) {
+  const samples = records.filter((row) => row.kind === 'short').toSorted((a, b) => a.at - b.at);
+  const gaps = samples.slice(1).map((row, index) => row.at - samples[index].at);
+  const maxGapMs = Math.max(0, ...gaps);
+  const durationMs = samples.length > 1 ? samples.at(-1).at - samples[0].at : 0;
+  const requestsPerSecond = durationMs > 0 ? (samples.length - 1) * 1000 / durationMs : 0;
+  return { passed: maxGapMs <= 1000 && requestsPerSecond >= 18, maxGapMs, requestsPerSecond };
+}
+
 export function settlement(records, outcome, expectedRelease) {
   const samples = records.filter((row) => row.kind === 'short');
   const wrong = samples.filter((row) => !good(row) || row.body.release !== expectedRelease);
@@ -24,7 +33,9 @@ export function assess({ scenario, records, outcome, updateAt, longRequest, obse
   const convergenceMs = settled.recoveredAt === null ? null : settled.recoveredAt - updateAt;
   const converged = outcome.state === expectedState && outcome.observedAt - updateAt <= deadlineMs && convergenceMs !== null && convergenceMs <= deadlineMs;
   const stableTail = settled.stable;
+  const traffic = trafficEvidence(records);
   const reasons = [];
+  if (!traffic.passed) reasons.push('load generator did not sustain the required traffic; measurement is invalid');
   if (!converged) reasons.push(`expected ${expectedState} and HTTP recovery within ${deadlineMs / 1000}s; observed ${outcome.state}`);
   if (premature.length) reasons.push(`${premature.length} application requests reached an unready task`);
   if (scenario !== 'crash-after-ready' && failures.length) reasons.push(`${failures.length} failed short requests`);
@@ -42,7 +53,7 @@ export function assess({ scenario, records, outcome, updateAt, longRequest, obse
   }
   if (failureStart !== null) longestGapMs = Math.max(longestGapMs, sorted.at(-1).endedAt - failureStart);
   return {
-    passed: reasons.length === 0, reasons, scenario, requests: shorts.length,
+    passed: reasons.length === 0, reasons, scenario, traffic, requests: shorts.length,
     failedRequests: failures.length, prematureRequests: premature.length,
     candidateRequests: candidate.length, oldRequestsAfterUpdate: oldAfter.length,
     convergenceMs, nativeConvergenceMs: outcome.observedAt - updateAt, trafficRecoveryAt: settled.recoveredAt, stableObservationMs: settled.observedForMs, outcome,

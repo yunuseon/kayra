@@ -40,7 +40,8 @@ and actual termination/restart of the lab update observer.
 
 Each mode starts with a 30-second healthy baseline. Cases start traffic five
 seconds before the update and continue for at least 30 seconds after its
-observed outcome. Short requests run at 20/s, alternating fresh and persistent
+HTTP convergence (a stable expected release), recording native runtime
+completion separately. Short requests run at 20/s, alternating fresh and persistent
 connections. They have two-second deadlines and no retries. The same image
 and runtime/provider settings are used in both modes, except for
 `traefik.swarm.lbswarm`. Image pins are read from this checkout rather than
@@ -52,7 +53,8 @@ Continuity cases require no failed requests or premature candidate exposure.
 The post-readiness crash permits disruption but requires native rollback
 within 90 seconds and a stable old release afterward. Docker events must prove
 the candidate became healthy before its injected exit (code 42). Every case requires
-a stable expected release throughout the post-convergence window. A mode
+30 seconds of the expected release after the last failed or wrong-release
+response. Both runtime completion and HTTP recovery must occur within 90 seconds. A mode
 is viable only if all 18 of its cases pass. Failure in the other mode does
 not invalidate it. The command still exits nonzero if any case fails,
 preserving the VM and all diagnostic evidence.

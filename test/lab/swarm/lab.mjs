@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isCurrentTask, request, traffic } from './probe.mjs';
-import { assess, verdict } from './results.mjs';
+import { assess, settlement, verdict } from './results.mjs';
 import { analyze } from './analyze.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -279,7 +279,8 @@ async function experiment(mode, scenario, repeat) {
     const observed = await monitor.done;
     outcome = { ...observed, observedAt: observed.at };
     line(join(path, 'timeline.ndjson'), { kind: 'outcome', ...outcome });
-    await sleep(31000);
+    const expectedRelease = scenario === 'never-ready' || scenario === 'crash-after-ready' ? 'A' : 'B';
+    while (!settlement(records, outcome, expectedRelease).stable && Date.now() < updateAt + 121000) await sleep(500);
     if (longPromise) { longRequest = await longPromise; write({ kind: 'long', ...longRequest }); }
   } finally {
     if (monitor && monitor.child.exitCode === null && monitor.child.signalCode === null) monitor.child.kill('SIGTERM');

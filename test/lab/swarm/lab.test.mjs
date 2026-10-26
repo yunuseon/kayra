@@ -9,14 +9,14 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { isCurrentTask, request, traffic } from './probe.mjs';
-import { assess, verdict } from './results.mjs';
+import { assess, settlement, verdict } from './results.mjs';
 import { analyze, routingEvidence, crashEvidence } from './analyze.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const sample = (at, release = 'B', fields = {}) => ({ kind: 'short', at, endedAt: at + 5, latencyMs: 5, status: 200, body: { release, ready: true, readyAt: 0, requestStartedAt: at }, ...fields });
 const passing = (scenario = 'healthy') => ({
   scenario, updateAt: 1000, outcome: { state: 'completed', observedAt: 2000 },
-  records: Array.from({ length: 600 }, (_, i) => sample(2100 + i * 50)),
+  records: Array.from({ length: 640 }, (_, i) => sample(2100 + i * 50)),
 });
 
 test('case readiness rejects a previous service task with the same release label', () => {
@@ -202,4 +202,18 @@ test('fixture failure waits for successful health check', { timeout: 5000 }, asy
   const exited = once(child, 'exit');
   assert.equal((await request(`${url}/health`)).status, 200);
   assert.equal((await exited)[0], 42);
+});
+
+
+test('HTTP recovery can follow runtime completion and needs its own stable window', () => {
+  const input = passing('crash-after-ready');
+  input.outcome.state = 'rollback_completed';
+  input.records.forEach((row) => { row.body.release = 'A'; });
+  input.records[10] = sample(2600, 'B', { error: 'ECONNRESET' });
+  assert.equal(settlement(input.records, input.outcome, 'A').stable, true);
+  const result = assess(input);
+  assert.equal(result.passed, true);
+  assert.ok(result.convergenceMs > result.nativeConvergenceMs);
+  input.records[100] = sample(7100, 'B', { error: 'ECONNRESET' });
+  assert.equal(assess(input).passed, false);
 });

@@ -1,6 +1,16 @@
 const good = (request) => !request.error && request.status === 200 && typeof request.body?.release === 'string';
 const percentile = (values, fraction) => values.length === 0 ? null : values.toSorted((a, b) => a - b)[Math.ceil(values.length * fraction) - 1];
 
+export function settlement(records, outcome, expectedRelease) {
+  const samples = records.filter((row) => row.kind === 'short');
+  const wrong = samples.filter((row) => !good(row) || row.body.release !== expectedRelease);
+  const after = Math.max(outcome.observedAt, ...wrong.map((row) => row.endedAt));
+  const tail = samples.filter((row) => row.at >= after).toSorted((a, b) => a.at - b.at);
+  const recoveredAt = tail[0]?.at ?? null;
+  const observedForMs = tail.length ? tail.at(-1).at - recoveredAt : 0;
+  return { recoveredAt, observedForMs, stable: tail.length >= 500 && observedForMs >= 30000 };
+}
+
 export function assess({ scenario, records, outcome, updateAt, longRequest, observer, deadlineMs = 90000 }) {
   const shorts = records.filter((record) => record.kind === 'short');
   const failures = shorts.filter((record) => !good(record));
@@ -9,12 +19,13 @@ export function assess({ scenario, records, outcome, updateAt, longRequest, obse
   const oldAfter = shorts.filter((record) => good(record) && record.body.release === 'A' && record.at >= updateAt);
   const rollback = scenario === 'never-ready' || scenario === 'crash-after-ready';
   const expectedState = rollback ? 'rollback_completed' : 'completed';
-  const converged = outcome.state === expectedState && outcome.observedAt - updateAt <= deadlineMs;
-  const lastSamples = shorts.filter((record) => record.at >= outcome.observedAt);
   const expectedRelease = rollback ? 'A' : 'B';
-  const stableTail = lastSamples.length >= 500 && lastSamples.every((record) => good(record) && record.body.release === expectedRelease);
+  const settled = settlement(records, outcome, expectedRelease);
+  const convergenceMs = settled.recoveredAt === null ? null : settled.recoveredAt - updateAt;
+  const converged = outcome.state === expectedState && outcome.observedAt - updateAt <= deadlineMs && convergenceMs !== null && convergenceMs <= deadlineMs;
+  const stableTail = settled.stable;
   const reasons = [];
-  if (!converged) reasons.push(`expected ${expectedState} within ${deadlineMs / 1000}s; observed ${outcome.state}`);
+  if (!converged) reasons.push(`expected ${expectedState} and HTTP recovery within ${deadlineMs / 1000}s; observed ${outcome.state}`);
   if (premature.length) reasons.push(`${premature.length} application requests reached an unready task`);
   if (scenario !== 'crash-after-ready' && failures.length) reasons.push(`${failures.length} failed short requests`);
   if (scenario === 'never-ready' && candidate.length) reasons.push(`${candidate.length} requests reached the permanently unready candidate`);
@@ -34,7 +45,7 @@ export function assess({ scenario, records, outcome, updateAt, longRequest, obse
     passed: reasons.length === 0, reasons, scenario, requests: shorts.length,
     failedRequests: failures.length, prematureRequests: premature.length,
     candidateRequests: candidate.length, oldRequestsAfterUpdate: oldAfter.length,
-    convergenceMs: outcome.observedAt - updateAt, outcome,
+    convergenceMs, nativeConvergenceMs: outcome.observedAt - updateAt, trafficRecoveryAt: settled.recoveredAt, stableObservationMs: settled.observedForMs, outcome,
     longestObservedFailureIntervalMs: longestGapMs,
     firstFailureAt: failures[0]?.at ?? null, lastFailureAt: failures.at(-1)?.at ?? null,
     latencyMs: { p50: percentile(shorts.map((row) => row.latencyMs), 0.5), p99: percentile(shorts.map((row) => row.latencyMs), 0.99), max: Math.max(0, ...shorts.map((row) => row.latencyMs)) },

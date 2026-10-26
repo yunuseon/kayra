@@ -81,6 +81,25 @@
   become: true
   register: platform_files
 
+# Rendered beside the copied dynamic/ files, which the copy never deletes:
+# gone again when apex_redirect is unset.
+- name: Render the bare domain's redirect
+  ansible.builtin.template:
+    src: apex.yml.j2
+    dest: "{{ platform_dir }}/traefik/dynamic/apex.yml"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  when: apex_redirect | length > 0
+  become: true
+
+- name: Remove the bare domain's redirect
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/traefik/dynamic/apex.yml"
+    state: absent
+  when: apex_redirect | length == 0
+  become: true
+
 # The deployer's code and the scripts it and the builder run, into the build
 # context of both images: a checkout's TypeScript, or the published package's
 # JavaScript (Node strips types only outside node_modules).

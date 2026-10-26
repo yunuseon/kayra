@@ -38,6 +38,11 @@
       ],
       "description": "Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner)."
     },
+    "apex_redirect": {
+      "description": "The host the bare domain redirects to, permanently, path and query kept: www sends https://<domain>/x?y to https://www.<domain>/x?y. Unset, the bare domain is not served.",
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    },
     "webhooks": {
       "type": "boolean",
       "description": "Whether a push webhook may start a deploy at once: true (default) serves deploy.<domain>/hook/<app>; false serves no such endpoint, and pushes deploy by deploy_poll."

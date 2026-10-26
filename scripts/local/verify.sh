@@ -8,6 +8,8 @@
 #   - auth.<domain> answers; the platform's own pages (hosts.conf; status only
 #     where a monitor runs) send a browser to the login, not a 403 from rules
 #     Authelia never loaded
+#   - with apex_redirect, the bare domain redirects permanently to that host,
+#     path and query kept
 #   - every certificate is a real one (Let's Encrypt or mkcert), never
 #     Traefik's default
 #   - an unsigned webhook is refused (with webhooks: false, /hook is not
@@ -41,6 +43,7 @@ note() { echo "    ! $*"; }
 domain="$(yq -r '.domain' "${dir}/server.yml")"
 # Not yq's `//`: it takes false for missing too.
 webhooks="$( { [ -f "${dir}/vars.yml" ] && yq -r '.webhooks' "${dir}/vars.yml"; } || echo true)"
+apex="$( { [ -f "${dir}/vars.yml" ] && yq -r '.apex_redirect // ""' "${dir}/vars.yml"; } || true)"
 inventory="${dir}/inventory.ini"
 [ -f "$inventory" ] || { fail "no inventory for ${name}: provision it first"; exit 1; }
 field() { awk -v key="$1" '{for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) {print substr($i, length(key) + 2); exit}}' "$inventory"; }
@@ -79,6 +82,7 @@ answers() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 200 ]; }
 to_login() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 302 ] && case "$(cut -d' ' -f2 <<< "$1")" in "https://auth.${domain}/"*) return 0 ;; esac; return 1; }
 not_5xx() { real_cert "$1" && case "$(cut -d' ' -f1 <<< "$1")" in 000|5*) return 1 ;; esac; }
 refused() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 401 ]; }
+to_apex() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 301 ] && [ "$(cut -d' ' -f2 <<< "$1")" = "https://${apex}.${domain}/x?y" ]; }
 
 describe() { echo "HTTP $(cut -d' ' -f1 <<< "$1"), certificate by $(cut -d' ' -f4- <<< "$1") (verify $(cut -d' ' -f3 <<< "$1"))"; }
 
@@ -96,6 +100,7 @@ while IFS= read -r sub; do
         *) check "${sub}.${domain} sends a browser to the login" "${sub}.${domain}" GET to_login ;;
     esac
 done < <(awk '!/^[[:space:]]*(#|$)/ {print $1}' "${KAYRA_ROOT}/hosts.conf")
+[ -z "$apex" ] || check "${domain} redirects to ${apex}.${domain}" "$domain" GET to_apex "/x?y"
 
 first_app="$(head -1 <<< "$registered_wanted")"
 if [ -n "$first_app" ]; then

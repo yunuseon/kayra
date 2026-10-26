@@ -5,5 +5,5 @@ output "records" {
 
 output "hosts" {
   description = "Every host this server serves, fully qualified"
-  value       = sort([for sub in local.subdomains : "${sub}.${local.domain}"])
+  value       = sort([for sub in keys(local.names) : sub == "@" ? local.domain : "${sub}.${local.domain}"])
 }

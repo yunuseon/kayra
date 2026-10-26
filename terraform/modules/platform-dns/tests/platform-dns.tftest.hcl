@@ -77,3 +77,33 @@ run "monitor_page" {
     error_message = "status should be a host where the server runs a monitor"
   }
 }
+
+# A server redirecting its bare domain (apex_redirect) serves that too: "@" in its own zone.
+run "bare_domain" {
+  command = plan
+
+  variables {
+    server = "redirecting"
+    zone   = "example.com"
+  }
+
+  assert {
+    condition     = contains(output.hosts, "example.com") && hcloud_zone_rrset.a["@"].name == "@"
+    error_message = "The bare domain should be an A record named @: ${jsonencode(output.hosts)}"
+  }
+}
+
+# Under the zone, the bare domain's name is the rest of it.
+run "bare_domain_under_the_zone" {
+  command = plan
+
+  variables {
+    server = "redirecting-nested"
+    zone   = "example.com"
+  }
+
+  assert {
+    condition     = contains(output.hosts, "shop.example.com") && hcloud_zone_rrset.a["@"].name == "shop"
+    error_message = "shop.example.com in example.com should be named shop"
+  }
+}

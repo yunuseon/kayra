@@ -27,6 +27,7 @@ the first line of a platform server's `vars.yml`:
 | `authelia_smtp_username` | platform | SMTP user for Authelia. |
 | `authelia_smtp_sender` | platform | Sender address of Authelia's mails. |
 | `acme_dns` | platform | Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner). |
+| `apex_redirect` | platform | The host the bare domain redirects to, permanently, path and query kept: www sends https://&lt;domain>/x?y to https://www.&lt;domain>/x?y. Unset, the bare domain is not served. |
 | `webhooks` | platform | Whether a push webhook may start a deploy at once: true (default) serves deploy.&lt;domain>/hook/&lt;app>; false serves no such endpoint, and pushes deploy by deploy_poll. |
 | `deploy_poll` | platform | When the deployer looks for pushes no webhook brought, as a five-field cron spec in the server's time (default hourly: 17 * * * *). |
 | `renovate_repositories` | platform | owner/repo of the repos this server's Renovate job keeps up to date; the job runs only where the list is not empty. |

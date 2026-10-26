@@ -122,3 +122,11 @@ A new route host in an app is a new record on the next `tofu apply` in
 `dns/terraform`; an app the fleet has not cloned stops the plan with a pointer
 to `kayra doctor` rather than leaving its hosts out. A server whose domain is
 under the zone (`shop.example.com` in `example.com`) gets `www.shop`, and so on.
+
+The bare domain is served only where `apex_redirect` in the server's
+`vars.yml` names a host to send it to: `apex_redirect: www` makes
+`https://example.com/x?y` a permanent redirect to `https://www.example.com/x?y`
+(plain HTTP goes to HTTPS on the same name first), with a certificate of its
+own, and the module adds the record for it (`@`, or `shop` under the zone).
+`kayra validate` checks that one of the server's apps routes that host;
+`kayra verify` and the monitors check the redirect.

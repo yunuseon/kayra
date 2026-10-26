@@ -357,6 +357,8 @@ async function main() {
   json(join(output, 'metadata.json'), metadata);
   collect(['sudo', 'docker', 'events', '--format', '{{json .}}'], 'docker-events.ndjson');
   collect(['sudo', 'python3', '-u', '/home/ubuntu/swarm-lab/telemetry.py'], 'metrics.ndjson');
+  collect(['sudo', 'docker', 'logs', '--follow', '--timestamps', 'traefik'], 'traefik.log');
+  collect(['sudo', 'docker', 'logs', '--follow', '--timestamps', 'socket-proxy'], 'socket-proxy.log');
   setupComplete = true;
   for (const mode of settings.modes) {
     progress(`${mode}: 30-second baseline`);
@@ -402,7 +404,9 @@ try {
   await Promise.race([Promise.all(collectors.map((collector) => collector.done)), delay(5000)]);
   if (ssh && setupComplete) {
     for (const name of ['traefik', 'socket-proxy']) {
-      await docker(['logs', '--timestamps', name], { allowFailure: true, log: join(output, `${name}.log`) }).catch(() => {});
+      if (!collectors.some((collector) => collector.name === `${name}.log`)) {
+        await docker(['logs', '--timestamps', name], { allowFailure: true, log: join(output, `${name}.log`) }).catch(() => {});
+      }
       await docker(['inspect', name], { allowFailure: true, log: join(output, `${name}-inspect.json`) }).catch(() => {});
     }
     await docker(['info'], { allowFailure: true, log: join(output, 'docker-info.txt') }).catch(() => {});

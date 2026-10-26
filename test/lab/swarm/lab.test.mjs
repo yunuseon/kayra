@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
-import { isCurrentTask, request } from './probe.mjs';
+import { isCurrentTask, request, traffic } from './probe.mjs';
 import { assess, verdict } from './results.mjs';
 import { analyze, routingEvidence } from './analyze.mjs';
 
@@ -156,6 +156,22 @@ test('fixture drains an in-flight delayed response on SIGTERM', { timeout: 5000 
   assert.equal(result.body.release, 'A');
   assert.equal(result.error, undefined);
   assert.equal((await exited)[0], 0);
+});
+
+test('fixture closes reusable connections while draining under continuing traffic', { timeout: 5000 }, async (t) => {
+  const { child, url } = await fixture(t, { RELEASE: 'A' });
+  const stop = traffic(`${url}/version`, () => {});
+  let started;
+  const headers = new Promise((resolve) => { started = resolve; });
+  const long = request(`${url}/slow?ms=500`, { onHeaders: started });
+  await headers;
+  await sleep(100);
+  const exited = once(child, 'exit');
+  child.kill('SIGTERM');
+  try {
+    assert.equal((await long).body.release, 'A');
+    assert.equal((await exited)[0], 0);
+  } finally { await stop(); }
 });
 
 test('request deadlines are failures and are never retried', { timeout: 5000 }, async (t) => {

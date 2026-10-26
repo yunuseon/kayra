@@ -71,6 +71,9 @@ Assessment checks the actual backend addresses in Traefik access logs against
 the service VIPs, so ignored/misapplied discovery labels cannot silently make
 both modes test the same routing behavior. Reassess preserved raw evidence
 with `node test/lab/swarm/analyze.mjs /absolute/output/directory`.
+Proxy logs are streamed for the entire experiment, so Docker's log rotation
+cannot discard early routing evidence. Missing routing evidence marks the
+measurement incomplete.
 
 Failed requests remain failures even when a later request succeeds. The
 longest failure interval is sampled at the request rate; it is not an exact

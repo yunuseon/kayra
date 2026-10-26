@@ -44,14 +44,15 @@ export function analyze(output) {
   });
   const directory = dirname(fileURLToPath(import.meta.url));
   const analysisSourceHashes = Object.fromEntries(['analyze.mjs', 'results.mjs'].map((name) => [name, createHash('sha256').update(readFileSync(join(directory, name))).digest('hex')]));
-  const updated = { ...summary, results, verdict: verdict(results), analysisSourceHashes, analyzedAt: new Date().toISOString() };
+  const evidenceComplete = results.every((row) => row.routing.requests > 0);
+  const updated = { ...summary, results, verdict: verdict(results), evidenceComplete, analysisSourceHashes, analyzedAt: new Date().toISOString() };
   writeFileSync(join(output, 'summary.json'), `${JSON.stringify(updated, null, 2)}\n`);
   writeFileSync(join(output, 'report.md'), render(updated));
   return updated;
 }
 
 function render(summary) {
-  const conclusion = summary.infrastructureError || !summary.settings.fullMatrix || !summary.verdict.complete
+  const conclusion = summary.infrastructureError || !summary.settings.fullMatrix || !summary.verdict.complete || !summary.evidenceComplete
     ? 'INCOMPLETE: infrastructure and a complete 36-case matrix must be valid before drawing a feasibility conclusion.'
     : summary.verdict.viable
       ? `**Viable discovery mode(s): ${summary.verdict.modes.filter((mode) => mode.passed).map((mode) => mode.mode).join(', ')}.** Advance to migration/worker/admission experiments; this does not select Swarm for production.`

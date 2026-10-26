@@ -25,7 +25,9 @@ const server = http.createServer((request, response) => {
   const body = { release, task, startedAt, readyAt: neverReady ? null : readyAt, requestStartedAt, ready: ready() };
   const health = url.pathname === '/health';
   const status = health && !body.ready ? 503 : 200;
-  response.writeHead(status, { 'content-type': 'application/json', 'x-probe-release': release, 'x-probe-task': task });
+  if (draining) response.shouldKeepAlive = false;
+  response.once('finish', () => { if (draining) setImmediate(() => server.closeIdleConnections()); });
+  response.writeHead(status, { 'content-type': 'application/json', 'x-probe-release': release, 'x-probe-task': task, ...(draining ? { connection: 'close' } : {}) });
   if (url.pathname === '/slow') {
     response.flushHeaders();
     event('slow-start', { requestStartedAt });

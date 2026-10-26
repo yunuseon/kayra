@@ -5,7 +5,7 @@ const name = process.env.MIGRATION ?? 'expand';
 const queries = {
   expand: ['ALTER TABLE items ADD COLUMN nickname text'],
   broken: ['ALTER TABLE items ADD COLUMN nickname text', 'SELECT 1 / 0'],
-  contract: ['UPDATE items SET nickname = display_name', 'ALTER TABLE items DROP COLUMN display_name'],
+  contract: ['LOCK TABLE items IN ACCESS EXCLUSIVE MODE', 'UPDATE items SET nickname = display_name', 'ALTER TABLE items DROP COLUMN display_name'],
 };
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 3000, statement_timeout: 20000 });
 const event = (kind, fields = {}) => console.log(JSON.stringify({ at: Date.now(), kind, migration: name, ...fields }));
@@ -20,7 +20,7 @@ try {
     await client.query('SELECT pg_sleep(8)');
   } else {
     const checksum = createHash('sha256').update(JSON.stringify(queries[name])).digest('hex');
-    await client.query("SET LOCAL lock_timeout = '10s'");
+    await client.query("SET LOCAL lock_timeout = '20s'");
     await client.query('SELECT pg_advisory_xact_lock(724917)');
     event('migration-lock-held');
     await client.query("SET LOCAL lock_timeout = '500ms'");

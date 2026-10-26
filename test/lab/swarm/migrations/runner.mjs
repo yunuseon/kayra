@@ -40,7 +40,7 @@ export async function prepareMigrations(ctx) {
 
 async function reset(ctx) {
   await ctx.docker(['service', 'rm', 'probe'], { allowFailure: true });
-  const deadline = Date.now() + 20000;
+  const deadline = Date.now() + 45000;
   while ((await ctx.docker(['ps', '-q', '--filter', 'label=com.docker.swarm.service.name=probe'])).stdout.trim()) {
     if (Date.now() > deadline) throw new Error('previous application tasks did not stop');
     await ctx.sleep(500);

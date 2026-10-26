@@ -58,7 +58,10 @@ pins, driver lockfile and exact measured source hashes are recorded.
 PostgreSQL-specific behavior is deliberate. Not all DDL is transactional, and
 an additive schema change can still block traffic while acquiring locks.
 This fixture bounds DDL lock waits rather than claiming additive changes are
-always safe. Real app backfills, nontransactional DDL, external side effects,
+always safe. Migration serialization allows a bounded 20-second wait, because
+killing a client does not guarantee PostgreSQL instantly notices its departure.
+The contraction takes an exclusive lock before backfilling and dropping the old
+column, so an old writer cannot slip an acknowledged row between those steps. Real app backfills, nontransactional DDL, external side effects,
 workers, singleton exclusion, database failover, backup restore and Kayra
 release-record recovery remain outside this experiment.
 

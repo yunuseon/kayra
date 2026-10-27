@@ -69,7 +69,7 @@ function options(argv) {
   if (value.modes.some((mode) => !['tasks', 'vip'].includes(mode))) throw new Error('unknown discovery mode');
   if (!['http', 'migrations', 'workers'].includes(value.suite)) throw new Error('unknown suite');
   if (value.suite === 'migrations' || value.suite === 'workers') {
-    if (argv.includes('--mode') && value.modes[0] !== 'vip') throw new Error('migration suite requires VIP routing');
+    if (argv.includes('--mode') && value.modes[0] !== 'vip') throw new Error(`${value.suite} suite requires VIP mode`);
     value.modes = ['vip'];
     if (!argv.includes('--scenario')) value.scenarios = [...(value.suite === 'workers' ? workerScenarios : migrationScenarios)];
   }
@@ -471,7 +471,8 @@ try {
   json(join(output, 'summary.json'), summary);
   try {
     const analyzed = analyzeOutput(output);
-    passed = passed && analyzed.results.every((row) => row.passed);
+    passed = passed && !analyzed.infrastructureError && analyzed.results.every((row) => row.passed);
+    infrastructureError ??= analyzed.infrastructureError;
   } catch (error) {
     infrastructureError ??= `evidence analysis failed: ${error.message}`;
     json(join(output, 'summary.json'), { ...summary, infrastructureError });

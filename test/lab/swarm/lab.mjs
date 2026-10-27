@@ -83,6 +83,12 @@ function options(argv) {
 }
 
 const settings = options(process.argv.slice(2));
+// Keep the host awake from launch through evidence collection; lid-close sleep still wins.
+if (process.platform === 'darwin') {
+  const awake = spawn('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' });
+  awake.on('error', () => {});
+  awake.unref();
+}
 const summarize = settings.suite === 'admission' ? admissionVerdict : settings.suite === 'workers' ? workerVerdict : settings.suite === 'migrations' ? migrationVerdict : verdict;
 const analyzeOutput = settings.suite === 'admission' ? analyzeAdmission : settings.suite === 'workers' ? analyzeWorkers : settings.suite === 'migrations' ? analyzeMigrations : analyze;
 const stamp = new Date().toISOString().replaceAll(/[-:.]/g, '').replace('Z', '').toLowerCase();
@@ -464,6 +470,8 @@ try {
   }
   metadata.hostDockerContextAfter = (await run('docker', ['context', 'show'], { allowFailure: true })).stdout.trim();
   metadata.multipassAfter = JSON.parse((await run('multipass', ['list', '--format', 'json'], { allowFailure: true })).stdout || '{}');
+  // Multipass can create an entry even when launch times out before vmCreated is set.
+  if (metadata.multipassAfter.list?.some((entry) => entry.name === vm)) vmCreated = true;
   if (metadata.hostDockerContextBefore !== metadata.hostDockerContextAfter) infrastructureError ??= 'host Docker context changed unexpectedly';
   const metricsPath = join(output, 'metrics.ndjson');
   const metrics = existsSync(metricsPath) ? readFileSync(metricsPath, 'utf8').split('\n').filter(Boolean).flatMap((row) => { try { return [JSON.parse(row)]; } catch { return []; } }).filter((row) => row.kind === 'vm') : [];

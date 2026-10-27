@@ -69,7 +69,12 @@ export function analyzeAdmission(output) {
     const path=join(output,`${previous.scenario}-${previous.repeat}`);
     const e=JSON.parse(readFileSync(join(path,'evidence.json'),'utf8'));
     const result=assessAdmission(e,lines(join(path,'requests.ndjson')));
-    result.routing=routingEvidence(access,e.after,e.initial.at,e.finishedAt,'vip');
+    const trafficStoppedAt=e.timeline.find((row)=>row.kind==='traffic-stopped')?.at??e.finishedAt;
+    result.routing=routingEvidence(access,e.after,e.initial.at,trafficStoppedAt,'vip');
+    if(e.details.recreatedService){
+      result.recreatedRouting=routingEvidence(access,e.details.recreatedService,e.details.recreated.at,e.finishedAt,'vip');
+      if(!result.recreatedRouting.passed)result.reasons.push('recreated-service VIP routing not proven');
+    }
     if(!result.routing.passed)result.reasons.push('VIP routing without retries not proven');
     const containers=readdirSync(path).filter((name)=>/^container-.*\.json$/.test(name)).flatMap((name)=>JSON.parse(readFileSync(join(path,name),'utf8')));
     const faultType=previous.scenario==='candidate-oom'?'oom':previous.scenario==='candidate-enospc'?'disk':previous.scenario==='retention-lifecycle'?'never':null;

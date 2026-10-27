@@ -146,6 +146,7 @@ async function runCase(ctx, scenario, repeat) {
       await ctx.docker(['stop','--time','30','lab-db']);await ctx.docker(['rm','lab-db']);await startDatabase(ctx);
       details.afterDatabaseRestart=await database(ctx);
       details.recreated=await createService(ctx);
+      details.recreatedService=await inspect(ctx);
       details.recreatedResponse=await request(`${ctx.target}/version`);
       finalDatabase=await database(ctx);afterFiles=await files(ctx);
       mark('recreated');

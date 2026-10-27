@@ -10,6 +10,9 @@ import { analyze } from './analyze.mjs';
 import { prepareMigrations, runMigrations, scenarios as migrationScenarios } from './migrations/runner.mjs';
 import { analyzeMigrations, migrationVerdict } from './migrations/results.mjs';
 
+import { prepareWorkers, runWorkers, scenarios as workerScenarios } from './workers/runner.mjs';
+import { analyzeWorkers, workerVerdict } from './workers/results.mjs';
+
 const directory = dirname(fileURLToPath(import.meta.url));
 const root = resolve(directory, '../../..');
 const quote = (value) => `'${String(value).replaceAll("'", "'\"'\"'")}'`;
@@ -58,29 +61,29 @@ function options(argv) {
       if (arg === '--mode') value.modes = [next];
       if (arg === '--scenario') value.scenarios = [next];
     } else if (arg === '--help') {
-      console.log('Usage: bash test/lab/swarm/run.sh [--suite http|migrations] [--keep] [--output DIR] [--repeats N] [--mode tasks|vip] [--scenario NAME]');
+      console.log('Usage: bash test/lab/swarm/run.sh [--suite http|migrations|workers] [--keep] [--output DIR] [--repeats N] [--mode tasks|vip] [--scenario NAME]');
       process.exit(0);
     } else throw new Error(`unknown option ${arg}`);
   }
   if (!Number.isInteger(value.repeats) || value.repeats < 1 || value.repeats > 10) throw new Error('--repeats must be 1..10');
   if (value.modes.some((mode) => !['tasks', 'vip'].includes(mode))) throw new Error('unknown discovery mode');
-  if (!['http', 'migrations'].includes(value.suite)) throw new Error('unknown suite');
-  if (value.suite === 'migrations') {
-    if (argv.includes('--mode') && value.modes[0] !== 'vip') throw new Error('migration suite requires VIP routing');
+  if (!['http', 'migrations', 'workers'].includes(value.suite)) throw new Error('unknown suite');
+  if (value.suite === 'migrations' || value.suite === 'workers') {
+    if (argv.includes('--mode') && value.modes[0] !== 'vip') throw new Error(`${value.suite} suite requires VIP mode`);
     value.modes = ['vip'];
-    if (!argv.includes('--scenario')) value.scenarios = [...migrationScenarios];
+    if (!argv.includes('--scenario')) value.scenarios = [...(value.suite === 'workers' ? workerScenarios : migrationScenarios)];
   }
-  const allowed = value.suite === 'migrations' ? migrationScenarios : ['healthy', 'slow-ready', 'never-ready', 'crash-after-ready', 'long-request', 'observer-interruption'];
+  const allowed = value.suite === 'workers' ? workerScenarios : value.suite === 'migrations' ? migrationScenarios : ['healthy', 'slow-ready', 'never-ready', 'crash-after-ready', 'long-request', 'observer-interruption'];
   if (value.scenarios.some((scenario) => !allowed.includes(scenario))) throw new Error('unknown scenario');
-  value.fullMatrix = value.repeats === 3 && (value.suite === 'migrations' ? value.scenarios.length === 8 : value.modes.length === 2 && value.scenarios.length === 6);
+  value.fullMatrix = value.repeats === 3 && (value.suite === 'workers' ? value.scenarios.length === 6 : value.suite === 'migrations' ? value.scenarios.length === 8 : value.modes.length === 2 && value.scenarios.length === 6);
   return value;
 }
 
 const settings = options(process.argv.slice(2));
-const summarize = settings.suite === 'migrations' ? migrationVerdict : verdict;
-const analyzeOutput = settings.suite === 'migrations' ? analyzeMigrations : analyze;
+const summarize = settings.suite === 'workers' ? workerVerdict : settings.suite === 'migrations' ? migrationVerdict : verdict;
+const analyzeOutput = settings.suite === 'workers' ? analyzeWorkers : settings.suite === 'migrations' ? analyzeMigrations : analyze;
 const stamp = new Date().toISOString().replaceAll(/[-:.]/g, '').replace('Z', '').toLowerCase();
-const output = settings.output ?? join(root, '.cache', settings.suite === 'migrations' ? 'swarm-migration-lab' : 'swarm-lab', stamp);
+const output = settings.output ?? join(root, '.cache', settings.suite === 'workers' ? 'swarm-worker-lab' : settings.suite === 'migrations' ? 'swarm-migration-lab' : 'swarm-lab', stamp);
 if (existsSync(output)) throw new Error(`output directory already exists: ${output}`);
 mkdirSync(output, { recursive: true });
 const scratch = mkdtempSync('/tmp/kayra-swarm-');
@@ -381,12 +384,18 @@ async function main() {
     "const base='http://socket-proxy:2375'; const get=await fetch(base+'/version'); const post=await fetch(base+'/containers/create',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});console.log(JSON.stringify({get:get.status,post:post.status}));if(!get.ok||post.status!==403)process.exit(1)"]);
   metadata.socketProxyChecks = JSON.parse(checks.stdout);
   if (settings.suite === 'migrations') await prepareMigrations(migrationContext());
+  if (settings.suite === 'workers') await prepareWorkers(migrationContext());
   json(join(output, 'metadata.json'), metadata);
   collect(['sudo', 'docker', 'events', '--format', '{{json .}}'], 'docker-events.ndjson');
   collect(['sudo', 'python3', '-u', '/home/ubuntu/swarm-lab/telemetry.py'], 'metrics.ndjson');
   collect(['sudo', 'docker', 'logs', '--follow', '--timestamps', 'traefik'], 'traefik.log');
   collect(['sudo', 'docker', 'logs', '--follow', '--timestamps', 'socket-proxy'], 'socket-proxy.log');
   setupComplete = true;
+  if (settings.suite === 'workers') {
+    await runWorkers(migrationContext());
+    passed = results.every((result) => result.passed);
+    return;
+  }
   if (settings.suite === 'migrations') {
     await runMigrations(migrationContext());
     passed = results.every((result) => result.passed);
@@ -462,7 +471,8 @@ try {
   json(join(output, 'summary.json'), summary);
   try {
     const analyzed = analyzeOutput(output);
-    passed = passed && analyzed.results.every((row) => row.passed);
+    passed = passed && !analyzed.infrastructureError && analyzed.results.every((row) => row.passed);
+    infrastructureError ??= analyzed.infrastructureError;
   } catch (error) {
     infrastructureError ??= `evidence analysis failed: ${error.message}`;
     json(join(output, 'summary.json'), { ...summary, infrastructureError });

@@ -95,3 +95,7 @@ compare the equivalent K3s experiment before adding custom traffic control.
 
 The [shared-database migration suite](migrations/README.md) builds on the VIP
 result: `bash test/lab/swarm/run.sh --suite migrations`.
+
+The follow-up [worker and singleton lab](workers/README.md) runs with
+`bash test/lab/swarm/run.sh --suite workers`. Its queue/locking protocols belong
+to the fixture app and do not change Kayra's production deployment contract.

@@ -1,19 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessWorker, workerVerdict, workerScenarios } from './results.mjs';
+import { assessWorker, baselineEvidence, workerVerdict, workerScenarios } from './results.mjs';
 const at = (ms) => new Date(1700000000000 + ms).toISOString();
 function queue(scenario = 'effect-idempotent') {
   return { scenario, repeat: 1, before: { Spec: { Mode: { Replicated: { Replicas: 1 } }, UpdateConfig: { Order: 'start-first' }, TaskTemplate: { ContainerSpec: { StopGracePeriod: 30000000000 } } } }, after: {}, initial: { task: 'aaaa' }, killed: 'aaaabbbb', timeline: [{ kind: 'kill-acknowledged', at: 1 }, { kind: 'work-completed', at: 10001 }], database: {
-    jobs: Array.from({ length: 20 }, (_, id) => ({ id, state: 'done', attempts: id === 0 ? 2 : 1 })),
+    jobs: Array.from({ length: 20 }, (_, id) => ({ id, state: 'done', owner: 'bbbb', attempts: id === 0 ? 2 : 1 })),
     effects: Array.from({ length: 20 }, (_, job_id) => ({ job_id })), raw_effects: [], ownership: [], ticks: [],
-    history: [{ kind: 'claimed', job_id: 0 }, { kind: 'claimed', job_id: 0 }, { kind: 'effect-committed', job_id: 0 }, { kind: 'effect-committed', job_id: 0 }, { kind: 'before-ack-paused', job_id: 0 }],
+    history: [{ kind: 'claimed', job_id: 0, task: 'aaaa' }, { kind: 'claimed', job_id: 0, task: 'bbbb' }, { kind: 'effect-committed', job_id: 0 }, { kind: 'effect-committed', job_id: 0 }, { kind: 'before-ack-paused', job_id: 0 }, ...Array.from({ length: 20 }, (_, job_id) => ({ kind: 'acknowledged', job_id }))],
   } };
 }
 function singleton(locked) {
   const evidence = queue(locked ? 'singleton-locked' : 'singleton-unlocked');
   delete evidence.killed;
   evidence.after = { UpdateStatus: { State: 'completed' } };
-  evidence.database = { jobs: [], effects: [], raw_effects: [], ownership: [{ task: 'A', release: 'A', started_at: at(0), ended_at: at(10000) }, { task: 'B', release: 'B', started_at: at(locked ? 10001 : 5000), ended_at: at(20000) }], ticks: [{ release: 'A', at: at(6000) }, { release: 'B', at: at(7000) }], history: [{ kind: 'started', release: 'B', at: at(4000) }, { kind: 'acquired', release: 'A' }, { kind: 'acquired', release: 'B' }, { kind: 'standby', release: 'B' }] };
+  evidence.database = { jobs: [], effects: [], raw_effects: [], ownership: [{ task: 'A', release: 'A', started_at: at(0), ended_at: at(10000) }, { task: 'B', release: 'B', started_at: at(locked ? 10001 : 5000), ended_at: at(20000) }], ticks: [{ task: 'A', release: 'A', at: at(6000) }, { task: 'B', release: 'B', at: at(locked ? 12000 : 7000) }], history: [{ kind: 'started', release: 'B', at: at(4000) }, { kind: 'acquired', release: 'A' }, { kind: 'acquired', release: 'B' }, { kind: 'standby', release: 'B' }] };
   return evidence;
 }
 test('redelivery can have two attempts and one durable effect per job', () => assert.equal(assessWorker(queue()).passed, true));
@@ -38,4 +38,15 @@ test('smoke matrix cannot count as three-repeat evidence', () => {
   const results = workerScenarios.map((scenario) => ({ scenario, repeat: 1, passed: true }));
   assert.equal(workerVerdict(results).complete, false);
   assert.equal(workerVerdict([1,2,3].flatMap((repeat) => results.map((row) => ({ ...row, repeat })))).complete, true);
+});
+
+test('baseline replay rejects host suspension', () => {
+  const ticks = Array.from({ length: 350 }, (_, i) => ({ at: at(i*100) }));
+  assert.equal(baselineEvidence(ticks).passed, true);
+  ticks[349].at = at(50000);
+  assert.equal(baselineEvidence(ticks).passed, false);
+});
+test('done state without acknowledgement history is insufficient', () => {
+  const evidence = queue(); evidence.database.history.pop();
+  assert.equal(assessWorker(evidence).passed, false);
 });

@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareMigrations } from '../migrations/runner.mjs';
-import { assessWorker, workerScenarios, workerVerdict } from './results.mjs';
+import { assessWorker, baselineEvidence, workerScenarios, workerVerdict } from './results.mjs';
 const directory = dirname(fileURLToPath(import.meta.url));
 export const scenarios = workerScenarios;
 const save = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -61,8 +61,7 @@ async function runCase(ctx, scenario, repeat, baseline = false) {
     const ticks = await rows(ctx, 'SELECT * FROM ticks ORDER BY id');
     save(join(path, 'ticks.json'), ticks);
     save(join(path, 'history.json'), await rows(ctx, 'SELECT * FROM history ORDER BY id'));
-    const times = ticks.map((row) => Date.parse(row.at));
-    if (times.length < 300 || times.at(-1) - times[0] < 30000 || times.some((at, index) => index && at - times[index-1] > 1000)) throw new Error('worker baseline interrupted or unhealthy');
+    if (!baselineEvidence(ticks).passed) throw new Error('worker baseline interrupted or unhealthy');
     return;
   }
   const singleton = scenario.startsWith('singleton');

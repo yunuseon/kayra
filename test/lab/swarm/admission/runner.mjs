@@ -44,7 +44,7 @@ export async function prepareAdmission(ctx) {
   ctx.metadata.images.admissionFixture = `kayra-swarm-admission:${ctx.metadata.vm.replace('kayra-swarm-lab-','')}`;
   await ctx.docker(['build','-t',ctx.metadata.images.admissionFixture,'/home/ubuntu/swarm-lab/migrations'],{timeout:600000});
   ctx.metadata.imageInspections.push(...await ctx.parseRemote(['image','inspect',ctx.metadata.images.admissionFixture]));
-  await ctx.remote(['sudo','bash','-s'],{input:`set -euo pipefail\ntruncate -s 256M /home/ubuntu/swarm-lab/pressure.img\nmkfs.ext4 -q -m 0 /home/ubuntu/swarm-lab/pressure.img\nmkdir -p /home/ubuntu/swarm-lab/pressure\nmount -o loop /home/ubuntu/swarm-lab/pressure.img /home/ubuntu/swarm-lab/pressure\nchmod 777 /home/ubuntu/swarm-lab/pressure\nmkdir -p /home/ubuntu/swarm-lab/purge-platform/bin /home/ubuntu/swarm-lab/purge-platform/apps\n`});
+  await ctx.remote(['sudo','bash','-s'],{input:`set -euo pipefail\ntruncate -s 256M /home/ubuntu/swarm-lab/pressure.img\nmkfs.ext4 -q -m 0 /home/ubuntu/swarm-lab/pressure.img\nmkdir -p /home/ubuntu/swarm-lab/pressure\nmount -o loop /home/ubuntu/swarm-lab/pressure.img /home/ubuntu/swarm-lab/pressure\nchmod 777 /home/ubuntu/swarm-lab/pressure\nmkdir -p /home/ubuntu/swarm-lab/purge-platform/bin /home/ubuntu/swarm-lab/purge-platform/apps\nchown -R ubuntu:ubuntu /home/ubuntu/swarm-lab/purge-platform\n`});
   await ctx.docker(['volume','create','--driver','local','--opt','type=none','--opt','o=bind','--opt','device=/home/ubuntu/swarm-lab/pressure','lab-pressure']);
   await ctx.run('multipass',['transfer',join(root,'scripts/server/app-purge'),`${ctx.metadata.vm}:/home/ubuntu/swarm-lab/purge-platform/bin/app-purge`]);
   await ctx.remote(['chmod','755','/home/ubuntu/swarm-lab/purge-platform/bin/app-purge']);

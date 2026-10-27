@@ -113,7 +113,7 @@ compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.s
 verify_cases() { bash "$E/ci/tests/verify/run.sh"; }
 monitor_cases() { bash "$E/ci/tests/monitor/run.sh"; }
 app_restore_cases() { bash "$E/ci/tests/app-restore/run.sh"; }
-swarm_lab_cases() { node --test "$E/test/lab/swarm/lab.test.mjs" "$E/test/lab/swarm/migrations/migrations.test.mjs" "$E/test/lab/swarm/workers/workers.test.mjs"; }
+swarm_lab_cases() { node --test "$E/test/lab/swarm/lab.test.mjs" "$E/test/lab/swarm/migrations/migrations.test.mjs" "$E/test/lab/swarm/workers/workers.test.mjs" "$E/test/lab/swarm/admission/admission.test.mjs"; }
 ansible_output() { bash "$E/ci/tests/ansible-output/run.sh"; }
 
 # The kayra CLI: strictest types, its lint rules, its tests.

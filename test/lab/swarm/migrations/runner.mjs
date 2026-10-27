@@ -24,8 +24,9 @@ export async function prepareMigrations(ctx) {
   await remote(['tee', '/home/ubuntu/swarm-lab/migrations/Dockerfile'], { input: `FROM ${metadata.images.node}\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci --omit=dev --ignore-scripts\nCOPY *.mjs ./\nUSER node\nCMD ["node", "/app/fixture.mjs"]\n` });
   await docker(['build', '-t', metadata.images.databaseFixture, '/home/ubuntu/swarm-lab/migrations'], { timeout: 600000 });
   await docker(['network', 'create', '--driver', 'overlay', '--attachable', 'lab-data']);
-  await docker(['volume', 'create', 'lab-db-data']);
-  await docker(['run', '-d', '--name', 'lab-db', '--network', 'lab-data', '--memory', '512m', '-v', 'lab-db-data:/var/lib/postgresql', '-e', 'POSTGRES_USER=lab', '-e', 'POSTGRES_PASSWORD=lab-only-password', '-e', 'POSTGRES_DB=lab', metadata.images.postgres, '-c', 'log_lock_waits=on']);
+  const databaseVolume = ctx.databaseVolume ?? 'lab-db-data';
+  await docker(['volume', 'create', ...(ctx.databaseVolumeLabels ?? []).flatMap((label) => ['--label', label]), databaseVolume]);
+  await docker(['run', '-d', '--name', 'lab-db', '--network', 'lab-data', '--memory', '512m', '-v', `${databaseVolume}:/var/lib/postgresql`, '-e', 'POSTGRES_USER=lab', '-e', 'POSTGRES_PASSWORD=lab-only-password', '-e', 'POSTGRES_DB=lab', metadata.images.postgres, '-c', 'log_lock_waits=on']);
   let ready = false;
   for (let attempt = 0; attempt < 60; attempt++) {
     try { ready = await query(ctx, 'SELECT 1') === '1'; } catch {}

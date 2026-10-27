@@ -99,3 +99,7 @@ result: `bash test/lab/swarm/run.sh --suite migrations`.
 The follow-up [worker and singleton lab](workers/README.md) runs with
 `bash test/lab/swarm/run.sh --suite workers`. Its queue/locking protocols belong
 to the fixture app and do not change Kayra's production deployment contract.
+
+The [admission and retention lab](admission/README.md) runs with
+`bash test/lab/swarm/run.sh --suite admission`. Its admission coordinator and
+volume ownership labels are lab prototypes, not production integration.

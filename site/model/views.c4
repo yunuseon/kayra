@@ -4,6 +4,7 @@ views {
     description 'The operator uses local kayra to run a fleet; developers push apps, and the platform server builds and serves them.'
     include *
     exclude visitor
+    exclude plannedDelivery
   }
 
   view clients of kayra {
@@ -14,6 +15,7 @@ views {
     include localProgram
     include agent
     include kayra.core ->
+    exclude plannedDelivery
   }
 
   view platform of platform {
@@ -40,5 +42,67 @@ views {
     platform.deployer -> platform.appContainers 'compose policy, then docker compose up --wait'
     visitor -> platform.traefik 'https://www.<domain>'
     platform.traefik -> platform.appContainers 'routes to the new release'
+  }
+  view deliveryBoundaries of plannedDelivery {
+    title 'Proposed application delivery boundaries'
+    description 'Target code boundaries inside the existing privileged process, alongside the isolated builder. These components are not all implemented yet.'
+    include *
+    include kayra.core ->
+    style element.tag = #untrusted {
+      color amber
+    }
+  }
+
+  dynamic view proposedDeployment {
+    title 'Proposed deployment and promotion'
+    description 'Validate untrusted inputs, reserve capacity and persist intent before touching owned workloads. Promotion follows verified readiness.'
+    autoLayout TopBottom
+    kayra.core -> plannedDelivery.trusted.platform 'registration, grants and deploy request'
+    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'lifecycle command and grants'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.builder 'prepare exact commit as an immutable bundle'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'validate and persist plan, admission and intent'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'reconcile plan under absolute deadline'
+    plannedDelivery.trusted.adapter -> plannedDelivery.workload 'update owned services and check readiness'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'promote only after convergence and checks'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish verified active release'
+  }
+
+  dynamic view proposedRecovery {
+    title 'Proposed restart recovery'
+    description 'A new exclusive writer uses persisted intent and runtime observations; ambiguity blocks for an audited decision.'
+    autoLayout TopBottom
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'load intent, action identity and original deadline'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'observe existing operation and owned objects'
+    plannedDelivery.trusted.adapter -> plannedDelivery.workload 'inspect migration and workload state'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish outcome or intervention required'
+    operator -> plannedDelivery.trusted.platform 'resolve a named blocked run and step'
+    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'audited recovery command'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'record decision and reconcile'
+  }
+
+  dynamic view proposedMaintenance {
+    title 'Proposed maintenance deployment'
+    description 'App declaration and fleet grant permit expected downtime; retained dependencies stay available for migrations.'
+    autoLayout TopBottom
+    kayra.core -> plannedDelivery.trusted.platform 'maintenance grant and request'
+    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'authorized maintenance command'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'record plan, admission and intent'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'quiesce consumers; retain dependencies'
+    plannedDelivery.trusted.adapter -> plannedDelivery.workload 'run admitted migrations, then start consumers'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'verify workloads and required checks'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'report downtime and verified outcome'
+  }
+
+  dynamic view proposedRemoval {
+    title 'Proposed application removal'
+    description 'Removal fences deployments and retains volumes; purge is a separate guarded operation.'
+    autoLayout TopBottom
+    kayra.core -> plannedDelivery.trusted.platform 'request removal'
+    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'lifecycle remove command'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'fence deploys and persist removal intent'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'settle work and remove owned workloads'
+    plannedDelivery.trusted.adapter -> plannedDelivery.workload 'retain volumes and ownership'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'preserve ownership tombstone'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish removal outcome'
   }
 }

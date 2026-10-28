@@ -101,6 +101,47 @@ model {
     }
   }
 
+  // Proposed code boundaries, not additional runtime services.
+  plannedDelivery = server 'Proposed application delivery' {
+    description 'Target architecture for the rollout RFC; not yet implemented'
+    builder = service 'Builder process' {
+      #untrusted
+      description 'Untrusted immutable bundle; no Docker socket or app secrets'
+    }
+    trusted = service 'Existing privileged server process' {
+      description 'One composition root assembles trusted modules; these are code boundaries, not process isolation'
+      platform = tool 'Platform' {
+        description 'Host, grants, secrets and routing policy; consumes published lifecycle projections'
+      }
+      coordinator = tool 'Deployment coordinator' {
+        description 'Typed-port lifecycle, admission, durable intent, reconciliation and verified promotion'
+      }
+      adapter = tool 'Runtime adapter' {
+        description 'Compose or Swarm workload effects and normalized observations'
+      }
+      journal = store 'Deployment journal' {
+        description 'Exclusive writer, synchronized intent and absolute deadlines; no resolved secret values'
+      }
+      projection = store 'Published read model' {
+        description 'Phase, verified active release and required recovery action'
+      }
+    }
+    workload = app 'Application workloads' {
+      #untrusted
+      description 'App-owned readiness, migrations, compatibility and coordination; volumes retained across removal'
+    }
+  }
+
+  kayra.core -> plannedDelivery.trusted.platform 'fleet settings and lifecycle requests'
+  plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'lifecycle commands and registration grants'
+  plannedDelivery.trusted.platform -> plannedDelivery.trusted.projection 'reads published state'
+  plannedDelivery.trusted.coordinator -> plannedDelivery.builder 'requests an immutable bundle'
+  plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'persists intent and observes recorded state'
+  plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publishes lifecycle state'
+  plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'typed workload operations and observations'
+  plannedDelivery.trusted.adapter -> plannedDelivery.workload 'reconciles owned workloads'
+  operator -> plannedDelivery.trusted.platform 'audited recovery decision'
+
   // Operating the fleet
   operator -> fleet 'edits, through PRs'
   operator -> kayra.cli 'kayra up / setup / apps / app deploy'

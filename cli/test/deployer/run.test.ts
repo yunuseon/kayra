@@ -27,10 +27,19 @@ const world = (overrides: Partial<Effects> = {}, fail?: string): { readonly fx: 
     log: () => undefined,
     resolve: () => Promise.resolve(ok(commit("a"))),
     prepare: () => Promise.resolve(ok(bundle)),
-    exec: (argv, options) => {
-      const step = argv.includes("config") ? "config" : argv.includes("up") ? "up" : "policy";
-      note(`${step}${Object.keys(options.env).length > 0 ? " +secrets" : ""}${options.stdin === undefined ? "" : ` <${options.stdin}`}`);
-      return Promise.resolve({ code: step === fail ? 1 : 0, stdout: step === "config" ? config : "" });
+    runtime: {
+      config: (request) => {
+        note(`config${Object.keys(request.env).length > 0 ? " +secrets" : ""}`);
+        return Promise.resolve({ code: fail === "config" ? 1 : 0, stdout: config });
+      },
+      up: (request) => {
+        note(`up${Object.keys(request.env).length > 0 ? " +secrets" : ""}`);
+        return Promise.resolve({ code: fail === "up" ? 1 : 0, stdout: "" });
+      },
+    },
+    policy: (_app, _script, _domain, _bundle, _cwd, resolved) => {
+      note(`policy <${resolved}`);
+      return Promise.resolve({ code: fail === "policy" ? 1 : 0, stdout: "" });
     },
     secrets: () => ok({ DATABASE_PASSWORD: "pw" }),
     workdir: () => Promise.resolve("/tmp/run"),

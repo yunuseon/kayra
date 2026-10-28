@@ -3,17 +3,17 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ok } from "../lib/result.ts";
 import { field, registered, type App } from "./app.ts";
 import { appName, appOwner, newRunId, type AppName } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
-import { matches } from "./cron.ts";
 import { json, send } from "./http/http.ts";
 import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request, type Why } from "./runs/queue.ts";
 import { ended, moved, releases, type RunMeta } from "./runs/records.ts";
-import { decide, type RunEnd } from "./forges/notify.ts";
-import { effects, runPage } from "./runs/effects.ts";
-import { deploy, renovate, type Effects, type Env, type Outcome } from "./runs/run.ts";
+import { deliver } from "../server/platform/notify.ts";
+import { schedule } from "../server/platform/schedule.ts";
+import { runMaintenance, type MaintenanceEffects } from "../server/platform/maintenance.ts";
+import { commandExecution, effects, runPage } from "./runs/effects.ts";
+import { deploy, type Effects, type Outcome } from "./runs/run.ts";
 import { toRestore, type Deployed } from "./runs/restore.ts";
 import { spawnLines } from "./process.ts";
 import { appendLog, meta, owners, prune, runsOf, writeMeta } from "./runs/store.ts";
@@ -32,18 +32,6 @@ import { assess, gather } from "./health.ts";
  *   :8091  inside the container only: POST /deploy, POST /job (kayra app …, kayra job …)
  */
 
-/** Raises or resolves what the finished run means; a notifier's failure is logged, never the run's. */
-const notify = async (s: Settings, end: RunEnd, log: (line: string) => void) => {
-  const decision = decide(end);
-  const done =
-    decision.kind === "raise"
-      ? await s.notifier.raise(decision.alert)
-      : decision.kind === "resolve"
-        ? await s.notifier.resolve(decision.key, decision.note)
-        : ok(undefined);
-  if (!done.ok) log(`(alert not sent: ${done.error})`);
-};
-
 const keepRuns = 50;
 
 const registeredApps = (s: Settings) => {
@@ -55,7 +43,7 @@ const registeredApps = (s: Settings) => {
   }));
 };
 
-const work = async (s: Settings, request: Request, fx: Effects) => {
+const work = async (s: Settings, request: Request, fx: Effects, exec: MaintenanceEffects["exec"]) => {
   if (request.work.kind === "deploy") {
     const app = registered(s.platformDir, request.work.app);
     if (!app.ok) {
@@ -64,10 +52,7 @@ const work = async (s: Settings, request: Request, fx: Effects) => {
     }
     return deploy(app.value, request.work.ref, { appsDir: s.appsDir, policyScript: s.policyScript, domain: s.domain }, fx);
   }
-  const argv = request.work.job === "gc" ? (["bash", s.gcScript] as const) : renovate(s.env, request.work.dryRun, s.renovateImage);
-  const env: Env = request.work.job === "renovate" ? { RENOVATE_TOKEN: token("RENOVATE_TOKEN") } : {};
-  const exit = await fx.exec(argv, { cwd: s.platformDir, env });
-  return typed<Outcome>({ ok: exit.code === 0 });
+  return typed<Outcome>(await runMaintenance(request.work, s, { token, exec }));
 };
 
 /** The daemon's one mutable cell: the queue, swapped whole on every change. */
@@ -123,7 +108,7 @@ const start = async (s: Settings, request: Request) => {
     appendLog(runs, request.owner, id, line);
   };
   const scratch = mkdtempSync(join(tmpdir(), `${id}-`));
-  const outcome = await work(s, request, effects(s, request.owner, id, scratch, log)).catch((error: unknown) => {
+  const outcome = await work(s, request, effects(s, request.owner, id, scratch, log), commandExecution(log)).catch((error: unknown) => {
     log(`deployer: ${String(error)}`);
     return typed<Outcome>({ ok: false, error: "the deployer failed; see the log" });
   });
@@ -136,8 +121,8 @@ const start = async (s: Settings, request: Request) => {
     ...(outcome.urls === undefined ? {} : { urls: outcome.urls }),
     ...(outcome.checks === undefined ? {} : { checks: outcome.checks }),
   });
-  await notify(
-    s,
+  await deliver(
+    s.notifier,
     { server: s.server, request, ok: outcome.ok, ...(outcome.sha === undefined ? {} : { sha: outcome.sha }), page: runPage(s, request.owner, id) },
     log,
   );
@@ -199,20 +184,6 @@ const restore = async (s: Settings) => {
 
 /** Long enough for Docker to have started the containers with a restart policy itself. */
 const restoreAfter = 30_000;
-
-const tick = (s: Settings, at: Date) => {
-  if (matches(s.poll, at)) void poll(s);
-  if (matches(s.gc, at)) ask(s, jobRequest(newId(), "gc", false, "schedule"));
-  if (s.renovate !== undefined && matches(s.renovate, at)) ask(s, jobRequest(newId(), "renovate", false, "schedule"));
-};
-
-const schedule = (s: Settings) => {
-  const wait = 60_000 - (Date.now() % 60_000) + 500;
-  setTimeout(() => {
-    tick(s, new Date());
-    schedule(s);
-  }, wait);
-};
 
 const handle =
   (handler: (request: IncomingMessage, response: ServerResponse) => Promise<void> | void) =>
@@ -292,7 +263,11 @@ export const serveDeployer = (env: NodeJS.ProcessEnv) => {
   abandon(s);
   createServer(handle((request, response) => push(s, request, response))).listen(8090);
   createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
-  schedule(s);
+  schedule(s, {
+    poll: () => { void poll(s); },
+    gc: () => { ask(s, jobRequest(newId(), "gc", false, "schedule")); },
+    renovate: () => { ask(s, jobRequest(newId(), "renovate", false, "schedule")); },
+  });
   setTimeout(() => { void restore(s); }, restoreAfter);
   console.log(`deployer: :8090 pushes and health, 127.0.0.1:8091 control; renovate ${s.renovate === undefined ? "off" : "on"}`);
 };

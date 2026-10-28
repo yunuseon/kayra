@@ -1,13 +1,12 @@
-import type { JobWhy, Why } from "./queue.ts";
-import { runId, sha, type RunId, type Sha } from "../brand.ts";
+import type { Check, Release, RunMeta, RunState } from "../../contracts/reporting.ts";
+export type { Check, Release, RunMeta, RunState } from "../../contracts/reporting.ts";
+import { runId, sha, type Sha } from "../brand.ts";
 import { field } from "../app.ts";
 import { typed } from "../../lib/typed.ts";
 
 /** A release record's name: releases/<app>/<UTC time>-<sha>.env. registry-gc.sh reads the same files. */
 export const releaseName = (at: Date, commit: Sha) =>
   `${at.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}-${commit}.env`;
-
-export type Release = { readonly sha: Sha; readonly time: string };
 
 /** Newest first, one per commit: the first is what runs now, the rest are what rollback offers. */
 export const releases = (names: readonly string[]) =>
@@ -29,29 +28,6 @@ export const releases = (names: readonly string[]) =>
  */
 export const moved = (resolved: Sha, tried: readonly Sha[], lastRelease: Sha | undefined) =>
   !tried.includes(resolved) && resolved !== lastRelease;
-
-/** queued until it starts; superseded when a newer request for its owner replaced it before it began. */
-export type RunState = "queued" | "running" | "success" | "failure" | "superseded";
-
-/** A route's readiness after up: the URL asked through Traefik, and what answered (0: nothing did). */
-export type Check = { readonly url: string; readonly status: number; readonly ok: boolean };
-
-/** runs/<owner>/<id>/meta.json, next to its log. */
-export type RunMeta = {
-  readonly id: RunId;
-  readonly owner: string;
-  readonly what: string;
-  readonly why: Why | JobWhy;
-  readonly sha?: Sha;
-  readonly state: RunState;
-  readonly started: string;
-  readonly finished?: string;
-  /** Why a run failed, in one line. */
-  readonly error?: string;
-  /** Where the deployed app answers. */
-  readonly urls?: readonly string[];
-  readonly checks?: readonly Check[];
-};
 
 const whys = ["push", "poll", "deploy", "rollback", "restore", "schedule", "manual"] as const;
 const states = ["queued", "running", "success", "failure", "superseded"] as const;

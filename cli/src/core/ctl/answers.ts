@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ReleasesAnswer, RunAnswer, RunsAnswer } from "../../deployer/ctl/answers.ts";
+import type { ReleasesAnswer, RunAnswer, RunsAnswer } from "../../contracts/reporting.ts";
 
 const deployed = z.object({ sha: z.string(), time: z.iso.datetime() });
 

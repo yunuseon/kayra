@@ -4,7 +4,8 @@ import { all, err, ok } from "../../lib/result.ts";
 import type { App } from "../app.ts";
 import type { Owner, RunId } from "../brand.ts";
 import { builderPrepare, builderResolve } from "../build/client.ts";
-import { appFiles, imagesFile, routesFile } from "../build/compose.ts";
+import { appFiles, imagesFile, policy, routesFile } from "../build/compose.ts";
+import { composeRuntime, type Execute } from "../../server/runtime/compose.ts";
 import { forge } from "../forges/forge.ts";
 import { forgeRepo } from "../../lib/forge-repo.ts";
 import { spawnLines } from "../process.ts";
@@ -42,12 +43,15 @@ const probe = async (url: string) => {
 /** A run's page, which its commit statuses link to. */
 export const runPage = (s: Settings, who: Owner, id: RunId) => `https://deploy.${s.domain}/runs/${who}/${id}`;
 
+export const commandExecution = (log: (line: string) => void) => typed<Execute>((argv, options) => spawnLines(argv, { ...options, timeoutMs: 20 * 60_000 }, log));
+
 /** What one run does to this server; its files go into `scratch`, which the run removes when it ends. */
 export const effects = (s: Settings, who: Owner, id: RunId, scratch: string, log: (line: string) => void) => typed<Effects>({
   log,
   resolve: (app, ref) => builderResolve(s.builder, app, ref),
   prepare: (app, commit) => builderPrepare(s.builder, app, commit, log),
-  exec: (argv, options) => spawnLines(argv, { ...options, timeoutMs: 20 * 60_000 }, log),
+  runtime: composeRuntime(commandExecution(log)),
+  policy: (app, script, domain, bundle, cwd, resolved) => commandExecution(log)(policy(app, script, domain, bundle), { cwd, env: {}, stdin: resolved }),
   secrets: appSecrets,
   workdir: (bundle, images) => {
     writeFileSync(join(scratch, imagesFile), images);

@@ -66,7 +66,7 @@ export default defineConfig(
   {
     // The deployer's daemons work with Node's I/O objects (requests, responses,
     // buffers, the environment, dates, regexps): classes the rule cannot make readonly.
-    files: ["src/deployer/**/*.ts"],
+    files: ["src/deployer/**/*.ts", "src/server/**/*.ts"],
     // A Buffer read from a request is bytes nothing changes in place; it reaches inferred returns (Promise<Buffer | undefined>).
     settings: { immutability: { overrides: [...immutableHere, { type: /^Buffer$/u, to: "ReadonlyDeep" }] } },
     rules: {
@@ -116,21 +116,22 @@ export default defineConfig(
   // Core and clients: the core knows no client, no client knows another, the
   // deployer (it runs on servers) knows neither, lib/ knows none of them. main.ts and serve.ts compose them.
   // The wire (the JSON every machine client speaks) is any client's, and knows none.
-  // The core may name the deployer's answers as types: they are ctl's wire format.
+  // Shared reporting contracts carry the wire format without depending on deployer internals.
   ...(
     [
-      ["src/core/**/*.ts", ["**/clients/**", "**/main.ts", "**/serve.ts"], true],
-      ["src/clients/cli/**/*.ts", ["**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/clients/api/**/*.ts", ["**/clients/cli/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/clients/mcp/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"], false],
-      ["src/clients/wire/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/core/**/*.ts", ["**/clients/**", "**/deployer/**", "**/server/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/cli/**/*.ts", ["**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/api/**/*.ts", ["**/clients/cli/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/mcp/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/wire/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/contracts/**/*.ts", ["**/server/**", "**/deployer/**", "**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"]],
       // The deployer's image installs no packages: of lib/, only what imports none.
-      ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"], false],
+      ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"]],
       // lib/ is what any TypeScript project could use: it knows nothing of kayra.
-      ["src/lib/**/*.ts", ["**/core/**", "**/clients/**", "**/deployer/**", "**/main.ts", "**/serve.ts"], false],
+      ["src/lib/**/*.ts", ["**/core/**", "**/clients/**", "**/deployer/**", "**/main.ts", "**/serve.ts"]],
     ] as const
-  ).map(([files, forbidden, deployerTypes]) => ({
+  ).map(([files, forbidden]) => ({
     files: [files],
     rules: {
       "no-restricted-imports": [
@@ -138,12 +139,32 @@ export default defineConfig(
         {
           patterns: [
             { group: [...forbidden], message: "Core and clients stay apart: see CLAUDE.md, Core and clients." },
-            ...(deployerTypes ? [{ group: ["**/deployer/**"], allowTypeImports: true, message: "The core runs no deployer code; its answers' types are fine." }] : []),
           ],
         },
       ] satisfies ["error", unknown],
     },
   })),
+  {
+    // Platform code consumes public facts and commands, never coordinator internals.
+    files: ["src/server/platform/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/deployer/**", "**/deployment/**", "**/core/**", "**/clients/**"], message: "Platform code must use published contracts and commands, not component internals." }] }],
+    },
+  },
+  {
+    // Runtime adapters consume normalized inputs, not policy or other components' internals.
+    files: ["src/server/runtime/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/deployer/**", "**/deployment/**", "**/platform/**", "**/core/**", "**/clients/**"], message: "Runtime adapters must use normalized inputs rather than other components' internals." }] }],
+    },
+  },
+  {
+    // Runtime effects belong behind coordinator ports; spawning a process here bypasses them.
+    files: ["src/server/deployment/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { paths: [{ name: "node:child_process", message: "Use a typed runtime port." }, { name: "child_process", message: "Use a typed runtime port." }], patterns: [{ group: ["**/deployer/process.ts", "**/deployer/process.js"], message: "Use a typed runtime port." }] }],
+    },
+  },
   {
     // Brands are minted here, and only here: the one place `as` may appear.
     files: ["src/lib/brand.ts", "src/core/fleet/brand.ts", "src/deployer/brand.ts"],

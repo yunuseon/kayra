@@ -1,12 +1,10 @@
 import type { Brand } from "../lib/brand.ts";
+import type { RunId, Sha } from "../contracts/identity.ts";
+export type { RunId, Sha } from "../contracts/identity.ts";
 import { err, ok } from "../lib/result.ts";
 import { names, type Name } from "../lib/names.ts";
 
 export type AppName = Brand<string, "AppName">;
-/** A full commit id: what gets built, deployed and recorded. */
-export type Sha = Brand<string, "Sha">;
-/** `<UTC time>-<6 hex>`: sorts by start time. */
-export type RunId = Brand<string, "RunId">;
 export type JobName = "gc" | "renovate";
 /** Whose runs a directory under runs/ holds: an app, or `_<job>` (no app name starts with `_`). */
 export type Owner = Brand<string, "Owner">;

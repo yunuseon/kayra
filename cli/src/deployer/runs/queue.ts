@@ -1,11 +1,7 @@
 import { jobOwner, type AppName, type JobName, type Owner, type RunId } from "../brand.ts";
 import { typed } from "../../lib/typed.ts";
-
-/** restore: the deployer bringing back a release that stopped running (restore.ts). */
-export type Why = "push" | "poll" | "deploy" | "rollback" | "restore";
-
-/** A job's cron fired, or someone asked for it (`kayra job`, through ctl). */
-export type JobWhy = "schedule" | "manual";
+import type { JobWhy, Why } from "../../contracts/reporting.ts";
+export type { JobWhy, Why } from "../../contracts/reporting.ts";
 
 export type Work =
   | { readonly kind: "deploy"; readonly app: AppName; readonly ref: string; readonly why: Why }

@@ -1,4 +1,4 @@
-import type { Deployed, ReleasesAnswer, RunAnswer, RunsAnswer } from "../../deployer/ctl/answers.ts";
+import type { Deployed, ReleasesAnswer, RunAnswer, RunsAnswer } from "../../contracts/reporting.ts";
 import type { DeployerAnswer } from "../../core/plan/model.ts";
 import { accent, active, bad, type Line, muted, ok, pointing, type Span, strong, warn } from "../../core/text/spans.ts";
 import { ago, table } from "./text.ts";

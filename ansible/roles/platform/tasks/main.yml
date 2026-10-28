@@ -119,6 +119,8 @@
     mode: "0644"
   loop:
     - deployer/
+    - server/
+    - contracts/
     - lib/
   vars:
     code: "{{ 'src' if deployer_source.stat.exists else 'dist' }}"

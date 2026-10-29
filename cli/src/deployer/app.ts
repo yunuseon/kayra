@@ -34,6 +34,8 @@ export const field = (record: object, key: string) => {
 export const parseApp = (expected: string, json: unknown) => {
   if (typeof json !== "object" || json === null) return err(`${expected}: not an object`);
   const name = field(json, "name");
+  const runtime = field(json, "runtime");
+  if (runtime !== undefined && runtime !== "compose") return err(`${expected}: unsupported runtime; only Compose is available`);
   const repo = field(json, "repo");
   const ref = field(json, "ref");
   const path = field(json, "path");

@@ -119,6 +119,11 @@ export const prepare = async (app: App, commit: Sha, s: Settings, line: Line) =>
   if (!checkedOut.ok) return checkedOut;
 
   const root = join(dir, app.path);
+  // Inspect presence, not truthiness: even an invalid rollout declaration must
+  // never be silently deployed through the legacy Compose pipeline.
+  const rollout = await spawnLines(["yq", "-o=json", 'has("rollout")', join(root, "app.yml")], { capture: true }, () => undefined);
+  if (rollout.code !== 0) return err("app.yml: could not validate rollout metadata");
+  if (rollout.stdout.trim() !== "false") return err("app.yml: rollout metadata is not yet supported");
   const buildEnv: Env = { REGISTRY: "localhost:5000" };
   const planned = await run(["bash", s.resolveImages, app.name, root, "--plan"], { env: buildEnv, capture: true }, line);
   if (!planned.ok) return planned;

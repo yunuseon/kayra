@@ -60,6 +60,16 @@
   loop: [runs, releases, alerts]
   become: true
 
+# Private durable coordinator state; only the deployer mounts it.
+- name: Create the lifecycle directory
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/lifecycle"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0700"
+  become: true
+
 # buildkit/ matters more than it looks: without buildkitd.toml the bind mount
 # has no source, Docker creates a directory in its place, and buildkitd
 # crash-loops until the container is recreated.

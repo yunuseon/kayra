@@ -37,6 +37,10 @@ test("webhooks: the ref a push moved, nothing for a ping", () => {
 
 test("registrations are checked, not trusted", () => {
   deepStrictEqual(parseApp("shop", { ...shop }), { ok: true, value: shop });
+  deepStrictEqual(parseApp("shop", { ...shop, runtime: "compose" }), { ok: true, value: shop });
+  for (const runtime of ["swarm", "other", "", null, false, 1, []]) {
+    deepStrictEqual(parseApp("shop", { ...shop, runtime }), { ok: false, error: "shop: unsupported runtime; only Compose is available" });
+  }
   deepStrictEqual(parseApp("shop", { ...shop, name: "other" }).ok, false);
   deepStrictEqual(parseApp("shop", { ...shop, path: "../x" }).ok, false);
   deepStrictEqual(parseApp("shop", { ...shop, secrets: ["lower"] }).ok, false);
@@ -49,6 +53,9 @@ test("a bundle may only name the app's own images and relative compose files", (
     compose: [{ path: "deploy/compose.yml", content: "services: {}\n" }],
     routes: [{ host: "www", service: "web", port: 3000 }],
   };
+  for (const rollout of [null, false, { strategy: "rolling" }]) {
+    deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, rollout }), { ok: false, error: "bundle: rollout metadata is not yet supported" });
+  }
   const bundle = must(parseBundle(name("shop"), commit("a"), good));
   strictEqual(imagesEnv(bundle), "WEB_IMAGE=localhost:5000/shop/web:0123456789ab\n");
   deepStrictEqual(parseBundle(name("shop"), commit("b"), good).ok, false);

@@ -27,6 +27,7 @@ const relative = (path: string) =>
 
 export const parseBundle = (app: AppName, expected: Sha, json: unknown) => {
   if (typeof json !== "object" || json === null) return err("bundle: not an object");
+  if (Object.hasOwn(json, "rollout")) return err("bundle: rollout metadata is not yet supported");
   const commit = field(json, "sha");
   const images = field(json, "images");
   const compose = field(json, "compose");

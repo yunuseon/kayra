@@ -20,6 +20,7 @@ import { appendLog, meta, owners, prune, runsOf, writeMeta } from "./runs/store.
 import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
 import { assess, gather } from "./health.ts";
+import { startWithLifecycle } from "../server/deployment/startup.ts";
 
 /**
  * The deployer: the half that holds the docker socket and the app secrets.
@@ -258,16 +259,20 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
   send(response, 404, "not found\n");
 };
 
-export const serveDeployer = (env: NodeJS.ProcessEnv) => {
+export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
-  abandon(s);
-  createServer(handle((request, response) => push(s, request, response))).listen(8090);
-  createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
-  schedule(s, {
-    poll: () => { void poll(s); },
-    gc: () => { ask(s, jobRequest(newId(), "gc", false, "schedule")); },
-    renovate: () => { ask(s, jobRequest(newId(), "renovate", false, "schedule")); },
+  const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), () => {
+    abandon(s);
+    createServer(handle((request, response) => push(s, request, response))).listen(8090);
+    createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
+    schedule(s, {
+      poll: () => { void poll(s); },
+      gc: () => { ask(s, jobRequest(newId(), "gc", false, "schedule")); },
+      renovate: () => { ask(s, jobRequest(newId(), "renovate", false, "schedule")); },
+    });
+    setTimeout(() => { void restore(s); }, restoreAfter);
+    console.log(`deployer: :8090 pushes and health, 127.0.0.1:8091 control; renovate ${s.renovate === undefined ? "off" : "on"}`);
   });
-  setTimeout(() => { void restore(s); }, restoreAfter);
-  console.log(`deployer: :8090 pushes and health, 127.0.0.1:8091 control; renovate ${s.renovate === undefined ? "off" : "on"}`);
+  // Keep the lock object reachable until exit; the OS releases it on exit.
+  process.once("exit", () => { void journal.close(); });
 };

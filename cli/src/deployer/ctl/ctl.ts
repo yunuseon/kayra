@@ -1,15 +1,15 @@
-import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { releasesAnswer, runAnswer, runsAnswer } from "./answers.ts";
 import { field } from "../app.ts";
-import { appOwner, appName, owner as mintOwner, runId, type Owner, type RunId } from "../brand.ts";
-import { ended, releases, type RunMeta } from "../runs/records.ts";
+import { appOwner, appName, owner as mintOwner, runId, type AppName, type Owner, type RunId } from "../brand.ts";
+import { ended, type RunMeta } from "../runs/records.ts";
 import { log, meta, runsOf } from "../runs/read.ts";
+import { legacyReleases } from "../runs/release-read.ts";
 import { typed } from "../../lib/typed.ts";
 
 /**
  * The operator's side, run inside the deployer container by `kayra app …` and
- * `kayra job …` over SSH. Reads runs/ and releases/ directly; anything that
+ * `kayra job …` over SSH. Reads legacy run and release projections; anything that
  * starts a run goes through the daemon's control port, so the queue stays the
  * only place runs begin. `--json` makes `runs` and rollback's list answer as
  * data (answers.ts), which kayra draws.
@@ -80,10 +80,7 @@ const start = async (payload: object, json: boolean) => {
   return posted.run === undefined ? posted.code : follow(posted.run.owner, posted.run.id, json);
 };
 
-const releasesOf = (app: string) => {
-  const dir = join(platformDir, "releases", app);
-  return releases(existsSync(dir) ? readdirSync(dir) : []);
-};
+const releasesOf = (app: AppName) => legacyReleases(platformDir, app).releases;
 
 const commands: Readonly<Record<string, (args: readonly string[], json: boolean) => Promise<number> | number>> = {
   runs: ([app], json) => {

@@ -1,41 +1,10 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { owner as mintOwner, runId, type Owner, type RunId } from "../brand.ts";
-import { expired, parseMeta, type RunMeta } from "./records.ts";
-import { typed } from "../../lib/typed.ts";
+import type { Owner, RunId } from "../brand.ts";
+import { expired, type RunMeta } from "./records.ts";
 
-/** runs/: <owner>/<id>/{meta.json,log}. Only the deployer writes there; the builder's pages and ctl read it. */
-
-const entries = (dir: string) => (existsSync(dir) ? readdirSync(dir).toSorted() : typed<readonly string[]>([]));
-
-export const owners = (runs: string) =>
-  Object.freeze(entries(runs).flatMap((name) => {
-    const minted = mintOwner(name);
-    return minted.ok ? Object.freeze([minted.value]) : Object.freeze([]);
-  }));
-
-export const meta = (runs: string, who: Owner, id: RunId) => {
-  const path = join(runs, who, id, "meta.json");
-  if (!existsSync(path)) return undefined;
-  try {
-    return parseMeta(JSON.parse(readFileSync(path, "utf8")));
-  } catch {
-    return undefined;
-  }
-};
-
-/** Newest first. */
-export const runsOf = (runs: string, who: Owner) =>
-  Object.freeze(entries(join(runs, who)).toReversed().flatMap((name) => {
-    const id = runId(name);
-    const found = id.ok ? meta(runs, who, id.value) : undefined;
-    return found === undefined ? Object.freeze([]) : Object.freeze([found]);
-  }));
-
-export const log = (runs: string, who: Owner, id: RunId) => {
-  const path = join(runs, who, id, "log");
-  return existsSync(path) ? readFileSync(path, "utf8") : undefined;
-};
+/** Compatibility exports for existing deployer callers. */
+export { log, meta, owners, runsOf } from "./read.ts";
 
 /** A run's meta.json, as it begins and again as it ends. */
 export const writeMeta = (runs: string, who: Owner, run: RunMeta) => {

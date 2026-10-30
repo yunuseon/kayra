@@ -1,6 +1,6 @@
 import type { Owner, RunId } from "../brand.ts";
 import type { RunMeta } from "../runs/records.ts";
-import { log, meta, owners, runsOf } from "../runs/store.ts";
+import { log, meta, owners, runsOf } from "../runs/read.ts";
 
 /** The read-only runs pages at deploy.<domain>, behind Authelia. */
 

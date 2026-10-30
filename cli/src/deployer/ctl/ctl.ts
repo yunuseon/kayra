@@ -4,7 +4,7 @@ import { releasesAnswer, runAnswer, runsAnswer } from "./answers.ts";
 import { field } from "../app.ts";
 import { appOwner, appName, owner as mintOwner, runId, type Owner, type RunId } from "../brand.ts";
 import { ended, releases, type RunMeta } from "../runs/records.ts";
-import { log, meta, runsOf } from "../runs/store.ts";
+import { log, meta, runsOf } from "../runs/read.ts";
 import { typed } from "../../lib/typed.ts";
 
 /**

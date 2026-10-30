@@ -185,6 +185,104 @@ lifecycle owner must serialize registration, deployment, removal and purge,
 reconcile incomplete removal, and check volume ownership and attachments. A
 registration recheck or removal marker alone does not establish those guarantees.
 
+### Proposed per-app lifecycle protocol
+
+The following protocol specifies the intended replacement for the current
+Ansible and control paths; it is not implemented yet. The coordinator is the
+single authority for app lifecycle transitions. It serializes admission and
+queue starts with registration changes, restore, removal and purge for each app.
+Different apps may proceed concurrently subject to host-wide admission and
+maintenance constraints. A transition closes the app's in-memory gate before
+any asynchronous journal write, persists its intent before acknowledging the
+request or performing an effect, and fails closed if persistence fails. Each
+operation has a stable identity and app generation; a stale completion cannot
+advance a newer operation. A timeout or disconnected caller does not release a
+gate while an effect might still be running.
+
+The existing Ansible app role must acquire a registration operation through the
+deployer's existing local control interface before inspecting the old
+registration or changing configuration and secrets. The coordinator first
+rejects new work for that app and settles its running deployment; queued work
+is explicitly ended rather than started against a changing grant. The platform
+then stages the registration, configuration and secrets as a new generation.
+Secret material stays platform-owned and is never sent through the journal or a
+public projection. A generation reference identifies all three together, so a
+deployment reads one consistent snapshot rather than a mixture of files from
+different registrations. Only after the staged generation is durable may the
+platform publish it and report completion with the matching operation identity.
+The coordinator observes the published generation and durably records completion
+before reopening the gate. The platform keeps the prior generation until it is
+safe to retire; it does not replace secret directories while a deployment is
+reading them. The deployer's read-only access to registration, configuration and
+secrets remains separate from the platform's write authority.
+
+The existing push, poll, control and both restore paths must ask the same owner
+before starting work. A queued request is revalidated against the current
+registration and generation at start, not merely when accepted. Restore's
+observation and its resulting request participate in this protocol; an
+observation failure cannot authorize a deployment. Platform scripts become
+thin clients of these commands, with no independent Docker stop, registration
+deletion or release-record deletion.
+
+Removal persists its identity and fenced intent first, rejects or ends queued
+work, and waits for running work to settle. Only then may the runtime adapter
+remove owned workloads. The platform removes registration and secrets as
+coordinated effects, and the deployment owner retains a durable tombstone
+containing the app generation and verified owned volume identities. Completion
+requires observed workload removal and durable tombstone publication. A failed
+or interrupted removal remains fenced; an absent registration alone is not
+evidence of completion. Purge is a separate serialized operation: it requires
+a completed tombstone, no current registration or conflicting operation, and
+fresh successful ownership and attachment observations before asking Docker to
+remove exactly the tombstoned volumes. Docker's in-use refusal remains a final
+check, but project labels alone do not establish ownership. Unrelated volumes
+are never selected for deletion.
+
+At restart, the owner loads and validates durable state before opening request
+listeners or starting restore and scheduled work. An incomplete operation
+remains fenced while the owner observes its recorded effect and reconciles it;
+it cannot assume an interrupted client or Docker command failed. In particular,
+Docker may complete an accepted request after the client or coordinator exits.
+Replays are limited to operations whose idempotence and current runtime evidence
+make them safe; an ambiguous outcome requires an audited decision. An interrupted
+registration cannot become available just because its caller vanished. An
+interrupted purge retains the identities and outcomes of its individual volume
+removals and never silently reselects a broader set. Reconciliation records
+its decision and effects before proceeding; operator-facing projections show the
+blocked phase and required action without secret values.
+
+Activation requires a coordinated host upgrade: install the new owner, clients
+and protocol-aware app role together, verify their versions and mounts, stop or
+settle older in-flight operations, and refuse activation if any required path
+can still bypass the owner. Import existing Compose registrations and readable
+history as legacy observations, not verified active releases. Existing
+interrupted legacy work is quarantined until its effects are reconciled; a
+missing tombstone is not treated as permission to purge. Legacy volume ownership
+requires an explicit, validated adoption procedure before destructive purge.
+The protocol's durable format and activation marker must be versioned. A
+supported downgrade checks that no managed operation or ownership state would
+be bypassed and refuses if that cannot be established. Older tools do not know
+this gate and have root privileges, so they cannot be made safe merely by
+writing a marker; running an older playbook or directly mutating Docker or host
+files after activation is outside the protocol and must be prevented by the
+operational upgrade policy. This does not claim protection from a privileged
+operator deliberately bypassing Kayra.
+
+Acceptance must exercise the real control, Ansible and runtime paths, not only
+an isolated state machine. Concurrent registration, deploy, restore, removal
+and purge requests for one app must demonstrate that no incompatible effects
+overlap; unrelated apps must still make progress. Fault injection kills the
+coordinator or host-side caller immediately before and after each intent,
+generation publication, workload removal, tombstone and individual volume
+removal. Restart must preserve the fence and reconcile or report the unresolved
+operation without repeating an unsafe effect. Tests cover stale operation IDs,
+failed durable writes, an unavailable Docker observation, concurrent
+registration versus purge, failed removal versus purge, attached and unrelated
+volumes, and a crash after Docker accepts an action. Upgrade and downgrade
+tests include existing registrations, interrupted legacy runs, unknown volume
+ownership and older-client bypass attempts; verify that no unverified legacy
+release is reported as active and no unresolved state authorizes purge.
+
 Legacy filename-based destructive registry GC is refused on hosts managing
 Swarm apps until GC understands image pins. The coordinator exports pins for
 active, candidate, rollback and unresolved operations. Historical failed Swarm

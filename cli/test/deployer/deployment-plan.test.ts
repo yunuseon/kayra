@@ -26,6 +26,27 @@ test('rejects unsupported fields, secret values and nonimmutable references', ()
   assert.equal(parseDeploymentPlan({ ...plan, grants: { ...plan.grants, memoryBytes: 0 } }).ok, false);
 });
 
+test('snapshots indexed references without trusting sparse arrays or input iterators', () => {
+  const invalid: readonly unknown[] = Array(1);
+  assert.equal(parseDeploymentPlan({ ...plan, services: { db: { ...db, secretGenerations: invalid }, web } }).ok, false);
+  assert.equal(parseDeploymentPlan({ ...plan, services: { db, web: { ...web, dependencies: invalid } } }).ok, false);
+  assert.equal(parseDeploymentPlan({ ...plan, services: { db: { ...db, volumes: invalid }, web } }).ok, false);
+
+  const references = [secret, `sg_${'b'.repeat(32)}`];
+  // eslint-disable-next-line functional/immutable-data -- simulate untrusted array methods
+  Object.defineProperty(references, Symbol.iterator, { value: function* () { yield secret; yield 'plain-secret'; } });
+  // eslint-disable-next-line functional/immutable-data -- simulate untrusted array methods
+  Object.defineProperty(references, 'every', { value: () => true });
+  const parsed = parseDeploymentPlan({ ...plan, services: { db: { ...db, secretGenerations: references }, web } });
+  assert.equal(parsed.ok, true);
+  const snapshot = parsed.value.services['db']?.secretGenerations;
+  assert.deepEqual(snapshot, [secret, `sg_${'b'.repeat(32)}`]);
+  // eslint-disable-next-line functional/immutable-data -- prove output does not share input
+  references[0] = `sg_${'c'.repeat(32)}`;
+  assert.deepEqual(snapshot, [secret, `sg_${'b'.repeat(32)}`]);
+  assert.equal(Object.isFrozen(snapshot), true);
+});
+
 test('rejects invalid dependencies, cycles and unowned or duplicate volume identities', () => {
   assert.equal(parseDeploymentPlan({ ...plan, services: { db: { ...db, dependencies: ['web'] }, web } }).ok, false);
   assert.equal(parseDeploymentPlan({ ...plan, services: { db, web: { ...web, dependencies: ['missing'] } } }).ok, false);

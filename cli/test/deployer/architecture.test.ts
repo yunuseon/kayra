@@ -23,6 +23,11 @@ test("shared contracts do not depend on component implementations or package-bou
   await refused("src/contracts/reporting.ts", 'import "../lib/schema.ts";');
 });
 
+test("generic library code does not depend on Kayra contracts or server components", async () => {
+  await refused("src/lib/typed.ts", 'import type { AppName } from "../contracts/identity.ts";');
+  await refused("src/lib/typed.ts", 'import type { Deployed } from "../server/deployment/legacy-restore.ts";');
+});
+
 
 test("operator core consumes public reporting contracts, not deployer internals", async () => {
   await refused("src/core/fleet/settings.ts", 'import "../../deployer/runs/records.ts";');

@@ -129,7 +129,7 @@ export default defineConfig(
       // The deployer's image installs no packages: of lib/, only what imports none.
       ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"]],
       // lib/ is what any TypeScript project could use: it knows nothing of kayra.
-      ["src/lib/**/*.ts", ["**/core/**", "**/clients/**", "**/deployer/**", "**/main.ts", "**/serve.ts"]],
+      ["src/lib/**/*.ts", ["**/core/**", "**/clients/**", "**/contracts/**", "**/deployer/**", "**/server/**", "**/main.ts", "**/serve.ts"]],
     ] as const
   ).map(([files, forbidden]) => ({
     files: [files],

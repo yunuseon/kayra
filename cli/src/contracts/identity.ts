@@ -1,5 +1,7 @@
 import type { Brand } from "../lib/brand.ts";
 
+/** A registered application's validated name. */
+export type AppName = Brand<string, "AppName">;
 /** A full commit id: what gets built, deployed and recorded. */
 export type Sha = Brand<string, "Sha">;
 /** `<UTC time>-<6 hex>`: sorts by start time. */

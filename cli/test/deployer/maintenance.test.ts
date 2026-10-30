@@ -16,6 +16,14 @@ test("platform maintenance invokes GC without reading a token", async () => {
   deepStrictEqual(result, { ok: true });
 });
 
+test("a GC dry run fails without executing a command or reading a token", async () => {
+  const result = await runMaintenance({ job: "gc", dryRun: true }, settings, {
+    token: () => { throw new Error("GC dry run must not read a token"); },
+    exec: () => { throw new Error("GC dry run must not execute a command"); },
+  });
+  deepStrictEqual(result, { ok: false, error: "Registry GC does not support dry runs; no cleanup was performed." });
+});
+
 test("platform maintenance supplies Renovate's token and reports failure", async () => {
   const result = await runMaintenance({ job: "renovate", dryRun: true }, settings, {
     token: (name) => name === "RENOVATE_TOKEN" ? "secret" : "",

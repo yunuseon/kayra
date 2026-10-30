@@ -6,6 +6,9 @@ export type RunState = "queued" | "running" | "success" | "failure" | "supersede
 export type Check = { readonly url: string; readonly status: number; readonly ok: boolean };
 export type Release = { readonly sha: Sha; readonly time: string };
 
+/** Compatibility facts from legacy release filenames, not verified active state. */
+export type LegacyReleases = { readonly hasEntries: boolean; readonly releases: readonly Release[] };
+
 /** Legacy run records may be unverified; these facts do not establish an active release. */
 export type RunMeta = {
   readonly id: RunId;

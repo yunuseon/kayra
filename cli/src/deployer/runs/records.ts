@@ -8,7 +8,7 @@ import { typed } from "../../lib/typed.ts";
 export const releaseName = (at: Date, commit: Sha) =>
   `${at.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}-${commit}.env`;
 
-/** Newest first, one per commit: the first is what runs now, the rest are what rollback offers. */
+/** Newest first, one per commit. Legacy callers assume the first is live; it is not verified active state. */
 export const releases = (names: readonly string[]) =>
   Object.freeze(names
     .toSorted()

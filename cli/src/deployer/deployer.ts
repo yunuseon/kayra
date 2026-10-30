@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,8 @@ import { appName, appOwner, newRunId } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
 import { json, send } from "./http/http.ts";
 import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request, type Why } from "./runs/queue.ts";
-import { ended, moved, releases, type RunMeta } from "./runs/records.ts";
+import { ended, moved, type RunMeta } from "./runs/records.ts";
+import { legacyReleases } from "./runs/release-read.ts";
 import { deliver } from "../server/platform/notify.ts";
 import { schedule } from "../server/platform/schedule.ts";
 import { runMaintenance, type MaintenanceEffects } from "../server/platform/maintenance.ts";
@@ -138,8 +139,7 @@ const poll = async (s: Settings) => {
     registeredApps(s).map(async (app) => {
       const commit = await builderResolve(s.builder, app, app.ref);
       const tried = runsOf(runsDir(s), appOwner(app.name)).flatMap((run) => Object.freeze(run.sha === undefined ? [] : [run.sha]));
-      const releasesDir = join(s.platformDir, "releases", app.name);
-      const lastRelease = releases(existsSync(releasesDir) ? readdirSync(releasesDir) : [])[0];
+      const lastRelease = legacyReleases(s.platformDir, app.name).releases[0];
       if (commit.ok && moved(commit.value, tried, lastRelease?.sha)) ask(s, deployRequest(app, app.ref, "poll"));
     }),
   );
@@ -157,8 +157,7 @@ const restore = async (s: Settings) => {
   const up = new Map(states);
   toRestore(
     apps.map((app) => {
-      const dir = join(s.platformDir, "releases", app.name);
-      return typed<Deployed>({ app: app.name, live: releases(existsSync(dir) ? readdirSync(dir) : [])[0]?.sha });
+      return typed<Deployed>({ app: app.name, live: legacyReleases(s.platformDir, app.name).releases[0]?.sha });
     }),
     (app) => up.get(app) ?? true,
   ).forEach(({ app, live }) => {
@@ -188,8 +187,7 @@ const accept = (s: Settings, response: ServerResponse, request: Request) => {
 const health = async (s: Settings, response: ServerResponse, gatherFacts: typeof gather) => {
   const scanned = registrations(s.platformDir);
   const apps = scanned.apps.map((app) => {
-    const dir = join(s.platformDir, "releases", app.name);
-    return Object.freeze({ name: app.name, released: existsSync(dir) && readdirSync(dir).length > 0 });
+    return Object.freeze({ name: app.name, released: legacyReleases(s.platformDir, app.name).hasEntries });
   });
   const assessed = assess({ ...await gatherFacts(apps, runsDir(s)), invalidRegistrations: scanned.invalid });
   send(response, assessed.healthy ? 200 : 503, JSON.stringify(assessed), "application/json");

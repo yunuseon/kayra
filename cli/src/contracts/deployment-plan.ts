@@ -30,8 +30,17 @@ const digest = (value: unknown): value is string => typeof value === 'string' &&
 const image = (value: unknown): value is string => typeof value === 'string' && /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+@sha256:[a-f0-9]{64}$/.test(value);
 const positive = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 const list = (value: unknown, predicate: (item: unknown) => item is string) => {
-  if (!Array.isArray(value) || value.length > 128 || !value.every(predicate) || new Set(value).size !== value.length) return undefined;
-  return Object.freeze([...value].sort());
+  if (!Array.isArray(value)) return undefined;
+  const length = value.length;
+  if (length > 128) return undefined;
+  // Snapshot indexed own values before validation: array iterators and methods
+  // on an untrusted input can produce different elements than those checked.
+  const snapshot: readonly unknown[] = Array.from({ length }, (_, index) => {
+    const item: unknown = Object.hasOwn(value, index) ? value[index] : undefined;
+    return item;
+  });
+  if (!snapshot.every(predicate) || new Set(snapshot).size !== length) return undefined;
+  return Object.freeze(snapshot.toSorted());
 };
 const secretGeneration = (value: unknown): value is string => typeof value === 'string' && /^sg_[a-f0-9]{32}$/.test(value);
 const volumeIdentity = (value: unknown): value is string => typeof value === 'string' && /^vol_[a-f0-9]{32}$/.test(value);

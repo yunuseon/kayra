@@ -15,6 +15,14 @@
 set -euo pipefail
 
 app="${1:?Usage: app-restore <app>}"
+valid_app_name() {
+    local LC_ALL=C
+    [[ "$1" =~ ^[a-z][a-z0-9-]*$ ]]
+}
+if ! valid_app_name "$app"; then
+    echo 'ERROR: invalid app name' >&2
+    exit 1
+fi
 platform_dir="${PLATFORM_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 releases="${platform_dir}/releases/${app}"
 

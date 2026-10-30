@@ -334,6 +334,19 @@ echo "✓ the same commit again: CACHED"
 kayra_cmd app logs "$server" sample | grep -q "ready  https://www.${domain}/  " || die "the deploy did not ask its route through Traefik"
 echo "✓ readiness: www.${domain} answered through Traefik"
 
+# The legacy restart path observes Compose projects before deciding whether a
+# previously deployed app needs to be started again. This exercises the actual
+# deployer after an intentional stop inside this disposable VM.
+step "3a  restore a stopped legacy Compose app after deployer restart"
+before="$run"
+multipass exec "$vm_name" -- sudo docker stop sample-web-1 >> "$log" 2>&1 || die "could not stop the fixture app"
+multipass exec "$vm_name" -- sudo docker restart platform-deployer-1 >> "$log" 2>&1 || die "could not restart the lab deployer"
+run="$(await_run "$before")"
+[ "$(state_of "$run")" = success ] || die "the legacy restore failed: ${run}"
+case "$run" in *" restore "*) ;; *) die "the app restarted for a reason other than restore: ${run}" ;; esac
+expect_serves v3
+echo "✓ stopped Compose app restored after deployer restart"
+
 # ── 4: a commit the policy refuses ──────────────────────────────────────────
 step "4  a commit the compose policy refuses"
 yq -i '.services.web.volumes = ["/etc:/host-etc"]' "${repo}/deploy/compose.yml"

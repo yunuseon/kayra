@@ -56,6 +56,33 @@ test('does not alias caller-owned command arguments in rendered data', () => {
   assert.equal(result.ok, true);
   assert.notEqual(result.value.TaskTemplate.ContainerSpec.Healthcheck.Test, command);
   assert.deepEqual(result.value.TaskTemplate.ContainerSpec.Healthcheck.Test, ['CMD', 'check', 'original']);
+  assert.equal(Reflect.set(result.value.TaskTemplate.ContainerSpec.Healthcheck.Test, '1', 'changed'), false);
+});
+
+test('renders only the validated indexed health command, ignoring a custom iterator', () => {
+  const command = ['check', 'original'];
+  // eslint-disable-next-line functional/immutable-data -- model an untrusted caller's iterator
+  Object.defineProperty(command, Symbol.iterator, { value: function* () { yield 'other'; } });
+  const result = renderSwarmHttp({ ...service, health: { ...service.health, command } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value.TaskTemplate.ContainerSpec.Healthcheck.Test, ['CMD', 'check', 'original']);
+
+  const bad = ['check', 'bad\0arg'];
+  // eslint-disable-next-line functional/immutable-data -- hide the invalid value from an iterator-based copy
+  Object.defineProperty(bad, Symbol.iterator, { value: function* () { yield 'check'; } });
+  assert.equal(renderSwarmHttp({ ...service, health: { ...service.health, command: bad } }).ok, false);
+});
+
+test('rejects sparse, accessor-backed and oversized health commands', () => {
+  const sparse = Array(2);
+  // eslint-disable-next-line functional/immutable-data -- model an untrusted sparse input
+  sparse[0] = 'check';
+  const accessor = ['check'];
+  // eslint-disable-next-line functional/immutable-data -- construct an untrusted accessor
+  Object.defineProperty(accessor, '0', { get: () => { throw new Error('must not execute input accessor'); } });
+  for (const command of [sparse, accessor, Array.from({ length: 129 }, () => 'x'), ['x'.repeat(4097)]]) {
+    assert.equal(renderSwarmHttp({ ...service, health: { ...service.health, command } }).ok, false);
+  }
 });
 
 test('rejects unsupported workload features and untrusted routing labels', () => {

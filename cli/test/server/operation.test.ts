@@ -68,6 +68,124 @@ test("invalid start requests reject without waiting on the journal", async () =>
   await assert.rejects(coordinator.start({ ...request, planDigest: "invalid" }), /invalid operation request/);
 });
 
+test("long deadlines survive the Node timer limit without extending the deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
+  let stored: unknown;
+  let invoked: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => { invoked = resolve; });
+  let aborted = false;
+  const coordinator = singleEffectCoordinator(
+    { read: () => Promise.resolve(stored), write: (value) => { stored = value; return Promise.resolve(); } },
+    {
+      authorize: (_record, signal) => {
+        signal.addEventListener("abort", () => { aborted = true; });
+        invoked?.();
+        return new Promise(() => undefined);
+      },
+      execute: () => { throw new Error("must not execute"); },
+      observe: () => Promise.resolve(observed("unknown")),
+    },
+    Date.now,
+  );
+  const deadline = 1000 + 2_147_483_647 + 100;
+  const pending = coordinator.start({ ...request, deadline });
+  await started;
+  t.mock.timers.tick(2_147_483_647);
+  assert.equal(aborted, false);
+  t.mock.timers.tick(99);
+  assert.equal(aborted, false);
+  t.mock.timers.tick(1);
+  const result = await pending;
+  assert.equal(aborted, true);
+  assert.equal(result.kind, "held");
+  assert.equal(result.record.deadline, deadline);
+  assert.equal(result.record.reason, "expired");
+});
+
+test("a clock failure while scheduling does not invoke the action port", async () => {
+  let stored: unknown;
+  let reads = 0;
+  let calls = 0;
+  const coordinator = singleEffectCoordinator(
+    { read: () => Promise.resolve(stored), write: (value) => { stored = value; return Promise.resolve(); } },
+    { authorize: () => { calls += 1; return Promise.resolve(true); }, execute: () => { calls += 1; return Promise.resolve(); }, observe: () => Promise.resolve(observed("unknown")) },
+    () => { reads += 1; return reads < 4 ? 1000 : Number.NaN; },
+  );
+  const result = await coordinator.start(request);
+  assert.equal(result.kind, "held");
+  assert.equal(result.record.reason, "expired");
+  assert.equal(calls, 0);
+});
+
+test("a deadline reached before the call microtask prevents the port invocation", async () => {
+  let stored: unknown;
+  let reads = 0;
+  let calls = 0;
+  const coordinator = singleEffectCoordinator(
+    { read: () => Promise.resolve(stored), write: (value) => { stored = value; return Promise.resolve(); } },
+    { authorize: () => { calls += 1; return Promise.resolve(true); }, execute: () => { calls += 1; return Promise.resolve(); }, observe: () => Promise.resolve(observed("unknown")) },
+    () => { reads += 1; return reads < 5 ? 1000 : request.deadline; },
+  );
+  const result = await coordinator.start(request);
+  assert.equal(result.kind, "held");
+  assert.equal(result.record.reason, "expired");
+  assert.equal(calls, 0);
+});
+
+test("a forward wall-clock jump aborts a pending long call on the next recheck", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let stored: unknown;
+  let clock = 1000;
+  let invoked: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => { invoked = resolve; });
+  let aborted = false;
+  const coordinator = singleEffectCoordinator(
+    { read: () => Promise.resolve(stored), write: (value) => { stored = value; return Promise.resolve(); } },
+    { authorize: (_record, signal) => { signal.addEventListener("abort", () => { aborted = true; }); invoked?.(); return new Promise(() => undefined); }, execute: () => { throw new Error("must not execute"); }, observe: () => Promise.resolve(observed("unknown")) },
+    () => clock,
+  );
+  const deadline = clock + 2_147_483_647 + 100;
+  const pending = coordinator.start({ ...request, deadline });
+  await started;
+  clock = deadline;
+  t.mock.timers.tick(999);
+  assert.equal(aborted, false);
+  t.mock.timers.tick(1);
+  const result = await pending;
+  assert.equal(aborted, true);
+  assert.equal(result.kind, "held");
+  assert.equal(result.record.deadline, deadline);
+  assert.equal(result.record.reason, "expired");
+});
+
+for (const outcome of ["resolved", "rejected", "invalid-clock"] as const) {
+  test(`a late ${outcome} effect is held even before its timer callback runs`, async () => {
+    let stored: unknown;
+    let clock = 1000;
+    let invoked: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { invoked = resolve; });
+    let settle: (() => void) | undefined;
+    let aborted = false;
+    const coordinator = singleEffectCoordinator(
+      { read: () => Promise.resolve(stored), write: (value) => { stored = value; return Promise.resolve(); } },
+      { authorize: allow, execute: (_record, signal) => {
+        signal.addEventListener("abort", () => { aborted = true; });
+        invoked?.();
+        return new Promise<void>((resolve, reject) => { settle = outcome === "rejected" ? () => { reject(new Error("unknown effect outcome")); } : resolve; });
+      }, observe: () => Promise.resolve(observed("unknown")) },
+      () => clock,
+    );
+    const pending = coordinator.start(request);
+    await started;
+    clock = outcome === "invalid-clock" ? Number.NaN : request.deadline;
+    settle?.();
+    const result = await pending;
+    assert.equal(aborted, true);
+    assert.equal(result.kind, "held");
+    assert.equal(result.record.reason, "expired");
+  });
+}
+
 test("held diagnostics observe without promoting or retrying the effect", async () => {
   const dir = await directory();
   try {

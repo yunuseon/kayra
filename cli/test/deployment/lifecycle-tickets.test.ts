@@ -9,7 +9,6 @@ import {
 const incarnation = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
 const descriptor = { kind: "deploy", planDigest: "a".repeat(64) } as const;
-// eslint-disable-next-line functional/prefer-immutable-types -- the helper accepts varied result shapes
 const must = <T>(r: Result<T, string>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
 
 test("lost responses return the same accepted or terminal operation and reject changed payloads", () => {

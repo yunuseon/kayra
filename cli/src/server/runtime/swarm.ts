@@ -8,8 +8,24 @@ const name = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 48 && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value);
 const positive = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
-const words = (value: unknown): value is readonly string[] =>
-  Array.isArray(value) && value.length > 0 && typeof value[0] === 'string' && value[0].length > 0 && value.every((word: unknown) => typeof word === 'string' && !word.includes('\0'));
+// Copy only bounded, own data entries; do not validate one array and render its
+// caller-supplied iterator or execute an accessor while reading it.
+const words = (value: unknown): readonly string[] | undefined => {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 128) return undefined;
+  const length = value.length;
+  // eslint-disable-next-line functional/prefer-immutable-types -- construct a private bounded snapshot
+  const copy: string[] = [];
+  // eslint-disable-next-line functional/no-let -- construct a bounded snapshot
+  for (let i = 0; i < length; i++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+    const word: unknown = descriptor?.value;
+    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value') || typeof word !== 'string' || word.length > 4096 || (i === 0 && word.length === 0) || word.includes('\0')) return undefined;
+    // eslint-disable-next-line functional/immutable-data -- copy has not escaped
+    copy.push(word);
+  }
+  if (value.length !== length) return undefined;
+  return Object.freeze(copy);
+};
 const registryName = (value: unknown): value is string => {
   if (typeof value !== 'string') return false;
   const [host, port, ...extra] = value.split(':');
@@ -50,8 +66,9 @@ export const renderSwarmHttp = (input: unknown) => {
   if (!record(health)) return err('health check is required');
   const healthExtra = unknownKey(health, ['command', 'intervalSeconds', 'timeoutSeconds', 'startPeriodSeconds', 'retries']);
   if (healthExtra !== undefined) return err(`unsupported health field ${healthExtra}`);
-  const { command, intervalSeconds, timeoutSeconds, startPeriodSeconds, retries } = health;
-  if (!words(command) || !positive(intervalSeconds) || intervalSeconds > 300 || !positive(timeoutSeconds) || timeoutSeconds > intervalSeconds || typeof startPeriodSeconds !== 'number' || !Number.isSafeInteger(startPeriodSeconds) || startPeriodSeconds < 0 || startPeriodSeconds > 300 || !positive(retries) || retries > 100) return err('invalid health check');
+  const { intervalSeconds, timeoutSeconds, startPeriodSeconds, retries } = health;
+  const command = words(health['command']);
+  if (command === undefined || !positive(intervalSeconds) || intervalSeconds > 300 || !positive(timeoutSeconds) || timeoutSeconds > intervalSeconds || typeof startPeriodSeconds !== 'number' || !Number.isSafeInteger(startPeriodSeconds) || startPeriodSeconds < 0 || startPeriodSeconds > 300 || !positive(retries) || retries > 100) return err('invalid health check');
 
   return ok({
     Name: `kayra-${app}--${service}`,
@@ -64,7 +81,7 @@ export const renderSwarmHttp = (input: unknown) => {
     TaskTemplate: {
       ContainerSpec: {
         Image: image,
-        Healthcheck: { Test: ['CMD', ...command], Interval: nanos(intervalSeconds), Timeout: nanos(timeoutSeconds), StartPeriod: nanos(startPeriodSeconds), Retries: retries },
+        Healthcheck: { Test: Object.freeze(['CMD', ...command]), Interval: nanos(intervalSeconds), Timeout: nanos(timeoutSeconds), StartPeriod: nanos(startPeriodSeconds), Retries: retries },
         StopGracePeriod: nanos(stopGraceSeconds),
       },
       Resources: {

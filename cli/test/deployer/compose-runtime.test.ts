@@ -1,6 +1,6 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { composeRuntime } from "../../src/server/runtime/compose.ts";
+import { composeProjectRunning, composeRuntime } from "../../src/server/runtime/compose.ts";
 
 const request = {
   app: { name: "shop" },
@@ -27,4 +27,18 @@ test("Compose adapter starts the same app files with platform routes", async () 
     return Promise.resolve({ code: 1, stdout: "failed" });
   });
   deepStrictEqual(await runtime.up(request), { code: 1, stdout: "failed" });
+});
+
+test("Compose restart observation treats running and restarting containers as present", async () => {
+  const result = await composeProjectRunning(request.app, (argv, options) => {
+    deepStrictEqual(argv, ["docker", "ps", "-q", "--filter", "label=com.docker.compose.project=shop", "--filter", "status=running", "--filter", "status=restarting"]);
+    deepStrictEqual(options, { cwd: "/", env: {}, capture: true, timeoutMs: 30_000 });
+    return Promise.resolve({ code: 0, stdout: "container-id\n" });
+  });
+  strictEqual(result, true);
+});
+
+test("Compose restart observation restores only after a successful empty result", async () => {
+  strictEqual(await composeProjectRunning(request.app, () => Promise.resolve({ code: 0, stdout: " \n" })), false);
+  strictEqual(await composeProjectRunning(request.app, () => Promise.resolve({ code: 1, stdout: "" })), true);
 });

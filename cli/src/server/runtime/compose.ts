@@ -18,6 +18,7 @@ export type ComposeRuntime = {
   readonly up: (request: ComposeRequest) => Promise<Exit>;
 };
 export type Execute = (argv: Argv, options: { readonly cwd: string; readonly env: Env; readonly stdin?: string; readonly capture?: boolean }) => Promise<Exit>;
+export type Observe = (argv: Argv, options: { readonly cwd: string; readonly env: Env; readonly capture: boolean; readonly timeoutMs: number }) => Promise<Exit>;
 
 export const appFiles = "app";
 export const imagesFile = "images.env";
@@ -46,3 +47,12 @@ export const composeRuntime = (exec: Execute) => typed<ComposeRuntime>({
   config: ({ app, appsDir, bundle, cwd, env }) => exec(config(app, appsDir, bundle), { cwd, env, capture: true }),
   up: ({ app, appsDir, bundle, cwd, env }) => exec(up(app, appsDir, bundle), { cwd, env }),
 });
+
+/** An observation failure must not cause the legacy restorer to deploy over a running app. */
+export const composeProjectRunning = async (app: ComposeApp, observe: Observe) => {
+  const exit = await observe(
+    ["docker", "ps", "-q", "--filter", `label=com.docker.compose.project=${app.name}`, "--filter", "status=running", "--filter", "status=restarting"],
+    { cwd: "/", env: {}, capture: true, timeoutMs: 30_000 },
+  );
+  return exit.code !== 0 || exit.stdout.trim() !== "";
+};

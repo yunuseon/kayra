@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { field, registered, registrations, type App } from "./app.ts";
-import { appName, appOwner, newRunId, type AppName } from "./brand.ts";
+import { appName, appOwner, newRunId } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
 import { json, send } from "./http/http.ts";
 import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request, type Why } from "./runs/queue.ts";
@@ -21,6 +21,7 @@ import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
 import { assess, gather } from "./health.ts";
 import { startWithLifecycle } from "../server/deployment/startup.ts";
+import { composeProjectRunning } from "../server/runtime/compose.ts";
 
 /**
  * The deployer: the half that holds the docker socket and the app secrets.
@@ -144,16 +145,6 @@ const poll = async (s: Settings) => {
   );
 };
 
-/** Whether any container of an app's compose project runs (or is restarting). */
-const running = async (app: AppName) => {
-  const exit = await spawnLines(
-    ["docker", "ps", "-q", "--filter", `label=com.docker.compose.project=${app}`, "--filter", "status=running", "--filter", "status=restarting"],
-    { cwd: "/", env: {}, capture: true, timeoutMs: 30_000 },
-    () => undefined,
-  );
-  return exit.code !== 0 || exit.stdout.trim() !== "";
-};
-
 /**
  * After the deployer starts (and Docker with it): each app that was deployed
  * and runs no container now, deployed again at the release that ran. A Docker
@@ -162,7 +153,7 @@ const running = async (app: AppName) => {
  */
 const restore = async (s: Settings) => {
   const apps = registeredApps(s);
-  const states = await Promise.all(apps.map(async (app) => [app.name, await running(app.name)] as const));
+  const states = await Promise.all(apps.map(async (app) => [app.name, await composeProjectRunning(app, (argv, options) => spawnLines(argv, options, () => undefined))] as const));
   const up = new Map(states);
   toRestore(
     apps.map((app) => {

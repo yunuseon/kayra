@@ -12,11 +12,11 @@ failed=0
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "${tmp}/bin"
-# docker: `ps` answers from $RUNNING; `compose exec … ctl deploy` is logged and exits $CTL_EXIT.
+# docker: `ps` answers from $RUNNING or fails with $PS_EXIT; the deploy is logged and exits $CTL_EXIT.
 cat > "${tmp}/bin/docker" <<'STUB'
 #!/usr/bin/env bash
 case "$1" in
-    ps) printf '%s' "${RUNNING:-}" ;;
+    ps) test "${PS_EXIT:-0}" = 0 || exit "$PS_EXIT"; printf '%s' "${RUNNING:-}" ;;
     compose) echo "$*" >> "${CALLS}"; exit "${CTL_EXIT:-0}" ;;
     *) echo "unexpected docker $*" >&2; exit 99 ;;
 esac
@@ -46,6 +46,9 @@ case_() {
 case_ "no releases directory: never deployed" ":" "never deployed" 0 none
 case_ "an empty releases directory: never deployed" "mkdir -p releases/shop" "never deployed" 0 none
 RUNNING=0123abc case_ "running, with a release: left alone" "mkdir -p releases/shop && touch releases/shop/20261020T100000Z-${sha_new}.env" "runs" 0 none
+PS_EXIT=1 case_ "failed Docker observation: no deploy" \
+    "mkdir -p releases/shop && touch releases/shop/20261020T100000Z-${sha_new}.env" \
+    "" 1 none
 case_ "stopped: the newest release deployed again" \
     "mkdir -p releases/shop && touch releases/shop/20261018T100000Z-${sha_old}.env releases/shop/20261020T100000Z-${sha_new}.env" \
     "restored ${sha_new}" 0 "compose exec -T deployer kayra-deployer ctl deploy shop ${sha_new}"

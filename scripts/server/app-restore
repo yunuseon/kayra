@@ -29,7 +29,8 @@ if [ -z "$live" ]; then
     exit 0
 fi
 
-if [ -n "$(docker ps -q --filter "label=com.docker.compose.project=${app}" --filter status=running --filter status=restarting)" ]; then
+running="$(docker ps -q --filter "label=com.docker.compose.project=${app}" --filter status=running --filter status=restarting)"
+if [ -n "$running" ]; then
     echo "runs"
     exit 0
 fi

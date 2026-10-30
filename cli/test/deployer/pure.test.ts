@@ -36,6 +36,8 @@ test("webhooks: the ref a push moved, nothing for a ping", () => {
 });
 
 test("registrations are checked, not trusted", () => {
+  const legacy = Object.fromEntries(Object.entries(shop).filter(([key]) => key !== "runtime"));
+  deepStrictEqual(parseApp("shop", legacy), { ok: true, value: shop });
   deepStrictEqual(parseApp("shop", { ...shop }), { ok: true, value: shop });
   deepStrictEqual(parseApp("shop", { ...shop, runtime: "compose" }), { ok: true, value: shop });
   for (const runtime of ["swarm", "other", "", null, false, 1, []]) {

@@ -175,6 +175,16 @@ tombstone. Purge is a separate guarded operation that checks ownership,
 registration and live attachments; it never deletes unrelated data. Restore,
 remove and purge go through the owning lifecycle component.
 
+The current legacy scripts do not provide that fence. In a Docker-stubbed
+fixture, a failed Compose stop left the app unregistered, and a subsequent
+purge proceeded to request removal of its volumes. A second fixture registered
+the app after purge checked registration but before volume removal; purge still
+issued the removal request. Docker can refuse removal of attached volumes, but
+that does not protect detached volumes or serialize these operations. The
+lifecycle owner must serialize registration, deployment, removal and purge,
+reconcile incomplete removal, and check volume ownership and attachments. A
+registration recheck or removal marker alone does not establish those guarantees.
+
 Legacy filename-based destructive registry GC is refused on hosts managing
 Swarm apps until GC understands image pins. The coordinator exports pins for
 active, candidate, rollback and unresolved operations. Historical failed Swarm

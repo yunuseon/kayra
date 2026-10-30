@@ -97,15 +97,41 @@ export const singleEffectCoordinator = (journal: OperationJournal, port: ActionP
     const remaining = deadline - time();
     if (remaining <= 0) return { kind: "timeout" } as const;
     const controller = new AbortController();
-    const timer = setTimeout(() => { controller.abort(); }, Math.min(remaining, 2_147_483_647));
+    // Periodically recheck the original wall-clock deadline, including for
+    // long deadlines and when the clock moves forward during a pending call.
+    // eslint-disable-next-line functional/no-let -- owns the currently scheduled timer
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<{ readonly kind: "timeout" }>((resolve) => {
       controller.signal.addEventListener("abort", () => { resolve({ kind: "timeout" }); }, { once: true });
     });
-    const result = Promise.resolve().then(() => call(controller.signal)).then(
-      (value) => ({ kind: "completed", value } as const),
-      () => ({ kind: "error" } as const),
-    );
-    try { return await Promise.race([timeout, result]); } finally { clearTimeout(timer); }
+    const schedule = () => {
+      try {
+        const left = deadline - time();
+        if (left <= 0) controller.abort();
+        else timer = setTimeout(schedule, Math.min(left, 1_000));
+      } catch {
+        // An invalid clock cannot safely extend a running effect.
+        controller.abort();
+      }
+    };
+    schedule();
+    const expired = () => {
+      try {
+        if (!controller.signal.aborted && time() < deadline) return false;
+      } catch { /* an invalid clock cannot safely extend an effect */ }
+      controller.abort();
+      return true;
+    };
+    const result = Promise.resolve().then(async () => {
+      if (expired()) return { kind: "timeout" } as const;
+      try {
+        const value = await call(controller.signal);
+        return expired() ? { kind: "timeout" } as const : { kind: "completed", value } as const;
+      } catch {
+        return expired() ? { kind: "timeout" } as const : { kind: "error" } as const;
+      }
+    });
+    try { return await Promise.race([timeout, result]); } finally { if (timer !== undefined) clearTimeout(timer); }
   };
   const hold = async (record: OperationRecord, reason: "ambiguous" | "expired" | "unavailable" | "unauthorized") => {
     const held = await write({ ...record, phase: "held", reason });

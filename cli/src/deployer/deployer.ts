@@ -14,7 +14,7 @@ import { schedule } from "../server/platform/schedule.ts";
 import { runMaintenance, type MaintenanceEffects } from "../server/platform/maintenance.ts";
 import { commandExecution, effects, runPage } from "./runs/effects.ts";
 import { deploy, type Effects, type Outcome } from "./runs/run.ts";
-import { toRestore, type Deployed } from "./runs/restore.ts";
+import { toRestore, type Deployed } from "../server/deployment/legacy-restore.ts";
 import { spawnLines } from "./process.ts";
 import { appendLog, meta, owners, prune, runsOf, writeMeta } from "./runs/store.ts";
 import { runsDir, settings, token, type Settings } from "./settings.ts";

@@ -1,10 +1,9 @@
 import type { Brand } from "../lib/brand.ts";
-import type { RunId, Sha } from "../contracts/identity.ts";
-export type { RunId, Sha } from "../contracts/identity.ts";
+import type { AppName, RunId, Sha } from "../contracts/identity.ts";
+export type { AppName, RunId, Sha } from "../contracts/identity.ts";
 import { err, ok } from "../lib/result.ts";
 import { names, type Name } from "../lib/names.ts";
 
-export type AppName = Brand<string, "AppName">;
 export type JobName = "gc" | "renovate";
 /** Whose runs a directory under runs/ holds: an app, or `_<job>` (no app name starts with `_`). */
 export type Owner = Brand<string, "Owner">;

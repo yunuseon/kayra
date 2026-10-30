@@ -19,6 +19,13 @@ test("coordinator logic cannot execute raw processes", async () => {
   }
 });
 
+test("legacy restore consumes shared identities without importing deployer internals", async () => {
+  const [allowed] = await eslint.lintText('import type { AppName, Sha } from "../../contracts/identity.ts";', { filePath: "src/server/deployment/legacy-restore.ts" });
+  const [refused] = await eslint.lintText('import type { AppName } from "../../deployer/brand.ts";', { filePath: "src/server/deployment/legacy-restore.ts" });
+  ok(allowed?.messages.some((message) => message.ruleId === "no-restricted-imports") === false);
+  ok(refused?.messages.some((message) => message.ruleId === "no-restricted-imports"));
+});
+
 test("coordinator rejects dynamic imports, require and fetch", async () => {
   for (const [source, rule] of [
     ['void import("node:child_process");', "no-restricted-syntax"],

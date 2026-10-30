@@ -54,7 +54,7 @@ test('an uncertain write poisons the writer until it is reopened', async () => {
 test('the OS releases an exclusive writer lock when its process is killed', async () => {
   const dir = await temporary();
   const moduleUrl = new URL('../../src/server/deployment/journal.ts', import.meta.url).href;
-  const source = `import { openJournal } from ${JSON.stringify(moduleUrl)};\nconst journal = await openJournal(process.argv[1]);\nawait journal.write({ phase: 'intent', deadline: '2030-01-01T00:00:00Z' });\nconsole.log('ready');\nsetInterval(() => {}, 1000);`;
+  const source = `import { openJournal } from ${JSON.stringify(moduleUrl)};\nconst journal = await openJournal(process.argv[1]);\nawait journal.write({ phase: 'intent', deadline: '2030-01-01T00:00:00Z' });\nconsole.log('ready');\nsetInterval(() => { void journal.read(); }, 1000);`;
   const child = spawn(process.execPath, ['--no-warnings', '--input-type=module', '--eval', source, dir], { stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     const data: unknown = await Promise.race([

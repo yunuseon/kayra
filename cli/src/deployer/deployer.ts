@@ -8,7 +8,7 @@ import { appName, appOwner, newRunId } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
 import { json, send } from "./http/http.ts";
 import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request, type Why } from "./runs/queue.ts";
-import { ended, moved, type RunMeta } from "./runs/records.ts";
+import { moved, type RunMeta } from "./runs/records.ts";
 import { legacyReleases } from "./runs/release-read.ts";
 import { deliver } from "../server/platform/notify.ts";
 import { schedule } from "../server/platform/schedule.ts";
@@ -17,7 +17,7 @@ import { commandExecution, effects, runPage } from "./runs/effects.ts";
 import { deploy, type Effects, type Outcome } from "./runs/run.ts";
 import { toRestore, type Deployed } from "../server/deployment/legacy-restore.ts";
 import { spawnLines } from "./process.ts";
-import { appendLog, meta, owners, prune, runsOf, writeMeta } from "./runs/store.ts";
+import { abandonInterruptedRuns, appendLog, meta, prune, runsOf, writeMeta } from "./runs/store.ts";
 import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
 import { assess, gather } from "./health.ts";
@@ -82,18 +82,6 @@ const ask = (s: Settings, request: Request) => {
 };
 
 const newId = () => newRunId(new Date(), randomBytes(3).toString("hex"));
-
-/** Runs a restart cut short: they never end otherwise, and whoever follows one would wait forever. */
-const abandon = (s: Settings) => {
-  const runs = runsDir(s);
-  owners(runs).forEach((who) => {
-    runsOf(runs, who)
-      .filter((run) => !ended(run.state))
-      .forEach((run) => {
-        writeMeta(runs, who, { ...run, state: "failure", error: "the deployer restarted before this run ended", finished: new Date().toISOString() });
-      });
-  });
-};
 
 const start = async (s: Settings, request: Request) => {
   const id = request.id;
@@ -250,7 +238,7 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
 export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
   const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), () => {
-    abandon(s);
+    abandonInterruptedRuns(runsDir(s), () => new Date().toISOString());
     createServer(pushHandler(s, gather)).listen(8090);
     createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
     schedule(s, {

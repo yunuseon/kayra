@@ -1,5 +1,5 @@
 import { typed } from "../lib/typed.ts";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "../lib/result.ts";
 import { appName, type AppName } from "./brand.ts";
@@ -62,3 +62,18 @@ export const registered = (platformDir: string, name: string) => {
   }
 };
 
+
+/** Valid registrations and names of records that cannot be used safely. */
+export const registrations = (platformDir: string) => {
+  const dir = join(platformDir, "apps");
+  const records = (existsSync(dir) ? readdirSync(dir) : []).flatMap((file) => {
+    if (!file.endsWith(".json")) return Object.freeze([]);
+    const name = file.slice(0, -5);
+    const result = registered(platformDir, name);
+    return Object.freeze([result.ok ? Object.freeze({ app: result.value }) : Object.freeze({ invalid: appName(name).ok ? name : "invalid filename" })]);
+  });
+  return Object.freeze({
+    apps: Object.freeze(records.flatMap((record) => "app" in record ? Object.freeze([record.app]) : Object.freeze([]))),
+    invalid: Object.freeze(records.flatMap((record) => "invalid" in record ? Object.freeze([record.invalid]) : Object.freeze([]))),
+  });
+};

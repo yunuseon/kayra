@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -84,5 +84,72 @@ setInterval(() => {}, 1000);`;
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('startup reconciles a killed first initialization before starting the daemon', async () => {
+  const moduleUrl = new URL('../../src/server/deployment/startup.ts', import.meta.url).href;
+  // Observe actual directory fsyncs in the child without changing the production API.
+  const source = `import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+const originalOpen = fs.open;
+const originalRename = fs.rename;
+let renames = 0;
+fs.rename = async (...args) => { await originalRename(...args); renames++; };
+fs.open = async (...args) => {
+  const file = await originalOpen(...args);
+  if (args[0] !== process.argv[1] || args[1] !== 'r') return file;
+  return { close: () => file.close(), sync: async () => {
+    await file.sync();
+    if (renames === Number(process.argv[2])) { console.log('checkpoint'); await new Promise(() => {}); }
+  } };
+};
+syncBuiltinESMExports();
+const { startWithLifecycle } = await import(${JSON.stringify(moduleUrl)});
+setInterval(() => {}, 1000);
+await startWithLifecycle(process.argv[1], () => { console.log('unexpected start'); });`;
+  for (const phase of [1, 2, 3]) {
+    const dir = await temporary();
+    const child = spawn(process.execPath, ['--no-warnings', '--input-type=module', '--eval', source, dir, String(phase)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      const data: unknown = await Promise.race([
+        once(child.stdout, 'data').then((args: readonly unknown[]) => args[0]),
+        once(child, 'exit').then(() => { throw new Error('startup exited before checkpoint'); }),
+      ]);
+      assert.equal(String(data).trim(), 'checkpoint');
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+      // eslint-disable-next-line functional/no-let -- count actual startup callbacks
+      let starts = 0;
+      const journal = await startWithLifecycle(dir, () => { starts += 1; });
+      assert.equal(starts, 1);
+      assert.deepEqual(await journal.read(), { version: 1, mode: 'legacy-compose-lock-only' });
+      assert.equal(await readFile(join(dir, 'initialized'), 'utf8'), 'kayra-journal-v1\n');
+      await assert.rejects(startWithLifecycle(dir, () => { starts += 1; }), /locked/);
+      assert.equal(starts, 1);
+      await journal.close();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('startup refuses unsupported or corrupt state recovered from interrupted initialization', async () => {
+  for (const state of ['{"version":99}', '{broken']) {
+    const dir = await temporary();
+    try {
+      await writeFile(join(dir, 'initialized'), 'kayra-journal-v2:preparing\n');
+      await writeFile(join(dir, 'state.json'), state);
+      // eslint-disable-next-line functional/no-let -- record whether startup callback was invoked
+      let starts = 0;
+      await assert.rejects(startWithLifecycle(dir, () => { starts += 1; }));
+      assert.equal(starts, 0);
+      assert.equal(await readFile(join(dir, 'state.json'), 'utf8'), state);
+      assert.equal(await readFile(join(dir, 'initialized'), 'utf8'), state === '{broken' ? 'kayra-journal-v2:preparing\n' : 'kayra-journal-v1\n');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 });

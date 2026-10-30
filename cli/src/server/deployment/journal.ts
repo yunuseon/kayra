@@ -13,9 +13,37 @@ export const openJournal = async (directory: string) => {
   const lock = new DatabaseSync(join(directory, 'writer-lock.sqlite'));
   const statePath = join(directory, 'state.json');
   const markerPath = join(directory, 'initialized');
-  const markerContent = 'kayra-journal-v1\n';
+  // Keep the established committed marker so an older deployer can read a
+  // completed initialization after a downgrade.
+  const committedMarker = 'kayra-journal-v1\n';
+  const preparingMarker = 'kayra-journal-v2:preparing\n';
   let hasState = false;
   let initialized = false;
+  let preparing = false;
+  const atomicReplace = async (path: string, content: string) => {
+    const tempPath = join(directory, `.journal-${randomUUID()}.tmp`);
+    let temporary = false;
+    try {
+      const file = await open(tempPath, 'wx', 0o600);
+      temporary = true;
+      try {
+        await file.writeFile(content, 'utf8');
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      await rename(tempPath, path);
+      temporary = false;
+      const dir = await open(directory, 'r');
+      try {
+        await dir.sync();
+      } finally {
+        await dir.close();
+      }
+    } finally {
+      if (temporary) await unlink(tempPath).catch(() => undefined);
+    }
+  };
   try {
     lock.exec('PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE');
     const dir = await open(directory, 'r');
@@ -26,8 +54,9 @@ export const openJournal = async (directory: string) => {
     }
     try {
       const marker = await readFile(markerPath, 'utf8');
-      if (marker !== markerContent) throw new Error('journal initialization marker is invalid');
-      initialized = true;
+      if (marker === preparingMarker) preparing = true;
+      else if (marker === committedMarker) initialized = true;
+      else throw new Error('journal initialization marker is invalid');
     } catch (error) {
       if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
     }
@@ -37,7 +66,16 @@ export const openJournal = async (directory: string) => {
     } catch (error) {
       if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
     }
-    if (initialized !== hasState) throw new Error('journal initialization and state disagree; intervention required');
+    if ((initialized && !hasState) || (!initialized && !preparing && hasState)) {
+      throw new Error('journal initialization and state disagree; intervention required');
+    }
+    // The initial write could have been interrupted after making its state durable
+    // but before acknowledging it. Preserve that state; never create a new one.
+    if (preparing && hasState) {
+      await atomicReplace(markerPath, committedMarker);
+      initialized = true;
+      preparing = false;
+    }
   } catch (error) {
     lock.close();
     throw error;
@@ -67,45 +105,22 @@ export const openJournal = async (directory: string) => {
     const content = JSON.stringify(value);
     const operation = pending.then(async () => {
       if (failed) throw new Error('journal write failed; reopen and reconcile');
-      const tempPath = join(directory, `.state-${randomUUID()}.tmp`);
-      let temporary = false;
       try {
         if (!initialized) {
-          const marker = await open(markerPath, 'wx', 0o600);
-          try {
-            await marker.writeFile(markerContent, 'utf8');
-            await marker.sync();
-          } finally {
-            await marker.close();
+          if (!preparing) {
+            await atomicReplace(markerPath, preparingMarker);
+            preparing = true;
           }
-          const dir = await open(directory, 'r');
-          try {
-            await dir.sync();
-          } finally {
-            await dir.close();
-          }
-          initialized = true;
         }
-        const file = await open(tempPath, 'wx', 0o600);
-        temporary = true;
-        try {
-          await file.writeFile(content, 'utf8');
-          await file.sync();
-        } finally {
-          await file.close();
-        }
-        await rename(tempPath, statePath);
+        await atomicReplace(statePath, content);
         hasState = true;
-        temporary = false;
-        const dir = await open(directory, 'r');
-        try {
-          await dir.sync();
-        } finally {
-          await dir.close();
+        if (!initialized) {
+          await atomicReplace(markerPath, committedMarker);
+          initialized = true;
+          preparing = false;
         }
       } catch (error) {
         failed = true;
-        if (temporary) await unlink(tempPath).catch(() => undefined);
         throw error;
       }
     });

@@ -162,7 +162,9 @@ const hook = async (s: Settings, name: string, request: IncomingMessage, respons
   const raw = await body(request);
   const app = registered(s.platformDir, name);
   if (!app.ok) {
-    send(response, 404, `${app.error}\n`);
+    // Registration errors can contain file contents and must not be disclosed
+    // on this public endpoint, which is reached before signature validation.
+    send(response, 404, "not found\n");
     return;
   }
   const repo = forgeRepo(app.value.repo);
@@ -239,21 +241,24 @@ const failing = (handler: (request: IncomingMessage, response: ServerResponse) =
   });
 };
 
+const publicHandler = (s: Settings) => failing(async (request, response) => {
+  const path = new URL(request.url ?? "/", "http://builder").pathname;
+  const hooked = /^\/hook\/([^/]+)\/?$/.exec(path);
+  if (request.method === "POST" && hooked?.[1] !== undefined) {
+    if (s.webhooks) await hook(s, hooked[1], request, response);
+    else send(response, 404, "this server takes no webhooks: it polls (webhooks: false)\n");
+  }
+  else if (request.method === "GET" && path === "/health") await health(s, request, response);
+  else if (request.method === "GET") pages(s, path, response);
+  else send(response, 405, "method not allowed\n");
+});
+
+/** The public HTTP surface, also usable with a caller-provided HTTP server. */
+export const builderPublicHandler = (env: NodeJS.ProcessEnv) => publicHandler(settings(env));
+
 export const serveBuilder = (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
-  createServer(
-    failing(async (request, response) => {
-      const path = new URL(request.url ?? "/", "http://builder").pathname;
-      const hooked = /^\/hook\/([^/]+)\/?$/.exec(path);
-      if (request.method === "POST" && hooked?.[1] !== undefined) {
-        if (s.webhooks) await hook(s, hooked[1], request, response);
-        else send(response, 404, "this server takes no webhooks: it polls (webhooks: false)\n");
-      }
-      else if (request.method === "GET" && path === "/health") await health(s, request, response);
-      else if (request.method === "GET") pages(s, path, response);
-      else send(response, 405, "method not allowed\n");
-    }),
-  ).listen(8080);
+  createServer(publicHandler(s)).listen(8080);
   createServer(
     failing(async (request, response) => {
       const path = new URL(request.url ?? "/", "http://builder").pathname;

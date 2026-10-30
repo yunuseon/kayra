@@ -217,6 +217,32 @@ volumes while preserving unrelated data. The full platform upgrade lab exercises
 TLS, Authelia and real deployment records. All six stages and their acceptance
 tests must pass before calling the experimental integration complete.
 
+### Integration prerequisites found during implementation
+
+The current builder emits image tags and the existing deployment-plan contract
+is only a fragment. Before using a plan to authorize effects, the coordinator
+needs a reconstructible normalized description and trusted authorities for
+image digests, registration and grant generations, secret-generation
+references, and volume ownership. The HTTP candidate and Swarm service
+renderer under development are disconnected experiments; neither establishes
+those authorities or authorizes a live deployment.
+
+The existing Docker socket proxy grants broad read access by API prefix. Adding
+Swarm discovery must not assume that read-only access protects secrets: Docker
+inspect and service descriptions can expose environment values, and container
+archive endpoints can expose files. A narrower, tested endpoint policy and a
+review of configuration exposure are prerequisites. Discovery must continue
+to work for existing Compose apps, and platform-owned routing must be generated
+for Swarm services rather than accepted from app labels.
+
+The existing registry GC does not know the images needed for an interrupted
+operation. A registration scan alone cannot safely authorize destructive GC:
+removal can delete a registration before workloads or recovery evidence are
+gone. Establish durable backend history and shared fencing before Swarm is
+first enabled, and refuse legacy GC when ownership or recovery state is
+uncertain. Until a real preview is implemented, a GC dry-run request must fail
+without invoking the destructive script.
+
 ## Evidence and limits
 
 The isolated single-node Swarm labs establish that, for their pinned versions,

@@ -152,6 +152,14 @@ export default defineConfig(
     },
   },
   {
+    // Builder code does not choose or invoke workload runtime adapters.
+    files: ["src/server/builder/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/runtime/**", "**/deployer/runs/**", "**/deployer/build/compose.ts", "**/deployer/build/compose.js"], message: "Builders produce bundles; workload runtime operations belong to adapters." }] }],
+      "no-restricted-syntax": ["error", { selector: "ImportExpression", message: "Builders must use statically checked imports." }],
+    },
+  },
+  {
     // Runtime adapters consume normalized inputs, not policy or other components' internals.
     files: ["src/server/runtime/**/*.ts"],
     rules: {
@@ -159,10 +167,26 @@ export default defineConfig(
     },
   },
   {
-    // Runtime effects belong behind coordinator ports; spawning a process here bypasses them.
+    // Runtime effects belong behind coordinator ports. These lint rules are a
+    // maintenance guardrail, not a sandbox for untrusted JavaScript.
     files: ["src/server/deployment/**/*.ts"],
     rules: {
-      "no-restricted-imports": ["error", { paths: [{ name: "node:child_process", message: "Use a typed runtime port." }, { name: "child_process", message: "Use a typed runtime port." }], patterns: [{ group: ["**/deployer/process.ts", "**/deployer/process.js"], message: "Use a typed runtime port." }] }],
+      "no-restricted-imports": ["error", {
+        paths: ["child_process", "cluster", "module", "http", "https", "http2", "net", "tls", "dgram", "dns", "dns/promises", "worker_threads"].flatMap((name) => [
+          { name, message: "Use a typed runtime port." },
+          { name: `node:${name}`, message: "Use a typed runtime port." },
+        ]),
+        patterns: [{ group: ["**/deployer/**", "**/builder/**", "**/platform/**", "**/runtime/**", "**/core/**", "**/clients/**"], message: "Use a typed port or shared contract rather than component internals." }],
+      }],
+      "no-restricted-syntax": ["error",
+        { selector: "ImportExpression", message: "Coordinator imports must be statically checked." },
+        { selector: "MemberExpression[object.name='globalThis'][property.name=/^(fetch|require)$/]", message: "Use a typed port and statically checked imports." },
+        { selector: "MemberExpression[object.name='globalThis'][property.value=/^(fetch|require)$/]", message: "Use a typed port and statically checked imports." },
+      ],
+      "no-restricted-globals": ["error", { name: "require", message: "Use statically checked imports." }, { name: "fetch", message: "Use a typed port for network effects." }],
+      "no-restricted-properties": ["error", ...["getBuiltinModule", "binding", "_linkedBinding", "dlopen", "mainModule"].map((property) => ({
+        object: "process", property, message: "Use a typed port and statically checked imports.",
+      }))],
     },
   },
   {

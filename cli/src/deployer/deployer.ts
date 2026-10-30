@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { field, registered, type App } from "./app.ts";
+import { field, registered, registrations, type App } from "./app.ts";
 import { appName, appOwner, newRunId, type AppName } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
 import { json, send } from "./http/http.ts";
@@ -35,14 +35,7 @@ import { startWithLifecycle } from "../server/deployment/startup.ts";
 
 const keepRuns = 50;
 
-const registeredApps = (s: Settings) => {
-  const dir = join(s.platformDir, "apps");
-  return Object.freeze((existsSync(dir) ? readdirSync(dir) : []).flatMap((file) => {
-    const name = /^(.+)\.json$/.exec(file)?.[1];
-    const app = name === undefined ? undefined : registered(s.platformDir, name);
-    return app?.ok === true ? Object.freeze([app.value]) : Object.freeze([]);
-  }));
-};
+const registeredApps = (s: Settings) => registrations(s.platformDir).apps;
 
 const work = async (s: Settings, request: Request, fx: Effects, exec: MaintenanceEffects["exec"]) => {
   if (request.work.kind === "deploy") {
@@ -201,18 +194,19 @@ const accept = (s: Settings, response: ServerResponse, request: Request) => {
 };
 
 /** POST /push/<app>, from the builder once a webhook proved itself: a deploy of the app's own ref. */
-const health = async (s: Settings, response: ServerResponse) => {
-  const apps = registeredApps(s).map((app) => {
+const health = async (s: Settings, response: ServerResponse, gatherFacts: typeof gather) => {
+  const scanned = registrations(s.platformDir);
+  const apps = scanned.apps.map((app) => {
     const dir = join(s.platformDir, "releases", app.name);
     return Object.freeze({ name: app.name, released: existsSync(dir) && readdirSync(dir).length > 0 });
   });
-  const assessed = assess(await gather(apps, runsDir(s)));
+  const assessed = assess({ ...await gatherFacts(apps, runsDir(s)), invalidRegistrations: scanned.invalid });
   send(response, assessed.healthy ? 200 : 503, JSON.stringify(assessed), "application/json");
 };
 
-const push = async (s: Settings, request: IncomingMessage, response: ServerResponse) => {
+const push = async (s: Settings, request: IncomingMessage, response: ServerResponse, gatherFacts: typeof gather) => {
   if (request.method === "GET" && new URL(request.url ?? "/", "http://deployer").pathname === "/health") {
-    await health(s, response);
+    await health(s, response, gatherFacts);
     return;
   }
   const name = /^\/push\/([^/]+)$/.exec(new URL(request.url ?? "/", "http://deployer").pathname)?.[1];
@@ -227,6 +221,11 @@ const push = async (s: Settings, request: IncomingMessage, response: ServerRespo
   }
   accept(s, response, deployRequest(app.value, app.value.ref, "push"));
 };
+
+const pushHandler = (s: Settings, gatherFacts: typeof gather) => handle((request, response) => push(s, request, response, gatherFacts));
+
+/** The internal push/health HTTP surface, with injectable health observations. */
+export const deployerPushHandler = (env: NodeJS.ProcessEnv, gatherFacts: typeof gather = gather) => pushHandler(settings(env), gatherFacts);
 
 const control = async (s: Settings, request: IncomingMessage, response: ServerResponse) => {
   const path = new URL(request.url ?? "/", "http://deployer").pathname;
@@ -263,7 +262,7 @@ export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
   const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), () => {
     abandon(s);
-    createServer(handle((request, response) => push(s, request, response))).listen(8090);
+    createServer(pushHandler(s, gather)).listen(8090);
     createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
     schedule(s, {
       poll: () => { void poll(s); },

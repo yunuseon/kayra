@@ -14,6 +14,8 @@ export type HealthFacts = {
   readonly containers: readonly Container[] | undefined;
   /** Each registered app, and whether it has ever deployed (a release record). */
   readonly apps: readonly { readonly name: string; readonly released: boolean }[];
+  /** Names only; malformed registration contents never reach health output. */
+  readonly invalidRegistrations?: readonly string[];
   /** Fractions, 0 to 1. */
   readonly diskUsed: number;
   readonly memoryAvailable: number;
@@ -39,7 +41,8 @@ export const assess = (facts: HealthFacts) => {
   const disk = facts.diskUsed >= 0.9 ? [`disk ${percent(facts.diskUsed)} full`] : [];
   const memory = facts.memoryAvailable < 0.05 ? [`memory ${percent(facts.memoryAvailable)} available`] : [];
   const containers = facts.containers === undefined ? ["docker did not answer"] : containerProblems(facts.containers, facts.apps);
-  const problems = Object.freeze([...containers, ...disk, ...memory]);
+  const registrations = (facts.invalidRegistrations ?? []).map((name) => `${name}: invalid application registration`);
+  const problems = Object.freeze([...containers, ...registrations, ...disk, ...memory]);
   const warnings = Object.freeze([
     ...(facts.diskUsed >= 0.8 && facts.diskUsed < 0.9 ? [`disk ${percent(facts.diskUsed)} full`] : []),
     ...(facts.memoryAvailable >= 0.05 && facts.memoryAvailable < 0.1 ? [`memory ${percent(facts.memoryAvailable)} available`] : []),

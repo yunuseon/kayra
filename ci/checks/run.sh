@@ -113,6 +113,7 @@ compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.s
 verify_cases() { bash "$E/ci/tests/verify/run.sh"; }
 monitor_cases() { bash "$E/ci/tests/monitor/run.sh"; }
 app_restore_cases() { bash "$E/ci/tests/app-restore/run.sh"; }
+app_lifecycle_cases() { bash "$E/ci/tests/app-lifecycle/run.sh"; }
 ansible_output() { bash "$E/ci/tests/ansible-output/run.sh"; }
 
 # The kayra CLI: strictest types, its lint rules, its tests.
@@ -300,6 +301,7 @@ if [ "$platform" = true ]; then
     check platform:verify verify_cases
     check platform:monitor monitor_cases
     check platform:app-restore app_restore_cases
+    check platform:app-lifecycle app_lifecycle_cases
     check platform:ansible-output ansible_output
     check platform:cli-typecheck cli_typecheck
     check platform:cli-lint cli_lint

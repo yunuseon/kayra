@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -33,13 +33,20 @@ set -euo pipefail
 KAYRA_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 from=""
 keep=false
+vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
     case "$1" in
-        --from) from="$2"; shift 2 ;;
+        --from) [ $# -ge 2 ] || { echo "--from requires a version" >&2; exit 2; }; from="$2"; shift 2 ;;
+        --vm-name) [ $# -ge 2 ] || { echo "--vm-name requires a name" >&2; exit 2; }; vm_name="$2"; shift 2 ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--keep]" >&2; exit 2 ;;
     esac
 done
+[[ "$vm_name" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { echo "invalid Multipass VM name: ${vm_name}" >&2; exit 2; }
+if multipass info "$vm_name" >/dev/null 2>&1; then
+    echo "Multipass VM ${vm_name} already exists; choose a different --vm-name" >&2
+    exit 1
+fi
 [ -n "$from" ] || from="$(git -C "$KAYRA_ROOT" describe --tags --abbrev=0 --match 'v*' | sed 's/^v//')"
 
 server=lab
@@ -56,19 +63,23 @@ die() { echo "✗ $*" >&2; echo "  the lab: ${work} (log: ${log})" >&2; exit 1; 
 # ── The Mac's address on Multipass's bridge, where the VM fetches the app ──
 host_ip="$(ifconfig bridge100 2>/dev/null | awk '/inet / {print $2; exit}')"
 [ -n "$host_ip" ] || die "no Multipass bridge (bridge100): is Multipass running?"
-port=18765
-
 passed=false
 cleanup() {
     [ -z "${server_pid:-}" ] || kill "$server_pid" 2>/dev/null || true
     if [ "$passed" = false ]; then
-        echo "kept for a look: the VM (kayra-lab), the fleet ${fleet}, the log ${log}"
+        echo "kept for a look: the VM (${vm_name}), the fleet ${fleet}, the log ${log}"
         echo "  then: (cd ${fleet} && node node_modules/@yunuseon/kayra/bin/kayra.js down ${server}) && rm -rf ${work}"
     elif [ "$keep" = true ]; then
-        echo "kept: the VM (kayra-lab) and ${work}; kayra down ${server} from ${fleet} removes the VM"
+        echo "kept: the VM (${vm_name}) and ${work}; kayra down ${server} from ${fleet} removes the VM"
     elif [ -d "${fleet}/servers/${server}/terraform" ]; then
-        (cd "$fleet" && kayra_cmd down "$server" >> "$log" 2>&1) || echo "kayra down ${server} failed; see ${log}" >&2
-        rm -rf "$work"
+        if (cd "$fleet" && kayra_cmd down "$server" >> "$log" 2>&1); then
+            rm -rf "$work"
+        else
+            echo "kayra down ${server} failed; kept the VM (${vm_name}), fleet ${fleet}, and log ${log}" >&2
+            echo "  retry: (cd ${fleet} && node node_modules/@yunuseon/kayra/bin/kayra.js down ${server}) && rm -rf ${work}" >&2
+            trap - EXIT
+            exit 1
+        fi
     fi
 }
 trap cleanup EXIT
@@ -99,10 +110,19 @@ publish() {
     git clone -q --bare "$repo" "${served}/lab/sample.git"
 }
 commit v1
-python3 "${KAYRA_ROOT}/test/lab/git-http.py" "$host_ip" "$port" "$served" >> "$log" 2>&1 &
+port_file="${work}/git-port"
+python3 "${KAYRA_ROOT}/test/lab/git-http.py" "$host_ip" 0 "$served" "$port_file" >> "$log" 2>&1 &
 server_pid=$!
-sleep 1
-git clone -q --depth 1 "http://${host_ip}:${port}/lab/sample.git" "${work}/probe" && rm -rf "${work}/probe" || die "the app's repository is not served at http://${host_ip}:${port}/lab/sample.git"
+for _ in $(seq 1 50); do
+    [ ! -s "$port_file" ] || break
+    kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
+    sleep 0.1
+done
+[ -s "$port_file" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
+port="$(cat "$port_file")"
+git clone -q --depth 1 "http://${host_ip}:${port}/lab/sample.git" "${work}/probe" || die "the app's repository is not served at http://${host_ip}:${port}/lab/sample.git"
+[ "$(git -C "${work}/probe" rev-parse HEAD)" = "$(git -C "$repo" rev-parse HEAD)" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not return this lab's repository"
+rm -rf "${work}/probe"
 echo "http://${host_ip}:${port}/lab/sample.git"
 
 # ── A fleet pinned to the release ───────────────────────────────────────────
@@ -158,7 +178,7 @@ to_sops() {
     (cd "$fleet" && sops encrypt --in-place "servers/${server}/secrets.yml")
 }
 [ "$sops_fleet" = false ] || to_sops
-cat > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
+sed "s/__KAYRA_LAB_VM_NAME__/${vm_name}/" > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
 terraform {
   required_providers {
     multipass = { source = "todoroff/multipass", version = "~> 1.7" }
@@ -169,7 +189,7 @@ terraform {
 
 module "instance" {
   source         = "../../../node_modules/@yunuseon/kayra/terraform/modules/multipass-instance"
-  name           = "kayra-lab"
+  name           = "__KAYRA_LAB_VM_NAME__"
   cpus           = 2
   memory         = "4G"
   disk           = "20G"
@@ -352,6 +372,8 @@ verified="$(kayra_cmd deploy "$server" 2>&1)" || { printf '%s\n' "$verified" >> 
 printf '%s\n' "$verified" >> "$log"
 grep -q "webhooks are off: /hook is not served" <<< "$verified" || die "verify does not see /hook gone"
 echo "✓ webhooks: false serves no /hook, and verify knows it"
+multipass exec "$vm_name" -- cat /opt/platform/apps/sample.json | jq -e '.runtime == "compose"' >/dev/null || die "registration did not record the Compose runtime"
+echo "✓ registration records the Compose runtime"
 yq -i 'del(.services.web.volumes)' "${repo}/deploy/compose.yml"
 echo v4 > "${repo}/web/index.html"
 commit v4

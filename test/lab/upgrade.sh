@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -33,13 +33,20 @@ set -euo pipefail
 KAYRA_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 from=""
 keep=false
+vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
     case "$1" in
-        --from) from="$2"; shift 2 ;;
+        --from) [ $# -ge 2 ] || { echo "--from requires a version" >&2; exit 2; }; from="$2"; shift 2 ;;
+        --vm-name) [ $# -ge 2 ] || { echo "--vm-name requires a name" >&2; exit 2; }; vm_name="$2"; shift 2 ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--keep]" >&2; exit 2 ;;
     esac
 done
+[[ "$vm_name" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { echo "invalid Multipass VM name: ${vm_name}" >&2; exit 2; }
+if multipass info "$vm_name" >/dev/null 2>&1; then
+    echo "Multipass VM ${vm_name} already exists; choose a different --vm-name" >&2
+    exit 1
+fi
 [ -n "$from" ] || from="$(git -C "$KAYRA_ROOT" describe --tags --abbrev=0 --match 'v*' | sed 's/^v//')"
 
 server=lab
@@ -62,10 +69,10 @@ passed=false
 cleanup() {
     [ -z "${server_pid:-}" ] || kill "$server_pid" 2>/dev/null || true
     if [ "$passed" = false ]; then
-        echo "kept for a look: the VM (kayra-lab), the fleet ${fleet}, the log ${log}"
+        echo "kept for a look: the VM (${vm_name}), the fleet ${fleet}, the log ${log}"
         echo "  then: (cd ${fleet} && node node_modules/@yunuseon/kayra/bin/kayra.js down ${server}) && rm -rf ${work}"
     elif [ "$keep" = true ]; then
-        echo "kept: the VM (kayra-lab) and ${work}; kayra down ${server} from ${fleet} removes the VM"
+        echo "kept: the VM (${vm_name}) and ${work}; kayra down ${server} from ${fleet} removes the VM"
     elif [ -d "${fleet}/servers/${server}/terraform" ]; then
         (cd "$fleet" && kayra_cmd down "$server" >> "$log" 2>&1) || echo "kayra down ${server} failed; see ${log}" >&2
         rm -rf "$work"
@@ -158,7 +165,7 @@ to_sops() {
     (cd "$fleet" && sops encrypt --in-place "servers/${server}/secrets.yml")
 }
 [ "$sops_fleet" = false ] || to_sops
-cat > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
+sed "s/__KAYRA_LAB_VM_NAME__/${vm_name}/" > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
 terraform {
   required_providers {
     multipass = { source = "todoroff/multipass", version = "~> 1.7" }
@@ -169,7 +176,7 @@ terraform {
 
 module "instance" {
   source         = "../../../node_modules/@yunuseon/kayra/terraform/modules/multipass-instance"
-  name           = "kayra-lab"
+  name           = "__KAYRA_LAB_VM_NAME__"
   cpus           = 2
   memory         = "4G"
   disk           = "20G"

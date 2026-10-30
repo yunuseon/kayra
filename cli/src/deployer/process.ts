@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { text } from "node:stream/consumers";
-import type { Argv } from "./build/compose.ts";
+import type { Argv } from "../contracts/process.ts";
 import type { Env, Exit } from "./runs/run.ts";
 
 export type Spawn = {

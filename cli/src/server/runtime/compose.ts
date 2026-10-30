@@ -1,6 +1,7 @@
 import { typed } from "../../lib/typed.ts";
+import type { Argv } from "../../contracts/process.ts";
 
-export type Argv = readonly [string, ...string[]];
+export type { Argv } from "../../contracts/process.ts";
 export type Env = Readonly<Record<string, string>>;
 export type Exit = { readonly code: number; readonly stdout: string };
 export type ComposeApp = { readonly name: string };

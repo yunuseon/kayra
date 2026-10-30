@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { err, ok, type Result } from "../../lib/result.ts";
 import { field, registered, type App } from "../../deployer/app.ts";
 import { owner, runId, sha, type Sha } from "../../deployer/brand.ts";
-import type { Argv } from "../../deployer/build/compose.ts";
+import type { Argv } from "../../contracts/process.ts";
 import { body, json, send } from "../../deployer/http/http.ts";
 import { page, runPage } from "../../deployer/http/page.ts";
 import { spawnLines } from "../../deployer/process.ts";

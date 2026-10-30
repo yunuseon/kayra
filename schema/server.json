@@ -52,6 +52,11 @@
             "description": "The app's root inside the repository (default .).",
             "default": ".",
             "type": "string"
+          },
+          "runtime": {
+            "description": "The fleet-selected deployment runtime (default compose; Swarm is not available yet).",
+            "type": "string",
+            "const": "compose"
           }
         },
         "required": [

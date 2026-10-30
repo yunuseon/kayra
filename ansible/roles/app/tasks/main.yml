@@ -154,6 +154,7 @@
       repo: "{{ app_repo }}"
       ref: "{{ app_ref }}"
       path: "{{ app.path | default('.') }}"
+      runtime: "{{ app.runtime | default('compose') }}"
       hosts: "{{ app_subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
       secrets: "{{ manifest.secrets | default([]) }}"
   become: true

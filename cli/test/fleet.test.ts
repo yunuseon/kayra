@@ -18,6 +18,13 @@ test("a server's kind defaults to platform", () => {
   strictEqual(server("shop", "target: multipass\ndomain: shop.test\n").kind, "platform");
 });
 
+test("the fleet can select Compose and rejects unsupported runtimes", () => {
+  const app = (runtime: string) => `target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, runtime: ${runtime}}]`;
+  strictEqual(server("a", app("compose")).apps[0]?.entry["runtime"], "compose");
+  strictEqual(refused(app("swarm")) === "accepted", false);
+  strictEqual(refused(app("unknown")) === "accepted", false);
+});
+
 test("a server is refused for what would break a command later", () => {
   strictEqual(refused("kind: castle\ntarget: home\ndomain: a.test"), "kind must be platform, edge, nas, not 'castle'");
   strictEqual(refused("target: moon\ndomain: a.test"), "target must be multipass, hetzner, home, not 'moon'");

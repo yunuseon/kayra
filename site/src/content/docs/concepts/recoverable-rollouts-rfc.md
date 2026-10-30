@@ -65,6 +65,12 @@ admission accounts for the active workloads, candidate overlap, one-shot jobs
 and platform overhead; it reserves the budget before effects. A reservation is
 not proof that Docker can schedule a task: actions also have finite deadlines.
 
+The Compose-only compatibility path accepts an optional fleet entry
+`runtime: compose` and records Compose on registration; older registrations
+without a runtime remain valid. Older Kayra CLIs have a strict fleet schema and
+reject that explicit key, so remove it before downgrading to such a version.
+Leaving it out preserves the previous fleet-file format.
+
 For an opted-in Swarm app, `rollout` declares:
 
 - The `rolling` or `maintenance` strategy. Rolling explicitly asserts

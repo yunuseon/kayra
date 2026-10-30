@@ -226,6 +226,7 @@ export const appEntrySchema = z.strictObject({
   repo: repoUrlSchema.describe("The app's repository, https://."),
   ref: z.string().optional().describe("The branch to build and deploy (default main)."),
   path: repoPathSchema.prefault(".").describe("The app's root inside the repository (default .)."),
+  runtime: z.literal("compose").optional().describe("The fleet-selected deployment runtime (default compose; Swarm is not available yet)."),
 });
 
 export const serverSchema = z

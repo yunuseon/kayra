@@ -4,9 +4,40 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { yamlOf } from "../../src/lib/yaml.ts";
 
 const ansibleAvailable = spawnSync("ansible-playbook", ["--version"]).status === 0;
 const root = resolve(import.meta.dirname, "../../..");
+
+test("registration records the fleet's Compose selection, including the default", { skip: !ansibleAvailable }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "kayra-registration-runtime-"));
+  try {
+    const parsed = yamlOf(readFileSync(join(root, "ansible/roles/app/tasks/main.yml"), "utf8"));
+    assert.ok(parsed.ok);
+    assert.ok(Array.isArray(parsed.value));
+    const task: unknown = parsed.value.find((entry: unknown) => typeof entry === "object" && entry !== null && Reflect.get(entry, "name") === "Register the app");
+    assert.ok(typeof task === "object" && task !== null);
+    const copy: unknown = Reflect.get(task, "ansible.builtin.copy");
+    assert.ok(typeof copy === "object" && copy !== null);
+    // Run the real registration task unprivileged in a temporary directory.
+    const copyForTest = Object.fromEntries(Object.entries(copy).filter(([key]) => key !== "owner" && key !== "group"));
+    const platform = join(dir, "platform");
+    mkdirSync(join(platform, "apps"), { recursive: true });
+    for (const runtime of [undefined, "compose"] as const) {
+      const app = { name: "shop", ...(runtime === undefined ? {} : { runtime }) };
+      const vars = { app, app_repo: "https://example.test/shop.git", app_ref: "main", app_subdomains: ["www"], manifest: {}, platform_dir: platform, domain: "lab.test" };
+      const play = join(dir, "play.json");
+      writeFileSync(play, JSON.stringify([{ hosts: "localhost", connection: "local", gather_facts: false, vars, tasks: [{ ...task, "ansible.builtin.copy": copyForTest, become: false }] }]));
+      const result = spawnSync("ansible-playbook", ["-i", "localhost,", play], { encoding: "utf8", env: { ...process.env, ANSIBLE_NOCOLOR: "1" } });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      const registration: unknown = JSON.parse(readFileSync(join(platform, "apps/shop.json"), "utf8"));
+      assert.ok(typeof registration === "object" && registration !== null);
+      assert.equal(Reflect.get(registration, "runtime"), "compose");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("registration refuses rollout metadata or an unsupported runtime before writing app data", { skip: !ansibleAvailable }, () => {
   const dir = mkdtempSync(join(tmpdir(), "kayra-registration-"));

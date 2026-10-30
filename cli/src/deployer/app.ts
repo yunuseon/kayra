@@ -13,6 +13,8 @@ export type App = {
   readonly name: AppName;
   readonly repo: string;
   readonly ref: string;
+  /** The persisted backend, defaulting to Compose for legacy registrations. */
+  readonly runtime: "compose";
   /** The app's root inside its repository. */
   readonly path: string;
   /** The hostnames its routers may claim. */
@@ -48,7 +50,7 @@ export const parseApp = (expected: string, json: unknown) => {
   if (typeof ref !== "string" || !/^[\w./-]+$/.test(ref)) return err(`${expected}: ref ${String(ref)}`);
   if (typeof path !== "string" || path.split("/").includes("..")) return err(`${expected}: path ${String(path)}`);
   if (hosts === undefined || secrets === undefined) return err(`${expected}: hosts or secrets malformed`);
-  return ok<App>({ name: minted.value, repo, ref, path, hosts, secrets });
+  return ok<App>({ name: minted.value, repo, ref, runtime: "compose", path, hosts, secrets });
 };
 
 /** An app registered on this server, from <platformDir>/apps/<name>.json. */

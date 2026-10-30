@@ -199,6 +199,16 @@ operation has a stable identity and app generation; a stale completion cannot
 advance a newer operation. A timeout or disconnected caller does not release a
 gate while an effect might still be running.
 
+For retryable host requests, the owner first durably allocates an app-incarnation
+and sequence ticket; allocation alone has no workload effect. The client retains
+that ticket and its request before submission. The owner binds the ticket to the
+validated, non-secret request and records intent atomically. A retry of the same
+ticket returns its existing progress or terminal receipt; a different request
+under that ticket is refused. Unresolved tickets remain pinned. Terminal receipts
+may be retained in bounded history, but an evicted ticket must return an unknown
+or expired outcome, never start work again. Timeouts cannot expire accepted
+operations. Ticket identity is not authorization and does not prove an effect.
+
 The existing Ansible app role must acquire a registration operation through the
 deployer's existing local control interface before inspecting the old
 registration or changing configuration and secrets. The coordinator first

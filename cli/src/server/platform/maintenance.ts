@@ -22,6 +22,9 @@ export type MaintenanceEffects = {
 };
 
 export const runMaintenance = async (work: Maintenance, settings: MaintenanceSettings, effects: MaintenanceEffects) => {
+  if (work.job === "gc" && work.dryRun) {
+    return { ok: false, error: "Registry GC does not support dry runs; no cleanup was performed." } as const;
+  }
   const argv = work.job === "gc" ? (["bash", settings.gcScript] as const) : renovate(settings.env, work.dryRun, settings.renovateImage);
   const env: Env = work.job === "renovate" ? { RENOVATE_TOKEN: effects.token("RENOVATE_TOKEN") } : {};
   const exit = await effects.exec(argv, { cwd: settings.platformDir, env });

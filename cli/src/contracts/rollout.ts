@@ -4,7 +4,7 @@ import { all, err, ok } from "../lib/result.ts";
 export type Runtime = "compose" | "swarm";
 export type ServiceRole = "http" | "worker" | "singleton" | "retained-dependency";
 export type Overlap = "allowed" | "forbidden" | "coordinated";
-export type Capability = "rolling-http" | "workers" | "singleton" | "retained-dependency" | "migrations" | "checks" | "maintenance";
+export type Capability = "rolling-http" | "workers" | "singleton" | "coordinated-non-singleton" | "retained-dependency" | "migrations" | "checks" | "maintenance";
 export type Service = {
   readonly role: ServiceRole;
   readonly overlap: Overlap;
@@ -146,6 +146,7 @@ export const validateAdmission = (options: {
     ...(Object.values(rollout.services).some((item) => item.role === "http") && rollout.strategy === "rolling" ? ["rolling-http" as const] : []),
     ...(Object.values(rollout.services).some((item) => item.role === "worker") ? ["workers" as const] : []),
     ...(Object.values(rollout.services).some((item) => item.role === "singleton") ? ["singleton" as const] : []),
+    ...(Object.values(rollout.services).some((item) => item.overlap === "coordinated" && item.role !== "singleton") ? ["coordinated-non-singleton" as const] : []),
     ...(Object.values(rollout.services).some((item) => item.role === "retained-dependency") ? ["retained-dependency" as const] : []),
     ...(rollout.migrations.length > 0 ? ["migrations" as const] : []),
     ...(rollout.checks.length > 0 ? ["checks" as const] : []),

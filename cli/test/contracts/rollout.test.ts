@@ -41,6 +41,18 @@ test("metadata is strict, explicit, and does not accept contradictory declaratio
   assert.equal(parseRollout({ strategy: "maintenance", mixed_version_compatible: false, rollback_compatible: false, services: { db: { role: "retained-dependency", overlap: "forbidden" } } }).ok, true);
 });
 
+test("non-singleton coordination is declared in the contract but refused by first-integration admission", () => {
+  for (const role of ["http", "worker"]) {
+    const declared = parseRollout({ ...baseline, strategy: "maintenance", services: { ...baseline.services, web: { role, overlap: "coordinated" } } });
+    assert.equal(declared.ok, true);
+    const options = { ...admission, rollout: declared.value, routedServices: role === "http" ? ["web"] : [] };
+    const admitted = validateAdmission(options);
+    assert.equal(admitted.ok, false);
+    assert.match(admitted.error, /coordinated-non-singleton/);
+    assert.equal(validateAdmission({ ...options, capabilities: [...capabilities, "coordinated-non-singleton"] }).ok, true);
+  }
+});
+
 test("admission refuses missing grants, capabilities, backend conversion, and invalid service contracts", () => {
   assert.equal(validateAdmission(admission).ok, true);
   assert.equal(validateAdmission({ ...admission, swarmEnabled: false }).ok, false);

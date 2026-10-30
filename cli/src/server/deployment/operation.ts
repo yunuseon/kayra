@@ -35,6 +35,9 @@ export type OperationResult =
   | { readonly kind: "pending"; readonly record: OperationRecord }
   | { readonly kind: "verified"; readonly record: OperationRecord }
   | { readonly kind: "held"; readonly record: OperationRecord };
+export type HeldDiagnostic =
+  | { readonly kind: "observed"; readonly status: ObservationStatus }
+  | { readonly kind: "unavailable" | "timeout" };
 
 const uuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const claimedJournals = new WeakSet<OperationJournal>();
@@ -120,15 +123,18 @@ export const singleEffectCoordinator = (journal: OperationJournal, port: ActionP
     if (execution.kind === "timeout") return hold(record, "expired");
     return typed<OperationResult>({ kind: "pending", record });
   };
-  const start = (request: OperationRequest) => serial(async () => {
-    if (await load() !== undefined) throw new Error("journal already holds an operation");
+  const start = async (request: OperationRequest) => {
+    // Validate and snapshot before yielding to the caller or waiting behind I/O.
     const intent = parseOperationRecord({ ...request, version: 1, attempts: 1, phase: "intent" });
     if (!intent.ok) throw new Error(`invalid operation request: ${intent.error}`);
-    if (time() >= intent.value.deadline) throw new Error("operation deadline has expired");
-    const persisted = await write(intent.value);
-    if (time() >= persisted.deadline) return hold(persisted, "expired");
-    return execute(persisted);
-  });
+    return serial(async () => {
+      if (await load() !== undefined) throw new Error("journal already holds an operation");
+      if (time() >= intent.value.deadline) throw new Error("operation deadline has expired");
+      const persisted = await write(intent.value);
+      if (time() >= persisted.deadline) return hold(persisted, "expired");
+      return execute(persisted);
+    });
+  };
   // A diagnostic read may have a distinct absolute deadline; it cannot extend the effect deadline.
   const reconcile = (observationDeadline?: number) => serial(async () => {
     const record = await load();
@@ -154,5 +160,19 @@ export const singleEffectCoordinator = (journal: OperationJournal, port: ActionP
     if (time() >= retry.deadline) return hold(retry, "expired");
     return execute(retry);
   });
-  return { start, reconcile };
+  // Diagnostic observations are neither authenticated proof nor an operator
+  // resolution. They never change the held record or authorize another effect.
+  const inspectHeld = (observationDeadline: number) => serial(async (): Promise<HeldDiagnostic> => {
+    const record = await load();
+    if (record?.phase !== "held") throw new Error("operation is not held");
+    if (!Number.isSafeInteger(observationDeadline) || observationDeadline <= time()) throw new Error("invalid observation deadline");
+    const result = await bounded(observationDeadline, (signal) => port.observe(record, signal));
+    if (result.kind === "timeout") return { kind: "timeout" };
+    const observed: unknown = result.kind === "completed" ? result.value : undefined;
+    if (!object(observed) || observed['operationId'] !== record.operationId || observed['actionId'] !== record.actionId || observed['planDigest'] !== record.planDigest) return { kind: "unavailable" };
+    const status = observed['status'];
+    if (status !== "applied" && status !== "running" && status !== "absent" && status !== "failed" && status !== "unknown") return { kind: "unavailable" };
+    return { kind: "observed", status };
+  });
+  return { start, reconcile, inspectHeld };
 };

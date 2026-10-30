@@ -31,6 +31,73 @@ test("record validation admits only fixed identity and state fields", () => {
   assert.equal(parseOperationRecord({ ...record, phase: "held" }).ok, false);
 });
 
+test("start snapshots the request before waiting for journal I/O", async () => {
+  const dir = await directory();
+  try {
+    const journal = await openJournal(dir);
+    let release: () => void = () => { throw new Error("gate was not initialized"); };
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const gated = { read: async () => { await gate; return journal.read(); }, write: journal.write };
+    const port: ActionPort = {
+      authorize: (record) => { assert.equal(record.planDigest, request.planDigest); assert.equal(record.deadline, request.deadline); return Promise.resolve(true); },
+      execute: (record) => { assert.equal(record.planDigest, request.planDigest); return Promise.resolve(); },
+      observe: () => Promise.resolve(observed("unknown")),
+    };
+    const coordinator = singleEffectCoordinator(gated, port, () => 1000);
+    const mutable = { ...request };
+    const pending = coordinator.start(mutable);
+    // eslint-disable-next-line functional/immutable-data -- mutate after invocation while the read is gated
+    Object.assign(mutable, { planDigest: "b".repeat(64), deadline: 9000, replay: "safe" });
+    release();
+    const result = await pending;
+    assert.equal(result.kind, "pending");
+    assert.equal(result.record.planDigest, request.planDigest);
+    assert.equal(result.record.deadline, request.deadline);
+    assert.equal(result.record.replay, request.replay);
+    assert.deepEqual(await recorded(journal), result.record);
+    await journal.close();
+  } finally { await rm(dir, { force: true, recursive: true }); }
+});
+
+test("invalid start requests reject without waiting on the journal", async () => {
+  const coordinator = singleEffectCoordinator(
+    { read: () => { throw new Error("must not read"); }, write: () => { throw new Error("must not write"); } },
+    { authorize: allow, execute: () => Promise.resolve(), observe: () => Promise.resolve(observed("unknown")) },
+    () => 1000,
+  );
+  await assert.rejects(coordinator.start({ ...request, planDigest: "invalid" }), /invalid operation request/);
+});
+
+test("held diagnostics observe without promoting or retrying the effect", async () => {
+  const dir = await directory();
+  try {
+    const journal = await openJournal(dir);
+    await journal.write({ ...request, version: 1, attempts: 1, phase: "held", reason: "expired" });
+    let mode: "applied" | "mismatch" | "hang" = "applied";
+    let effects = 0;
+    const coordinator = singleEffectCoordinator(journal, {
+      authorize: allow,
+      execute: () => { effects += 1; return Promise.resolve(); },
+      observe: () => {
+        if (mode === "hang") return new Promise(() => undefined);
+        return Promise.resolve(mode === "mismatch" ? { ...observed("applied"), actionId: "33333333-3333-4333-8333-333333333333" } : observed("applied"));
+      },
+    }, Date.now);
+    assert.deepEqual(await coordinator.inspectHeld(Date.now() + 1000), { kind: "observed", status: "applied" });
+    mode = "mismatch";
+    assert.deepEqual(await coordinator.inspectHeld(Date.now() + 1000), { kind: "unavailable" });
+    mode = "hang";
+    assert.deepEqual(await coordinator.inspectHeld(Date.now() + 20), { kind: "timeout" });
+    const state = await recorded(journal);
+    assert.equal(state.phase, "held");
+    assert.equal(state.reason, "expired");
+    assert.equal(state.deadline, request.deadline);
+    assert.equal(effects, 0);
+    assert.equal((await coordinator.reconcile()).kind, "held");
+    await journal.close();
+  } finally { await rm(dir, { force: true, recursive: true }); }
+});
+
 test("an interrupted unsafe effect is observed on restart and never reissued if absent", async () => {
   const dir = await directory();
   try {

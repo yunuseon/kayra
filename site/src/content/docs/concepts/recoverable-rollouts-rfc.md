@@ -199,8 +199,8 @@ operation has a stable identity and app generation; a stale completion cannot
 advance a newer operation. A timeout or disconnected caller does not release a
 gate while an effect might still be running.
 
-For retryable host requests, the owner first durably allocates an app-incarnation
-and sequence ticket; allocation alone has no workload effect. The client retains
+For retryable host requests, the owner first durably allocates a sequence ticket
+within the app incarnation; allocation alone has no workload effect. The client retains
 that ticket and its request before submission. The owner binds the ticket to the
 validated, non-secret request and records intent atomically. A retry of the same
 ticket returns its existing progress or terminal receipt; a different request

@@ -63,8 +63,6 @@ die() { echo "✗ $*" >&2; echo "  the lab: ${work} (log: ${log})" >&2; exit 1; 
 # ── The Mac's address on Multipass's bridge, where the VM fetches the app ──
 host_ip="$(ifconfig bridge100 2>/dev/null | awk '/inet / {print $2; exit}')"
 [ -n "$host_ip" ] || die "no Multipass bridge (bridge100): is Multipass running?"
-port=18765
-
 passed=false
 cleanup() {
     [ -z "${server_pid:-}" ] || kill "$server_pid" 2>/dev/null || true
@@ -74,8 +72,14 @@ cleanup() {
     elif [ "$keep" = true ]; then
         echo "kept: the VM (${vm_name}) and ${work}; kayra down ${server} from ${fleet} removes the VM"
     elif [ -d "${fleet}/servers/${server}/terraform" ]; then
-        (cd "$fleet" && kayra_cmd down "$server" >> "$log" 2>&1) || echo "kayra down ${server} failed; see ${log}" >&2
-        rm -rf "$work"
+        if (cd "$fleet" && kayra_cmd down "$server" >> "$log" 2>&1); then
+            rm -rf "$work"
+        else
+            echo "kayra down ${server} failed; kept the VM (${vm_name}), fleet ${fleet}, and log ${log}" >&2
+            echo "  retry: (cd ${fleet} && node node_modules/@yunuseon/kayra/bin/kayra.js down ${server}) && rm -rf ${work}" >&2
+            trap - EXIT
+            exit 1
+        fi
     fi
 }
 trap cleanup EXIT
@@ -106,10 +110,19 @@ publish() {
     git clone -q --bare "$repo" "${served}/lab/sample.git"
 }
 commit v1
-python3 "${KAYRA_ROOT}/test/lab/git-http.py" "$host_ip" "$port" "$served" >> "$log" 2>&1 &
+port_file="${work}/git-port"
+python3 "${KAYRA_ROOT}/test/lab/git-http.py" "$host_ip" 0 "$served" "$port_file" >> "$log" 2>&1 &
 server_pid=$!
-sleep 1
-git clone -q --depth 1 "http://${host_ip}:${port}/lab/sample.git" "${work}/probe" && rm -rf "${work}/probe" || die "the app's repository is not served at http://${host_ip}:${port}/lab/sample.git"
+for _ in $(seq 1 50); do
+    [ ! -s "$port_file" ] || break
+    kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
+    sleep 0.1
+done
+[ -s "$port_file" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
+port="$(cat "$port_file")"
+git clone -q --depth 1 "http://${host_ip}:${port}/lab/sample.git" "${work}/probe" || die "the app's repository is not served at http://${host_ip}:${port}/lab/sample.git"
+[ "$(git -C "${work}/probe" rev-parse HEAD)" = "$(git -C "$repo" rev-parse HEAD)" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not return this lab's repository"
+rm -rf "${work}/probe"
 echo "http://${host_ip}:${port}/lab/sample.git"
 
 # ── A fleet pinned to the release ───────────────────────────────────────────

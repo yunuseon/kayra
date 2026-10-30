@@ -201,7 +201,11 @@ gate while an effect might still be running.
 
 For retryable host requests, the owner first durably allocates a sequence ticket
 within the app incarnation; allocation alone has no workload effect. The client retains
-that ticket and its request before submission. The owner binds the ticket to the
+that ticket and its request before submission. The allocator also needs a
+durable, non-reusable client allocation identity or an audited way to recover
+an allocation whose response was lost; otherwise unknown reservations exhaust
+capacity. A bounded cache alone must not allow an old allocation key to be
+reused after eviction. The owner binds the ticket to the
 validated, non-secret request and records intent atomically. A retry of the same
 ticket returns its existing progress or terminal receipt; a different request
 under that ticket is refused. Unresolved tickets remain pinned. Terminal receipts

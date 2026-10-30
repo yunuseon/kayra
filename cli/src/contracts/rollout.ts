@@ -32,7 +32,26 @@ export type Rollout = {
 const record = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 const name = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(value);
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-const args = (value: unknown): value is readonly string[] => Array.isArray(value) && value.length > 0 && value.every((part: unknown) => typeof part === "string" && part.length > 0);
+const seconds = (value: unknown): value is number => positive(value) && value <= Math.floor(Number.MAX_SAFE_INTEGER / 1000);
+// Copy only own indexed entries, without trusting an input array's iterator.
+const dense = (value: unknown): readonly unknown[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const length = value.length;
+  if (length > 4096) return undefined;
+  // eslint-disable-next-line functional/prefer-immutable-types -- build a bounded snapshot without trusting the input iterator
+  const copy: unknown[] = [];
+  // eslint-disable-next-line functional/no-let -- inspect every own index, including holes
+  for (let i = 0; i < length; i++) {
+    if (!Object.hasOwn(value, i)) return undefined;
+    // eslint-disable-next-line functional/immutable-data -- local snapshot, never the input
+    copy.push(value[i]);
+  }
+  return value.length === length ? copy : undefined;
+};
+const args = (value: unknown): readonly string[] | undefined => {
+  const copy = dense(value);
+  return copy !== undefined && copy.length > 0 && copy.every((part): part is string => typeof part === "string" && part.length > 0 && !part.includes("\0")) ? Object.freeze(copy) : undefined;
+};
 const extra = (value: Readonly<Record<string, unknown>>, keys: readonly string[]) => Object.keys(value).find((key) => !keys.includes(key));
 
 export const parseRuntime = (value: unknown) => value === undefined || value === "compose" ? ok<Runtime>("compose") : value === "swarm" ? ok<Runtime>("swarm") : err("runtime must be compose or swarm");
@@ -54,10 +73,10 @@ const service = (value: unknown, key: string) => {
 
 const command = (value: Readonly<Record<string, unknown>>, label: string) => {
   const target = value["service"];
-  const argv = value["command"];
+  const argv = args(value["command"]);
   const timeout = value["timeout_seconds"];
-  if (!name(target) || !args(argv) || !positive(timeout)) return err(`${label}: service, command, and positive timeout_seconds are required`);
-  return ok<Command>({ service: target, command: Object.freeze([...argv]), timeout_seconds: timeout });
+  if (!name(target) || argv === undefined || !seconds(timeout)) return err(`${label}: service, command, and valid timeout_seconds are required`);
+  return ok<Command>({ service: target, command: argv, timeout_seconds: timeout });
 };
 
 const migration = (value: unknown, index: number) => {
@@ -74,8 +93,9 @@ const migration = (value: unknown, index: number) => {
     return ok<Migration>({ id: value["id"], ...parsed.value, recovery: { kind: "replay-safe" } });
   }
   if (recovery["kind"] === "status-probe") {
-    if (extra(recovery, ["kind", "command", "timeout_seconds"]) !== undefined || !args(recovery["command"]) || !positive(recovery["timeout_seconds"])) return err(`${label}: invalid status probe`);
-    return ok<Migration>({ id: value["id"], ...parsed.value, recovery: { kind: "status-probe", command: Object.freeze([...recovery["command"]]), timeout_seconds: recovery["timeout_seconds"] } });
+    const argv = args(recovery["command"]);
+    if (extra(recovery, ["kind", "command", "timeout_seconds"]) !== undefined || argv === undefined || !seconds(recovery["timeout_seconds"])) return err(`${label}: invalid status probe`);
+    return ok<Migration>({ id: value["id"], ...parsed.value, recovery: { kind: "status-probe", command: argv, timeout_seconds: recovery["timeout_seconds"] } });
   }
   return err(`${label}: recovery must be replay-safe or status-probe`);
 };
@@ -101,10 +121,12 @@ export const parseRollout = (value: unknown) => {
   if (typeof mixed !== "boolean" || typeof rollback !== "boolean") return err("rollout: explicit compatibility declarations are required");
   if (strategy === "rolling" && (!mixed || !rollback)) return err("rollout: rolling requires mixed-version and rollback compatibility");
   if (!record(services) || Object.keys(services).length === 0) return err("rollout: services must be a nonempty mapping");
-  if (!Array.isArray(migrations) || !Array.isArray(checks)) return err("rollout: migrations and checks must be lists");
+  const migrationEntries = dense(migrations);
+  const checkEntries = dense(checks);
+  if (migrationEntries === undefined || checkEntries === undefined) return err("rollout: migrations and checks must be dense lists of at most 4096 entries");
   const parsedServices = all(Object.entries(services).map(([key, entry]) => service(entry, key)));
-  const parsedMigrations = all(migrations.map((entry: unknown, index) => migration(entry, index)));
-  const parsedChecks = all(checks.map((entry: unknown, index) => check(entry, index)));
+  const parsedMigrations = all(migrationEntries.map(migration));
+  const parsedChecks = all(checkEntries.map(check));
   if (!parsedServices.ok) return parsedServices;
   if (!parsedMigrations.ok) return parsedMigrations;
   if (!parsedChecks.ok) return parsedChecks;
@@ -132,6 +154,7 @@ export const validateAdmission = (options: {
   readonly composeServices: readonly string[];
   readonly routedServices: readonly string[];
   readonly migrationTimeoutCeilingSeconds: number;
+  readonly checkTimeoutCeilingSeconds?: number;
 }) => {
   if (options.existingRuntime !== undefined && options.existingRuntime !== options.runtime) return err("changing the runtime of a managed app is not supported");
   if (options.runtime === "compose") return options.rollout === undefined ? ok(true) : err("rollout metadata requires an experimental runtime");
@@ -139,8 +162,11 @@ export const validateAdmission = (options: {
   if (options.rollout === undefined) return err("Swarm requires rollout metadata");
   const rollout = options.rollout;
   if (rollout.strategy === "maintenance" && !options.maintenanceGranted) return err("maintenance deployments are not granted for this app");
-  if (!positive(options.migrationTimeoutCeilingSeconds)) return err("a positive migration timeout ceiling is required");
+  if (!seconds(options.migrationTimeoutCeilingSeconds)) return err("a valid migration timeout ceiling is required");
+  const checkTimeoutCeilingSeconds = options.checkTimeoutCeilingSeconds;
+  if (!seconds(checkTimeoutCeilingSeconds)) return err("a valid check timeout ceiling is required");
   if (rollout.migrations.some((step) => step.timeout_seconds > options.migrationTimeoutCeilingSeconds || (step.recovery.kind === "status-probe" && step.recovery.timeout_seconds > options.migrationTimeoutCeilingSeconds))) return err("migration or status probe timeout exceeds the server ceiling");
+  if (rollout.checks.some((step) => step.timeout_seconds > checkTimeoutCeilingSeconds)) return err("check timeout exceeds the server ceiling");
   const needed: readonly Capability[] = [
     ...(rollout.strategy === "maintenance" ? ["maintenance" as const] : []),
     ...(Object.values(rollout.services).some((item) => item.role === "http") && rollout.strategy === "rolling" ? ["rolling-http" as const] : []),

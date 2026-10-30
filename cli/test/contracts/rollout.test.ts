@@ -19,7 +19,7 @@ const capabilities: readonly Capability[] = ["rolling-http", "workers", "singlet
 const parsed = parseRollout(baseline);
 if (!parsed.ok) throw new Error(parsed.error);
 const rollout: Rollout = parsed.value;
-const admission = { runtime: "swarm" as const, swarmEnabled: true, maintenanceGranted: true, rollout, capabilities, composeServices: ["web", "worker", "leader", "db"], routedServices: ["web"], migrationTimeoutCeilingSeconds: 90 };
+const admission = { runtime: "swarm" as const, swarmEnabled: true, maintenanceGranted: true, rollout, capabilities, composeServices: ["web", "worker", "leader", "db"], routedServices: ["web"], migrationTimeoutCeilingSeconds: 90, checkTimeoutCeilingSeconds: 30 };
 
 test("runtime defaults to Compose, without accepting arbitrary values", () => {
   assert.deepEqual(parseRuntime(undefined), { ok: true, value: "compose" });
@@ -51,6 +51,71 @@ test("non-singleton coordination is declared in the contract but refused by firs
     assert.match(admitted.error, /coordinated-non-singleton/);
     assert.equal(validateAdmission({ ...options, capabilities: [...capabilities, "coordinated-non-singleton"] }).ok, true);
   }
+});
+
+test("commands reject NUL and timeouts remain safe when converted to milliseconds", () => {
+  const maximum = Math.floor(Number.MAX_SAFE_INTEGER / 1000);
+  const migration = baseline.migrations[0];
+  const check = baseline.checks[0];
+  if (migration === undefined || check === undefined) throw new Error("invalid test fixture");
+  assert.equal(parseRollout({ ...baseline, migrations: [{ ...migration, command: ["run\0bad"] }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, migrations: [{ ...migration, recovery: { ...migration.recovery, command: ["probe\0bad"] } }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, checks: [{ ...check, command: ["check\0bad"] }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, migrations: [{ ...migration, timeout_seconds: maximum + 1 }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, migrations: [{ ...migration, recovery: { ...migration.recovery, timeout_seconds: maximum + 1 } }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, checks: [{ ...check, timeout_seconds: maximum + 1 }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, checks: [{ ...check, timeout_seconds: maximum }] }).ok, true);
+});
+
+test("sparse command and step arrays cannot silently omit work", () => {
+  const migration = baseline.migrations[0];
+  const check = baseline.checks[0];
+  if (migration === undefined || check === undefined) throw new Error("invalid test fixture");
+  const sparse: readonly unknown[] = Array(1);
+  const partiallySparse = Object.assign(Array<unknown>(2), { 0: migration });
+  assert.equal(parseRollout({ ...baseline, migrations: [{ ...migration, command: sparse }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, migrations: [{ ...migration, recovery: { ...migration.recovery, command: sparse } }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, checks: [{ ...check, command: sparse }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, migrations: partiallySparse }).ok, false);
+  assert.equal(parseRollout({ ...baseline, migrations: sparse }).ok, false);
+  assert.equal(parseRollout({ ...baseline, checks: sparse }).ok, false);
+});
+
+test("array snapshots use indexed values rather than a supplied iterator", () => {
+  const check = baseline.checks[0];
+  const migration = baseline.migrations[0];
+  if (check === undefined || migration === undefined) throw new Error("invalid test fixture");
+  const command = ["run"];
+  // eslint-disable-next-line functional/immutable-data -- simulate a hostile in-process array
+  Object.defineProperty(command, Symbol.iterator, { value: function* () { /* omit the actual argument */ } });
+  const migrations = [migration];
+  // eslint-disable-next-line functional/immutable-data -- simulate a hostile in-process array
+  Object.defineProperty(migrations, Symbol.iterator, { value: function* () { /* omit the migration */ } });
+  const parsed = parseRollout({ ...baseline, migrations, checks: [{ ...check, command }] });
+  if (!parsed.ok) throw new Error(parsed.error);
+  assert.equal(parsed.value.migrations.length, 1);
+  assert.deepEqual(parsed.value.checks[0]?.command, ["run"]);
+  const growing = ["run"];
+  // eslint-disable-next-line functional/immutable-data -- simulate a changing array while it is read
+  Object.defineProperty(growing, 0, { get: () => {
+    // eslint-disable-next-line functional/immutable-data -- simulate a hostile accessor
+    growing.push("extra");
+    return "run";
+  } });
+  assert.equal(parseRollout({ ...baseline, checks: [{ ...check, command: growing }] }).ok, false);
+  assert.equal(parseRollout({ ...baseline, migrations: Array.from({ length: 4097 }, () => migration) }).ok, false);
+  assert.equal(parseRollout({ ...baseline, checks: [{ ...check, command: Array.from({ length: 4097 }, () => "run") }] }).ok, false);
+});
+
+test("check admission requires a trusted finite ceiling and enforces it", () => {
+  assert.equal(validateAdmission({ ...admission, checkTimeoutCeilingSeconds: 31 }).ok, true);
+  assert.equal(validateAdmission({ ...admission, checkTimeoutCeilingSeconds: 30 }).ok, true);
+  assert.equal(validateAdmission({ ...admission, checkTimeoutCeilingSeconds: 29 }).ok, false);
+  assert.equal(validateAdmission({ runtime: "swarm", swarmEnabled: true, maintenanceGranted: true, rollout, capabilities, composeServices: admission.composeServices, routedServices: admission.routedServices, migrationTimeoutCeilingSeconds: 90 }).ok, false);
+  for (const checkTimeoutCeilingSeconds of [0, Number.NaN, Infinity, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(validateAdmission({ ...admission, checkTimeoutCeilingSeconds }).ok, false);
+  }
+  assert.equal(validateAdmission({ ...admission, migrationTimeoutCeilingSeconds: Number.MAX_SAFE_INTEGER }).ok, false);
 });
 
 test("admission refuses missing grants, capabilities, backend conversion, and invalid service contracts", () => {

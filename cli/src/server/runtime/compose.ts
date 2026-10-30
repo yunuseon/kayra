@@ -48,11 +48,17 @@ export const composeRuntime = (exec: Execute) => typed<ComposeRuntime>({
   up: ({ app, appsDir, bundle, cwd, env }) => exec(up(app, appsDir, bundle), { cwd, env }),
 });
 
-/** An observation failure must not cause the legacy restorer to deploy over a running app. */
-export const composeProjectRunning = async (app: ComposeApp, observe: Observe) => {
+/** A point-in-time Docker query for running or restarting project containers only. */
+export type ComposeProjectObservation = "present" | "absent" | "unavailable";
+
+export const observeComposeProject = async (app: ComposeApp, observe: Observe) => {
   const exit = await observe(
     ["docker", "ps", "-q", "--filter", `label=com.docker.compose.project=${app.name}`, "--filter", "status=running", "--filter", "status=restarting"],
     { cwd: "/", env: {}, capture: true, timeoutMs: 30_000 },
   );
-  return exit.code !== 0 || exit.stdout.trim() !== "";
+  return typed<ComposeProjectObservation>(exit.code !== 0 ? "unavailable" : exit.stdout.trim() === "" ? "absent" : "present");
 };
+
+/** An observation failure must not cause the legacy restorer to deploy over a running app. */
+export const composeProjectRunning = async (app: ComposeApp, observe: Observe) =>
+  (await observeComposeProject(app, observe)) !== "absent";

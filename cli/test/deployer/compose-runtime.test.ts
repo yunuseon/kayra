@@ -1,6 +1,6 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { composeProjectRunning, composeRuntime } from "../../src/server/runtime/compose.ts";
+import { composeProjectRunning, composeRuntime, observeComposeProject } from "../../src/server/runtime/compose.ts";
 
 const request = {
   app: { name: "shop" },
@@ -41,4 +41,16 @@ test("Compose restart observation treats running and restarting containers as pr
 test("Compose restart observation restores only after a successful empty result", async () => {
   strictEqual(await composeProjectRunning(request.app, () => Promise.resolve({ code: 0, stdout: " \n" })), false);
   strictEqual(await composeProjectRunning(request.app, () => Promise.resolve({ code: 1, stdout: "" })), true);
+});
+
+test("Compose project observations distinguish a failed query from a successful empty query", async () => {
+  strictEqual(await observeComposeProject(request.app, () => Promise.resolve({ code: 0, stdout: "container-id\n" })), "present");
+  strictEqual(await observeComposeProject(request.app, () => Promise.resolve({ code: 0, stdout: " \n" })), "absent");
+  strictEqual(await observeComposeProject(request.app, () => Promise.resolve({ code: 1, stdout: "container-id\n" })), "unavailable");
+});
+
+test("Compose observation propagates execution rejection as before", async () => {
+  const error = new Error("cannot query Docker");
+  await rejects(composeProjectRunning(request.app, () => Promise.reject(error)), error);
+  await rejects(observeComposeProject(request.app, () => Promise.reject(error)), error);
 });

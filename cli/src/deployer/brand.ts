@@ -1,12 +1,10 @@
 import type { Brand } from "../lib/brand.ts";
-import type { AppName, RunId, Sha } from "../contracts/identity.ts";
-export type { AppName, RunId, Sha } from "../contracts/identity.ts";
+import type { AppName, Owner, RunId, Sha } from "../contracts/identity.ts";
+import type { JobName } from "../contracts/legacy-work.ts";
+export type { AppName, Owner, RunId, Sha } from "../contracts/identity.ts";
+export type { JobName } from "../contracts/legacy-work.ts";
 import { err, ok } from "../lib/result.ts";
 import { names, type Name } from "../lib/names.ts";
-
-export type JobName = "gc" | "renovate";
-/** Whose runs a directory under runs/ holds: an app, or `_<job>` (no app name starts with `_`). */
-export type Owner = Brand<string, "Owner">;
 
 /** A constructor for the brand B: the value, if it follows the name's rule (lib/names.ts, as the fleet's schemas do). */
 const matching = <B extends string>({ pattern, what }: Name) => (value: string) =>

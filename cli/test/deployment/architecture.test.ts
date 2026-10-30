@@ -26,6 +26,13 @@ test("legacy restore consumes shared identities without importing deployer inter
   ok(refused?.messages.some((message) => message.ruleId === "no-restricted-imports"));
 });
 
+test("legacy queue consumes shared work contracts without importing deployer internals", async () => {
+  const [allowed] = await eslint.lintText('import type { Request } from "../../contracts/legacy-work.ts";', { filePath: "src/server/deployment/legacy-queue.ts" });
+  const [refused] = await eslint.lintText('import type { Request } from "../../deployer/runs/queue.ts";', { filePath: "src/server/deployment/legacy-queue.ts" });
+  ok(allowed?.messages.some((message) => message.ruleId === "no-restricted-imports") === false);
+  ok(refused?.messages.some((message) => message.ruleId === "no-restricted-imports"));
+});
+
 test("coordinator rejects dynamic imports, require and fetch", async () => {
   for (const [source, rule] of [
     ['void import("node:child_process");', "no-restricted-syntax"],

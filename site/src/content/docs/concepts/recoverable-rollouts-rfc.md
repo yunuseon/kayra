@@ -302,6 +302,99 @@ Swarm apps until GC understands image pins. The coordinator exports pins for
 active, candidate, rollback and unresolved operations. Historical failed Swarm
 tasks are not themselves evidence that the current application is unhealthy.
 
+### Proposed registration-generation storage
+
+This layout and publication protocol are proposed, not implemented. They
+provide the platform-owned evidence needed by registration reconciliation;
+they do not by themselves fence legacy host scripts or the deployment queue.
+The platform remains the writer of registration, configuration and secrets. The
+coordinator owns operation intent and verifies completion through a trusted
+platform observation; it does not acquire authority to materialize secrets.
+
+Use separate public and private generation trees under the platform directory:
+
+```text
+registration-public/<app-key>/current.json
+registration-public/<app-key>/generations/<generation>/manifest.json
+registration-public/<app-key>/generations/<generation>/registration.json
+registration-private/<app-key>/generations/<generation>/.env
+registration-private/<app-key>/generations/<generation>/secrets/<KEY>
+```
+
+The app key is a stable digest of the full validated app name; a durable
+platform index binds that key to the original name and incarnation. This avoids
+using an unbounded fleet name as a filesystem path component.
+
+The strict version-one manifest and pointer each contain only `version`, `app`,
+`incarnation`, `actionId` and `registrationGeneration`. The incarnation and
+registration generation are distinct identities; the action ID belongs to that
+incarnation. `registration.json` follows the validated registration contract.
+The private tree holds configuration and exactly the declared, validated secret
+keys as regular files. Metadata never contains secret values or hashes of secret
+values. A validated generation reference selects both trees, and a deployment
+uses that one reference for its whole snapshot. Prior generations remain until
+no operation, rollback or recovery still needs them.
+
+The platform alone can create and publish generations. The builder receives a
+read-only public view and no private-tree mount. The deployer receives the views
+it needs read-only and cannot modify a generation or pointer; it may read app
+secrets as it does today. On Linux, provision root-owned parents and staging
+directories, restrict traversal and read access with dedicated service groups,
+and make finalized generation directories and files read-only to those groups.
+For example, private staging may be `0700` with `0600` files, followed by
+root-owned `0550` directories and `0440` files for the authorized deployer
+group. Exact ownership and container UID/GID mappings must be checked during
+host setup and in the lab. The public tree must not create an indirect path to
+the private tree. These controls preserve the builder/deployer boundary; they do
+not protect against root or an actor with Docker-socket privileges.
+
+The publisher validates app names, incarnation and generation IDs, action IDs,
+declared keys, file types and bounded inputs. It must prevent path traversal,
+symlink substitution and replacement of existing generations using filesystem
+primitives with tested semantics. In particular, an ordinary rename must not be
+assumed to provide no-overwrite behavior. One possible approach is exclusive
+creation of each final generation directory, populate it while no current pointer
+references it, then publish only after validation and synchronization. A
+preexisting or partially created generation is never silently overwritten or
+assumed to be complete. Secret input does not appear in command arguments or
+logs.
+
+Publication runs under the same durable app fence as registration. After
+persisting intent, the platform writes and synchronizes all public and private
+files, applies and checks ownership and modes, and synchronizes the generation
+directories and their parents. Only then may it write and synchronize a pointer
+temporary file, atomically replace `current.json`, and synchronize the pointer's
+parent directory. Before pointer replacement, the prior pointer remains
+authoritative; incomplete new files are retained for reconciliation. After a
+crash, the observer validates the pointer and manifest against the journaled
+app, incarnation, action and generation, and checks both finalized trees. A
+self-consistent pointer is not authority to accept a different journaled
+operation.
+
+Seeing a renamed pointer is not enough to prove it survived a crash: the
+publisher may have stopped before synchronizing the directory. Before reporting
+`applied`, the observation path must establish a tested durability barrier for
+the pointer and containing directory while the same fence prevents a writer
+from changing them. Any unavailable observation, invalid identity, incomplete
+generation or failed synchronization remains unresolved. A successful
+observation alone does not authenticate arbitrary client-supplied metadata; the
+observer, its expected operation and the platform writer must be trusted and
+bound by the owner. Existing `.env`, secret-directory replacement and
+`apps/<app>.json` writes are separate effects and are not evidence of this
+atomic publication protocol.
+
+Adapter tests use isolated directories and synthetic secret values; they check
+strict metadata, ownership and modes, denied access, key validation, symlinks,
+non-regular files, collisions, incomplete generations and the absence of secret
+values from metadata, logs and journals. Linux-host tests verify real bind mounts,
+UID/GID access and synchronization behavior. Fault injection kills the publisher
+before and after file synchronization, generation creation, pointer replacement
+and directory synchronization; recovery must leave the previous generation or a
+fully verified new one and keep ambiguous operations fenced. Concurrent
+publication and deployment tests must exercise the shared lifecycle gate.
+Integration remains disabled until the real Ansible, queue, restore, removal,
+purge, upgrade and legacy-import paths participate in that gate.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

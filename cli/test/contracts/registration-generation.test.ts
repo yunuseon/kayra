@@ -1,10 +1,22 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { matchRegistrationGeneration, parseRegistrationGeneration } from "../../src/contracts/registration-generation.ts";
+import { matchRegistrationGeneration, parseRegistrationGeneration, parseRegistrationObservation } from "../../src/contracts/registration-generation.ts";
 
 const incarnation = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
 const metadata = { version: 1, app: "shop-", incarnation, actionId: `${incarnation}:1`, registrationGeneration: other };
+
+test("observations share metadata identity validation without accepting extra fields", () => {
+  const identity = { app: metadata.app, incarnation: metadata.incarnation, actionId: metadata.actionId, registrationGeneration: metadata.registrationGeneration };
+  for (const status of ["applied", "not-applied", "unknown"]) {
+    assert.equal(parseRegistrationObservation({ ...identity, status }).ok, true);
+  }
+  for (const observation of [{ ...identity, status: "success" }, { ...identity, status: "applied", secret: "value" }, { ...identity, status: "applied", actionId: `${other}:1` }]) {
+    assert.equal(parseRegistrationObservation(observation).ok, false);
+  }
+  const getter = Object.defineProperty({ ...identity, status: "applied" }, "status", { get: () => { throw new Error("must not invoke"); } });
+  assert.equal(parseRegistrationObservation(getter).ok, false);
+});
 
 test("validates and snapshots the common manifest and pointer shape", () => {
   const value = parseRegistrationGeneration(metadata);

@@ -24,6 +24,27 @@ const record = z.object({
 });
 
 export type RegistrationGeneration = Readonly<z.infer<typeof record>>;
+export type RegistrationObservation = Readonly<Omit<RegistrationGeneration, "version"> & { readonly status: "applied" | "not-applied" | "unknown" }>;
+
+const metadataKeys = ["version", "app", "incarnation", "actionId", "registrationGeneration"] as const;
+const dataProperties = (input: unknown, expected: readonly string[]) => {
+  try {
+    if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
+    const proto: unknown = Object.getPrototypeOf(input);
+    if (proto !== Object.prototype && proto !== null) return undefined;
+    const keys = Reflect.ownKeys(input);
+    if (keys.length !== expected.length || keys.some((key) => typeof key !== "string" || !expected.includes(key))) return undefined;
+    // eslint-disable-next-line functional/prefer-immutable-types -- local descriptors never escape
+    const fields = keys.map((key) => [key, Object.getOwnPropertyDescriptor(input, key)] as const);
+    if (fields.some(([, property]) => property === undefined || !Object.hasOwn(property, "value") || !property.enumerable)) return undefined;
+    return Object.freeze(Object.fromEntries(fields.map(([key, property]) => {
+      const value: unknown = property?.value;
+      return [key, value] as const;
+    })));
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Parse a JSON-like manifest or current-pointer record. A future file reader
@@ -32,22 +53,23 @@ export type RegistrationGeneration = Readonly<z.infer<typeof record>>;
  */
 export const parseRegistrationGeneration = (input: unknown) => {
   try {
-    if (input === null || typeof input !== "object" || Array.isArray(input)) return err("invalid registration generation metadata");
-    const proto: unknown = Object.getPrototypeOf(input);
-    if (proto !== Object.prototype && proto !== null) return err("invalid registration generation metadata");
-    const keys = Reflect.ownKeys(input);
-    const expected = ["version", "app", "incarnation", "actionId", "registrationGeneration"];
-    if (keys.length !== expected.length || keys.some((key) => typeof key !== "string" || !expected.includes(key))) return err("invalid registration generation metadata");
-    // eslint-disable-next-line functional/prefer-immutable-types -- these descriptors are local inspection snapshots
-    const fields = keys.map((key) => [key, Object.getOwnPropertyDescriptor(input, key)] as const);
-    if (fields.some(([, property]) => property === undefined || !Object.hasOwn(property, "value") || !property.enumerable)) return err("invalid registration generation metadata");
-    // eslint-disable-next-line functional/prefer-immutable-types -- local snapshot is parsed and frozen before it escapes
-    const snapshot = Object.fromEntries(fields.map(([key, property]) => [key, property?.value]));
-    const parsed = record.safeParse(snapshot);
+    const parsed = record.safeParse(dataProperties(input, metadataKeys));
     return parsed.success ? ok(Object.freeze(parsed.data)) : err("invalid registration generation metadata");
   } catch {
     return err("invalid registration generation metadata");
   }
+};
+
+/** Identity-bound evidence from a trusted platform observer. Parsing alone does
+ * not establish its authority, durability or freshness under the app fence. */
+export const parseRegistrationObservation = (input: unknown) => {
+  const value = dataProperties(input, ["app", "incarnation", "actionId", "registrationGeneration", "status"]);
+  if (value === undefined) return err("invalid registration observation");
+  const metadata = parseRegistrationGeneration({ version: 1, app: value["app"], incarnation: value["incarnation"], actionId: value["actionId"], registrationGeneration: value["registrationGeneration"] });
+  const status = value["status"];
+  if (!metadata.ok || (status !== "applied" && status !== "not-applied" && status !== "unknown")) return err("invalid registration observation");
+  const { app, incarnation, actionId, registrationGeneration } = metadata.value;
+  return ok<RegistrationObservation>(Object.freeze({ app, incarnation, actionId, registrationGeneration, status }));
 };
 
 /**

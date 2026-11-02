@@ -43,3 +43,21 @@ Capture `multipass version`, `multipass info "$lab_vm" --format json`, guest
 Python/kernel/OS versions and source SHA-256 hashes when recording a result.
 The checked-in `results/2026-11-02/` evidence describes the resumed seven-case
 run; it is filesystem evidence, not a full platform acceptance result.
+
+## Experimental platform adapter
+
+The root-side implementation under `scripts/server-lib/` has its own stricter
+suite. It is packaged but remains uninstalled and unused by live host writers.
+On a fresh Linux checkout run:
+
+```bash
+sudo python3 -B ci/tests/registration-generation/test_generation.py
+```
+
+The suite covers complete metadata and secret-key checks, private service-group
+access, immutable-generation collisions, symlinks, hard links, nonregular files,
+owner/mode failures, failed synchronization, lost rename acknowledgements,
+publisher process kills and competing pointer updates. It refuses to pass by
+skipping when Linux root is unavailable. The shared JSON fixture is also checked
+against the TypeScript contracts. `results/2026-11-02-adapter/` records exact
+sources and environment for the isolated Multipass run.

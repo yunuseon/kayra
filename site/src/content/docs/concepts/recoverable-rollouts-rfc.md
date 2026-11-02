@@ -302,23 +302,27 @@ Swarm apps until GC understands image pins. The coordinator exports pins for
 active, candidate, rollback and unresolved operations. Historical failed Swarm
 tasks are not themselves evidence that the current application is unhealthy.
 
-### Proposed registration-generation storage
+### Experimental registration-generation storage
 
-This layout and publication protocol are proposed, not implemented. They
-provide the platform-owned evidence needed by registration reconciliation;
-they do not by themselves fence legacy host scripts or the deployment queue.
+The experimental storage library implements this layout and publication
+protocol, but is not installed or called by the live platform. It provides
+the platform-owned evidence needed by registration reconciliation;
+it does not itself fence legacy host scripts or the deployment queue.
 The platform remains the writer of registration, configuration and secrets. The
 coordinator owns operation intent and verifies completion through a trusted
 platform observation; it does not acquire authority to materialize secrets.
 
-Use separate public and private generation trees under the platform directory:
+Use separate public and private trees under a dedicated root-controlled
+registration root. Its ancestry must not be writable by the deployer or other
+untrusted actors; the current deploy-owned platform directory is not sufficient:
 
 ```text
-registration-public/<app-key>/current.json
-registration-public/<app-key>/generations/<generation>/manifest.json
-registration-public/<app-key>/generations/<generation>/registration.json
-registration-private/<app-key>/generations/<generation>/.env
-registration-private/<app-key>/generations/<generation>/secrets/<KEY>
+public/<app-key>/current.json
+public/<app-key>/generations/<generation>/manifest.json
+public/<app-key>/generations/<generation>/registration.json
+private/<app-key>/generations/<generation>/manifest.json
+private/<app-key>/generations/<generation>/configuration.json
+private/<app-key>/generations/<generation>/secrets/<KEY>
 ```
 
 The app key is a stable digest of the full validated app name; a durable
@@ -329,8 +333,8 @@ The strict version-one manifest and pointer each contain only `version`, `app`,
 `incarnation`, `actionId` and `registrationGeneration`. The incarnation and
 registration generation are distinct identities; the action ID belongs to that
 incarnation. `registration.json` follows the validated registration contract.
-The private tree holds configuration and exactly the declared, validated secret
-keys as regular files. Metadata never contains secret values or hashes of secret
+The private tree holds configuration as JSON, a matching manifest, and exactly
+the declared, validated secret keys as regular files. Metadata never contains secret values or hashes of secret
 values. A validated generation reference selects both trees, and a deployment
 uses that one reference for its whole snapshot. Prior generations remain until
 no operation, rollback or recovery still needs them.

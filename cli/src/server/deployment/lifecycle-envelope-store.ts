@@ -6,19 +6,18 @@
 /* eslint-disable functional/prefer-immutable-types */
 import { z } from "zod";
 import type { OperationJournal } from "./operation.ts";
+import { claimJournal } from "./journal-claim.ts";
 import { parseLifecycleEnvelope } from "./lifecycle-envelope.ts";
 import { beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
 
-const claimed = new WeakSet<OperationJournal>();
 const evidence = z.object({ app: z.string(), incarnation: z.string(), actionId: z.string(), registrationGeneration: z.string(), status: z.enum(["applied", "not-applied", "unknown"]) }).strict();
 type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
 /** The composition root, never a client request, supplies this trusted read-only port. */
 export type RegistrationObserver = (expected: RegistrationObservation) => Promise<unknown>;
 
 export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeRegistration?: RegistrationObserver) => {
-  if (claimed.has(journal)) throw new Error("lifecycle envelope journal is already owned");
-  claimed.add(journal);
+  claimJournal(journal, "lifecycle envelope journal is already owned");
   // eslint-disable-next-line functional/no-let -- serialize the exclusive writer
   let pending = Promise.resolve();
   // eslint-disable-next-line functional/no-let -- a failed write may nevertheless have committed

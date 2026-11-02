@@ -4,14 +4,13 @@
  * authenticate registration references. Lost allocation replies can exhaust
  * reservations; this is not a live endpoint or a complete lifecycle owner. */
 /* eslint-disable functional/prefer-immutable-types */
-import { z } from "zod";
 import type { OperationJournal } from "./operation.ts";
+import { parseRegistrationObservation } from "../../contracts/registration-generation.ts";
 import { claimJournal } from "./journal-claim.ts";
 import { parseLifecycleEnvelope } from "./lifecycle-envelope.ts";
 import { beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
 
-const evidence = z.object({ app: z.string(), incarnation: z.string(), actionId: z.string(), registrationGeneration: z.string(), status: z.enum(["applied", "not-applied", "unknown"]) }).strict();
 type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
 /** The composition root, never a client request, supplies this trusted read-only port. */
 export type RegistrationObserver = (expected: RegistrationObservation) => Promise<unknown>;
@@ -117,10 +116,10 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         if (observeRegistration === undefined) return Object.freeze({ status: "pending" as const });
         const expected = Object.freeze({ app: fence.app, incarnation: fence.generation, actionId, registrationGeneration });
         const observation = await (async () => {
-          try { return evidence.safeParse(await observeRegistration(expected)); }
+          try { return parseRegistrationObservation(await observeRegistration(expected)); }
           catch { return undefined; }
         })();
-        if (observation === undefined || !observation.success || observation.data.status !== "applied" || observation.data.app !== expected.app || observation.data.incarnation !== expected.incarnation || observation.data.actionId !== expected.actionId || observation.data.registrationGeneration !== expected.registrationGeneration) return Object.freeze({ status: "pending" as const });
+        if (observation === undefined || !observation.ok || observation.value.status !== "applied" || observation.value.app !== expected.app || observation.value.incarnation !== expected.incarnation || observation.value.actionId !== expected.actionId || observation.value.registrationGeneration !== expected.registrationGeneration) return Object.freeze({ status: "pending" as const });
         const settled = settleLifecycleWork(fence, actionId);
         const completed = completeTicket(current.tickets, ticket, "success");
         if (!settled.ok || !completed.ok) throw new Error("invalid registration settlement");

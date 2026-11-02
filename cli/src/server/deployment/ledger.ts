@@ -1,5 +1,6 @@
 /* Parsing JSON creates temporary objects; this module also owns live writer handles. */
 /* eslint-disable functional/prefer-immutable-types */
+import { claimJournal } from './journal-claim.ts';
 import { reserve, type AdmissionState, type Budget, type Reservation } from './admission.ts';
 import { parseOperationRecord, type OperationJournal, type OperationRecord, type OperationRequest } from './operation.ts';
 
@@ -73,12 +74,12 @@ const parseLedger = (value: unknown) => {
   if (entries.some((item) => !resources.reservations.some((lease) => lease.id === item.request.operationId && lease.deadline === item.request.deadline))) return undefined;
   return { version: 1, admission: resources, operations: entries } as const;
 };
-const claims = new WeakSet<Journal>();
 
 /** Owns a journal handle exclusively; never share it with another coordinator. */
 export const openLedger = async (journal: Journal, initial: AdmissionState, now: () => number) => {
-  if (claims.has(journal)) throw new Error('journal handle is already owned');
-  claims.add(journal);
+  const release = claimJournal(journal, 'journal handle is already owned');
+  // eslint-disable-next-line functional/no-let -- uncertain initial writes cannot be released
+  let writeStarted = false;
   const ledger = await (async () => {
     const initialAdmission = admission(initial);
     if (initialAdmission?.reservations.length !== 0) throw new Error('invalid initial admission');
@@ -86,12 +87,15 @@ export const openLedger = async (journal: Journal, initial: AdmissionState, now:
     const loaded = raw === undefined ? { version: 1, admission: initialAdmission, operations: [] } as const : parseLedger(raw);
     if (loaded === undefined) throw new Error('invalid lifecycle ledger');
     if (JSON.stringify(loaded.admission.capacity) !== JSON.stringify(initialAdmission.capacity) || JSON.stringify(loaded.admission.platform) !== JSON.stringify(initialAdmission.platform) || JSON.stringify(loaded.admission.workloads) !== JSON.stringify(initialAdmission.workloads)) throw new Error('host capacity or workloads require reconciliation');
-    if (raw === undefined) await journal.write(loaded);
+    if (raw === undefined) {
+      writeStarted = true;
+      await journal.write(loaded);
+    }
     return loaded;
   })().catch((error: unknown) => {
-    // A failed open must not permanently claim a handle. Concurrent opens are
-    // still excluded while the initialization and any write are in flight.
-    claims.delete(journal);
+    // A possibly committed initialization must be reconciled through a fresh
+    // journal handle. Only an open that failed before its first write can release.
+    if (!writeStarted) release();
     throw error;
   });
   // eslint-disable-next-line functional/no-let -- serializes all operations on this journal

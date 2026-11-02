@@ -3,6 +3,7 @@
 import { err, ok } from "../../lib/result.ts";
 import { typed } from "../../lib/typed.ts";
 import type { JournalValue } from "./journal.ts";
+import { claimJournal } from "./journal-claim.ts";
 
 export type OperationRequest = {
   readonly operationId: string;
@@ -20,6 +21,10 @@ export type OperationRecord = OperationRequest & {
 };
 export type ObservationStatus = "applied" | "running" | "absent" | "failed" | "unknown";
 export type Observation = { readonly operationId: string; readonly actionId: string; readonly planDigest: string; readonly status: ObservationStatus };
+/** Implementations synchronize acknowledged writes and hold an exclusive OS
+ * lock. An uncertain write poisons the handle: later reads and writes must
+ * reject until it is closed, reopened and reconciled. Wrappers preserve this
+ * contract; a rejected write is not proof that the value was not committed. */
 export type OperationJournal = { readonly read: () => Promise<unknown>; readonly write: (value: JournalValue) => Promise<void> };
 export type ActionPort = {
   /** Verify the immutable plan, action identity, deadline and replay declaration before an effect. */
@@ -40,7 +45,6 @@ export type HeldDiagnostic =
   | { readonly kind: "unavailable" | "timeout" };
 
 const uuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
-const claimedJournals = new WeakSet<OperationJournal>();
 const object = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** No arbitrary payload, error text, command, environment, or resolved secret can enter this record. */
@@ -65,8 +69,7 @@ export const parseOperationRecord = (value: unknown) => {
  * immutable plan identified by planDigest and preserve authoritative action evidence.
  */
 export const singleEffectCoordinator = (journal: OperationJournal, port: ActionPort, now: () => number) => {
-  if (claimedJournals.has(journal)) throw new Error("journal handle already has a coordinator");
-  claimedJournals.add(journal);
+  claimJournal(journal, "journal handle already has a coordinator");
   // Calls serialize inside one owner as well as across processes at the journal lock.
   // eslint-disable-next-line functional/no-let -- serializes this exclusive writer
   let pending = Promise.resolve();

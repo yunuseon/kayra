@@ -1,13 +1,12 @@
 /* A trusted composition root gives this store exclusive ownership of its journal. */
 /* eslint-disable functional/prefer-immutable-types */
 import type { OperationJournal } from "./operation.ts";
+import { claimJournal } from "./journal-claim.ts";
 import {
   beginRegistration, beginLifecycleRegistration, beginLifecycleWork, completeLifecyclePurge,
   completeLifecycleRemoval, parseLifecycleFence, requestLifecycleRemoval, settleLifecycleWork,
   startLifecyclePurge, startLifecycleRemoval,
 } from "./lifecycle-fence.ts";
-
-const claimed = new WeakSet<OperationJournal>();
 
 /**
  * Disconnected persistence primitive. It serializes transitions and persists each
@@ -16,8 +15,7 @@ const claimed = new WeakSet<OperationJournal>();
  * through the journal handle and must reconcile every interrupted effect.
  */
 export const openLifecycleFenceStore = (journal: OperationJournal) => {
-  if (claimed.has(journal)) throw new Error("lifecycle journal is already owned");
-  claimed.add(journal);
+  claimJournal(journal, "lifecycle journal is already owned");
   // eslint-disable-next-line functional/no-let -- serialize reads and writes on the exclusive handle
   let pending = Promise.resolve();
   // eslint-disable-next-line functional/no-let -- uncertain writes must not be followed by new effects

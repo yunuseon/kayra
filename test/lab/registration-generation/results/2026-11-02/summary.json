@@ -1,0 +1,51 @@
+{
+  "recorded_at_utc": "2026-11-02T22:24:44.994023+00:00",
+  "source_commit": "5aa095292150123f8ad7593a91ed86a5fb383630",
+  "fixture_was_uncommitted": true,
+  "source_sha256": {
+    "publisher.py": "9186eb753f7e5bc077f57625eeb80988af34d163d7f3921079ca74bbf4926f8d",
+    "test_publisher.py": "eaf9360115ba04bb7769a1c2a26c433a4a0532c82bfa8c38cf5ddd7e5af984dd"
+  },
+  "vm": "kayra-registration-lab-20261101-0915",
+  "multipass": [
+    "multipass   1.16.1+mac",
+    "multipassd  1.16.1+mac"
+  ],
+  "image_hash": "50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e",
+  "cpu_count": "2",
+  "memory_bytes": 997953536,
+  "disk_bytes": "8238844928",
+  "environment": {
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "kernel": "6.8.0-147-generic",
+    "machine": "aarch64",
+    "os": {
+      "NAME": "Ubuntu",
+      "ID": "ubuntu",
+      "PRETTY_NAME": "Ubuntu 24.04.5 LTS",
+      "VERSION_ID": "24.04",
+      "VERSION": "24.04.5 LTS (Noble Numbat)",
+      "VERSION_CODENAME": "noble",
+      "ID_LIKE": "debian",
+      "HOME_URL": "https://www.ubuntu.com/",
+      "SUPPORT_URL": "https://help.ubuntu.com/",
+      "BUG_REPORT_URL": "https://bugs.launchpad.net/ubuntu/",
+      "PRIVACY_POLICY_URL": "https://www.ubuntu.com/legal/terms-and-policies/privacy-policy",
+      "UBUNTU_CODENAME": "noble",
+      "LOGO": "ubuntu-logo"
+    }
+  },
+  "tests": {
+    "count": 7,
+    "exit_code": 0
+  },
+  "cleanup": "successful_vm_deleted_and_purged",
+  "limits": [
+    "lab-only filesystem fixture",
+    "trusted root descriptor and ancestors",
+    "trusted public/private classification",
+    "no live platform or journal integration",
+    "no power-loss guarantee",
+    "no production group/mount isolation proof"
+  ]
+}

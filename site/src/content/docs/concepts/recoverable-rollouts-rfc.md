@@ -203,9 +203,9 @@ requires intervention. Unindexed directories and envelopes that already issued
 tickets during initialization also require intervention.
 
 The index is wired to initial registration intent and receipt reconciliation
-through the envelope store. It serializes these calls, including observation,
-for the entire index. Bounded observation and independent progress between
-apps are required before live use. The index does not adopt legacy apps or
+through the envelope store. Calls for the same app are serialized. An app's
+observer does not hold up operations for other apps, though observation still
+requires a deadline before live use. The index does not adopt legacy apps or
 assign a new incarnation to an existing name. Legacy entrypoints still bypass
 this experimental path.
 

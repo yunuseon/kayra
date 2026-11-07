@@ -102,6 +102,41 @@ test("indexed ownership is held when a ready journal disappears or belongs to an
   await assert.rejects(createLifecycleAppIndex(root), { code: "EEXIST" });
 });
 
+test("observation fences one app and close drains its accepted calls", { timeout: 5000 }, async (t) => {
+  const root = await fixture(t);
+  const started = Promise.withResolvers<void>();
+  const observed = Promise.withResolvers<void>();
+  t.after(() => observed.resolve());
+  const index = await createLifecycleAppIndex(root, async (expected) => {
+    started.resolve();
+    await observed.promise;
+    return { ...expected, status: "applied" };
+  });
+  try {
+    await index.prepareApp("shop");
+    const ticket = await index.reserveRegistration("shop");
+    await index.submitRegistration("shop", ticket, generation);
+    const reconcile = index.reconcileRegistration("shop", ticket, generation);
+    await started.promise;
+
+    const retry = index.submitRegistration("shop", ticket, generation);
+    const other = await index.prepareApp("other");
+    assert.equal(await index.reserveRegistration("other"), `${other}:1`);
+    const closing = index.close();
+    await assert.rejects(index.prepareApp("third"), /closed/);
+    await assert.rejects(openLifecycleAppIndex(root), /locked/);
+
+    observed.resolve();
+    assert.deepEqual(await reconcile, { status: "verified" });
+    assert.deepEqual(await retry, { status: "terminal", outcome: "success" });
+    await closing;
+    await (await openLifecycleAppIndex(root)).close();
+  } finally {
+    observed.resolve();
+    await index.close();
+  }
+});
+
 // Materialize each durable prefix under real locks so the kill point is deterministic.
 const journalUrl = new URL("../../src/server/deployment/journal.ts", import.meta.url).href;
 const storeUrl = new URL("../../src/server/deployment/lifecycle-envelope-store.ts", import.meta.url).href;

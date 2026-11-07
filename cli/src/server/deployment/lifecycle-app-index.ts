@@ -51,19 +51,26 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     throw error;
   }
 
-  let pending = Promise.resolve();
+  let pendingIndex = Promise.resolve();
+  const pendingApps = new Map<string, Promise<void>>();
   let closed = false;
-  const serial = <T>(task: () => Promise<T>) => {
+  const serialIndex = <T>(task: () => Promise<T>) => {
+    const result = pendingIndex.then(task);
+    pendingIndex = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  const serialApp = <T>(app: string, task: () => Promise<T>) => {
     if (closed) return Promise.reject(new Error("lifecycle app index is closed"));
-    const result = pending.then(task);
-    pending = result.then(() => undefined, () => undefined);
+    if (!appName.safeParse(app).success) return Promise.reject(new Error("invalid lifecycle app name"));
+    const result = (pendingApps.get(app) ?? Promise.resolve()).then(task);
+    const settled = result.then(() => undefined, () => undefined);
+    pendingApps.set(app, settled);
+    void settled.then(() => {
+      if (pendingApps.get(app) === settled) pendingApps.delete(app);
+    });
     return result;
   };
   const appDirectory = (app: string) => join(directory, createHash("sha256").update(app, "utf8").digest("hex"));
-  const checkedName = (app: string) => {
-    if (!appName.safeParse(app).success) throw new Error("invalid lifecycle app name");
-    return app;
-  };
   const withEnvelope = async <T>(path: string, ownership: IndexEntry, use: (store: EnvelopeStore) => T | Promise<T>) => {
     await requireDirectory(path);
     const appJournal = await openJournal(path, ownership.phase === "ready" ? "existing" : "initialize");
@@ -82,25 +89,23 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await appJournal.close();
     }
   };
-  const useReady = <T>(app: string, use: (store: EnvelopeStore) => Promise<T>) => serial(async () => {
-    const name = checkedName(app);
+  const useReady = <T>(app: string, use: (store: EnvelopeStore) => Promise<T>) => serialApp(app, async () => {
     const index = await readIndex();
-    const ownership = index.apps.find((item) => item.app === name);
+    const ownership = index.apps.find((item) => item.app === app);
     if (ownership?.phase !== "ready") throw new Error("lifecycle app is not ready in the index");
-    return withEnvelope(appDirectory(name), ownership, use);
+    return withEnvelope(appDirectory(app), ownership, use);
   });
 
   return {
-    prepareApp: (app: string) => serial(async () => {
-      const name = checkedName(app);
+    prepareApp: (app: string) => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
-      const path = appDirectory(name);
-      const existing = index.apps.find((item) => item.app === name);
+      const path = appDirectory(app);
+      const existing = index.apps.find((item) => item.app === app);
       if (existing?.phase === "ready") {
         await withEnvelope(path, existing, () => undefined);
         return existing.incarnation;
       }
-      const ownership = existing ?? entry.parse({ app: name, incarnation: randomUUID(), phase: "initializing" });
+      const ownership = existing ?? entry.parse({ app, incarnation: randomUUID(), phase: "initializing" });
       if (existing === undefined) {
         if (await stat(path)) throw new Error("unindexed lifecycle directory exists; intervention required");
         if (index.apps.some((item) => item.incarnation === ownership.incarnation)) throw new Error("lifecycle incarnation collision");
@@ -109,17 +114,18 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (await stat(path) === undefined) await mkdir(path, { mode: 0o700 });
       await syncDirectory(directory);
       await withEnvelope(path, ownership, () => undefined);
-      await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== name), { ...ownership, phase: "ready" }] });
+      await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
-    }),
+    })),
     reserveRegistration: (app: string) => useReady(app, (store) => store.reserveRegistration()),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.submitRegistration(ticket, generation)),
     reconcileRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.reconcileRegistration(ticket, generation)),
-    close: () => {
+    close: async () => {
       closed = true;
-      return pending.then(() => journal.close());
+      await Promise.all(pendingApps.values());
+      await journal.close();
     },
   };
 };

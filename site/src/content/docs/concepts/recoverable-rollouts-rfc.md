@@ -185,6 +185,30 @@ lifecycle owner must serialize registration, deployment, removal and purge,
 reconcile incomplete removal, and check volume ownership and attachments. A
 registration recheck or removal marker alone does not establish those guarantees.
 
+### Coordinator app index
+
+The experimental coordinator index owns the link between an app name and its
+operation journal. Provisioning creates a fresh index directory under a trusted
+parent. Startup opens an existing index under an exclusive writer lock and
+refuses missing state. The coordinator's composition root must select this
+directory durably and control its ancestry. A fresh directory is never a
+recovery procedure for a missing index.
+
+The index records an initializing app and its server-assigned incarnation
+before creating the app's directory. The directory name is the SHA-256 digest
+of the validated app name. After syncing the directory entry and initializing
+the envelope, the index marks the app ready. A retry can finish initialization
+using the same incarnation. A ready entry with a missing or mismatched journal
+requires intervention. Unindexed directories and envelopes that already issued
+tickets during initialization also require intervention.
+
+The index is wired to initial registration intent and receipt reconciliation
+through the envelope store. It serializes these calls, including observation,
+for the entire index. Bounded observation and independent progress between
+apps are required before live use. The index does not adopt legacy apps or
+assign a new incarnation to an existing name. Legacy entrypoints still bypass
+this experimental path.
+
 ### Proposed per-app lifecycle protocol
 
 The following protocol specifies the intended replacement for the current
@@ -325,9 +349,10 @@ private/<app-key>/generations/<generation>/configuration.json
 private/<app-key>/generations/<generation>/secrets/<KEY>
 ```
 
-The app key is a stable digest of the full validated app name; a durable
-platform index binds that key to the original name and incarnation. This avoids
-using an unbounded fleet name as a filesystem path component.
+The app key is a stable digest of the full validated app name. The coordinator
+binds that name to an incarnation in its private index and provides the binding
+to the platform through the lifecycle interface. This avoids using an unbounded
+fleet name as a filesystem path component.
 
 The strict version-one manifest and pointer each contain only `version`, `app`,
 `incarnation`, `actionId` and `registrationGeneration`. The incarnation and

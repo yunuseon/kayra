@@ -1,18 +1,27 @@
 /* The journal owns a live lock and serializes I/O across its mutable lifetime. */
 /* eslint-disable functional/no-let, functional/prefer-immutable-types */
 import { randomUUID } from 'node:crypto';
-import { open, readFile, rename, unlink } from 'node:fs/promises';
+import { lstat, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 export type JournalValue = null | boolean | number | string | readonly JournalValue[] | { readonly [key: string]: JournalValue };
+const missing = (error: unknown) => error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 
 // SQLite holds only the OS lock. The journal is a separately synchronized JSON file.
 // Never delete or replace the lock database: another writer could lock a new inode.
-export const openJournal = async (directory: string) => {
-  const lock = new DatabaseSync(join(directory, 'writer-lock.sqlite'));
+export const openJournal = async (directory: string, mode: 'initialize' | 'existing' = 'initialize') => {
+  const lockPath = join(directory, 'writer-lock.sqlite');
   const statePath = join(directory, 'state.json');
   const markerPath = join(directory, 'initialized');
+  if (mode === 'existing') {
+    const files = await Promise.all([lockPath, statePath, markerPath].map((path) => lstat(path).catch((error: unknown) => {
+      if (missing(error)) return undefined;
+      throw error;
+    })));
+    if (files.some((file) => !file?.isFile())) throw new Error('indexed journal files are missing or invalid; intervention required');
+  }
+  const lock = new DatabaseSync(lockPath);
   // Keep the established committed marker so an older deployer can read a
   // completed initialization after a downgrade.
   const committedMarker = 'kayra-journal-v1\n';
@@ -58,15 +67,15 @@ export const openJournal = async (directory: string) => {
       else if (marker === committedMarker) initialized = true;
       else throw new Error('journal initialization marker is invalid');
     } catch (error) {
-      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
+      if (!missing(error)) throw error;
     }
     try {
       JSON.parse(await readFile(statePath, 'utf8'));
       hasState = true;
     } catch (error) {
-      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
+      if (!missing(error)) throw error;
     }
-    if ((initialized && !hasState) || (!initialized && !preparing && hasState)) {
+    if ((!hasState && (initialized || mode === 'existing')) || (!initialized && !preparing && hasState)) {
       throw new Error('journal initialization and state disagree; intervention required');
     }
     // The initial write could have been interrupted after making its state durable
@@ -92,7 +101,7 @@ export const openJournal = async (directory: string) => {
         const parsed: unknown = JSON.parse(await readFile(statePath, 'utf8'));
         return parsed;
       } catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT' && !hasState) return undefined;
+      if (missing(error) && !hasState) return undefined;
         failed = true;
         throw error;
       }

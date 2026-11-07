@@ -64,8 +64,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     if (!appName.safeParse(app).success) return Promise.reject(new Error("invalid lifecycle app name"));
     const result = (pendingApps.get(app) ?? Promise.resolve()).then(task);
     const settled = result.then(() => undefined, () => undefined);
+    // eslint-disable-next-line functional/immutable-data -- track the tail of each live app queue
     pendingApps.set(app, settled);
     void settled.then(() => {
+      // eslint-disable-next-line functional/immutable-data -- release idle app queues
       if (pendingApps.get(app) === settled) pendingApps.delete(app);
     });
     return result;

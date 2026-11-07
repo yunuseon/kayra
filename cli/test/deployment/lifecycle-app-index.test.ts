@@ -104,11 +104,11 @@ test("indexed ownership is held when a ready journal disappears or belongs to an
 
 test("observation fences one app and close drains its accepted calls", { timeout: 5000 }, async (t) => {
   const root = await fixture(t);
-  const started = Promise.withResolvers<void>();
-  const observed = Promise.withResolvers<void>();
-  t.after(() => observed.resolve());
+  const started = Promise.withResolvers<undefined>();
+  const observed = Promise.withResolvers<undefined>();
+  t.after(() => { observed.resolve(undefined); });
   const index = await createLifecycleAppIndex(root, async (expected) => {
-    started.resolve();
+    started.resolve(undefined);
     await observed.promise;
     return { ...expected, status: "applied" };
   });
@@ -126,13 +126,13 @@ test("observation fences one app and close drains its accepted calls", { timeout
     await assert.rejects(index.prepareApp("third"), /closed/);
     await assert.rejects(openLifecycleAppIndex(root), /locked/);
 
-    observed.resolve();
+    observed.resolve(undefined);
     assert.deepEqual(await reconcile, { status: "verified" });
     assert.deepEqual(await retry, { status: "terminal", outcome: "success" });
     await closing;
     await (await openLifecycleAppIndex(root)).close();
   } finally {
-    observed.resolve();
+    observed.resolve(undefined);
     await index.close();
   }
 });

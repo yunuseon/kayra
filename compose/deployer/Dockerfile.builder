@@ -16,7 +16,7 @@ FROM node:24.22.1-trixie-slim@sha256:89c5244bc22a9bc3287d89ebc7e49b9cb5bb84cd40e
 # renovate: datasource=github-releases depName=moby/buildkit
 ARG BUILDKIT_VERSION=v0.34.1
 # renovate: datasource=github-releases depName=mikefarah/yq
-ARG YQ_VERSION=v4.54.1
+ARG YQ_VERSION=v4.54.3
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl git jq && \

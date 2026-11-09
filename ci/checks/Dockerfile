@@ -30,7 +30,7 @@ ARG SHELLCHECK_VERSION=v0.11.0
 # renovate: datasource=github-releases depName=opentofu/opentofu
 ARG TOFU_VERSION=v1.13.2
 # renovate: datasource=github-releases depName=mikefarah/yq
-ARG YQ_VERSION=v4.54.1
+ARG YQ_VERSION=v4.54.3
 # renovate: datasource=github-releases depName=docker/compose
 ARG COMPOSE_VERSION=v5.6.1
 # renovate: datasource=github-releases depName=getsops/sops

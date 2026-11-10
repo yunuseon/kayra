@@ -49,6 +49,16 @@
   loop: [apps, app-secrets]
   become: true
 
+- name: Create host removal state directories
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop: [removal-locks, removing]
+  become: true
+
 # Written by the deployer (uid 1000); the builder reads runs/ for its pages.
 - name: Create the runs and releases directories
   ansible.builtin.file:

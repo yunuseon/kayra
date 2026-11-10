@@ -25,7 +25,18 @@ if ! valid_app_name "$app"; then
     exit 1
 fi
 platform_dir="$(cd "$(dirname "$0")/.." && pwd)"
+# Keep lock inodes across operations and upgrades.
+exec 9>"${platform_dir}/removal-locks/${app}.lock"
+if ! flock -n 9; then
+    echo "ERROR: another remove or purge is in progress for ${app}." >&2
+    exit 1
+fi
+pending="${platform_dir}/removing/${app}.json"
 apps_dir="$(sed -n 's/^APPS_DIR=//p' "${platform_dir}/.env")"
+
+# A crash after unregistration must leave purge fenced and pruning retryable.
+touch "$pending"
+sync -f "${platform_dir}/removing"
 
 # Unregistered first: from here on no push, poll or rollback starts a run.
 rm -f "${platform_dir}/apps/${app}.json"
@@ -34,4 +45,6 @@ rm -rf "${platform_dir}/app-secrets/${app}" \
        "${platform_dir}/runs/${app}" \
        "${platform_dir}/releases/${app}" \
        "${apps_dir:?}/${app}"
+rm -f "$pending"
+sync -f "${platform_dir}/removing"
 echo "Removed ${app}. Its volumes are kept — app-purge ${app} deletes them."

@@ -19,11 +19,23 @@ if ! valid_app_name "$app"; then
     exit 1
 fi
 platform_dir="$(cd "$(dirname "$0")/.." && pwd)"
+# Keep lock inodes across operations and upgrades.
+exec 9>"${platform_dir}/removal-locks/${app}.lock"
+if ! flock -n 9; then
+    echo "ERROR: another remove or purge is in progress for ${app}." >&2
+    exit 1
+fi
+pending="${platform_dir}/removing/${app}.json"
 
 if [ -e "${platform_dir}/apps/${app}.json" ]; then
     echo "ERROR: ${app} is still registered on this server — remove it from server.yml and run \`kayra apps <server>\` first." >&2
     exit 1
 fi
+if [ -e "$pending" ]; then
+    echo "ERROR: removal of ${app} is incomplete. Retry app-remove before purging." >&2
+    exit 1
+fi
+
 volumes=$(docker volume ls -q --filter "label=com.docker.compose.project=${app}")
 if [ -z "$volumes" ]; then
     echo "No volumes left for ${app}."

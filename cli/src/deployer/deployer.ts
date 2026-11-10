@@ -23,6 +23,7 @@ import { abandonInterruptedRuns, appendLog, meta, prune, runsOf, writeMeta } fro
 import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
 import { assess, gather } from "./health.ts";
+import type { registrationControl } from "../server/deployment/registration-control.ts";
 import { startWithLifecycle } from "../server/deployment/startup.ts";
 import { composeProjectRunning } from "../server/runtime/compose.ts";
 
@@ -206,11 +207,24 @@ const pushHandler = (s: Settings, gatherFacts: typeof gather) => handle((request
 /** The internal push/health HTTP surface, with injectable health observations. */
 export const deployerPushHandler = (env: NodeJS.ProcessEnv, gatherFacts: typeof gather = gather) => pushHandler(settings(env), gatherFacts);
 
-const control = async (s: Settings, request: IncomingMessage, response: ServerResponse) => {
+const control = async (
+  s: Settings, request: IncomingMessage, response: ServerResponse,
+  registration?: ReturnType<typeof registrationControl>,
+) => {
   const path = new URL(request.url ?? "/", "http://deployer").pathname;
   const input = await json(request);
   if (request.method !== "POST" || typeof input !== "object" || input === null) {
     send(response, 400, "bad request\n");
+    return;
+  }
+  if (registration !== undefined && path.startsWith("/registration/")) {
+    try {
+      const result = await registration(path, input);
+      if (result === undefined) send(response, 400, "bad registration request\n");
+      else send(response, 200, JSON.stringify(result), "application/json; charset=utf-8");
+    } catch {
+      send(response, 409, "registration unavailable; inspect the operation before retrying\n");
+    }
     return;
   }
   if (path === "/deploy") {
@@ -237,12 +251,17 @@ const control = async (s: Settings, request: IncomingMessage, response: ServerRe
   send(response, 404, "not found\n");
 };
 
+export const deployerControlHandler = (env: NodeJS.ProcessEnv, registration?: ReturnType<typeof registrationControl>) => {
+  const s = settings(env);
+  return handle((request, response) => control(s, request, response, registration));
+};
+
 export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
   const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), () => {
     abandonInterruptedRuns(runsDir(s), () => new Date().toISOString());
     createServer(pushHandler(s, gather)).listen(8090);
-    createServer(handle((request, response) => control(s, request, response))).listen(8091, "127.0.0.1");
+    createServer(deployerControlHandler(env)).listen(8091, "127.0.0.1");
     schedule(s, {
       poll: () => { void poll(s); },
       gc: () => { ask(s, jobRequest(newId(), "gc", false, "schedule")); },

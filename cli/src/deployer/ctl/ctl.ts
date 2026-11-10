@@ -128,6 +128,21 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     if (target === undefined || commit.length < 7) return fail(`${commit} is not an earlier release of ${name.value}`);
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
   },
+  registration: async ([operation, app, generation, ticket]) => {
+    if ((operation !== "reserve" && operation !== "submit" && operation !== "reconcile") ||
+      app === undefined || generation === undefined || (operation === "reserve") !== (ticket === undefined)) {
+      return fail("usage: ctl registration reserve|submit|reconcile <app> <generation> [ticket]");
+    }
+    const response = await fetch(`http://127.0.0.1:8091/registration/${operation}`, {
+      method: "POST",
+      body: JSON.stringify({ app, generation, ...(ticket === undefined ? {} : { ticket }) }),
+      signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+    if (response === undefined) return fail("registration control unavailable");
+    if (!response.ok) return fail(`registration control returned ${response.status}`);
+    console.log(await response.text());
+    return 0;
+  },
   job: async ([job, flag]) => {
     const posted = await post("/job", { job, dryRun: flag === "--dry-run" });
     if (posted.run !== undefined) console.log(`${String(job)}: run ${posted.run.id}; kayra app logs <server> ${String(job)} shows its log`);

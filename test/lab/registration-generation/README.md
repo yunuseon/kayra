@@ -88,3 +88,9 @@ before ticket allocation. After each kill it reopens that storage to recover
 the original generation ID. The platform storage suite verifies that a lost
 staging acknowledgement recovers the same request and that changing the
 payload under the same app is refused.
+
+After verifying publication, the platform writes a root-owned evidence record
+that contains only the operation identity and applied status. The coordinator
+reads that record using the platform adapter. The fixture exercises this
+handoff through ordinary files. Production integration still needs to mount the
+evidence directory read-only in the deployer and keep publication fenced.

@@ -6,7 +6,7 @@ import sys
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts/server-lib"))
-from registration_generation import observe, publish_staged_initial_registration, stage_initial_registration
+from registration_generation import record_publication_evidence, publish_staged_initial_registration, stage_initial_registration
 
 mode, directory = sys.argv[1:]
 expected = json.load(sys.stdin)
@@ -19,7 +19,7 @@ try:
     elif mode == "publish":
         publish_staged_initial_registration(root, {"version": 1, **expected}, 0)
     elif mode == "observe":
-        print(json.dumps(observe(root, {"version": 1, **expected}, 0)))
+        print(json.dumps(record_publication_evidence(root, {"version": 1, **expected}, 0)))
     else:
         raise ValueError("unknown fixture operation")
 finally:

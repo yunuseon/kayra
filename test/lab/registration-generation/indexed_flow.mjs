@@ -8,19 +8,25 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../../cli/src/server/deployment/lifecycle-app-index.ts";
 
+import { registrationObservation } from "../../../cli/src/server/platform/registration-observation.ts";
+
 const app = "fixture-app-";
 const platform = (mode, root, expected) => execFileSync("python3", [
   "-B", fileURLToPath(new URL("platform_fixture.py", import.meta.url)), mode, join(root, "platform"),
 ], { input: JSON.stringify(expected), encoding: "utf8", timeout: 5000 });
-const observe = (root, expected) => JSON.parse(platform("observe", root, expected));
+const observe = async (root, expected, signal) => {
+  const evidence = JSON.parse(platform("observe", root, expected));
+  if (evidence.status !== "applied") return evidence;
+  return registrationObservation(join(root, "platform", "observations"))(expected, signal);
+};
 const signalParent = (message) => new Promise((resolve, reject) => {
   process.send(message, (error) => error ? reject(error) : resolve());
 });
 
 async function runWriter(root, checkpoint) {
   const generation = platform("stage", root, { app }).trim();
-  const index = await createLifecycleAppIndex(join(root, "index"), async (expected) => {
-    const evidence = observe(root, expected);
+  const index = await createLifecycleAppIndex(join(root, "index"), async (expected, signal) => {
+    const evidence = await observe(root, expected, signal);
     assert.equal(evidence.status, "applied");
     await signalParent({ ticket: expected.actionId, checkpoint });
     return new Promise(() => {});
@@ -74,8 +80,8 @@ if (process.argv[2] === "writer") {
         const generation = platform("stage", root, { app }).trim();
         const unpublished = checkpoint === "before-publish" || checkpoint === "lost-allocation-reply";
         const observations = [];
-        const index = await openLifecycleAppIndex(join(root, "index"), async (expected) => {
-          const evidence = observe(root, expected);
+        const index = await openLifecycleAppIndex(join(root, "index"), async (expected, signal) => {
+          const evidence = await observe(root, expected, signal);
           observations.push(evidence.status);
           return evidence;
         });

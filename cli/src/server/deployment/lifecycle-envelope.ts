@@ -13,6 +13,7 @@ import { admitTicket, parseTicketState } from "./lifecycle-tickets.ts";
 // Registration and ownership generations are independent references, not app
 // incarnation IDs. This parser cannot authenticate either without registries.
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+export const registrationGenerationId = uuid;
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const descriptor = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("register"), registrationGeneration: uuid }).strict(),
@@ -28,6 +29,7 @@ const shape = z.object({
   created: z.boolean(),
   fence: z.unknown(),
   tickets: z.unknown(),
+  registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80) }).strict().optional(),
   operations: z.array(z.object({ ticket: z.string().max(80), action: z.string().max(80), descriptor }).strict()).max(2),
 }).strict();
 
@@ -41,6 +43,15 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   if (!fence.ok) return err("invalid lifecycle envelope");
   if (parsed.data.created !== (fence.value !== null) || (fence.value === null && tickets.value.receipts.length !== 0)) return err("invalid lifecycle envelope");
   if (fence.value !== null && (fence.value.app !== tickets.value.app || fence.value.generation !== tickets.value.incarnation)) return err("invalid lifecycle envelope");
+
+  const allocation = parsed.data.registrationAllocation;
+  if (allocation !== undefined) {
+    const bound = admitTicket(tickets.value, allocation.ticket, { kind: "register", registrationGeneration: allocation.generation });
+    if (!bound.ok || (bound.value.status === "new") !== !parsed.data.created ||
+      (bound.value.status === "accepted" && !parsed.data.operations.some((operation) => operation.ticket === allocation.ticket))) {
+      return err("invalid initial registration allocation");
+    }
+  }
 
   const current = fence.value?.lifecycle;
   const action = current !== undefined && "active" in current ? current.active : null;
@@ -64,5 +75,6 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   });
   if (!consistent) return err("invalid lifecycle envelope");
   operations.forEach((operation) => { Object.freeze(operation.descriptor); Object.freeze(operation); });
-  return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations) }));
+  return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
+    ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }) }));
 };

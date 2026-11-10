@@ -216,3 +216,18 @@ test("initializing ownership refuses an envelope that already issued tickets", a
     await index.close();
   }
 });
+
+test("initial registration allocation is bound to one generation across concurrent retries", async (t) => {
+  const root = await fixture(t);
+  const index = await createLifecycleAppIndex(root);
+  try {
+    const id = await index.prepareApp("shop");
+    await assert.rejects(index.reserveRegistration("shop", "bad"), /invalid registration generation/);
+    const tickets = await Promise.all(Array.from({ length: 70 }, () => index.reserveRegistration("shop", generation)));
+    assert.deepEqual(new Set(tickets), new Set([`${id}:1`]));
+    await assert.rejects(index.submitRegistration("shop", `${id}:1`, incarnation), /allocation conflict/);
+    await assert.rejects(index.reserveRegistration("shop"), /allocation conflict/);
+  } finally {
+    await index.close();
+  }
+});

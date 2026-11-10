@@ -1,8 +1,7 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, fork } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -11,11 +10,16 @@ import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../../cli/src
 import { registrationObservation } from "../../../cli/src/server/platform/registration-observation.ts";
 
 const app = "fixture-app-";
-const platform = (mode, root, expected) => execFileSync("python3", [
-  "-B", fileURLToPath(new URL("platform_fixture.py", import.meta.url)), mode, join(root, "platform"),
-], { input: JSON.stringify(expected), encoding: "utf8", timeout: 5000 });
+const fixture = JSON.parse(await readFile(new URL("../../../ci/tests/registration-generation/fixture.json", import.meta.url), "utf8"));
+const platform = (mode, root, input) => JSON.parse(execFileSync("python3", [
+  "-B", fileURLToPath(new URL("../../../scripts/server-lib/registration_command.py", import.meta.url)),
+  mode, "--root", join(root, "platform"), "--private-gid", "0",
+], { input: JSON.stringify(input), encoding: "utf8", timeout: 5000 }));
+const stage = (root) => platform("stage", root, {
+  app, registration: fixture.registration, configuration: fixture.configuration, secrets: fixture.secrets,
+}).generation;
 const observe = async (root, expected, signal) => {
-  const evidence = JSON.parse(platform("observe", root, expected));
+  const evidence = platform("verify", root, { version: 1, ...expected });
   if (evidence.status !== "applied") return evidence;
   return registrationObservation(join(root, "platform", "observations"))(expected, signal);
 };
@@ -24,7 +28,7 @@ const signalParent = (message) => new Promise((resolve, reject) => {
 });
 
 async function runWriter(root, checkpoint) {
-  const generation = platform("stage", root, { app }).trim();
+  const generation = stage(root);
   const index = await createLifecycleAppIndex(join(root, "index"), async (expected, signal) => {
     const evidence = await observe(root, expected, signal);
     assert.equal(evidence.status, "applied");
@@ -40,7 +44,8 @@ async function runWriter(root, checkpoint) {
   const intent = await index.submitRegistration(app, ticket, generation);
   assert.deepEqual(intent, { status: "new", actionId: ticket });
   if (checkpoint !== "before-publish") {
-    platform("publish", root, { app, incarnation, actionId: intent.actionId, registrationGeneration: generation });
+    const evidence = platform("publish", root, { version: 1, app, incarnation, actionId: intent.actionId, registrationGeneration: generation });
+    assert.equal(evidence.status, "applied");
   }
   if (checkpoint === "after-observe") {
     await index.reconcileRegistration(app, ticket, generation);
@@ -57,7 +62,7 @@ if (process.argv[2] === "writer") {
     test(checkpoint, { timeout: 15000 }, async () => {
       assert.equal(process.platform, "linux");
       assert.equal(process.getuid(), 0);
-      const root = await mkdtemp(join(tmpdir(), "kayra-indexed-flow-"));
+      const root = await mkdtemp("/var/lib/kayra-indexed-flow-");
       try {
         await mkdir(join(root, "platform"), { mode: 0o700 });
         const child = fork(fileURLToPath(import.meta.url), ["writer", root, checkpoint], { execArgv: [] });
@@ -77,7 +82,7 @@ if (process.argv[2] === "writer") {
         }
 
         assert.deepEqual(await exited, [null, "SIGKILL"]);
-        const generation = platform("stage", root, { app }).trim();
+        const generation = stage(root);
         const unpublished = checkpoint === "before-publish" || checkpoint === "lost-allocation-reply";
         const observations = [];
         const index = await openLifecycleAppIndex(join(root, "index"), async (expected, signal) => {

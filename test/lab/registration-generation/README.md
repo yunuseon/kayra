@@ -107,3 +107,9 @@ to reserve, submit and reconcile. It binds port 8091 inside the isolated guest
 and permits only the fixture app. Production startup supplies no registration
 handler yet. The app role and legacy lifecycle commands still need a shared
 fence before this path can be enabled on a platform host.
+
+The host command also exposes `register`, which stages the request and calls
+the deployer's existing Compose exec control path to reserve, submit and
+reconcile it. A retry uses the same staged payload and accepts already-verified
+publication without replacing the generation. The storage suite covers a
+retry after publication with a pending receipt.

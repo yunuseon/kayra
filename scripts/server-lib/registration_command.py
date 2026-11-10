@@ -8,6 +8,7 @@ import contextlib
 import json
 import os
 from pathlib import PurePosixPath
+import subprocess
 import sys
 
 import registration_generation as storage
@@ -51,11 +52,52 @@ def execute(root, mode, gid, request):
     return storage.record_publication_evidence(root, request, gid)
 
 
+def register(root, gid, request, ctl):
+    generation = execute(root, "stage", gid, request)["generation"]
+    app = request["app"]
+    reservation = ctl("reserve", app, generation)
+    storage._require(type(reservation) is dict and set(reservation) == {"incarnation", "ticket"},
+                     "invalid registration reservation")
+    incarnation, ticket = reservation["incarnation"], reservation["ticket"]
+    storage._require(type(incarnation) is str and bool(storage._UUID.fullmatch(incarnation))
+                     and type(ticket) is str and ticket.startswith(incarnation + ":"),
+                     "invalid registration ticket")
+
+    intent = ctl("submit", app, generation, ticket)
+    if intent == {"status": "terminal", "outcome": "success"}:
+        return intent
+    storage._require(type(intent) is dict and set(intent) == {"status", "actionId"}
+                     and intent["status"] in ("new", "reconcile"), "invalid registration intent")
+    metadata = storage._metadata({"version": 1, "app": app, "incarnation": incarnation,
+                                  "registrationGeneration": generation, "actionId": intent["actionId"]})
+    # The platform command uses the immutable staged inputs and exclusive
+    # generation creation even if the original submit acknowledgement was lost.
+    evidence = execute(root, "publish", gid, metadata)
+    storage._require(evidence["status"] == "applied", "registration publication remains unresolved")
+    receipt = ctl("reconcile", app, generation, ticket)
+    storage._require(receipt in ({"status": "verified"}, {"status": "terminal", "outcome": "success"}),
+                     "registration receipt remains unresolved")
+    return receipt
+
+
+def docker_control(platform_dir, *args):
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "exec", "-T", "deployer", "kayra-deployer", "ctl", "registration", *args],
+            cwd=platform_dir, check=True, capture_output=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise storage.RegistrationError("registration control unavailable; retry the same request") from None
+    storage._require(len(result.stdout) <= storage.MAX_FILE_BYTES, "registration control reply too large")
+    return storage._decode(result.stdout)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("stage", "publish", "verify"))
+    parser.add_argument("mode", choices=("stage", "publish", "verify", "register"))
     parser.add_argument("--root", required=True)
     parser.add_argument("--private-gid", type=int, required=True)
+    parser.add_argument("--platform-dir")
     args = parser.parse_args()
     try:
         storage._require(0 <= args.private_gid <= 2147483647, "invalid registration group")
@@ -63,7 +105,13 @@ def main():
         storage._require(len(raw) <= storage.MAX_STAGED_BYTES, "registration request too large")
         request = storage._decode(raw)
         with trusted_root(args.root) as root:
-            result = execute(root, args.mode, args.private_gid, request)
+            if args.mode == "register":
+                storage._require(args.platform_dir is not None and os.path.isabs(args.platform_dir),
+                                 "register requires an absolute platform directory")
+                result = register(root, args.private_gid, request,
+                                  lambda *values: docker_control(args.platform_dir, *values))
+            else:
+                result = execute(root, args.mode, args.private_gid, request)
         print(json.dumps(result))
     except (OSError, RecursionError):
         print("registration host operation failed; reconcile before retrying", file=sys.stderr)

@@ -119,7 +119,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
-    reserveRegistration: (app: string) => useReady(app, (store) => store.reserveRegistration()),
+    reserveRegistration: (app: string, generation?: string) => useReady(app, (store) => store.reserveRegistration(generation)),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.submitRegistration(ticket, generation)),
     reconcileRegistration: (app: string, ticket: string, generation: string) =>

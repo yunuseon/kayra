@@ -237,6 +237,13 @@ may be retained in bounded history, but an evicted ticket must return an unknown
 or expired outcome, never start work again. Timeouts cannot expire accepted
 operations. Ticket identity is not authorization and does not prove an effect.
 
+For initial registration, the caller can retain a generation ID before asking
+for allocation. The index journals that ID with the reservation in one write.
+Retrying the same ID returns the original ticket through acceptance and
+settlement. A different ID conflicts with the existing binding. This single
+binding applies for the life of the initial registration in that incarnation.
+The live Ansible caller still needs durable storage for its generation ID.
+
 The existing Ansible app role must acquire a registration operation through the
 deployer's existing local control interface before inspecting the old
 registration or changing configuration and secrets. The coordinator first

@@ -1,13 +1,13 @@
 /* Disconnected prototype. No operation here authorizes or executes an effect.
  * The composition root must exclusively own this journal (including across
  * other journal consumers), bind its identity to a durable app index, and
- * authenticate registration references. Lost allocation replies can exhaust
- * reservations; this is not a live endpoint or a complete lifecycle owner. */
+ * authenticate registration references. This is not a live endpoint or a
+ * complete lifecycle owner. */
 /* eslint-disable functional/prefer-immutable-types */
 import type { OperationJournal } from "./operation.ts";
 import { parseRegistrationObservation } from "../../contracts/registration-generation.ts";
 import { claimJournal } from "./journal-claim.ts";
-import { parseLifecycleEnvelope } from "./lifecycle-envelope.ts";
+import { parseLifecycleEnvelope, registrationGenerationId } from "./lifecycle-envelope.ts";
 import { beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
 
@@ -65,13 +65,23 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       if (!tickets.ok) throw new Error(tickets.error);
       return persist({ version: 1, created: false, fence: null, tickets: tickets.value, operations: [] });
     }),
-    /** Allocation is durable before return, but a lost allocation reply is not recoverable here. */
-    reserveRegistration: () => serial(async () => {
+    /** The caller durably retains the generation ID before requesting a ticket. */
+    reserveRegistration: (generation?: string) => serial(async () => {
+      if (generation !== undefined && !registrationGenerationId.safeParse(generation).success) throw new Error("invalid registration generation");
       const current = await required();
+      const allocation = current.registrationAllocation;
+      if (allocation !== undefined) {
+        if (allocation.generation !== generation) throw new Error("initial registration allocation conflict");
+        return allocation.ticket;
+      }
       if (current.created) throw new Error("initial registration is already in progress or complete");
+      if (generation !== undefined && current.tickets.active.length !== 0) throw new Error("initial registration has outstanding legacy reservations");
       const reserved = reserveTicket(current.tickets);
       if (!reserved.ok) throw new Error(reserved.error);
-      await persist({ ...current, tickets: reserved.value.state });
+      await persist({
+        ...current, tickets: reserved.value.state,
+        ...(generation === undefined ? {} : { registrationAllocation: { generation, ticket: reserved.value.ticket } }),
+      });
       return reserved.value.ticket;
     }),
     /** A new response acknowledges persisted intent only; reconcile responses never permit replay. */
@@ -80,6 +90,10 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const descriptor = Object.freeze({ kind: "register" as const, registrationGeneration });
       return serial(async () => {
         const current = await required();
+        const allocation = current.registrationAllocation;
+        if (allocation !== undefined && (allocation.ticket !== ticket || allocation.generation !== registrationGeneration)) {
+          throw new Error("initial registration allocation conflict");
+        }
         const admitted = admitTicket(current.tickets, ticket, descriptor);
         if (!admitted.ok) throw new Error(admitted.error);
         if (admitted.value.status === "terminal") return Object.freeze({ status: "terminal" as const, outcome: admitted.value.outcome });

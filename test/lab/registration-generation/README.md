@@ -72,10 +72,11 @@ sudo "$(command -v node)" --test test/lab/registration-generation/indexed_flow.m
 ```
 
 The fixture runs the coordinator's app index and the platform publisher with
-synthetic inputs. It kills the coordinator after intent, after publication,
-and after the observer verifies publication but before its result reaches the
-journal. On restart, it uses the same app index and real platform observation.
-The unpublished operation stays pending. The two published operations settle
+synthetic inputs. It kills the coordinator after allocating a ticket without
+delivering the reply, after intent, after publication, and after the observer
+verifies publication but before its result reaches the journal. A retry with
+the same generation ID recovers the original ticket. On restart, it uses the same app index and real platform observation.
+Unpublished operations stay pending. The two published operations settle
 without publishing again, and a second restart returns the durable receipt.
 
 CI runs these cases as `platform:indexed-registration`. The Python bridge and

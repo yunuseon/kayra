@@ -26,7 +26,11 @@ async function runWriter(root, checkpoint) {
     return new Promise(() => {});
   });
   const incarnation = await index.prepareApp(app);
-  const ticket = await index.reserveRegistration(app);
+  const ticket = await index.reserveRegistration(app, generation);
+  if (checkpoint === "lost-allocation-reply") {
+    await signalParent({ checkpoint });
+    return;
+  }
   const intent = await index.submitRegistration(app, ticket, generation);
   assert.deepEqual(intent, { status: "new", actionId: ticket });
   if (checkpoint !== "before-publish") {
@@ -43,7 +47,7 @@ if (process.argv[2] === "writer") {
   setInterval(() => {}, 1000);
   await runWriter(process.argv[3], process.argv[4]);
 } else {
-  for (const checkpoint of ["before-publish", "after-publish", "after-observe"]) {
+  for (const checkpoint of ["lost-allocation-reply", "before-publish", "after-publish", "after-observe"]) {
     test(checkpoint, { timeout: 15000 }, async () => {
       assert.equal(process.platform, "linux");
       assert.equal(process.getuid(), 0);
@@ -67,6 +71,7 @@ if (process.argv[2] === "writer") {
         }
 
         assert.deepEqual(await exited, [null, "SIGKILL"]);
+        const unpublished = checkpoint === "before-publish" || checkpoint === "lost-allocation-reply";
         const observations = [];
         const index = await openLifecycleAppIndex(join(root, "index"), async (expected) => {
           const evidence = observe(root, expected);
@@ -74,17 +79,28 @@ if (process.argv[2] === "writer") {
           return evidence;
         });
         try {
-          assert.deepEqual(await index.submitRegistration(app, ticket, generation), { status: "reconcile", actionId: ticket });
-          assert.deepEqual(await index.reconcileRegistration(app, ticket, generation), {
-            status: checkpoint === "before-publish" ? "pending" : "verified",
+          const recovered = await index.reserveRegistration(app, generation);
+          if (checkpoint === "lost-allocation-reply") {
+            assert.match(recovered, /:1$/);
+            ticket = recovered;
+          } else {
+            assert.equal(recovered, ticket);
+          }
+          await assert.rejects(index.reserveRegistration(app, "33333333-3333-4333-8333-333333333333"), /allocation conflict/);
+          assert.deepEqual(await index.submitRegistration(app, ticket, generation), {
+            status: checkpoint === "lost-allocation-reply" ? "new" : "reconcile", actionId: ticket,
           });
-          assert.deepEqual(observations, [checkpoint === "before-publish" ? "unknown" : "applied"]);
+          assert.deepEqual(await index.reconcileRegistration(app, ticket, generation), {
+            status: unpublished ? "pending" : "verified",
+          });
+          assert.deepEqual(observations, [unpublished ? "unknown" : "applied"]);
         } finally {
           await index.close();
         }
         const reopened = await openLifecycleAppIndex(join(root, "index"));
         try {
-          assert.deepEqual(await reopened.submitRegistration(app, ticket, generation), checkpoint === "before-publish"
+          assert.equal(await reopened.reserveRegistration(app, generation), ticket);
+          assert.deepEqual(await reopened.submitRegistration(app, ticket, generation), unpublished
             ? { status: "reconcile", actionId: ticket }
             : { status: "terminal", outcome: "success" });
         } finally {

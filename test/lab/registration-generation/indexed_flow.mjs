@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../../cli/src/server/deployment/lifecycle-app-index.ts";
 
 const app = "fixture-app-";
-const generation = "22222222-2222-4222-8222-222222222222";
 const platform = (mode, root, expected) => execFileSync("python3", [
   "-B", fileURLToPath(new URL("platform_fixture.py", import.meta.url)), mode, join(root, "platform"),
 ], { input: JSON.stringify(expected), encoding: "utf8", timeout: 5000 });
@@ -19,6 +18,7 @@ const signalParent = (message) => new Promise((resolve, reject) => {
 });
 
 async function runWriter(root, checkpoint) {
+  const generation = platform("stage", root, { app }).trim();
   const index = await createLifecycleAppIndex(join(root, "index"), async (expected) => {
     const evidence = observe(root, expected);
     assert.equal(evidence.status, "applied");
@@ -71,6 +71,7 @@ if (process.argv[2] === "writer") {
         }
 
         assert.deepEqual(await exited, [null, "SIGKILL"]);
+        const generation = platform("stage", root, { app }).trim();
         const unpublished = checkpoint === "before-publish" || checkpoint === "lost-allocation-reply";
         const observations = [];
         const index = await openLifecycleAppIndex(join(root, "index"), async (expected) => {

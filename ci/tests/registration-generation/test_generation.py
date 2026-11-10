@@ -46,6 +46,38 @@ class GenerationTest(unittest.TestCase):
     def next_metadata(self, number=3):
         return {**self.meta, "registrationGeneration": f"{number:08x}-3333-4333-8333-333333333333", "actionId": self.meta["incarnation"] + f":{number - 1}"}
 
+    def test_initial_staging_is_private_and_binds_exact_payload(self):
+        app = self.meta["app"]
+
+        def stage():
+            return storage.stage_initial_registration(self.fd, app, self.fixture["registration"], self.fixture["configuration"], self.fixture["secrets"])
+
+        replace = os.replace
+
+        def replace_then_fail(*args, **kwargs):
+            replace(*args, **kwargs)
+            raise OSError("lost acknowledgement")
+
+        with mock.patch.object(storage.os, "replace", side_effect=replace_then_fail):
+            with self.assertRaisesRegex(storage.RegistrationError, "staging uncertain"):
+                stage()
+        generation = stage()
+        self.assertEqual(stage(), generation)
+        request = self.root / "initial-requests" / self.key / "request.json"
+        self.assertEqual(stat.S_IMODE(request.stat().st_mode), 0o400)
+        self.assertEqual(stat.S_IMODE(request.parent.stat().st_mode), 0o700)
+        self.assertFalse((self.root / "public").exists())
+        with self.assertRaisesRegex(storage.RegistrationError, "generation conflict"):
+            storage.publish_staged_initial_registration(self.fd, self.next_metadata(), GID)
+        self.fixture["secrets"]["DATABASE_PASSWORD"] = "changed"
+        with self.assertRaisesRegex(storage.RegistrationError, "payload conflict"):
+            stage()
+        metadata = {**self.meta, "registrationGeneration": generation}
+        storage.publish_staged_initial_registration(self.fd, metadata, GID)
+        self.assertEqual(self.observation(metadata)["status"], "applied")
+        secret = self.path(True, generation) / "secrets/DATABASE_PASSWORD"
+        self.assertEqual(secret.read_text(), FIXTURE["secrets"]["DATABASE_PASSWORD"])
+
     def test_published_identity_and_private_access(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):

@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 MAX_BYTES = 1024 * 1024
 MAX_FILE_BYTES = 64 * 1024
+MAX_STAGED_BYTES = 8 * MAX_BYTES
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
@@ -47,12 +48,12 @@ def _metadata(value):
     return dict(value)
 
 
-def _encoded(value):
+def _encoded(value, limit=MAX_FILE_BYTES):
     try:
         data = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
     except (TypeError, ValueError, OverflowError):
         raise RegistrationError("invalid registration payload") from None
-    _require(len(data) <= MAX_FILE_BYTES, "registration payload too large")
+    _require(len(data) <= limit, "registration payload too large")
     return data
 
 
@@ -149,19 +150,19 @@ def _new_file(parent, name, data, mode, gid=0):
         os.close(fd)
 
 
-def _read_file(parent, name, mode, gid=0, contents=True):
+def _read_file(parent, name, mode, gid=0, contents=True, limit=MAX_FILE_BYTES):
     fd = os.open(name, _FILE_FLAGS, dir_fd=parent)
     try:
         info = _check(fd, mode, gid, False)
-        _require(info.st_size <= MAX_FILE_BYTES, "registration file too large")
+        _require(info.st_size <= limit, "registration file too large")
         if contents:
             data = bytearray()
             while True:
-                chunk = os.read(fd, min(8192, MAX_FILE_BYTES + 1 - len(data)))
+                chunk = os.read(fd, min(8192, limit + 1 - len(data)))
                 if not chunk:
                     break
                 data.extend(chunk)
-                _require(len(data) <= MAX_FILE_BYTES, "registration file too large")
+                _require(len(data) <= limit, "registration file too large")
             result = bytes(data)
         else:
             result = None
@@ -171,10 +172,78 @@ def _read_file(parent, name, mode, gid=0, contents=True):
         os.close(fd)
 
 
-@contextlib.contextmanager
-def _app(root, metadata, private_gid, create=False):
+def _check_root(root):
     info = os.fstat(root)
     _require(sys.platform == "linux" and os.geteuid() == 0 and stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not (info.st_mode & 0o022), "untrusted registration root")
+
+
+def _payload(app, registration, configuration, secrets):
+    registration = _registration(registration, {"app": app})
+    configuration, secrets = _values(configuration), _values(secrets)
+    _require(set(secrets) == set(registration["secrets"]) and not set(configuration).intersection(secrets), "registration keys do not match")
+    size = len(_encoded(registration)) + len(_encoded(configuration))
+    _require(size + sum(len(value.encode("utf8")) for value in secrets.values()) <= MAX_BYTES, "registration payload too large")
+    return {"registration": registration, "configuration": configuration, "secrets": secrets}
+
+
+@contextlib.contextmanager
+def _staging(root, app, create=False):
+    _check_root(root)
+    key = hashlib.sha256(app.encode("utf8")).hexdigest()
+    with _dir(root, "initial-requests", 0o700, create=create) as requests:
+        with _dir(requests, key, 0o700, create=create) as staged:
+            yield staged
+
+
+def _read_staged(staged, app):
+    request = _decode(_read_file(staged, "request.json", 0o400, limit=MAX_STAGED_BYTES))
+    _require(type(request) is dict and set(request) == {"generation", "registration", "configuration", "secrets"})
+    generation = request["generation"]
+    _require(type(generation) is str and bool(_UUID.fullmatch(generation)), "invalid staged registration generation")
+    payload = _payload(app, request["registration"], request["configuration"], request["secrets"])
+    return generation, payload
+
+
+def stage_initial_registration(root, app, registration, configuration, secrets):
+    """Durably bind one root-only request to a generation before allocation."""
+    _require(type(app) is str and bool(_APP.fullmatch(app)), "invalid staged app name")
+    payload = _payload(app, registration, configuration, secrets)
+    try:
+        with _staging(root, app, create=True) as staged:
+            lock = os.open(".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=staged)
+            try:
+                _check(lock, 0o600, 0, False)
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                try:
+                    generation, previous = _read_staged(staged, app)
+                except FileNotFoundError:
+                    generation = str(uuid.uuid4())
+                    temporary = ".request-" + uuid.uuid4().hex + ".tmp"
+                    _new_file(staged, temporary, _encoded({"generation": generation, **payload}, MAX_STAGED_BYTES), 0o400)
+                    os.replace(temporary, "request.json", src_dir_fd=staged, dst_dir_fd=staged)
+                else:
+                    _require(previous == payload, "initial registration payload conflict")
+                os.fsync(staged)
+                return generation
+            finally:
+                os.close(lock)
+    except OSError:
+        raise RegistrationError("initial registration staging uncertain; retry with the same payload") from None
+
+
+def publish_staged_initial_registration(root, metadata, private_gid):
+    """Publish staged inputs under an already-held durable registration fence."""
+    expected = _metadata(metadata)
+    with _staging(root, expected["app"]) as staged:
+        generation, payload = _read_staged(staged, expected["app"])
+        _require(generation == expected["registrationGeneration"], "staged registration generation conflict")
+        os.fsync(staged)
+    return publish(root, expected, **payload, private_gid=private_gid)
+
+
+@contextlib.contextmanager
+def _app(root, metadata, private_gid, create=False):
+    _check_root(root)
     _require(type(private_gid) is int and 0 <= private_gid <= 2147483647, "invalid registration group")
     key = hashlib.sha256(metadata["app"].encode("utf8")).hexdigest()
     with _dir(root, "public", 0o755, create=create) as public, _dir(root, "private", 0o750, private_gid, create) as private:
@@ -212,11 +281,11 @@ def publish(root, metadata, registration, configuration, secrets, private_gid, p
     if previous is not None:
         _require(previous["app"] == expected["app"] and previous["incarnation"] == expected["incarnation"], "registration identity changed")
         _require(int(expected["actionId"].rpartition(":")[2]) > int(previous["actionId"].rpartition(":")[2]), "registration action did not advance")
-    registration = _registration(registration, expected)
-    configuration, secrets = _values(configuration), _values(secrets)
-    _require(set(secrets) == set(registration["secrets"]) and not set(configuration).intersection(secrets), "registration keys do not match")
-    metadata_bytes, registration_bytes, config_bytes = _encoded(expected), _encoded(registration), _encoded(configuration)
-    _require(sum(len(value.encode("utf8")) for value in secrets.values()) + len(config_bytes) + len(registration_bytes) <= MAX_BYTES, "registration payload too large")
+    payload = _payload(expected["app"], registration, configuration, secrets)
+    secrets = payload["secrets"]
+    metadata_bytes = _encoded(expected)
+    registration_bytes = _encoded(payload["registration"])
+    config_bytes = _encoded(payload["configuration"])
     generation = expected["registrationGeneration"]
     try:
         with _app(root, expected, private_gid, create=True) as (public, public_generations, private_generations):

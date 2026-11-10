@@ -363,3 +363,20 @@ def observe(root, expected, private_gid):
     except (OSError, RegistrationError, UnicodeError):
         pass
     return _evidence(expected, status)
+
+
+def record_publication_evidence(root, metadata, private_gid):
+    """Record applied evidence while the caller still holds the app fence."""
+    expected = _metadata(metadata)
+    evidence = observe(root, expected, private_gid)
+    if evidence["status"] != "applied":
+        return evidence
+    key = hashlib.sha256(expected["app"].encode("utf8")).hexdigest()
+    with _dir(root, "observations", 0o755, create=True) as observations:
+        with _dir(observations, key, 0o755, create=True) as app:
+            name = expected["registrationGeneration"] + ".json"
+            temporary = ".observation-" + uuid.uuid4().hex + ".tmp"
+            _new_file(app, temporary, _encoded(evidence), 0o444)
+            os.replace(temporary, name, src_dir_fd=app, dst_dir_fd=app)
+            os.fsync(app)
+    return evidence

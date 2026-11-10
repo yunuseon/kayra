@@ -78,6 +78,23 @@ class GenerationTest(unittest.TestCase):
         secret = self.path(True, generation) / "secrets/DATABASE_PASSWORD"
         self.assertEqual(secret.read_text(), FIXTURE["secrets"]["DATABASE_PASSWORD"])
 
+    def test_only_verified_publication_creates_root_owned_evidence(self):
+        evidence_root = self.root / "observations"
+        result = storage.record_publication_evidence(self.fd, self.meta, GID)
+        self.assertEqual(result["status"], "unknown")
+        self.assertFalse(evidence_root.exists())
+        self.publish()
+        wrong = storage.record_publication_evidence(self.fd, self.next_metadata(), GID)
+        self.assertEqual(wrong["status"], "not-applied")
+        self.assertFalse(evidence_root.exists())
+        result = storage.record_publication_evidence(self.fd, self.meta, GID)
+        path = evidence_root / self.key / (self.meta["registrationGeneration"] + ".json")
+        self.assertEqual(json.loads(path.read_text()), result)
+        self.assertEqual(result, self.fixture["evidence"])
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
+        self.assertEqual(path.stat().st_uid, 0)
+        self.assertEqual(path.stat().st_gid, 0)
+
     def test_published_identity_and_private_access(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):

@@ -28,7 +28,7 @@ FROM python:3.14.9-slim-trixie AS tools
 # renovate: datasource=github-releases depName=koalaman/shellcheck
 ARG SHELLCHECK_VERSION=v0.11.0
 # renovate: datasource=github-releases depName=opentofu/opentofu
-ARG TOFU_VERSION=v1.13.2
+ARG TOFU_VERSION=v1.13.9
 # renovate: datasource=github-releases depName=mikefarah/yq
 ARG YQ_VERSION=v4.54.1
 # renovate: datasource=github-releases depName=docker/compose

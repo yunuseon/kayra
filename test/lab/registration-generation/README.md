@@ -82,3 +82,9 @@ without publishing again, and a second restart returns the durable receipt.
 CI runs these cases as `platform:indexed-registration`. The Python bridge and
 its temporary storage are lab fixtures. Live Ansible registration and its
 coordination with deploy, remove and purge still require integration tests.
+
+The indexed fixture also stages the full initial request in root-only storage
+before ticket allocation. After each kill it reopens that storage to recover
+the original generation ID. The platform storage suite verifies that a lost
+staging acknowledgement recovers the same request and that changing the
+payload under the same app is refused.

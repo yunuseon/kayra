@@ -219,3 +219,30 @@ test("concurrent reconciliation observes and commits once, then returns the hist
   assert.equal(observations, 1);
   assert.equal(writes, before + 1);
 });
+
+test("a timed-out observation leaves intent pending and a later attempt can verify it", async () => {
+  // eslint-disable-next-line functional/no-let -- simulated durable state
+  let value: JournalValue | undefined;
+  // eslint-disable-next-line functional/no-let -- first observation remains outstanding until explicitly released
+  let calls = 0;
+  const late = Promise.withResolvers<unknown>();
+  const aborted = Promise.withResolvers<undefined>();
+  const store = openLifecycleEnvelopeStore({
+    read: () => Promise.resolve(value),
+    write: (next) => { value = structuredClone(next); return Promise.resolve(); },
+  }, (expected, signal) => {
+    calls++;
+    const evidence = { ...expected, status: "applied" };
+    if (calls !== 1) return Promise.resolve(evidence);
+    signal.addEventListener("abort", () => { aborted.resolve(undefined); }, { once: true });
+    return late.promise.then(() => evidence);
+  }, 20);
+  await store.initialize("shop", incarnation);
+  const ticket = await store.reserveRegistration(registration);
+  await store.submitRegistration(ticket, registration);
+  assert.deepEqual(await store.reconcileRegistration(ticket, registration), { status: "pending" });
+  await aborted.promise;
+  late.resolve(undefined);
+  assert.equal((await store.read())?.fence?.lifecycle.phase, "registering");
+  assert.deepEqual(await store.reconcileRegistration(ticket, registration), { status: "verified" });
+});

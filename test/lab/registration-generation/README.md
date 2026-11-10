@@ -61,3 +61,23 @@ publisher process kills and competing pointer updates. It refuses to pass by
 skipping when Linux root is unavailable. The shared JSON fixture is also checked
 against the TypeScript contracts. `results/2026-11-02-adapter/` records exact
 sources and environment for the isolated Multipass run.
+
+## Indexed registration recovery
+
+Run from a Linux checkout with the locked npm dependencies installed, Node 24
+and Python 3. The fixture requires root for the platform storage operations.
+
+```bash
+sudo "$(command -v node)" --test test/lab/registration-generation/indexed_flow.mjs
+```
+
+The fixture runs the coordinator's app index and the platform publisher with
+synthetic inputs. It kills the coordinator after intent, after publication,
+and after the observer verifies publication but before its result reaches the
+journal. On restart, it uses the same app index and real platform observation.
+The unpublished operation stays pending. The two published operations settle
+without publishing again, and a second restart returns the durable receipt.
+
+CI runs these cases as `platform:indexed-registration`. The Python bridge and
+its temporary storage are lab fixtures. Live Ansible registration and its
+coordination with deploy, remove and purge still require integration tests.

@@ -1,0 +1,21 @@
+VM: kayra-registration-flow-20261110230723
+multipass   1.16.1+mac
+multipassd  1.16.1+mac
+
+#########################################################################################
+Multipass 1.17.0 release
+Fully open source, custom image launch, GUI improvements, and many fixes.
+
+Go here for more information: https://github.com/canonical/multipass/releases/tag/v1.17.0
+#########################################################################################
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+6.8.0-147-generic aarch64
+Python 3.12.3
+v24.22.1
+
+Base commit and source hashes
+9562a8dcda303c3a48b03625e874d3548d62bf88
+1d7569f572600480eb8677d8ffb2d2a17d0eb8b858eac1bc5b7f181f8425ee8e  test/lab/registration-generation/indexed_flow.mjs
+42f810ed7bc2f1677664a761c6216a0b7db03d9342ae5f4716cccf56d6e93d99  test/lab/registration-generation/platform_fixture.py
+017540a0f27165673ef07170abed701b667f09e6c581478aa7899e44ba225a43  scripts/server-lib/registration_generation.py
+bae7e54cd6fff1782bc64f4ade1b9c04c66318367de098e798483a60a15ecfeb  ci/tests/registration-generation/fixture.json

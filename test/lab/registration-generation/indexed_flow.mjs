@@ -45,7 +45,7 @@ with trusted_root(sys.argv[1]) as root:
   const exited = once(executable, "exit");
   executable.stdin.end(JSON.stringify(request));
   assert.deepEqual(await exited, [0, null]);
-  return JSON.parse(Buffer.concat(await output).toString("utf8"));
+  return JSON.parse((await output).join(""));
 };
 const observe = (root) => registrationObservation(join(root, "platform", "observations"));
 

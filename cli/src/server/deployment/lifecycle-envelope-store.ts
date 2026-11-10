@@ -13,9 +13,32 @@ import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "
 
 type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
 /** The composition root, never a client request, supplies this trusted read-only port. */
-export type RegistrationObserver = (expected: RegistrationObservation) => Promise<unknown>;
+export type RegistrationObserver = (expected: RegistrationObservation, signal: AbortSignal) => Promise<unknown>;
 
-export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeRegistration?: RegistrationObserver) => {
+const observeWithDeadline = async (observe: RegistrationObserver, expected: RegistrationObservation, timeoutMs: number) => {
+  const controller = new AbortController();
+  const deadline = performance.now() + timeoutMs;
+  const timeout = Promise.withResolvers<undefined>();
+  const timer = setTimeout(() => {
+    timeout.resolve(undefined);
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const evidence = await Promise.race([observe(expected, controller.signal), timeout.promise]);
+    if (performance.now() >= deadline) {
+      controller.abort();
+      return undefined;
+    }
+    return parseRegistrationObservation(evidence);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeRegistration?: RegistrationObserver, observationTimeoutMs = 10_000) => {
+  if (!Number.isInteger(observationTimeoutMs) || observationTimeoutMs < 1 || observationTimeoutMs > 2_147_483_647) throw new Error("invalid registration observation timeout");
   claimJournal(journal, "lifecycle envelope journal is already owned");
   // eslint-disable-next-line functional/no-let -- serialize the exclusive writer
   let pending = Promise.resolve();
@@ -129,10 +152,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         if (operation?.action !== actionId) throw new Error("accepted ticket lacks initial registration intent");
         if (observeRegistration === undefined) return Object.freeze({ status: "pending" as const });
         const expected = Object.freeze({ app: fence.app, incarnation: fence.generation, actionId, registrationGeneration });
-        const observation = await (async () => {
-          try { return parseRegistrationObservation(await observeRegistration(expected)); }
-          catch { return undefined; }
-        })();
+        const observation = await observeWithDeadline(observeRegistration, expected, observationTimeoutMs);
         if (observation === undefined || !observation.ok || observation.value.status !== "applied" || observation.value.app !== expected.app || observation.value.incarnation !== expected.incarnation || observation.value.actionId !== expected.actionId || observation.value.registrationGeneration !== expected.registrationGeneration) return Object.freeze({ status: "pending" as const });
         const settled = settleLifecycleWork(fence, actionId);
         const completed = completeTicket(current.tickets, ticket, "success");

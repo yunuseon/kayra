@@ -204,8 +204,9 @@ tickets during initialization also require intervention.
 
 The index is wired to initial registration intent and receipt reconciliation
 through the envelope store. Calls for the same app are serialized. An app's
-observer does not hold up operations for other apps, though observation still
-requires a deadline before live use. The index does not adopt legacy apps or
+observer does not hold up operations for other apps. Each observation attempt
+has a ten-second deadline. On timeout the coordinator signals cancellation,
+discards late evidence and leaves the registration pending for another attempt. The index does not adopt legacy apps or
 assign a new incarnation to an existing name. Legacy entrypoints still bypass
 this experimental path.
 

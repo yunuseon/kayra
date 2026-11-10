@@ -16,6 +16,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts/server-lib"))
 import registration_generation as storage
+import registration_command as command
 
 FIXTURE = json.loads((Path(__file__).with_name("fixture.json")).read_text())
 GID = 65534
@@ -94,6 +95,37 @@ class GenerationTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
         self.assertEqual(path.stat().st_uid, 0)
         self.assertEqual(path.stat().st_gid, 0)
+
+    def test_host_flow_reuses_generation_after_lost_reconcile_reply(self):
+        request = {key: self.fixture[key] for key in ("registration", "configuration", "secrets")}
+        request["app"] = self.meta["app"]
+        ticket = self.meta["actionId"]
+        generations = set()
+
+        def control(operation, app, generation, *tickets):
+            self.assertEqual(app, self.meta["app"])
+            generations.add(generation)
+            if operation == "reserve":
+                return {"incarnation": self.meta["incarnation"], "ticket": ticket}
+            self.assertEqual(tickets, (ticket,))
+            if operation == "submit":
+                return {"status": "reconcile", "actionId": ticket}
+            self.assertEqual(operation, "reconcile")
+            return {"status": "pending"}
+
+        with self.assertRaisesRegex(storage.RegistrationError, "receipt remains unresolved"):
+            command.register(self.fd, GID, request, control)
+        generation, = generations
+        private = self.path(True, generation)
+        first_inode = private.stat().st_ino
+
+        def retry(operation, *args):
+            reply = control(operation, *args)
+            return {"status": "verified"} if operation == "reconcile" else reply
+
+        self.assertEqual(command.register(self.fd, GID, request, retry), {"status": "verified"})
+        self.assertEqual(generations, {generation})
+        self.assertEqual(private.stat().st_ino, first_inode)
 
     def test_published_identity_and_private_access(self):
         output = io.StringIO()

@@ -19,9 +19,34 @@ const platform = (mode, root, input) => JSON.parse(execFileSync("python3", [
   "-B", fileURLToPath(new URL("../../../scripts/server-lib/registration_command.py", import.meta.url)),
   mode, "--root", join(root, "platform"), "--private-gid", "0",
 ], { input: JSON.stringify(input), encoding: "utf8", timeout: 5000 }));
-const stage = (root) => platform("stage", root, {
-  app, registration: fixture.registration, configuration: fixture.configuration, secrets: fixture.secrets,
-}).generation;
+const request = { app, registration: fixture.registration, configuration: fixture.configuration, secrets: fixture.secrets };
+const stage = (root) => platform("stage", root, request).generation;
+const hostFlow = async (root) => {
+  const source = `
+import json, subprocess, sys
+from registration_command import register, trusted_root
+
+def ctl(*args):
+    result = subprocess.run([sys.argv[2], sys.argv[3], "ctl", "registration", *args],
+                            check=True, capture_output=True, timeout=15)
+    return json.loads(result.stdout)
+
+with trusted_root(sys.argv[1]) as root:
+    print(json.dumps(register(root, 0, json.load(sys.stdin), ctl)))
+`;
+  const executable = execFile("python3", [
+    "-B", "-c", source, join(root, "platform"), process.execPath,
+    fileURLToPath(new URL("../../../cli/src/deployer/main.ts", import.meta.url)),
+  ], {
+    env: { ...process.env, PYTHONPATH: fileURLToPath(new URL("../../../scripts/server-lib/", import.meta.url)) },
+    timeout: 12000,
+  });
+  const output = Array.fromAsync(executable.stdout);
+  const exited = once(executable, "exit");
+  executable.stdin.end(JSON.stringify(request));
+  assert.deepEqual(await exited, [0, null]);
+  return JSON.parse((await output).join(""));
+};
 const observe = (root) => registrationObservation(join(root, "platform", "observations"));
 
 async function localControl(root, index) {
@@ -116,6 +141,8 @@ if (process.argv[2] === "writer") {
           assert.deepEqual(await control.call("reconcile", { app, ticket, generation }), {
             status: unpublished ? "pending" : "verified",
           });
+          if (unpublished) assert.deepEqual(await hostFlow(root), { status: "verified" });
+          assert.deepEqual(await hostFlow(root), { status: "terminal", outcome: "success" });
         } finally {
           await control.close();
           await index.close();
@@ -123,9 +150,7 @@ if (process.argv[2] === "writer") {
         const reopened = await openLifecycleAppIndex(join(root, "index"));
         try {
           assert.equal(await reopened.reserveRegistration(app, generation), ticket);
-          assert.deepEqual(await reopened.submitRegistration(app, ticket, generation), unpublished
-            ? { status: "reconcile", actionId: ticket }
-            : { status: "terminal", outcome: "success" });
+          assert.deepEqual(await reopened.submitRegistration(app, ticket, generation), { status: "terminal", outcome: "success" });
         } finally {
           await reopened.close();
         }

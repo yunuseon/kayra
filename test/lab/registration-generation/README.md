@@ -94,3 +94,10 @@ that contains only the operation identity and applied status. The coordinator
 reads that record using the platform adapter. The fixture exercises this
 handoff through ordinary files. Production integration still needs to mount the
 evidence directory read-only in the deployer and keep publication fenced.
+
+The fixture invokes the same root-side command intended for the platform
+caller. It sends bounded JSON on stdin for staging, publication and
+verification. The command rejects symlinked or writable ancestors of its
+storage root and accepts publication identities from the trusted caller that
+holds the registration fence. The fixture creates its root under `/var/lib`
+to exercise that path validation.

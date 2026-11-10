@@ -101,3 +101,9 @@ verification. The command rejects symlinked or writable ancestors of its
 storage root and accepts publication identities from the trusted caller that
 holds the registration fence. The fixture creates its root under `/var/lib`
 to exercise that path validation.
+
+The fixture uses the deployer's localhost HTTP handler and `ctl registration`
+to reserve, submit and reconcile. It binds port 8091 inside the isolated guest
+and permits only the fixture app. Production startup supplies no registration
+handler yet. The app role and legacy lifecycle commands still need a shared
+fence before this path can be enabled on a platform host.

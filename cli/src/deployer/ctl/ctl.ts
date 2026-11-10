@@ -139,7 +139,7 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
       signal: AbortSignal.timeout(15_000),
     }).catch(() => undefined);
     if (response === undefined) return fail("registration control unavailable");
-    if (!response.ok) return fail(`registration control returned ${response.status}`);
+    if (!response.ok) return fail(`registration control returned ${String(response.status)}`);
     console.log(await response.text());
     return 0;
   },

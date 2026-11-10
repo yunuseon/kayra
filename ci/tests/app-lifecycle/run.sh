@@ -13,6 +13,12 @@ printf '%s\n' "$*" >> "$CALLS"
 case "$*" in
     'compose -p shop down --remove-orphans')
         test ! -e "$PLATFORM/apps/shop.json" || { echo 'registration still present' >&2; exit 92; }
+        if [ "${CHECK_PURGE:-0}" = 1 ]; then
+            if bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/concurrent" 2>&1; then
+                exit 94
+            fi
+            grep -q 'another remove or purge is in progress' "$PLATFORM/concurrent"
+        fi
         exit "${DOWN_EXIT:-0}"
         ;;
     'compose -p a-0- down --remove-orphans')
@@ -34,7 +40,7 @@ fixture() {
     PLATFORM="$tmp/$1"
     CALLS="$PLATFORM/calls"
     export PLATFORM CALLS
-    mkdir -p "$PLATFORM/bin" "$PLATFORM/apps" "$PLATFORM/app-secrets/shop" "$PLATFORM/runs/shop" "$PLATFORM/releases/shop" "$PLATFORM/data/shop" "$PLATFORM/data/other"
+    mkdir -p "$PLATFORM/bin" "$PLATFORM/apps" "$PLATFORM/removing" "$PLATFORM/removal-locks" "$PLATFORM/app-secrets/shop" "$PLATFORM/runs/shop" "$PLATFORM/releases/shop" "$PLATFORM/data/shop" "$PLATFORM/data/other"
     cp "$root/scripts/server/app-remove" "$root/scripts/server/app-purge" "$root/scripts/server/app-restore" "$PLATFORM/bin/"
     printf 'APPS_DIR=%s/data\n' "$PLATFORM" > "$PLATFORM/.env"
     : > "$PLATFORM/apps/shop.json"
@@ -47,7 +53,7 @@ fixture() {
 }
 
 fixture removed
-output="$(bash "$PLATFORM/bin/app-remove" shop)"
+output="$(CHECK_PURGE=1 bash "$PLATFORM/bin/app-remove" shop)"
 test "$output" = 'Removed shop. Its volumes are kept — app-purge shop deletes them.'
 test ! -e "$PLATFORM/apps/shop.json"
 test ! -e "$PLATFORM/app-secrets/shop"
@@ -98,7 +104,16 @@ test -e "$PLATFORM/app-secrets/shop/secret"
 test -e "$PLATFORM/runs/shop/run"
 test -e "$PLATFORM/releases/shop/release"
 test -e "$PLATFORM/data/shop/.env"
-echo '  ✓ a failed Compose stop preserves records and files after unregistration'
+if bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output" 2>&1; then
+    echo '  ✗ purge proceeded after a failed Compose stop' >&2
+    exit 1
+fi
+grep -q 'removal of shop is incomplete' "$PLATFORM/output"
+test "$(cat "$CALLS")" = 'compose -p shop down --remove-orphans'
+bash "$PLATFORM/bin/app-remove" shop > "$PLATFORM/output"
+test ! -e "$PLATFORM/removing/shop.json"
+bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output"
+echo '  ✓ a failed Compose stop fences purge until removal succeeds on retry'
 
 fixture registered
 if bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output" 2>&1; then

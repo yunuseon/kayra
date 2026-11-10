@@ -175,15 +175,16 @@ tombstone. Purge is a separate guarded operation that checks ownership,
 registration and live attachments; it never deletes unrelated data. Restore,
 remove and purge go through the owning lifecycle component.
 
-The current legacy scripts do not provide that fence. In a Docker-stubbed
-fixture, a failed Compose stop left the app unregistered, and a subsequent
-purge proceeded to request removal of its volumes. A second fixture registered
-the app after purge checked registration but before volume removal; purge still
-issued the removal request. Docker can refuse removal of attached volumes, but
-that does not protect detached volumes or serialize these operations. The
-lifecycle owner must serialize registration, deployment, removal and purge,
-reconcile incomplete removal, and check volume ownership and attachments. A
-registration recheck or removal marker alone does not establish those guarantees.
+Legacy Compose remove and purge serialize per app. Removal records a
+pending marker before unregistering. A failed stop leaves the marker in place
+and purge refuses the app until removal completes. Fleet pruning includes
+pending removals so it can retry after a crash.
+
+Legacy registration and the deployment queue still bypass this lock. A
+registration can race purge between the registration check and volume removal,
+and a previously accepted deployment can race removal. The lifecycle owner
+must serialize these operations and verify volume ownership and attachments
+before purge.
 
 ### Coordinator app index
 

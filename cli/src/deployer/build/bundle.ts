@@ -1,3 +1,4 @@
+import { parseRollout, type Rollout } from "../../contracts/rollout.ts";
 import { matchRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { err, ok } from "../../lib/result.ts";
 import { field } from "../app.ts";
@@ -18,6 +19,7 @@ export type ComposeFile = { readonly path: string; readonly content: string };
  */
 export type Bundle = {
   readonly registration?: RegistrationGeneration;
+  readonly rollout?: Rollout;
   readonly sha: Sha;
   readonly images: readonly Image[];
   readonly compose: readonly ComposeFile[];
@@ -27,9 +29,12 @@ export type Bundle = {
 const relative = (path: string) =>
   path !== "" && !path.startsWith("/") && !path.split("/").some((segment) => segment === ".." || segment === "");
 
-export const parseBundle = (app: AppName, expected: Sha, json: unknown, registration?: RegistrationGeneration) => {
+export const parseBundle = (app: AppName, expected: Sha, json: unknown, registration?: RegistrationGeneration, mode: "legacy" | "artifact" = "legacy") => {
   if (typeof json !== "object" || json === null) return err("bundle: not an object");
-  if (Object.hasOwn(json, "rollout")) return err("bundle: rollout metadata is not yet supported");
+  const hasRollout = Object.hasOwn(json, "rollout");
+  if (hasRollout && (mode !== "artifact" || registration === undefined)) return err("bundle: rollout metadata is not yet supported");
+  const rollout = hasRollout ? parseRollout(field(json, "rollout")) : ok<Rollout | undefined>(undefined);
+  if (!rollout.ok) return err("bundle: invalid rollout metadata");
   const snapshot = field(json, "registration");
   if (registration === undefined && snapshot !== undefined) return err("bundle: unexpected registration snapshot");
   if (registration !== undefined && (!matchRegistrationGeneration(snapshot, registration, registration).ok || registration.app !== app)) return err("bundle: registration snapshot mismatch");
@@ -64,6 +69,7 @@ export const parseBundle = (app: AppName, expected: Sha, json: unknown, registra
   if (!routes.ok) return err(`bundle: ${routes.error}`);
   return ok<Bundle>({
     sha: minted.value,
+    ...(rollout.value === undefined ? {} : { rollout: rollout.value }),
     ...(registration === undefined ? {} : { registration: Object.freeze({ ...registration }) }),
     images: parsedImages.filter((item) => typeof item !== "string"),
     compose: parsedCompose.filter((item) => typeof item !== "string"),
@@ -76,6 +82,7 @@ export const imagesEnv = (bundle: Bundle) => bundle.images.map((image) => `${ima
 
 /** Only validated fields are retained; platform secrets never enter the builder bundle. */
 export const bundleWire = (bundle: Bundle) => Object.freeze({
+  ...(bundle.rollout === undefined ? {} : { rollout: bundle.rollout }),
   ...(bundle.registration === undefined ? {} : { registration: bundle.registration }),
   sha: bundle.sha, images: bundle.images, compose: bundle.compose,
   routes: Object.freeze(bundle.routes.map((route) => Object.freeze({

@@ -98,9 +98,9 @@
             if (!app.ok || !registration.ok || !commit.ok) throw new Error('invalid fixture inputs');
             const built = await builderPrepare('http://builder:8081', app.value, commit.value, console.error, registration.value);
             if (!built.ok) throw new Error(built.error);
-            const checked = parseBundle(app.value.name, commit.value, built.value, registration.value);
+            const checked = parseBundle(app.value.name, commit.value, built.value, registration.value, "artifact");
             if (!checked.ok) throw new Error(checked.error);
-            console.log(JSON.stringify({images: checked.value.images, registration: checked.value.registration}));
+            console.log(JSON.stringify({images: checked.value.images, registration: checked.value.registration, ...(checked.value.rollout === undefined ? {} : {rollout: checked.value.rollout})}));
         stdin: "{{ {'app':build_registration, 'registration':(pointer.content | b64decode | from_json), 'commit':fixture_commit} | to_json }}"
         chdir: "{{ platform_dir }}"
       environment: "{{ compose_env }}"
@@ -180,7 +180,7 @@
           - not (pins.stdout | from_json).complete
           - (pins.stdout | from_json).unresolved | length == 0
           - (pins.stdout | from_json).artifacts | selectattr('artifact', 'equalto', (retained_build.stdout | from_json).artifact) | list | length == 1
-          - (pins.stdout | from_json).artifacts | map(attribute='images') | flatten | sort == (bundle.stdout | from_json).images | map(attribute='ref') | sort
+          - ((pins.stdout | from_json).artifacts | selectattr('artifact', 'equalto', (retained_build.stdout | from_json).artifact) | first).images | sort == (bundle.stdout | from_json).images | map(attribute='ref') | sort
         quiet: true
 
     - name: Require GC to preserve coordinator-managed images

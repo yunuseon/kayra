@@ -158,3 +158,9 @@ missing artifacts cause refusal. The projection is explicitly incomplete until
 active, candidate and rollback runtime plans are integrated. It contains no
 Compose content, resolved configuration or secret values, and does not enable
 registry GC.
+
+Indexed artifacts may carry an app's validated `rollout` section. The builder
+validates its shape before building, and the coordinator validates it again
+before retention. Ordinary legacy requests still refuse any rollout declaration.
+Artifact retention grants no runtime capability and does not enable rollout
+execution.

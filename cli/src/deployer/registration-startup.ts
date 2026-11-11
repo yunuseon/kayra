@@ -15,7 +15,7 @@ const missing = (error: unknown) => typeof error === "object" && error !== null 
 
 const parseBundleRegistration = (registration: RegistrationGeneration, commit: Sha, payload: unknown) => {
   const app = appName(registration.app);
-  return app.ok ? parseBundle(app.value, commit, payload, registration) : undefined;
+  return app.ok ? parseBundle(app.value, commit, payload, registration, "artifact") : undefined;
 };
 
 /** Optional composition for the existing deployer control listener. */
@@ -47,7 +47,7 @@ export const startRegistrationControl = async (platform: string, observations: s
       if (!snapshot.ok || !fullCommit.ok) throw new Error("build registration or commit is invalid");
       const prepared = await builderPrepare(builder, snapshot.value.app, fullCommit.value, console.log, registration, deadline, signal);
       if (!prepared.ok) throw new Error("builder did not prepare the registered commit");
-      const checked = parseBundle(snapshot.value.app.name, fullCommit.value, prepared.value, registration);
+      const checked = parseBundle(snapshot.value.app.name, fullCommit.value, prepared.value, registration, "artifact");
       if (!checked.ok) throw new Error("builder returned an invalid artifact");
       return JSON.stringify(bundleWire(checked.value));
     },

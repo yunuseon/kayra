@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { all, err, ok, type Result } from "../../lib/result.ts";
+import { all, attempt, err, ok, type Result } from "../../lib/result.ts";
 import { field, type App } from "../../contracts/app-registration.ts";
+import { parseRollout, type Rollout } from "../../contracts/rollout.ts";
 import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { readPublicRegistrationGeneration } from "../platform/public-registration.ts";
 import { registered } from "../platform/legacy-registration.ts";
@@ -113,6 +114,17 @@ const immutableImage = async (reference: string) => {
     ? ok(`localhost:5000/${match[1]}@${digest}`) : err("could not resolve the built image digest");
 };
 
+const readRollout = async (root: string, indexed: boolean) => {
+  const present = await spawnLines(["yq", "-o=json", 'has("rollout")', join(root, "app.yml")], { capture: true }, () => undefined);
+  if (present.code !== 0) return err("app.yml: could not validate rollout metadata");
+  if (present.stdout.trim() === "false") return ok<Rollout | undefined>(undefined);
+  if (!indexed) return err("app.yml: rollout metadata is not yet supported");
+  const payload = await spawnLines(["yq", "-o=json", ".rollout", join(root, "app.yml")], { capture: true }, () => undefined);
+  if (payload.code !== 0) return err("app.yml: invalid rollout metadata");
+  const parsed = attempt(() => parseRollout(JSON.parse(payload.stdout)), () => "invalid rollout metadata");
+  return parsed.ok ? parsed : err("app.yml: invalid rollout metadata");
+};
+
 /**
  * One app's checkout at a commit, its images built where the registry lacks
  * them (resolve-images.sh, through buildkitd), and the compose files app.yml
@@ -138,11 +150,8 @@ const prepareBundle = async (app: App, commit: Sha, s: Settings, line: Line, reg
   if (!checkedOut.ok) return checkedOut;
 
   const root = join(dir, app.path);
-  // Inspect presence, not truthiness: even an invalid rollout declaration must
-  // never be silently deployed through the legacy Compose pipeline.
-  const rollout = await spawnLines(["yq", "-o=json", 'has("rollout")', join(root, "app.yml")], { capture: true }, () => undefined);
-  if (rollout.code !== 0) return err("app.yml: could not validate rollout metadata");
-  if (rollout.stdout.trim() !== "false") return err("app.yml: rollout metadata is not yet supported");
+  const rollout = await readRollout(root, registration !== undefined);
+  if (!rollout.ok) return rollout;
   const buildEnv: Env = { REGISTRY: "localhost:5000", ...(registration === undefined ? {} : { KAYRA_IMMUTABLE_IMAGES: "true" }) };
   const planned = await run(["bash", s.resolveImages, app.name, root, "--plan"], { env: buildEnv, capture: true }, line);
   if (!planned.ok) return planned;
@@ -180,6 +189,7 @@ const prepareBundle = async (app: App, commit: Sha, s: Settings, line: Line, reg
   const routed: unknown = JSON.parse(routes.value);
   return ok<unknown>({
     sha: commit,
+    ...(rollout.value === undefined ? {} : { rollout: rollout.value }),
     ...(registration === undefined ? {} : { registration }),
     images: checkedImages.value,
     compose: files.map((file) => ({ path: file, content: readFileSync(join(root, file), "utf8") } as const)),

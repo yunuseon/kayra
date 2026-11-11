@@ -90,12 +90,12 @@ def claim_experimental_app(platform_dir, app, inspect=legacy_objects):
                          "legacy Compose state already uses the app name")
         directory = os.open(platform / "managed-apps", storage._DIR_FLAGS)
         try:
-            storage._check(directory, 0o700, 0, True)
+            storage._check(directory, 0o755, 0, True)
             name = app + ".json"
             try:
-                storage._new_file(directory, name, b"", 0o400)
+                storage._new_file(directory, name, b"", 0o444)
             except FileExistsError:
-                storage._read_file(directory, name, 0o400)
+                storage._read_file(directory, name, 0o444)
             os.fsync(directory)
         finally:
             os.close(directory)

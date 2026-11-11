@@ -117,3 +117,8 @@ retry after publication with a pending receipt.
 The fixture also reads the public registration and then uses its exact
 generation identity to read private configuration and secrets. A mismatched
 private manifest is refused. Public consumers require only the public tree.
+
+The final indexed case starts the real deployer daemon with an explicit
+evidence directory. It verifies that the default startup leaves registration
+disabled, that an opted-in daemon requires explicit initialization, and that
+a restarted daemon reopens the existing index and returns the verified receipt.

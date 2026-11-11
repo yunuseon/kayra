@@ -1,9 +1,10 @@
 import { strict as assert } from "node:assert";
-import { execFile, execFileSync, fork } from "node:child_process";
+import { execFile, execFileSync, fork, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -174,4 +175,59 @@ if (process.argv[2] === "writer") {
       }
     });
   }
+}
+
+
+if (process.argv[2] !== "writer") {
+  test("the deployer opens the indexed control route only in the opted-in process", { timeout: 20000 }, async () => {
+    const root = await mkdtemp("/var/lib/kayra-registration-daemon-");
+    try {
+      const platformDir = join(root, "legacy");
+      await mkdir(join(root, "platform"), { mode: 0o700 });
+      await mkdir(join(platformDir, "lifecycle"), { recursive: true });
+      await mkdir(join(platformDir, "managed-apps"));
+      await writeFile(join(platformDir, "managed-apps", app + ".json"), "", { mode: 0o444 });
+      const main = fileURLToPath(new URL("../../../cli/src/deployer/main.ts", import.meta.url));
+      const call = async (...args) => {
+        const { stdout } = await promisify(execFile)(process.execPath, [main, "ctl", "registration", ...args], { timeout: 5000 });
+        return JSON.parse(stdout);
+      };
+      const run = async (enabled, exercise) => {
+        const child = spawn(process.execPath, [main, "deployer"], {
+          env: {
+            ...process.env, PLATFORM_DIR: platformDir,
+            KAYRA_REGISTRATION_EVIDENCE_DIR: enabled ? join(root, "platform", "observations") : undefined,
+          },
+          stdio: ["ignore", "pipe", "inherit"],
+        });
+        const exited = once(child, "exit");
+        const lines = createInterface({ input: child.stdout });
+        try {
+          const [ready] = await Promise.race([
+            once(lines, "line", { signal: AbortSignal.timeout(6000) }),
+            exited.then(() => { throw new Error("deployer exited during startup"); }),
+          ]);
+          assert.match(ready, /^deployer:/);
+          await exercise();
+        } finally {
+          child.kill("SIGKILL");
+          await exited;
+          lines.close();
+        }
+      };
+      await run(false, async () => {
+        await assert.rejects(call("initialize"), /404/);
+      });
+      await run(true, async () => {
+        await assert.rejects(call("reserve", app, stage(root)), /409/);
+        assert.deepEqual(await call("initialize"), { status: "ready" });
+        assert.deepEqual(await hostFlow(root), { status: "verified" });
+      });
+      await run(true, async () => {
+        assert.deepEqual(await hostFlow(root), { status: "terminal", outcome: "success" });
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 }

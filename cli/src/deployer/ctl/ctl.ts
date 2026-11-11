@@ -129,13 +129,14 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
   },
   registration: async ([operation, app, generation, ticket]) => {
-    if ((operation !== "reserve" && operation !== "submit" && operation !== "reconcile") ||
-      app === undefined || generation === undefined || (operation === "reserve") !== (ticket === undefined)) {
-      return fail("usage: ctl registration reserve|submit|reconcile <app> <generation> [ticket]");
+    const initialize = operation === "initialize" && app === undefined;
+    if (!initialize && ((operation !== "reserve" && operation !== "submit" && operation !== "reconcile") ||
+      app === undefined || generation === undefined || (operation === "reserve") !== (ticket === undefined))) {
+      return fail("usage: ctl registration initialize | reserve|submit|reconcile <app> <generation> [ticket]");
     }
     const response = await fetch(`http://127.0.0.1:8091/registration/${operation}`, {
       method: "POST",
-      body: JSON.stringify({ app, generation, ...(ticket === undefined ? {} : { ticket }) }),
+      body: JSON.stringify(initialize ? {} : { app, generation, ...(ticket === undefined ? {} : { ticket }) }),
       signal: AbortSignal.timeout(15_000),
     }).catch(() => undefined);
     if (response === undefined) return fail("registration control unavailable");

@@ -420,6 +420,23 @@ if [ "$indexed_registration" = true ]; then
     step "7  indexed registration through Ansible and the running deployer"
     ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook         -i "servers/${server}/inventory.ini"         "${KAYRA_ROOT}/test/lab/registration-generation/live.yml"         -e "kayra_root=${KAYRA_ROOT}" >> "$log" 2>&1 || die "indexed registration through Ansible"
     echo "✓ indexed registration survived a deployer restart and protected its app name"
+    indexed_repo="${work}/indexed-build"
+    cp -R "${KAYRA_ROOT}/test/lab/app" "$indexed_repo"
+    yq -i '.name = "indexed-build" | .routes[0].host = "indexed"' "${indexed_repo}/app.yml"
+    jq '.image = "indexed-build/web"' "${indexed_repo}/web/docker/image.json" > "${work}/indexed-image.json"
+    mv "${work}/indexed-image.json" "${indexed_repo}/web/docker/image.json"
+    git -C "$indexed_repo" init -q -b main
+    git -C "$indexed_repo" add -A
+    git -C "$indexed_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "indexed build fixture"
+    git clone -q --bare "$indexed_repo" "${served}/lab/indexed.git"
+    indexed_commit="$(git -C "$indexed_repo" rev-parse HEAD)"
+    ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+        -i "servers/${server}/inventory.ini" \
+        "${KAYRA_ROOT}/test/lab/registration-generation/build-live.yml" \
+        -e "kayra_root=${KAYRA_ROOT}" \
+        -e "fixture_repo=http://${host_ip}:${port}/lab/indexed.git" \
+        -e "fixture_commit=${indexed_commit}" >> "$log" 2>&1 || die "building the indexed fixture"
+    echo "✓ indexed build returned digest-qualified images and refused destructive GC"
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi
 

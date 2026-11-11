@@ -39,7 +39,9 @@ export const parseBundle = (app: AppName, expected: Sha, json: unknown, registra
   const minted = sha(typeof commit === "string" ? commit : "");
   if (!minted.ok || minted.value !== expected) return err(`bundle: for ${String(commit)}, not ${expected}`);
   if (!Array.isArray(images) || !Array.isArray(compose) || compose.length === 0) return err("bundle: images or compose missing");
-  const own = new RegExp(`^localhost:5000/${app}/[a-z0-9._/-]+:[0-9a-f]{12}$`);
+  const own = new RegExp(registration === undefined
+    ? `^localhost:5000/${app}/[a-z0-9._/-]+:[0-9a-f]{12}$`
+    : `^localhost:5000/${app}/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$`);
   const parsedImages = images.map((image: unknown) => {
     if (typeof image !== "object" || image === null) return typed<Image | string>("an image is not an object");
     const variable = field(image, "variable");

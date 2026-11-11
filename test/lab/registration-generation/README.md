@@ -133,3 +133,9 @@ It upgrades the regular platform first, enables registration in an explicit
 lab override, registers a synthetic app through Ansible, restarts the deployer
 and requires the same durable receipt. It also checks legacy purge refusal
 and runs platform verification after the experiment.
+
+The indexed upgrade scenario builds a second fixture from its real Git
+repository. Its artifact tags use the full input commit and the builder
+returns manifest digests. The deployer validates the bundle's registration
+identity and digest references. The lab also verifies that legacy registry GC
+refuses cleanup while coordinator-managed app claims exist.

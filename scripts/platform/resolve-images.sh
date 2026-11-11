@@ -53,7 +53,10 @@ read_manifest() {
 
     local inputs=() input
     while IFS= read -r input; do inputs+=("$input"); done < <(jq -r '.inputs[]' "$manifest")
-    tag=$(git -C "$root" rev-list -1 HEAD -- "${inputs[@]}" | cut -c1-12)
+    tag=$(git -C "$root" rev-list -1 HEAD -- "${inputs[@]}")
+    if [ "${KAYRA_IMMUTABLE_IMAGES:-false}" != true ]; then
+        tag="${tag:0:12}"
+    fi
     [ -n "$tag" ] || { echo "ERROR: ${manifest}: no commit touches its inputs" >&2; return 1; }
 
     ref="${REGISTRY}/${image}:${tag}"

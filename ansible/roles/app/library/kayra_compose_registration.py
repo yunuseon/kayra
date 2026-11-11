@@ -94,6 +94,7 @@ def main():
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     module.fail_json(msg="Another registration, removal or purge holds the app lock.", retryable=True)
+                os.fchmod(fd, 0o644)
                 apply(*arguments, lock_fd=fd)
             finally:
                 os.close(fd)

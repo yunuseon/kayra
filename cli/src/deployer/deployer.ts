@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { field, registered, registrations, type App } from "./app.ts";
-import { appName, appOwner, newRunId } from "./brand.ts";
+import { appName, appOwner, newRunId, type Owner } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
 import { json, send } from "./http/http.ts";
 import { jobRequest, type Why } from "./runs/queue.ts";
@@ -25,6 +25,7 @@ import { typed } from "../lib/typed.ts";
 import { assess, gather } from "./health.ts";
 import type { registrationControl } from "../server/deployment/registration-control.ts";
 import { startWithLifecycle } from "../server/deployment/startup.ts";
+import { acquireComposeAppLease } from "../server/runtime/compose-app-lease.ts";
 import { composeProjectRunning } from "../server/runtime/compose.ts";
 
 /**
@@ -58,6 +59,16 @@ const work = async (s: Settings, request: Request, fx: Effects, exec: Maintenanc
 // eslint-disable-next-line functional/prefer-immutable-types -- the daemon's state lives here, nowhere else
 const cell: { queue: Queue } = { queue: empty(2) };
 
+// The lease covers queued and running requests for an app, including run records.
+const leases = new Map<Owner, NonNullable<ReturnType<typeof acquireComposeAppLease>>>();
+
+const releaseIdleLease = (owner: Owner) => {
+  if (cell.queue.running.some((request) => request.owner === owner) || cell.queue.waiting.some((request) => request.owner === owner)) return;
+  leases.get(owner)?.close();
+  // eslint-disable-next-line functional/immutable-data -- an idle app no longer holds its host lease
+  leases.delete(owner);
+};
+
 type Change = { readonly queue: Queue; readonly start: readonly Request[]; readonly replaced?: readonly Request[] };
 
 const asked = (request: Request, state: RunMeta["state"]) =>
@@ -80,8 +91,30 @@ const swap = (s: Settings, change: (queue: Queue) => Change) => {
 
 /** A request on record as queued before the queue sees it, so whoever asked can follow it by its id at once. */
 const ask = (s: Settings, request: Request) => {
-  writeMeta(runsDir(s), request.owner, asked(request, "queued"));
-  return swap(s, (queue) => enqueue(queue, request)).includes(request);
+  if (request.work.kind === "deploy" && !leases.has(request.owner)) {
+    const app = request.work.app;
+    try {
+      const lease = acquireComposeAppLease(join(s.platformDir, "removal-locks"), app);
+      if (lease === undefined) return "busy" as const;
+      // eslint-disable-next-line functional/immutable-data -- the queue owns one lease for each admitted app
+      leases.set(request.owner, lease);
+      if (lstatSync(join(s.platformDir, "removing", app + ".json"), { throwIfNoEntry: false }) !== undefined || !registered(s.platformDir, app).ok) {
+        releaseIdleLease(request.owner);
+        return "busy" as const;
+      }
+    } catch {
+      releaseIdleLease(request.owner);
+      return "unavailable" as const;
+    }
+  }
+  try {
+    writeMeta(runsDir(s), request.owner, asked(request, "queued"));
+    const started = swap(s, (queue) => enqueue(queue, request)).includes(request);
+    return started ? "running" as const : "queued" as const;
+  } catch (error) {
+    releaseIdleLease(request.owner);
+    throw error;
+  }
 };
 
 const newId = () => newRunId(new Date(), randomBytes(3).toString("hex"));
@@ -95,7 +128,8 @@ const start = async (s: Settings, request: Request) => {
     appendLog(runs, request.owner, id, line);
   };
   const scratch = mkdtempSync(join(tmpdir(), `${id}-`));
-  const outcome = await work(s, request, effects(s, request.owner, id, scratch, log), commandExecution(log)).catch((error: unknown) => {
+  const lease = leases.get(request.owner);
+  const outcome = await work(s, request, effects(s, request.owner, id, scratch, log, lease?.fd), commandExecution(log)).catch((error: unknown) => {
     log(`deployer: ${String(error)}`);
     return typed<Outcome>({ ok: false, error: "the deployer failed; see the log" });
   });
@@ -116,6 +150,7 @@ const start = async (s: Settings, request: Request) => {
   prune(runs, request.owner, keepRuns);
   rmSync(scratch, { recursive: true, force: true });
   swap(s, (queue) => finish(queue, request.owner));
+  releaseIdleLease(request.owner);
 };
 
 const deployRequest = (app: App, ref: string, why: Why) => typed<Request>({
@@ -170,8 +205,12 @@ const handle =
   };
 
 const accept = (s: Settings, response: ServerResponse, request: Request) => {
-  const started = ask(s, request);
-  send(response, 202, `${JSON.stringify({ id: request.id, owner: request.owner, state: started ? "running" : "queued" })}\n`);
+  const result = ask(s, request);
+  if (result === "busy" || result === "unavailable") {
+    send(response, result === "busy" ? 409 : 503, "app lifecycle is busy or unavailable; retry the request\n");
+    return;
+  }
+  send(response, 202, `${JSON.stringify({ id: request.id, owner: request.owner, state: result })}\n`);
 };
 
 /** POST /push/<app>, from the builder once a webhook proved itself: a deploy of the app's own ref. */

@@ -11,6 +11,7 @@ export type Spawn = {
   /** Collect stdout instead of passing it to `line`. */
   readonly capture?: boolean;
   readonly timeoutMs?: number;
+  readonly leaseFd?: number;
 };
 
 /** Runs a program; its stderr, and its stdout unless captured, reach `line` one line at a time. */
@@ -19,9 +20,10 @@ export const spawnLines = (argv: Argv, options: Spawn, line: (text: string) => v
   const child = spawn(program, args, {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe", options.leaseFd ?? "ignore"],
     signal: AbortSignal.timeout(options.timeoutMs ?? 30 * 60_000),
   });
+  if (child.stdin === null || child.stdout === null || child.stderr === null) throw new Error("process pipes are unavailable");
   // A child may exit before reading its stdin; that EPIPE is no failure of ours.
   child.stdin.on("error", () => undefined);
   child.stdin.end(options.stdin ?? "");

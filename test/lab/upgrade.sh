@@ -297,6 +297,23 @@ running="$(kayra_cmd status --json | jq -r --arg name "$server" '.servers[] | se
 echo "✓ kayra status: set up by kayra ${running}, the pin"
 expect_serves v1
 
+step "2a  the deployer refuses work while the host owns the app lock"
+before="$(newest_run)"
+multipass exec "$vm_name" -- sudo flock /opt/platform/removal-locks/sample.lock sh -c 'touch /tmp/kayra-app-lock-held; sleep 15' >> "$log" 2>&1 &
+holder=$!
+for _ in $(seq 1 25); do
+    multipass exec "$vm_name" -- test -e /tmp/kayra-app-lock-held && break
+    sleep 0.2
+done
+multipass exec "$vm_name" -- test -e /tmp/kayra-app-lock-held || die "the host did not acquire the fixture app lock"
+if refused="$(ctl deploy sample 2>&1)"; then
+    die "the deployer accepted work during a host app operation"
+fi
+grep -q 'app lifecycle is busy' <<< "$refused" || die "unexpected deploy refusal while the app lock is held"
+[ "$(newest_run)" = "$before" ] || die "a refused deploy wrote a run record"
+wait "$holder"
+echo "✓ host app lock refused deployment before queuing a run"
+
 # ── 3: the app as this checkout knows it; a new commit; the same again ─────
 step "3  the app as this checkout knows it, a new commit by webhook, then the same commit again"
 adopt_checkout_app

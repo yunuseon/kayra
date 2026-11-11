@@ -43,14 +43,14 @@ const probe = async (url: string) => {
 /** A run's page, which its commit statuses link to. */
 export const runPage = (s: Settings, who: Owner, id: RunId) => `https://deploy.${s.domain}/runs/${who}/${id}`;
 
-export const commandExecution = (log: (line: string) => void) => typed<Execute>((argv, options) => spawnLines(argv, { ...options, timeoutMs: 20 * 60_000 }, log));
+export const commandExecution = (log: (line: string) => void, leaseFd?: number) => typed<Execute>((argv, options) => spawnLines(argv, { ...options, timeoutMs: 20 * 60_000, ...(leaseFd === undefined ? {} : { leaseFd }) }, log));
 
 /** What one run does to this server; its files go into `scratch`, which the run removes when it ends. */
-export const effects = (s: Settings, who: Owner, id: RunId, scratch: string, log: (line: string) => void) => typed<Effects>({
+export const effects = (s: Settings, who: Owner, id: RunId, scratch: string, log: (line: string) => void, leaseFd?: number) => typed<Effects>({
   log,
   resolve: (app, ref) => builderResolve(s.builder, app, ref),
   prepare: (app, commit) => builderPrepare(s.builder, app, commit, log),
-  runtime: composeRuntime(commandExecution(log)),
+  runtime: composeRuntime(commandExecution(log, leaseFd)),
   policy: (app, script, domain, bundle, cwd, resolved) => commandExecution(log)(policy(app, script, domain, bundle), { cwd, env: {}, stdin: resolved }),
   secrets: appSecrets,
   workdir: (bundle, images) => {

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { execFile, execFileSync, fork, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -186,7 +186,7 @@ if (process.argv[2] !== "writer") {
       await mkdir(join(root, "platform"), { mode: 0o700 });
       await mkdir(join(platformDir, "lifecycle"), { recursive: true });
       await mkdir(join(platformDir, "managed-apps"));
-      await writeFile(join(platformDir, "managed-apps", app + ".json"), "", { mode: 0o444 });
+      const claimPath = join(platformDir, "managed-apps", app + ".json");
       const main = fileURLToPath(new URL("../../../cli/src/deployer/main.ts", import.meta.url));
       const call = async (...args) => {
         const { stdout } = await promisify(execFile)(process.execPath, [main, "ctl", "registration", ...args], { timeout: 5000 });
@@ -221,10 +221,16 @@ if (process.argv[2] !== "writer") {
       await run(true, async () => {
         await assert.rejects(call("reserve", app, stage(root)), /409/);
         assert.deepEqual(await call("initialize"), { status: "ready" });
+        await writeFile(claimPath, "", { mode: 0o444 });
         assert.deepEqual(await hostFlow(root), { status: "verified" });
       });
       await run(true, async () => {
         assert.deepEqual(await hostFlow(root), { status: "terminal", outcome: "success" });
+      });
+      await rename(join(platformDir, "lifecycle", "app-index"), join(platformDir, "saved-app-index"));
+      await run(true, async () => {
+        await assert.rejects(call("initialize"), /409/);
+        await assert.rejects(call("reserve", app, stage(root)), /409/);
       });
     } finally {
       await rm(root, { recursive: true, force: true });

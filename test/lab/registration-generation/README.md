@@ -122,3 +122,14 @@ The final indexed case starts the real deployer daemon with an explicit
 evidence directory. It verifies that the default startup leaves registration
 disabled, that an opted-in daemon requires explicit initialization, and that
 a restarted daemon reopens the existing index and returns the verified receipt.
+
+Run the Ansible and container integration with the upgrade lab:
+
+```bash
+bash test/lab/upgrade.sh --indexed-registration --vm-name kayra-indexed-lab-unique
+```
+
+It upgrades the regular platform first, enables registration in an explicit
+lab override, registers a synthetic app through Ansible, restarts the deployer
+and requires the same durable receipt. It also checks legacy purge refusal
+and runs platform verification after the experiment.

@@ -505,6 +505,25 @@ These checks are live only in the explicit lab registration path. Normal fleet
 app registration still refuses Swarm until the application adapter and admission
 path are integrated; infrastructure enablement does not convert an app.
 
+### HTTP plan proposals
+
+The indexed control path can preview an already-retained Swarm artifact through
+typed coordinator ports. The runtime description parser accepts an explicit,
+narrow Compose subset and performs no interpolation, filesystem reads or Docker
+effects. Unsupported fields are refused. The coordinator revalidates rollout
+requirements, exact artifact/registration identity, owned image digests,
+platform host grants and per-release resource grants before returning an
+immutable proposal. Host admission must separately account for existing
+workloads and actual candidate overlap.
+
+The proposal uses a services map and route list, pins platform authority and
+configuration identity, and retains environment inputs as literal app values or
+configuration/secret references. It never materializes a secret. The live lab
+previews with the builder stopped and the fixture secret temporarily absent.
+The response explicitly reports `admitted:false`; preview neither authorizes a
+runtime effect nor marks a release active. The initial supported subset and
+reproduction commands are documented in the registration-generation lab.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

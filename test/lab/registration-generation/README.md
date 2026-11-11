@@ -173,3 +173,22 @@ its name. Runtime selection is journaled with the generation before publication;
 builds and retains its rollout-bearing artifact and recovers the same receipt
 while the builder is stopped. It does not start this app's workloads. Ordinary
 fleet registration remains Compose-only until adapter/admission integration.
+
+`ctl preview <app> <full-commit>` reads an already-retained Swarm artifact and
+returns `{admitted:false, plan:...}`. It performs no build or workload mutation.
+The normalized proposal pins registration, artifact, image digests, platform
+authority, grants and configuration identity. Environment values remain literal
+app data or exact configuration/secret references. The lab previews while the
+builder is stopped and the fixture secret is hidden, then restores the secret.
+Host admission must still account for active workloads and candidate overlap.
+
+The first HTTP normalizer accepts one Compose file up to 256 KiB, one rolling
+HTTP service and one route. It supports explicit CPU/memory limits and
+reservations, CMD health checks with whole-second timings, argument-list command
+and entrypoint overrides, declared environment references, and the implicit app
+network. It refuses unknown fields, file inclusions/extends, env files, implicit
+host environment, mounts, published ports, custom networks, application routing
+labels and unsupported roles/strategies. It parses without resolving variables,
+reading host paths or invoking Docker. Multi-service/dependency/worker and
+maintenance semantics remain subsequent integration work; legacy Compose
+normalization is unchanged.

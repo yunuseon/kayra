@@ -38,7 +38,7 @@ RUN echo '{"type": "module"}' > /opt/kayra/package.json
 
 ARG KAYRA_REGISTRATION_LAB=false
 RUN if [ "$KAYRA_REGISTRATION_LAB" = true ]; then \
-      npm install --prefix /opt/kayra --ignore-scripts --no-audit --no-fund --no-save zod@4.6.7; \
+      npm install --prefix /opt/kayra --ignore-scripts --no-audit --no-fund --no-save zod@4.6.7 yaml@2.9.1; \
     fi
 
 USER node

@@ -128,6 +128,15 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     if (target === undefined || commit.length < 7) return fail(`${commit} is not an earlier release of ${name.value}`);
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
   },
+  preview: async ([app, commit, extra]) => {
+    if (app === undefined || commit === undefined || extra !== undefined) return fail("usage: ctl preview <app> <full-commit>");
+    const response = await fetch("http://127.0.0.1:8091/registration/preview", {
+      method: "POST", body: JSON.stringify({ app, commit }), signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+    if (!response?.ok) return fail("plan preview unavailable; prepare an artifact and inspect its registration and requirements");
+    console.log(await response.text());
+    return 0;
+  },
   pins: async (args) => {
     if (args.length !== 0) return fail("usage: ctl pins");
     const response = await fetch("http://127.0.0.1:8091/registration/pins", {

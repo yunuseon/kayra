@@ -1,7 +1,10 @@
 /* eslint-disable functional/no-let -- owns the experimental registration journal across control requests */
+import { describeCompose } from "../server/runtime/compose-description.ts";
+import { compileHttpPlan } from "../server/deployment/http-plan.ts";
+import { readPrivateConfiguration } from "../server/platform/private-registration.ts";
+import type { RegistrationGeneration } from "../contracts/registration-generation.ts";
 import type { Runtime } from "../contracts/rollout.ts";
 import { readSwarmAuthority } from "../server/platform/swarm-authority.ts";
-import type { RegistrationGeneration } from "../contracts/registration-generation.ts";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { readPublicRegistrationGeneration } from "../server/platform/public-registration.ts";
@@ -21,7 +24,7 @@ const parseBundleRegistration = (registration: RegistrationGeneration, commit: S
 };
 
 /** Optional composition for the existing deployer control listener. */
-export const startRegistrationControl = async (platform: string, observations: string, publicRegistrations?: string, builder = "http://builder:8081", swarmAuthority?: string) => {
+export const startRegistrationControl = async (platform: string, observations: string, publicRegistrations?: string, builder = "http://builder:8081", swarmAuthority?: string, privateRegistrations?: string, domain = "localhost") => {
   const path = join(platform, "lifecycle", "app-index");
   const observer = registrationObservation(observations);
   const present = await lstat(path).catch((error: unknown) => {
@@ -54,6 +57,26 @@ export const startRegistrationControl = async (platform: string, observations: s
       return JSON.stringify(bundleWire(checked.value));
     },
   });
+  const plans = artifacts === undefined || publicRegistrations === undefined || privateRegistrations === undefined || swarmAuthority === undefined ? undefined : Object.freeze({
+    preview: async (registration: RegistrationGeneration, runtime: Runtime, commit: string, artifact: string) => {
+      const snapshot = await readPublicRegistrationGeneration(publicRegistrations, registration);
+      const fullCommit = sha(commit);
+      if (!snapshot.ok || !fullCommit.ok || snapshot.value.app.runtime !== runtime) throw new Error("plan registration or commit is invalid");
+      const payload: unknown = JSON.parse(await artifacts.read(artifact));
+      const checked = parseBundleRegistration(registration, fullCommit.value, payload);
+      if (!checked?.ok) throw new Error("retained artifact does not match plan scope");
+      const authority = await readSwarmAuthority(swarmAuthority);
+      const configuration = await readPrivateConfiguration(privateRegistrations, registration, 1000);
+      if (!authority.ok || !configuration.ok) throw new Error("platform plan inputs are unavailable");
+      const description = describeCompose(checked.value.compose);
+      if (!description.ok) throw new Error(description.error);
+      const compiled = compileHttpPlan({ registration, runtime, app: snapshot.value.app, authority: authority.value, domain,
+        configuration: { identity: configuration.value.identity, keys: Object.keys(configuration.value.configuration) } },
+        { ...checked.value, registration: checked.value.registration, rollout: checked.value.rollout, artifact }, description.value);
+      if (!compiled.ok) throw new Error(compiled.error);
+      return compiled.value;
+    },
+  });
   const canRegister = async (app: string) => {
     const claim = await lstat(join(platform, "managed-apps", app + ".json"));
     return claim.isFile() && claim.uid === 0 && claim.gid === 0 && (claim.mode & 0o7777) === 0o444 && claim.nlink === 1;
@@ -73,7 +96,7 @@ export const startRegistrationControl = async (platform: string, observations: s
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
-      return registrationControl(await opening, canRegister, builds, async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok))(route, input);
+      return registrationControl(await opening, canRegister, builds, async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok), plans)(route, input);
     },
     close: async () => {
       const index = await opening;

@@ -1,6 +1,7 @@
 """Root/Linux filesystem tests: all writes stay in a new temporary directory."""
 import contextlib
 import copy
+import fcntl
 import hashlib
 import io
 import json
@@ -126,6 +127,40 @@ class GenerationTest(unittest.TestCase):
         self.assertEqual(command.register(self.fd, GID, request, retry), {"status": "verified"})
         self.assertEqual(generations, {generation})
         self.assertEqual(private.stat().st_ino, first_inode)
+
+    def test_experimental_claim_refuses_legacy_state_and_survives_reopen(self):
+        app = self.meta["app"]
+        for name in ("apps", "removing", "removal-locks", "managed-apps"):
+            (self.root / name).mkdir(mode=0o700)
+        marker = self.root / "managed-apps" / (app + ".json")
+        legacy = self.root / "apps" / (app + ".json")
+        legacy.touch()
+        with self.assertRaisesRegex(storage.RegistrationError, "legacy Compose state"):
+            with command.claim_experimental_app(self.root, app, lambda _: False):
+                self.fail("legacy app was claimed")
+        self.assertFalse(marker.exists())
+        legacy.unlink()
+
+        with self.assertRaisesRegex(storage.RegistrationError, "legacy Compose state"):
+            with command.claim_experimental_app(self.root, app, lambda _: True):
+                self.fail("legacy volume was ignored")
+        self.assertFalse(marker.exists())
+
+        lock = self.root / "removal-locks" / (app + ".lock")
+        with lock.open("w") as holder:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            with self.assertRaisesRegex(storage.RegistrationError, "holds the app lock"):
+                with command.claim_experimental_app(self.root, app, lambda _: False):
+                    self.fail("contended app was claimed")
+        self.assertFalse(marker.exists())
+
+        with self.assertRaisesRegex(RuntimeError, "lost registration caller"):
+            with command.claim_experimental_app(self.root, app, lambda _: False):
+                self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o400)
+                raise RuntimeError("lost registration caller")
+        inode = marker.stat().st_ino
+        with command.claim_experimental_app(self.root, app, lambda _: False):
+            self.assertEqual(marker.stat().st_ino, inode)
 
     def test_published_identity_and_private_access(self):
         output = io.StringIO()

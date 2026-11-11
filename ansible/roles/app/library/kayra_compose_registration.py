@@ -41,6 +41,8 @@ def install(path, content, uid, gid, mode):
 
 def apply(module, platform, app, app_directory, registration, dotenv, lock_fd=None):
     target = platform / "apps" / (app + ".json")
+    if (platform / "managed-apps" / (app + ".json")).exists():
+        module.fail_json(msg="The deployment coordinator owns this app registration.")
     if (platform / "removing" / (app + ".json")).exists():
         module.fail_json(msg="App removal is incomplete. Complete removal before registering the app.")
     if target.exists():
@@ -59,7 +61,7 @@ def apply(module, platform, app, app_directory, registration, dotenv, lock_fd=No
     os.chown(app_directory, deploy, group)
     app_directory.chmod(0o755)
     install(env_path, dotenv, deploy, group, 0o644)
-    subprocess.run([str(platform / "bin" / "app-apply"), app],
+    subprocess.run([str(platform / "bin" / "app-apply"), app, "--locked-fd", str(lock_fd)],
                    input=module.params["secrets"].encode(), capture_output=True, check=True, pass_fds=(lock_fd,))
     install(target, registration, 0, 0, 0o644)
     module.exit_json(changed=True)

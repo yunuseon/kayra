@@ -59,6 +59,15 @@
   loop: [removal-locks, removing]
   become: true
 
+- name: Create managed application ownership directory
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/managed-apps"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
 - name: Find existing Compose registrations for lock provisioning
   ansible.builtin.find:
     paths: "{{ platform_dir }}/apps"

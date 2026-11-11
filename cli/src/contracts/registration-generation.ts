@@ -1,29 +1,15 @@
-import { z } from "zod";
 import { names } from "../lib/names.ts";
 import { err, ok } from "../lib/result.ts";
 
-/**
- * Metadata only. This contract does not authenticate its producer, establish
- * generation uniqueness or publication durability, or inspect files or secrets.
- */
-const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-const record = z.object({
-  version: z.literal(1),
-  app: z.string().regex(names.app.pattern),
-  incarnation: uuid,
-  actionId: z.string(),
-  registrationGeneration: uuid,
-}).strict().superRefine((value, ctx) => {
-  const match = /^([0-9a-f-]+):([1-9][0-9]*)$/.exec(value.actionId);
-  const sequence = Number(match?.[2]);
-  // Fence allocation never issues MAX_SAFE_INTEGER, because it must advance
-  // its next action before the intent is persisted.
-  if (match?.[1] !== value.incarnation || !Number.isSafeInteger(sequence) || sequence < 1 || sequence >= Number.MAX_SAFE_INTEGER) {
-    ctx.addIssue({ code: "custom", message: "invalid lifecycle action identity" });
-  }
-});
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export type RegistrationGeneration = Readonly<z.infer<typeof record>>;
+export type RegistrationGeneration = {
+  readonly version: 1;
+  readonly app: string;
+  readonly incarnation: string;
+  readonly actionId: string;
+  readonly registrationGeneration: string;
+};
 export type RegistrationObservation = Readonly<Omit<RegistrationGeneration, "version"> & { readonly status: "applied" | "not-applied" | "unknown" }>;
 
 const metadataKeys = ["version", "app", "incarnation", "actionId", "registrationGeneration"] as const;
@@ -49,15 +35,21 @@ const dataProperties = (input: unknown, expected: readonly string[]) => {
 /**
  * Parse a JSON-like manifest or current-pointer record. A future file reader
  * must bound input size before parsing. Inherited fields and accessors are not
- * metadata; copy only own data properties before handing values to the schema.
+ * metadata; only own data properties are accepted.
  */
 export const parseRegistrationGeneration = (input: unknown) => {
-  try {
-    const parsed = record.safeParse(dataProperties(input, metadataKeys));
-    return parsed.success ? ok(Object.freeze(parsed.data)) : err("invalid registration generation metadata");
-  } catch {
-    return err("invalid registration generation metadata");
-  }
+  const fields = dataProperties(input, metadataKeys);
+  if (fields === undefined) return err("invalid registration generation metadata");
+  const { version, app, incarnation, actionId, registrationGeneration } = fields;
+  if (version !== 1 || typeof app !== "string" || !names.app.pattern.test(app) ||
+    typeof incarnation !== "string" || !uuid.test(incarnation) ||
+    typeof registrationGeneration !== "string" || !uuid.test(registrationGeneration) ||
+    typeof actionId !== "string") return err("invalid registration generation metadata");
+  const match = /^([0-9a-f-]+):([1-9][0-9]*)$/.exec(actionId);
+  const sequence = Number(match?.[2]);
+  if (match?.[1] !== incarnation || !Number.isSafeInteger(sequence) ||
+    sequence < 1 || sequence >= Number.MAX_SAFE_INTEGER) return err("invalid registration generation metadata");
+  return ok<RegistrationGeneration>(Object.freeze({ version, app, incarnation, actionId, registrationGeneration }));
 };
 
 /** Identity-bound evidence from a trusted platform observer. Parsing alone does

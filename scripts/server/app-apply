@@ -13,6 +13,29 @@ set -euo pipefail
 
 app="${1:?Usage: app-apply <app> < secrets.env}"
 platform_dir="$(cd "$(dirname "$0")/.." && pwd)"
+if ! (export LC_ALL=C; [[ "$app" =~ ^[a-z][a-z0-9-]*$ ]]); then
+    echo 'ERROR: invalid app name' >&2
+    exit 1
+fi
+lock="${platform_dir}/removal-locks/${app}.lock"
+if [ "${2:-}" = "--locked-fd" ]; then
+    fd="${3:?missing lock descriptor}"
+    if ! [[ "$fd" =~ ^[0-9]+$ && "/proc/self/fd/${fd}" -ef "$lock" ]]; then
+        echo "ERROR: invalid app lock for ${app}." >&2
+        exit 1
+    fi
+else
+    exec 9>"$lock"
+    fd=9
+fi
+if ! flock -n "$fd"; then
+    echo "ERROR: another operation holds the app lock for ${app}." >&2
+    exit 1
+fi
+if [ -e "${platform_dir}/managed-apps/${app}.json" ]; then
+    echo "ERROR: the deployment coordinator owns ${app}." >&2
+    exit 1
+fi
 secrets_dir="${platform_dir}/app-secrets/${app}"
 
 # Staged next to the target and swapped in whole, so keys the app no longer

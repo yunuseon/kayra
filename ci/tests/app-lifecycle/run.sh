@@ -40,8 +40,8 @@ fixture() {
     PLATFORM="$tmp/$1"
     CALLS="$PLATFORM/calls"
     export PLATFORM CALLS
-    mkdir -p "$PLATFORM/bin" "$PLATFORM/apps" "$PLATFORM/removing" "$PLATFORM/removal-locks" "$PLATFORM/app-secrets/shop" "$PLATFORM/runs/shop" "$PLATFORM/releases/shop" "$PLATFORM/data/shop" "$PLATFORM/data/other"
-    cp "$root/scripts/server/app-remove" "$root/scripts/server/app-purge" "$root/scripts/server/app-restore" "$PLATFORM/bin/"
+    mkdir -p "$PLATFORM/bin" "$PLATFORM/apps" "$PLATFORM/removing" "$PLATFORM/removal-locks" "$PLATFORM/managed-apps" "$PLATFORM/app-secrets/shop" "$PLATFORM/runs/shop" "$PLATFORM/releases/shop" "$PLATFORM/data/shop" "$PLATFORM/data/other"
+    cp "$root/scripts/server/app-apply" "$root/scripts/server/app-remove" "$root/scripts/server/app-purge" "$root/scripts/server/app-restore" "$PLATFORM/bin/"
     printf 'APPS_DIR=%s/data\n' "$PLATFORM" > "$PLATFORM/.env"
     : > "$PLATFORM/apps/shop.json"
     : > "$PLATFORM/app-secrets/shop/secret"
@@ -155,3 +155,17 @@ if VOLUMES='shop_db' REMOVE_EXIT=1 bash "$PLATFORM/bin/app-purge" shop > "$PLATF
 fi
 test "$(cat "$CALLS")" = $'volume ls -q --filter label=com.docker.compose.project=shop\nvolume rm shop_db'
 echo '  ✓ a failed Docker volume removal is reported'
+
+fixture managed
+rm "$PLATFORM/apps/shop.json"
+touch "$PLATFORM/managed-apps/shop.json"
+for script in app-apply app-remove app-purge; do
+    if bash "$PLATFORM/bin/$script" shop < /dev/null > "$PLATFORM/output" 2>&1; then
+        echo "  ✗ $script accepted a coordinator-owned app" >&2
+        exit 1
+    fi
+    grep -q 'deployment coordinator owns shop' "$PLATFORM/output"
+    test ! -s "$CALLS"
+    test -e "$PLATFORM/app-secrets/shop/secret"
+done
+echo '  ✓ legacy mutations refuse names owned by the coordinator'

@@ -25,6 +25,10 @@ if ! flock -n 9; then
     echo "ERROR: another remove or purge is in progress for ${app}." >&2
     exit 1
 fi
+if [ -e "${platform_dir}/managed-apps/${app}.json" ]; then
+    echo "ERROR: the deployment coordinator owns ${app}." >&2
+    exit 1
+fi
 pending="${platform_dir}/removing/${app}.json"
 
 if [ -e "${platform_dir}/apps/${app}.json" ]; then

@@ -5,9 +5,11 @@ identity returned by the lifecycle owner while its registration fence is held.
 """
 import argparse
 import contextlib
+import fcntl
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+import stat
 import subprocess
 import sys
 
@@ -32,8 +34,7 @@ def trusted_root(value):
 
 def execute(root, mode, gid, request):
     if mode == "stage":
-        fields = {"app", "registration", "configuration", "secrets"}
-        storage._require(type(request) is dict and set(request) == fields, "invalid initial registration request")
+        registration_request(request)
         return {"generation": storage.stage_initial_registration(root, **request)}
     if mode == "verify":
         return storage.record_publication_evidence(root, request, gid)
@@ -50,6 +51,57 @@ def execute(root, mode, gid, request):
             return evidence
         raise
     return storage.record_publication_evidence(root, request, gid)
+
+
+def registration_request(request):
+    fields = {"app", "registration", "configuration", "secrets"}
+    storage._require(type(request) is dict and set(request) == fields, "invalid initial registration request")
+    app = request["app"]
+    storage._require(type(app) is str and bool(storage._APP.fullmatch(app)), "invalid staged app name")
+    return app
+
+
+def legacy_objects(app):
+    label = "label=com.docker.compose.project=" + app
+    try:
+        return any(subprocess.check_output(["docker", *command, "--filter", label], timeout=10).strip()
+                   for command in (("ps", "-aq"), ("volume", "ls", "-q")))
+    except (OSError, subprocess.SubprocessError):
+        raise storage.RegistrationError("could not check legacy Compose ownership") from None
+
+
+@contextlib.contextmanager
+def claim_experimental_app(platform_dir, app, inspect=legacy_objects):
+    """Fence all cooperating legacy writers before an indexed app uses the name."""
+    storage._require(type(app) is str and bool(storage._APP.fullmatch(app)), "invalid staged app name")
+    platform = Path(platform_dir)
+    path = platform / "removal-locks" / (app + ".lock")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    try:
+        info = os.fstat(fd)
+        storage._require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1, "invalid host app lock")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise storage.RegistrationError("another operation holds the app lock") from None
+        legacy = (platform / "apps" / (app + ".json"), platform / "removing" / (app + ".json"),
+                  platform / "runs" / app, platform / "releases" / app, platform / "app-secrets" / app)
+        storage._require(not any(os.path.lexists(item) for item in legacy) and not inspect(app),
+                         "legacy Compose state already uses the app name")
+        directory = os.open(platform / "managed-apps", storage._DIR_FLAGS)
+        try:
+            storage._check(directory, 0o700, 0, True)
+            name = app + ".json"
+            try:
+                storage._new_file(directory, name, b"", 0o400)
+            except FileExistsError:
+                storage._read_file(directory, name, 0o400)
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        yield
+    finally:
+        os.close(fd)
 
 
 def register(root, gid, request, ctl):
@@ -108,8 +160,11 @@ def main():
             if args.mode == "register":
                 storage._require(args.platform_dir is not None and os.path.isabs(args.platform_dir),
                                  "register requires an absolute platform directory")
-                result = register(root, args.private_gid, request,
-                                  lambda *values: docker_control(args.platform_dir, *values))
+                app = registration_request(request)
+                storage._payload(app, request["registration"], request["configuration"], request["secrets"])
+                with claim_experimental_app(args.platform_dir, app):
+                    result = register(root, args.private_gid, request,
+                                      lambda *values: docker_control(args.platform_dir, *values))
             else:
                 result = execute(root, args.mode, args.private_gid, request)
         print(json.dumps(result))

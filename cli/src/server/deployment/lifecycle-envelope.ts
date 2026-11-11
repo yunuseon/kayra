@@ -5,8 +5,9 @@
 /* eslint-disable functional/prefer-immutable-types */
 import { z } from "zod";
 import { err, ok } from "../../lib/result.ts";
+import { parseRegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
-import { admitTicket, parseTicketState } from "./lifecycle-tickets.ts";
+import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
 
 // Snapshot only narrowly defined references; the ticket module independently
 // validates and hashes them, so a mismatch between the schemas fails closed.
@@ -30,6 +31,7 @@ const shape = z.object({
   fence: z.unknown(),
   tickets: z.unknown(),
   registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]).default("compose") }).strict().optional(),
+  registrationReceipt: z.object({ ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]), metadata: z.unknown() }).strict().optional(),
   operations: z.array(z.object({ ticket: z.string().max(80), action: z.string().max(80), descriptor }).strict()).max(2),
 }).strict();
 
@@ -45,12 +47,26 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   if (fence.value !== null && (fence.value.app !== tickets.value.app || fence.value.generation !== tickets.value.incarnation)) return err("invalid lifecycle envelope");
 
   const allocation = parsed.data.registrationAllocation;
-  if (allocation !== undefined) {
-    const bound = admitTicket(tickets.value, allocation.ticket, { kind: "register", registrationGeneration: allocation.generation });
-    if (!bound.ok || (bound.value.status === "new") !== !parsed.data.created ||
-      (bound.value.status === "accepted" && !parsed.data.operations.some((operation) => operation.ticket === allocation.ticket))) {
-      return err("invalid initial registration allocation");
-    }
+  const bound = allocation === undefined ? undefined : admitTicket(tickets.value, allocation.ticket, { kind: "register", registrationGeneration: allocation.generation });
+  // Older journals can gain a certificate only from a still-present verified receipt.
+  const legacyReceipt = allocation !== undefined && bound?.ok && bound.value.status === "terminal" && bound.value.outcome === "success"
+    ? { ticket: allocation.ticket, runtime: allocation.runtime, metadata: {
+      version: 1, app: tickets.value.app, incarnation: tickets.value.incarnation,
+      actionId: `${tickets.value.incarnation}:1`, registrationGeneration: allocation.generation,
+    } } : undefined;
+  const supplied = parsed.data.registrationReceipt ?? legacyReceipt;
+  const metadata = supplied === undefined ? undefined : parseRegistrationGeneration(supplied.metadata);
+  if (supplied !== undefined && !metadata?.ok) return err("invalid registration certificate");
+  const receipt = supplied === undefined || !metadata?.ok ? undefined : Object.freeze({ ticket: supplied.ticket, runtime: supplied.runtime, metadata: metadata.value });
+  if (receipt !== undefined) {
+    if (allocation === undefined || !parsed.data.created || fence.value === null || receipt.ticket !== allocation.ticket || receipt.runtime !== allocation.runtime ||
+      receipt.metadata.app !== tickets.value.app || receipt.metadata.incarnation !== tickets.value.incarnation ||
+      receipt.metadata.actionId !== `${tickets.value.incarnation}:1` || receipt.metadata.registrationGeneration !== allocation.generation) return err("invalid registration certificate");
+    const lookup = lookupTicket(tickets.value, allocation.ticket);
+    if (!lookup.ok || (lookup.value.status !== "expired" && (!bound?.ok || bound.value.status !== "terminal" || bound.value.outcome !== "success"))) return err("registration certificate conflicts with ticket history");
+  } else if (allocation !== undefined && (!bound?.ok || (bound.value.status === "new") !== !parsed.data.created ||
+    (bound.value.status === "accepted" && !parsed.data.operations.some((operation) => operation.ticket === allocation.ticket)))) {
+    return err("invalid initial registration allocation");
   }
 
   const current = fence.value?.lifecycle;
@@ -76,5 +92,6 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   if (!consistent) return err("invalid lifecycle envelope");
   operations.forEach((operation) => { Object.freeze(operation.descriptor); Object.freeze(operation); });
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
-    ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }) }));
+    ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
+    ...(receipt === undefined ? {} : { registrationReceipt: receipt }) }));
 };

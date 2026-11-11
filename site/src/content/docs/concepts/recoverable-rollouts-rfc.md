@@ -245,6 +245,11 @@ for allocation. The index journals that ID with the reservation in one write.
 Retrying the same ID returns the original ticket through acceptance and
 settlement. A different ID conflicts with the existing binding. This single
 binding applies for the life of the initial registration in that incarnation.
+The successful initial registration also seals an independent receipt in the
+app envelope, in the same write that settles its ticket. That receipt survives
+bounded terminal-ticket history and preserves the selected backend. Older
+journals can recover this proof only from a matching successful ticket still
+present in history; an expired ticket or registered fence alone is insufficient.
 The live Ansible caller still needs durable storage for its generation ID.
 
 The existing Ansible app role must acquire a registration operation through the

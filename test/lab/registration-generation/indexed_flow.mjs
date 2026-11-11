@@ -251,12 +251,16 @@ if (process.argv[2] !== "writer") {
         const verified = await call("verified", app);
         assert.equal(verified.app, app);
         assert.equal(verified.registrationGeneration, stage(root));
+        const saved = JSON.parse(await readFile(join(platformDir, "lifecycle", "app-index", createHash("sha256").update(app).digest("hex"), "state.json"), "utf8"));
+        assert.deepEqual(saved.registrationReceipt, { ticket: saved.registrationAllocation.ticket, runtime: "compose", metadata: verified });
       });
       await run(true, async () => {
         assert.deepEqual(await hostFlow(root), { status: "terminal", outcome: "success" });
         const verified = await call("verified", app);
         assert.equal(verified.app, app);
         assert.equal(verified.registrationGeneration, stage(root));
+        const saved = JSON.parse(await readFile(join(platformDir, "lifecycle", "app-index", createHash("sha256").update(app).digest("hex"), "state.json"), "utf8"));
+        assert.deepEqual(saved.registrationReceipt, { ticket: saved.registrationAllocation.ticket, runtime: "compose", metadata: verified });
       });
       await rename(join(platformDir, "lifecycle", "app-index"), join(platformDir, "saved-app-index"));
       await run(true, async () => {

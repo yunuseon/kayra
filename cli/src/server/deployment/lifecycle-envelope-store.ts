@@ -119,6 +119,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         if (allocation !== undefined && (allocation.ticket !== ticket || allocation.generation !== registrationGeneration)) {
           throw new Error("initial registration allocation conflict");
         }
+        if (current.registrationReceipt?.ticket === ticket && current.registrationReceipt.metadata.registrationGeneration === registrationGeneration) return Object.freeze({ status: "terminal" as const, outcome: "success" as const });
         const admitted = admitTicket(current.tickets, ticket, descriptor);
         if (!admitted.ok) throw new Error(admitted.error);
         if (admitted.value.status === "terminal") return Object.freeze({ status: "terminal" as const, outcome: admitted.value.outcome });
@@ -143,6 +144,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const descriptor = Object.freeze({ kind: "register" as const, registrationGeneration });
       return serial(async () => {
         const current = await required();
+        if (current.registrationReceipt?.ticket === ticket && current.registrationReceipt.metadata.registrationGeneration === registrationGeneration) return Object.freeze({ status: "terminal" as const, outcome: "success" as const });
         const admitted = admitTicket(current.tickets, ticket, descriptor);
         if (!admitted.ok) throw new Error(admitted.error);
         if (admitted.value.status === "terminal") return Object.freeze({ status: "terminal" as const, outcome: admitted.value.outcome });
@@ -159,7 +161,11 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         const settled = settleLifecycleWork(fence, actionId);
         const completed = completeTicket(current.tickets, ticket, "success");
         if (!settled.ok || !completed.ok) throw new Error("invalid registration settlement");
-        await persist({ ...current, fence: settled.value, tickets: completed.value, operations: current.operations.filter((item) => item.ticket !== ticket) });
+        await persist({ ...current, fence: settled.value, tickets: completed.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+          ...(current.registrationAllocation === undefined ? {} : { registrationReceipt: {
+            ticket, runtime: current.registrationAllocation.runtime, metadata: { version: 1, ...expected },
+          } }),
+        });
         return Object.freeze({ status: "verified" as const });
       });
     },

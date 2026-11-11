@@ -58,6 +58,13 @@ test("a bundle may only name the app's own images and relative compose files", (
   for (const rollout of [null, false, { strategy: "rolling" }]) {
     deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, rollout }), { ok: false, error: "bundle: rollout metadata is not yet supported" });
   }
+  const incarnation = "11111111-1111-4111-8111-111111111111";
+  const registration = { version: 1 as const, app: "shop", incarnation, actionId: incarnation + ":1", registrationGeneration: "22222222-2222-4222-8222-222222222222" };
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), good, registration).ok, false);
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, registration }).ok, false);
+  const pinned = must(parseBundle(name("shop"), commit("a"), { ...good, registration }, registration));
+  deepStrictEqual(pinned.registration, registration);
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, registration: { ...registration, actionId: incarnation + ":2" } }, registration).ok, false);
   const bundle = must(parseBundle(name("shop"), commit("a"), good));
   strictEqual(imagesEnv(bundle), "WEB_IMAGE=localhost:5000/shop/web:0123456789ab\n");
   deepStrictEqual(parseBundle(name("shop"), commit("b"), good).ok, false);

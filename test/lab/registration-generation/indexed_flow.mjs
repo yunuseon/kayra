@@ -8,6 +8,9 @@ import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { builderInternalHandler } from "../../../cli/src/server/builder/builder.ts";
+import { builderResolve } from "../../../cli/src/deployer/build/client.ts";
+import { createHash } from "node:crypto";
 import { deployerControlHandler } from "../../../cli/src/deployer/deployer.ts";
 import { registrationControl } from "../../../cli/src/server/deployment/registration-control.ts";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../../cli/src/server/deployment/lifecycle-app-index.ts";
@@ -159,6 +162,27 @@ if (process.argv[2] === "writer") {
             published.value.app.secrets, 0,
           );
           assert.deepEqual(mismatched, { ok: false, error: "private registration identity mismatch" });
+          const builder = createServer(builderInternalHandler({
+            PLATFORM_DIR: join(root, "legacy"),
+            KAYRA_PUBLIC_REGISTRATIONS_DIR: join(root, "platform", "public"),
+          })).listen(0, "127.0.0.1");
+          await once(builder, "listening");
+          const builderUrl = `http://127.0.0.1:${builder.address().port}`;
+          const publicPointer = join(root, "platform", "public", createHash("sha256").update(app).digest("hex"), "current.json");
+          try {
+            await rename(publicPointer, publicPointer + ".saved");
+            const resolved = await builderResolve(builderUrl, published.value.app, "a".repeat(40), published.value.metadata);
+            assert.deepEqual(resolved, { ok: true, value: "a".repeat(40) });
+            const wrong = await builderResolve(builderUrl, published.value.app, "a".repeat(40), {
+              ...published.value.metadata, actionId: published.value.metadata.incarnation + ":2",
+            });
+            assert.equal(wrong.ok, false);
+            const unpinned = await builderResolve(builderUrl, published.value.app, "a".repeat(40));
+            assert.equal(unpinned.ok, false);
+          } finally {
+            await rename(publicPointer + ".saved", publicPointer);
+            await new Promise((resolve, reject) => builder.close((error) => error ? reject(error) : resolve()));
+          }
         } finally {
           await control.close();
           await index.close();

@@ -159,6 +159,20 @@
         src: "{{ registration_root }}/public/{{ fixture.metadata.app | hash('sha256') }}/current.json"
       register: public_pointer
 
+    - name: Read the coordinator's verified registration projection
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, registration, verified, "{{ fixture.metadata.app }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: verified_registration
+      changed_when: false
+
+    - name: Require the coordinator and platform to agree on registration identity
+      ansible.builtin.assert:
+        that:
+          - (verified_registration.stdout | from_json) == (public_pointer.content | b64decode | from_json)
+        quiet: true
+
     - name: Resolve a commit through the builder using the pinned public registration
       ansible.builtin.command:
         argv:

@@ -246,10 +246,17 @@ if (process.argv[2] !== "writer") {
         await assert.rejects(call("reserve", app, stage(root)), /409/);
         assert.deepEqual(await call("initialize"), { status: "ready" });
         await writeFile(claimPath, "", { mode: 0o444 });
+        await assert.rejects(call("verified", app), /409/);
         assert.deepEqual(await hostFlow(root), { status: "verified" });
+        const verified = await call("verified", app);
+        assert.equal(verified.app, app);
+        assert.equal(verified.registrationGeneration, stage(root));
       });
       await run(true, async () => {
         assert.deepEqual(await hostFlow(root), { status: "terminal", outcome: "success" });
+        const verified = await call("verified", app);
+        assert.equal(verified.app, app);
+        assert.equal(verified.registrationGeneration, stage(root));
       });
       await rename(join(platformDir, "lifecycle", "app-index"), join(platformDir, "saved-app-index"));
       await run(true, async () => {

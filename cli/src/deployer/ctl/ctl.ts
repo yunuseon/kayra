@@ -130,9 +130,10 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
   },
   registration: async ([operation, app, generation, ticket]) => {
     const initialize = operation === "initialize" && app === undefined;
-    if (!initialize && ((operation !== "reserve" && operation !== "submit" && operation !== "reconcile") ||
+    const verified = operation === "verified" && app !== undefined && generation === undefined;
+    if (!initialize && !verified && ((operation !== "reserve" && operation !== "submit" && operation !== "reconcile") ||
       app === undefined || generation === undefined || (operation === "reserve") !== (ticket === undefined))) {
-      return fail("usage: ctl registration initialize | reserve|submit|reconcile <app> <generation> [ticket]");
+      return fail("usage: ctl registration initialize | verified <app> | reserve|submit|reconcile <app> <generation> [ticket]");
     }
     const response = await fetch(`http://127.0.0.1:8091/registration/${operation}`, {
       method: "POST",

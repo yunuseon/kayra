@@ -40,8 +40,9 @@ test("runtime adapters do not import policy or coordinator internals", async () 
   await refused("src/server/runtime/compose.ts", 'import "../../deployer/runs/run.ts";');
 });
 
-test("builder does not depend on workload runtime adapters or legacy Compose operations", async () => {
+test("builder does not depend on workload runtime adapters or legacy deployer registration", async () => {
   await refused("src/server/builder/builder.ts", 'import "../runtime/compose.ts";');
+  await refused("src/server/builder/builder.ts", 'import "../../deployer/app.ts";');
   await refused("src/server/builder/builder.ts", 'import "../../deployer/build/compose.ts";');
   await refused("src/server/builder/builder.ts", 'import "../../deployer/runs/run.ts";');
   await refused("src/server/builder/builder.ts", 'export * from "../../deployer/runs/records.ts";');

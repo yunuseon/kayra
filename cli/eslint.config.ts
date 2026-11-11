@@ -155,7 +155,7 @@ export default defineConfig(
     // Builder code does not choose or invoke workload runtime adapters.
     files: ["src/server/builder/**/*.ts"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [{ group: ["**/runtime/**", "**/deployer/runs/**", "**/deployer/build/compose.ts", "**/deployer/build/compose.js"], message: "Builders produce bundles; workload runtime operations belong to adapters." }] }],
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/runtime/**", "**/deployer/runs/**", "**/deployer/app.ts", "**/deployer/app.js", "**/deployer/build/compose.ts", "**/deployer/build/compose.js"], message: "Builders produce bundles; workload runtime operations belong to adapters." }] }],
       "no-restricted-syntax": ["error", { selector: "ImportExpression", message: "Builders must use statically checked imports." }],
     },
   },

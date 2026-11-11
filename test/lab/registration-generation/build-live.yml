@@ -34,7 +34,7 @@
     platform_dir: /opt/platform
     registration_root: /var/lib/kayra/registration-lab
     compose_env:
-      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:registration-lab.yml
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml{{ ':docker-compose.swarm.yml' if kayra_lab_swarm | default(false) | bool else '' }}:registration-lab.yml
     build_registration:
       name: indexed-build
       repo: "{{ fixture_repo }}"

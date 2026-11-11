@@ -7,6 +7,8 @@
 # live under apps_dir/<name>. Changing either means changing every app.
 platform_dir: /opt/platform
 apps_dir: /opt/apps
+# Omitted by default; enabling requires explicit host and overhead budgets.
+experimental_swarm: {}
 domain: localhost
 # The engine's files (compose files, scripts) lie above the playbooks, wherever
 # the fleet it serves is; the fleet's (servers/, .cache/) above the server's

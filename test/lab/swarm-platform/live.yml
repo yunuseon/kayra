@@ -1,0 +1,58 @@
+---
+- name: Check experimental platform Swarm discovery alongside Compose
+  hosts: servers
+  become: true
+  tasks:
+    - name: Read the immutable host authority
+      ansible.builtin.slurp:
+        src: /var/lib/kayra/swarm/authority.json
+      register: authority
+
+    - name: Reconcile host setup a second time
+      kayra_swarm_host:
+        profile: "{{ (authority.content | b64decode | from_json).profile }}"
+      register: repeated_setup
+
+    - name: Require idempotent host setup
+      ansible.builtin.assert:
+        that: not repeated_setup.changed
+        quiet: true
+
+    - name: Copy the public lab certificate authority
+      ansible.builtin.copy:
+        src: "{{ lookup('ansible.builtin.pipe', 'mkcert -CAROOT') }}/rootCA.pem"
+        dest: /var/lib/kayra/swarm/lab-ca.pem
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install the disposable routing probe
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/test/lab/swarm-platform/probe.py"
+        dest: /var/lib/kayra/swarm/lab-probe.py
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Verify read-only discovery and mixed routing with real TLS
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -B
+          - /var/lib/kayra/swarm/lab-probe.py
+          - --address
+          - "{{ ansible_host }}"
+          - --domain
+          - lab.test
+          - --ca
+          - /var/lib/kayra/swarm/lab-ca.pem
+      register: probe
+      changed_when: true
+
+    - name: Retain the exact platform integration result
+      ansible.builtin.copy:
+        content: "{{ probe.stdout }}\n"
+        dest: "{{ report_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

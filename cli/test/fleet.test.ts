@@ -154,3 +154,12 @@ test("server.yml holds topology only", () => {
     "server.yml: 'platform_ci' is not a key it knows",
   );
 });
+
+test("experimental Swarm host setup requires explicit capacity and platform overhead", () => {
+  const descriptor = "target: multipass\ndomain: a.test\n";
+  const profile = { enabled: true, advertise_address: "192.0.2.1", memory_bytes: 3 * 1024**3, cpu_millicores: 2000, platform_memory_bytes: 1024**3, platform_cpu_millicores: 500 };
+  strictEqual(refused(descriptor, { vars: JSON.stringify({ experimental_swarm: profile }) }), "accepted");
+  for (const invalid of [{}, { ...profile, enabled: false }, { ...profile, advertise_address: "invalid" }, { ...profile, platform_memory_bytes: profile.memory_bytes }, { ...profile, platform_cpu_millicores: 2000 }, { ...profile, extra: true }]) {
+    strictEqual(refused(descriptor, { vars: JSON.stringify({ experimental_swarm: invalid }) }) === "accepted", false);
+  }
+});

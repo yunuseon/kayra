@@ -49,14 +49,35 @@
   loop: [apps, app-secrets]
   become: true
 
-- name: Create host removal state directories
+- name: Create host lifecycle state directories
   ansible.builtin.file:
     path: "{{ platform_dir }}/{{ item }}"
     state: directory
     owner: root
     group: root
-    mode: "0700"
+    mode: "0755"
   loop: [removal-locks, removing]
+  become: true
+
+- name: Find existing Compose registrations for lock provisioning
+  ansible.builtin.find:
+    paths: "{{ platform_dir }}/apps"
+    patterns: "^[a-z][a-z0-9-]*\\.json$"
+    use_regex: true
+  register: existing_app_registrations
+  become: true
+
+- name: Provision app locks for existing registrations
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/removal-locks/{{ (item.path | basename)[:-5] }}.lock"
+    state: touch
+    access_time: preserve
+    modification_time: preserve
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ existing_app_registrations.files }}"
+  when: not ansible_check_mode
   become: true
 
 # Written by the deployer (uid 1000); the builder reads runs/ for its pages.

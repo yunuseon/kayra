@@ -180,11 +180,12 @@ pending marker before unregistering. A failed stop leaves the marker in place
 and purge refuses the app until removal completes. Fleet pruning includes
 pending removals so it can retry after a crash.
 
-The legacy Ansible registration task holds the same lock through its
-configuration, secret and registration writes. The deployment queue still
-bypasses this lock, so an accepted deployment can race removal. The lifecycle
-owner must serialize that work and verify volume ownership and attachments
-before purge.
+Legacy Ansible registration holds the same lock through its configuration,
+secret and registration writes. The deployer takes the lock before queue
+admission and holds it through queued and running work for the app. This
+serializes cooperating live writers. Interrupted Docker effects still require
+durable reconciliation, and purge still requires verified volume ownership
+and attachments for the new lifecycle path.
 
 ### Coordinator app index
 

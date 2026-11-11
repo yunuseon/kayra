@@ -89,3 +89,42 @@ test("concurrent preparations keep each bundle at its requested commit", { skip:
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("indexed builder carries validated rollout metadata while legacy preparation refuses it", { skip: !yqAvailable }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kayra-builder-rollout-artifact-"));
+  try {
+    const repo = join(dir, "repo");
+    mkdirSync(repo);
+    execFileSync("git", ["init", "-q", "-b", "main", repo]);
+    execFileSync("git", ["-C", repo, "config", "user.name", "Kayra test"]);
+    execFileSync("git", ["-C", repo, "config", "user.email", "test@example.invalid"]);
+    writeFileSync(join(repo, "compose.yml"), "services: {}\n");
+    const marker = join(dir, "planned");
+    const script = join(dir, "resolve-images.sh");
+    writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\n`);
+    const settings = { platformDir: dir, work: join(dir, "work"), deployer: "", resolveImages: script, webhookSecret: () => "", gitToken: () => "", healthToken: () => "", webhooks: false };
+    const app = { ...shop, repo: `file://${repo}` };
+    const incarnation = "11111111-1111-4111-8111-111111111111";
+    const registration = { version: 1 as const, app: app.name, incarnation, actionId: incarnation + ":1", registrationGeneration: "22222222-2222-4222-8222-222222222222" };
+    const rollout = { strategy: "rolling", mixed_version_compatible: true, rollback_compatible: true, services: { web: { role: "http", overlap: "allowed" } } };
+    for (const [label, declaration, valid] of [["valid", rollout, true], ["false", false, false], ["null", null, false], ["private", { private: "SECRET-CONTENTS" }, false]] as const) {
+      writeFileSync(join(repo, "app.yml"), JSON.stringify({ name: app.name, compose: ["compose.yml"], routes: [], rollout: declaration }));
+      execFileSync("git", ["-C", repo, "add", "."]);
+      execFileSync("git", ["-C", repo, "-c", "commit.gpgsign=false", "commit", "-qm", label]);
+      const id = sha(execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim());
+      assert.ok(id.ok);
+      rmSync(marker, { force: true });
+      const legacy = await prepare(app, id.value, settings, () => undefined);
+      assert.equal(legacy.ok, false);
+      assert.equal(existsSync(marker), false);
+      const indexed = await prepare(app, id.value, settings, () => undefined, registration);
+      assert.equal(indexed.ok, valid, label);
+      assert.equal(existsSync(marker), valid, label);
+      assert.equal(JSON.stringify(indexed).includes("SECRET-CONTENTS"), false);
+      if (indexed.ok) {
+        assert.ok(indexed.value !== null && typeof indexed.value === "object");
+        assert.deepEqual(Reflect.get(indexed.value, "rollout"), { ...rollout, migrations: [], checks: [] });
+      }
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

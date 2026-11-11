@@ -69,6 +69,16 @@ test("a bundle may only name the app's own images and relative compose files", (
   deepStrictEqual(Object.hasOwn(bundleWire(pinned), "ignored"), false);
   deepStrictEqual(pinned.registration, registration);
   deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...immutable, registration: { ...registration, actionId: incarnation + ":2" } }, registration).ok, false);
+  const rollout = { strategy: "rolling", mixed_version_compatible: true, rollback_compatible: true, services: { web: { role: "http", overlap: "allowed" } } };
+  const proposed = { ...immutable, registration, rollout };
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), proposed, registration).ok, false);
+  const artifact = must(parseBundle(name("shop"), commit("a"), proposed, registration, "artifact"));
+  deepStrictEqual(artifact.rollout, { ...rollout, migrations: [], checks: [] });
+  deepStrictEqual(must(parseBundle(name("shop"), commit("a"), bundleWire(artifact), registration, "artifact")), artifact);
+  for (const invalid of [null, false, {}, { ...rollout, rollback_compatible: false }]) {
+    deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...proposed, rollout: invalid }, registration, "artifact").ok, false);
+  }
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, rollout }, undefined, "artifact").ok, false);
   const bundle = must(parseBundle(name("shop"), commit("a"), good));
   strictEqual(imagesEnv(bundle), "WEB_IMAGE=localhost:5000/shop/web:0123456789ab\n");
   deepStrictEqual(parseBundle(name("shop"), commit("b"), good).ok, false);

@@ -434,6 +434,36 @@ publication and deployment tests must exercise the shared lifecycle gate.
 Integration remains disabled until the real Ansible, queue, restore, removal,
 purge, upgrade and legacy-import paths participate in that gate.
 
+### Indexed build retention
+
+The explicitly enabled registration control path now exposes the exact verified
+registration identity from its durable receipt. A public pointer alone is not
+proof of successful registration. The builder resolves immutable public
+registration generations without reading private registration material.
+
+Indexed build requests require a full commit. Before calling the builder, the
+coordinator journals registration identity, commit and an absolute 45-minute
+deadline. The builder serializes preparations sharing a checkout and returns
+registry manifest digests. The trusted composition validates the bundle again,
+retains only validated fields in synchronized content-addressed files, then
+journals the receipt. Retries after restart return that receipt without the
+builder; missing or corrupted content requires intervention. Interrupted
+preparations may repeat image building at the same commit and original
+deadline. This is safe image preparation, not a claim of exactly-once execution
+of arbitrary application code.
+
+Indexed artifacts can carry validated rollout declarations. The legacy builder
+request and Compose deployment parser continue to refuse those declarations.
+Retaining an artifact neither admits its resource requirements nor authorizes
+workload effects or promotes an active release. Runtime selection, admission,
+normalization and the rollout state machine remain separate gates.
+
+The image-pin projection verifies retained artifacts against recorded identity
+and publishes image digests and unresolved build identities. It exposes no
+Compose content or resolved secret material. It explicitly reports incomplete
+coverage until active, candidate and rollback runtime plans are integrated;
+legacy registry GC remains refused for coordinator-managed app names.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

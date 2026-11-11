@@ -23,7 +23,6 @@ import { abandonInterruptedRuns, appendLog, meta, prune, runsOf, writeMeta } fro
 import { runsDir, settings, token, type Settings } from "./settings.ts";
 import { typed } from "../lib/typed.ts";
 import { assess, gather } from "./health.ts";
-import type { registrationControl } from "../server/deployment/registration-control.ts";
 import { startWithLifecycle } from "../server/deployment/startup.ts";
 import { acquireComposeAppLease } from "../server/runtime/compose-app-lease.ts";
 import { composeProjectRunning } from "../server/runtime/compose.ts";
@@ -246,9 +245,11 @@ const pushHandler = (s: Settings, gatherFacts: typeof gather) => handle((request
 /** The internal push/health HTTP surface, with injectable health observations. */
 export const deployerPushHandler = (env: NodeJS.ProcessEnv, gatherFacts: typeof gather = gather) => pushHandler(settings(env), gatherFacts);
 
+type RegistrationHandler = (route: string, input: unknown) => Promise<unknown>;
+
 const control = async (
   s: Settings, request: IncomingMessage, response: ServerResponse,
-  registration?: ReturnType<typeof registrationControl>,
+  registration?: RegistrationHandler,
 ) => {
   const path = new URL(request.url ?? "/", "http://deployer").pathname;
   const input = await json(request);
@@ -290,17 +291,21 @@ const control = async (
   send(response, 404, "not found\n");
 };
 
-export const deployerControlHandler = (env: NodeJS.ProcessEnv, registration?: ReturnType<typeof registrationControl>) => {
+export const deployerControlHandler = (env: NodeJS.ProcessEnv, registration?: RegistrationHandler) => {
   const s = settings(env);
   return handle((request, response) => control(s, request, response, registration));
 };
 
 export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
-  const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), () => {
+  const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), async () => {
+    const observations = env["KAYRA_REGISTRATION_EVIDENCE_DIR"];
+    const registration = observations === undefined ? undefined
+      : await (await import("./registration-startup.ts")).startRegistrationControl(s.platformDir, observations);
+    if (registration !== undefined) process.once("exit", () => { void registration.close(); });
     abandonInterruptedRuns(runsDir(s), () => new Date().toISOString());
     createServer(pushHandler(s, gather)).listen(8090);
-    createServer(deployerControlHandler(env)).listen(8091, "127.0.0.1");
+    createServer(deployerControlHandler(env, registration?.handle)).listen(8091, "127.0.0.1");
     schedule(s, {
       poll: () => { void poll(s); },
       gc: () => { ask(s, jobRequest(newId(), "gc", false, "schedule")); },

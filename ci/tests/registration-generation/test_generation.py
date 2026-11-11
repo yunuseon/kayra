@@ -131,7 +131,7 @@ class GenerationTest(unittest.TestCase):
     def test_experimental_claim_refuses_legacy_state_and_survives_reopen(self):
         app = self.meta["app"]
         for name in ("apps", "removing", "removal-locks", "managed-apps"):
-            (self.root / name).mkdir(mode=0o700)
+            (self.root / name).mkdir(mode=0o755 if name == "managed-apps" else 0o700)
         marker = self.root / "managed-apps" / (app + ".json")
         legacy = self.root / "apps" / (app + ".json")
         legacy.touch()
@@ -156,7 +156,7 @@ class GenerationTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "lost registration caller"):
             with command.claim_experimental_app(self.root, app, lambda _: False):
-                self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o400)
+                self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o444)
                 raise RuntimeError("lost registration caller")
         inode = marker.stat().st_ino
         with command.claim_experimental_app(self.root, app, lambda _: False):

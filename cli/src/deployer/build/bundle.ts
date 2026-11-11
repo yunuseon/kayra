@@ -1,3 +1,4 @@
+import { matchRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { err, ok } from "../../lib/result.ts";
 import { field } from "../app.ts";
 import { sha, type AppName, type Sha } from "../brand.ts";
@@ -16,6 +17,7 @@ export type ComposeFile = { readonly path: string; readonly content: string };
  * through admission.
  */
 export type Bundle = {
+  readonly registration?: RegistrationGeneration;
   readonly sha: Sha;
   readonly images: readonly Image[];
   readonly compose: readonly ComposeFile[];
@@ -25,9 +27,12 @@ export type Bundle = {
 const relative = (path: string) =>
   path !== "" && !path.startsWith("/") && !path.split("/").some((segment) => segment === ".." || segment === "");
 
-export const parseBundle = (app: AppName, expected: Sha, json: unknown) => {
+export const parseBundle = (app: AppName, expected: Sha, json: unknown, registration?: RegistrationGeneration) => {
   if (typeof json !== "object" || json === null) return err("bundle: not an object");
   if (Object.hasOwn(json, "rollout")) return err("bundle: rollout metadata is not yet supported");
+  const snapshot = field(json, "registration");
+  if (registration === undefined && snapshot !== undefined) return err("bundle: unexpected registration snapshot");
+  if (registration !== undefined && (!matchRegistrationGeneration(snapshot, registration, registration).ok || registration.app !== app)) return err("bundle: registration snapshot mismatch");
   const commit = field(json, "sha");
   const images = field(json, "images");
   const compose = field(json, "compose");
@@ -57,6 +62,7 @@ export const parseBundle = (app: AppName, expected: Sha, json: unknown) => {
   if (!routes.ok) return err(`bundle: ${routes.error}`);
   return ok<Bundle>({
     sha: minted.value,
+    ...(registration === undefined ? {} : { registration: Object.freeze({ ...registration }) }),
     images: parsedImages.filter((item) => typeof item !== "string"),
     compose: parsedCompose.filter((item) => typeof item !== "string"),
     routes: routes.value,

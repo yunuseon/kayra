@@ -1,3 +1,4 @@
+import type { RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import { err, ok } from "../../lib/result.ts";
@@ -7,8 +8,8 @@ import { sha, type Sha } from "../brand.ts";
 /** The builder as the deployer asks it, on platform-internal (:8081): what it answers is checked again later, never trusted. */
 
 /** A branch, tag or full commit id to the commit it names. */
-export const builderResolve = async (builder: string, app: App, ref: string) => {
-  const response = await fetch(`${builder}/resolve`, { method: "POST", body: JSON.stringify({ app: app.name, ref }) }).catch(() => undefined);
+export const builderResolve = async (builder: string, app: App, ref: string, registration?: RegistrationGeneration) => {
+  const response = await fetch(`${builder}/resolve`, { method: "POST", body: JSON.stringify({ app: app.name, ref, ...(registration === undefined ? {} : { registration }) }) }).catch(() => undefined);
   if (response === undefined) return err("the builder did not answer");
   const answer: unknown = await response.json().catch(() => undefined);
   const given = typeof answer === "object" && answer !== null ? field(answer, "sha") : undefined;
@@ -17,10 +18,10 @@ export const builderResolve = async (builder: string, app: App, ref: string) => 
 };
 
 /** The builder's NDJSON: log lines as they come, then the bundle or an error. */
-export const builderPrepare = async (builder: string, app: App, commit: Sha, log: (line: string) => void) => {
+export const builderPrepare = async (builder: string, app: App, commit: Sha, log: (line: string) => void, registration?: RegistrationGeneration) => {
   const response = await fetch(`${builder}/prepare`, {
     method: "POST",
-    body: JSON.stringify({ app: app.name, sha: commit }),
+    body: JSON.stringify({ app: app.name, sha: commit, ...(registration === undefined ? {} : { registration }) }),
     signal: AbortSignal.timeout(45 * 60_000),
   }).catch(() => undefined);
   if (response?.body == null || !response.ok) return err("the builder did not prepare a bundle");

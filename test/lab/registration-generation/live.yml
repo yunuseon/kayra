@@ -65,10 +65,15 @@
               volumes:
                 - {{ registration_root }}/observations:/run/kayra-registration/observations:ro
                 - ./managed-apps:/opt/platform/managed-apps:ro
+            builder:
+              environment:
+                KAYRA_PUBLIC_REGISTRATIONS_DIR: /run/kayra-registration/public
+              volumes:
+                - {{ registration_root }}/public:/run/kayra-registration/public:ro
 
     - name: Start the explicitly opted-in deployer
       ansible.builtin.command:
-        argv: [docker, compose, up, -d, --build, --no-deps, deployer]
+        argv: [docker, compose, up, -d, --build, --no-deps, deployer, builder]
         chdir: "{{ platform_dir }}"
       environment: "{{ compose_env }}"
       changed_when: true
@@ -148,6 +153,43 @@
       register: purge_refusal
       failed_when: purge_refusal.rc == 0 or 'deployment coordinator owns' not in purge_refusal.stderr
       changed_when: false
+
+    - name: Read the published public registration pointer
+      ansible.builtin.slurp:
+        src: "{{ registration_root }}/public/{{ fixture.metadata.app | hash('sha256') }}/current.json"
+      register: public_pointer
+
+    - name: Resolve a commit through the builder using the pinned public registration
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - builder
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import { text } from 'node:stream/consumers';
+            const input = JSON.parse(await text(process.stdin));
+            const response = await fetch('http://127.0.0.1:8081/resolve', {
+              method: 'POST',
+              body: JSON.stringify(input),
+            });
+            console.log(JSON.stringify({ status: response.status, answer: await response.json() }));
+        stdin: "{{ {'app':fixture.metadata.app, 'ref':'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'registration':(public_pointer.content | b64decode | from_json)} | to_json }}"
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: builder_resolution
+      changed_when: false
+
+    - name: Require resolution against the selected generation
+      ansible.builtin.assert:
+        that:
+          - (builder_resolution.stdout | from_json).status == 200
+          - (builder_resolution.stdout | from_json).answer.sha == 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        quiet: true
 
     - name: Verify the builder has no private registration mount
       ansible.builtin.command:

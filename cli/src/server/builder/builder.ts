@@ -3,6 +3,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join } from "node:path";
 import { err, ok, type Result } from "../../lib/result.ts";
 import { field, type App } from "../../contracts/app-registration.ts";
+import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
+import { readPublicRegistrationGeneration } from "../platform/public-registration.ts";
 import { registered } from "../platform/legacy-registration.ts";
 import { owner, runId, sha, type Sha } from "../../deployer/brand.ts";
 import type { Argv } from "../../contracts/process.ts";
@@ -27,6 +29,7 @@ import { typed } from "../../lib/typed.ts";
  */
 type Settings = {
   readonly platformDir: string;
+  readonly registrations?: string | undefined;
   readonly work: string;
   readonly deployer: string;
   readonly resolveImages: string;
@@ -44,6 +47,7 @@ const settings = (env: NodeJS.ProcessEnv) => {
   const platformDir = env["PLATFORM_DIR"] ?? "/opt/platform";
   return typed<Settings>({
     platformDir,
+    registrations: env["KAYRA_PUBLIC_REGISTRATIONS_DIR"],
     work: env["WORK_DIR"] ?? "/work",
     deployer: env["DEPLOYER_URL"] ?? "http://deployer:8090",
     resolveImages: env["RESOLVE_IMAGES"] ?? "/opt/kayra/scripts/platform/resolve-images.sh",
@@ -101,7 +105,7 @@ const sequence = async (steps: readonly (() => Promise<Result<string, string>>)[
  * lists at that commit. A clone per app, kept between runs; the deployer never
  * runs two for the same app at once, and neither does this.
  */
-export const prepare = async (app: App, commit: Sha, s: Settings, line: Line) => {
+export const prepare = async (app: App, commit: Sha, s: Settings, line: Line, registration?: RegistrationGeneration) => {
   const dir = join(s.work, app.name);
   const env = gitEnv(s.gitToken());
   const git = (...args: readonly string[]) => run(["git", "-C", dir, ...args], { env, timeoutMs: 10 * 60_000 }, line);
@@ -153,6 +157,7 @@ export const prepare = async (app: App, commit: Sha, s: Settings, line: Line) =>
   const routed: unknown = JSON.parse(routes.value);
   return ok<unknown>({
     sha: commit,
+    ...(registration === undefined ? {} : { registration }),
     images: artifacts.map(([, variable, ref]) => ({ variable, ref } as const)),
     compose: files.map((file) => ({ path: file, content: readFileSync(join(root, file), "utf8") } as const)),
     routes: routed,
@@ -209,17 +214,32 @@ const pages = (s: Settings, path: string, response: ServerResponse) => {
   send(response, 404, "not found\n");
 };
 
+const selectedRegistration = async (s: Settings, name: unknown, identity: unknown) => {
+  if (typeof name !== "string") return err("invalid app name");
+  if (identity === undefined) {
+    const legacy = registered(s.platformDir, name);
+    return legacy.ok ? ok(Object.freeze({ app: legacy.value, metadata: undefined })) : legacy;
+  }
+  const parsed = parseRegistrationGeneration(identity);
+  if (!parsed.ok || parsed.value.app !== name || s.registrations === undefined) return err("registration snapshot is unavailable");
+  return readPublicRegistrationGeneration(s.registrations, parsed.value);
+};
+
 const internal = async (s: Settings, path: string, request: IncomingMessage, response: ServerResponse) => {
   const input = await json(request);
-  const name = typeof input === "object" && input !== null ? field(input, "app") : undefined;
-  const app = registered(s.platformDir, typeof name === "string" ? name : "");
-  if (!app.ok || typeof input !== "object" || input === null) {
-    send(response, 404, `${app.ok ? "bad request" : app.error}\n`);
+  if (typeof input !== "object" || input === null) {
+    send(response, 400, "bad request\n");
     return;
   }
+  const selected = await selectedRegistration(s, field(input, "app"), field(input, "registration"));
+  if (!selected.ok) {
+    send(response, 404, "registration is unavailable\n");
+    return;
+  }
+  const app = selected.value.app;
   if (path === "/resolve") {
     const ref = field(input, "ref");
-    const resolved = await resolveRef(app.value, typeof ref === "string" ? ref : app.value.ref, s.gitToken());
+    const resolved = await resolveRef(app, typeof ref === "string" ? ref : app.ref, s.gitToken());
     send(response, resolved.ok ? 200 : 422, JSON.stringify(resolved.ok ? { sha: resolved.value } : { error: resolved.error }), "application/json");
     return;
   }
@@ -230,7 +250,7 @@ const internal = async (s: Settings, path: string, request: IncomingMessage, res
   }
   // One JSON object per line: {log} as the build goes, then {bundle} or {error}.
   response.writeHead(200, { "Content-Type": "application/x-ndjson" });
-  const prepared = await prepare(app.value, commit.value, s, (text) => response.write(`${JSON.stringify({ log: text })}\n`));
+  const prepared = await prepare(app, commit.value, s, (text) => response.write(`${JSON.stringify({ log: text })}\n`), selected.value.metadata);
   response.end(`${JSON.stringify(prepared.ok ? { bundle: prepared.value } : { error: prepared.error })}\n`);
 };
 
@@ -257,15 +277,15 @@ const publicHandler = (s: Settings) => failing(async (request, response) => {
 /** The public HTTP surface, also usable with a caller-provided HTTP server. */
 export const builderPublicHandler = (env: NodeJS.ProcessEnv) => publicHandler(settings(env));
 
+export const builderInternalHandler = (env: NodeJS.ProcessEnv) => failing(async (request, response) => {
+  const path = new URL(request.url ?? "/", "http://builder").pathname;
+  if (request.method === "POST") await internal(settings(env), path, request, response);
+  else send(response, 405, "method not allowed\n");
+});
+
 export const serveBuilder = (env: NodeJS.ProcessEnv) => {
   const s = settings(env);
   createServer(publicHandler(s)).listen(8080);
-  createServer(
-    failing(async (request, response) => {
-      const path = new URL(request.url ?? "/", "http://builder").pathname;
-      if (request.method === "POST") await internal(s, path, request, response);
-      else send(response, 405, "method not allowed\n");
-    }),
-  ).listen(8081);
+  createServer(builderInternalHandler(env)).listen(8081);
   console.log("builder: :8080 hooks and pages, :8081 resolve and prepare");
 };

@@ -231,3 +231,29 @@ test("initial registration allocation is bound to one generation across concurre
     await index.close();
   }
 });
+
+test("the registration projection requires a verified durable receipt", async (t) => {
+  const root = await fixture(t);
+  const observer = (expected: { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string }) =>
+    Promise.resolve({ ...expected, status: "applied" });
+  const index = await createLifecycleAppIndex(root, observer);
+  const id = await index.prepareApp("shop");
+  const ticket = await index.reserveRegistration("shop", generation);
+  try {
+    await assert.rejects(index.verifiedRegistration("shop"), /not been verified/);
+    await index.submitRegistration("shop", ticket, generation);
+    await assert.rejects(index.verifiedRegistration("shop"), /not been verified/);
+    await index.reconcileRegistration("shop", ticket, generation);
+    assert.deepEqual(await index.verifiedRegistration("shop"), {
+      version: 1, app: "shop", incarnation: id, actionId: id + ":1", registrationGeneration: generation,
+    });
+  } finally {
+    await index.close();
+  }
+  const reopened = await openLifecycleAppIndex(root);
+  try {
+    assert.equal((await reopened.verifiedRegistration("shop")).registrationGeneration, generation);
+  } finally {
+    await reopened.close();
+  }
+});

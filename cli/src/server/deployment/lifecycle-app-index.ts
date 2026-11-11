@@ -5,6 +5,9 @@ import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { names } from "../../lib/names.ts";
+import { admitTicket } from "./lifecycle-tickets.ts";
+import { lifecycleActionId } from "./lifecycle-fence.ts";
+import { parseRegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
 
@@ -119,6 +122,23 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
+    verifiedRegistration: (app: string) => useReady(app, async (store) => {
+      const state = await store.read();
+      if (state === undefined) throw new Error("registration state is missing");
+      const allocation = state.registrationAllocation;
+      const fence = state.fence;
+      if (allocation === undefined || fence?.lifecycle.phase !== "registered") throw new Error("registration has not been verified");
+      const receipt = admitTicket(state.tickets, allocation.ticket, {
+        kind: "register", registrationGeneration: allocation.generation,
+      });
+      if (!receipt.ok || receipt.value.status !== "terminal" || receipt.value.outcome !== "success") throw new Error("registration has no verified receipt");
+      const metadata = parseRegistrationGeneration({
+        version: 1, app, incarnation: state.tickets.incarnation,
+        actionId: lifecycleActionId(fence, 1), registrationGeneration: allocation.generation,
+      });
+      if (!metadata.ok) throw new Error(metadata.error);
+      return metadata.value;
+    }),
     reserveRegistration: (app: string, generation?: string) => useReady(app, (store) => store.reserveRegistration(generation)),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.submitRegistration(ticket, generation)),

@@ -10,10 +10,16 @@ const request = z.object({
 const ticketRequest = request.extend({ ticket: z.string().max(80) });
 
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
-  "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
+  "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
 export const registrationControl = (index: AppIndex, canRegister: (app: string) => Promise<boolean>) => async (path: string, input: unknown) => {
   switch (path) {
+    case "/registration/verified": {
+      const parsed = z.object({ app: z.string().regex(names.app.pattern) }).strict().safeParse(input);
+      if (!parsed.success) return undefined;
+      if (!(await canRegister(parsed.data.app))) throw new Error("app is outside registration scope");
+      return index.verifiedRegistration(parsed.data.app);
+    }
     case "/registration/reserve": {
       const parsed = request.safeParse(input);
       if (!parsed.success) return undefined;

@@ -105,7 +105,7 @@ const sequence = async (steps: readonly (() => Promise<Result<string, string>>)[
  * lists at that commit. A clone per app, kept between runs; the deployer never
  * runs two for the same app at once, and neither does this.
  */
-export const prepare = async (app: App, commit: Sha, s: Settings, line: Line, registration?: RegistrationGeneration) => {
+const prepareBundle = async (app: App, commit: Sha, s: Settings, line: Line, registration?: RegistrationGeneration) => {
   const dir = join(s.work, app.name);
   const env = gitEnv(s.gitToken());
   const git = (...args: readonly string[]) => run(["git", "-C", dir, ...args], { env, timeoutMs: 10 * 60_000 }, line);
@@ -162,6 +162,22 @@ export const prepare = async (app: App, commit: Sha, s: Settings, line: Line, re
     compose: files.map((file) => ({ path: file, content: readFileSync(join(root, file), "utf8") } as const)),
     routes: routed,
   });
+};
+
+// Each app has one mutable checkout inside this builder process.
+const preparations = new Map<string, Promise<void>>();
+
+export const prepare = (app: App, commit: Sha, s: Settings, line: Line, registration?: RegistrationGeneration) => {
+  const key = join(s.work, app.name);
+  const result = (preparations.get(key) ?? Promise.resolve()).then(() => prepareBundle(app, commit, s, line, registration));
+  const settled = result.then(() => undefined, () => undefined);
+  // eslint-disable-next-line functional/immutable-data -- retain each checkout's active preparation
+  preparations.set(key, settled);
+  void settled.then(() => {
+    // eslint-disable-next-line functional/immutable-data -- remove the idle checkout only after its final request
+    if (preparations.get(key) === settled) preparations.delete(key);
+  });
+  return result;
 };
 
 const hook = async (s: Settings, name: string, request: IncomingMessage, response: ServerResponse) => {

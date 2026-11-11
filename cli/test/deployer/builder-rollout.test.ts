@@ -54,3 +54,38 @@ test('builder refuses any rollout declaration before building images without log
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("concurrent preparations keep each bundle at its requested commit", { skip: !yqAvailable }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kayra-builder-concurrent-"));
+  try {
+    const repo = join(dir, "repo");
+    mkdirSync(repo);
+    execFileSync("git", ["init", "-q", "-b", "main", repo]);
+    execFileSync("git", ["-C", repo, "config", "user.name", "Kayra test"]);
+    execFileSync("git", ["-C", repo, "config", "user.email", "test@example.invalid"]);
+    const commits = ["first", "second"].map((release) => {
+      writeFileSync(join(repo, "app.yml"), "name: shop\ncompose: [compose.yml]\nroutes: []\n");
+      writeFileSync(join(repo, "compose.yml"), release);
+      execFileSync("git", ["-C", repo, "add", "."]);
+      execFileSync("git", ["-C", repo, "-c", "commit.gpgsign=false", "commit", "-qm", release]);
+      const id = sha(execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim());
+      assert.ok(id.ok);
+      return id.value;
+    });
+    const script = join(dir, "resolve-images.sh");
+    writeFileSync(script, "#!/bin/sh\nsleep 0.2\n");
+    const settings = { platformDir: dir, work: join(dir, "work"), deployer: "", resolveImages: script, webhookSecret: () => "", gitToken: () => "", healthToken: () => "", webhooks: false };
+    const app = { ...shop, repo: `file://${repo}` };
+    const results = await Promise.all(commits.map((id) => prepare(app, id, settings, () => undefined)));
+    results.forEach((result, index) => {
+      assert.ok(result.ok);
+      assert.ok(typeof result.value === "object" && result.value !== null);
+      assert.equal(Reflect.get(result.value, "sha"), commits[index]);
+      const compose: unknown = Reflect.get(result.value, "compose");
+      assert.ok(Array.isArray(compose));
+      assert.equal(Reflect.get(compose[0], "content"), index === 0 ? "first" : "second");
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

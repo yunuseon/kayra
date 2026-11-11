@@ -36,5 +36,8 @@ COPY app /opt/kayra
 # The code is ES modules, from either a checkout (.ts) or the package (.js).
 RUN echo '{"type": "module"}' > /opt/kayra/package.json
 
+ARG KAYRA_REGISTRATION_LAB=false
+RUN if [ "$KAYRA_REGISTRATION_LAB" = true ]; then       npm install --prefix /opt/kayra --ignore-scripts --no-audit --no-fund --no-save zod@4.6.7;     fi
+
 USER node
 ENTRYPOINT ["kayra-deployer"]

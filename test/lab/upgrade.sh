@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -33,13 +33,15 @@ set -euo pipefail
 KAYRA_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 from=""
 keep=false
+indexed_registration=false
 vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) [ $# -ge 2 ] || { echo "--from requires a version" >&2; exit 2; }; from="$2"; shift 2 ;;
         --vm-name) [ $# -ge 2 ] || { echo "--vm-name requires a name" >&2; exit 2; }; vm_name="$2"; shift 2 ;;
+        --indexed-registration) indexed_registration=true; shift ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--keep]" >&2; exit 2 ;;
     esac
 done
 [[ "$vm_name" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { echo "invalid Multipass VM name: ${vm_name}" >&2; exit 2; }
@@ -413,6 +415,13 @@ run="$(await_run "$before")"
 grep -q " poll " <<< "$run" || die "v4 deployed, but not by the poll: ${run}"
 expect_serves v4
 echo "✓ a push with no webhook deployed by deploy_poll"
+
+if [ "$indexed_registration" = true ]; then
+    step "7  indexed registration through Ansible and the running deployer"
+    ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook         -i "servers/${server}/inventory.ini"         "${KAYRA_ROOT}/test/lab/registration-generation/live.yml"         -e "kayra_root=${KAYRA_ROOT}" >> "$log" 2>&1 || die "indexed registration through Ansible"
+    echo "✓ indexed registration survived a deployer restart and protected its app name"
+    kayra_cmd verify "$server" || die "platform verification after indexed registration"
+fi
 
 passed=true
 step "the upgrade from ${from} holds"

@@ -434,6 +434,7 @@ if [ "$swarm_host" = true ]; then
         "${KAYRA_ROOT}/test/lab/swarm-platform/live.yml" \
         -e "kayra_root=${KAYRA_ROOT}" -e "report_path=${work}/swarm-platform.json" >> "$log" 2>&1 || die "mixed Compose and Swarm routing"
     cp "${work}/swarm-platform.json" "/tmp/kayra-swarm-platform-${vm_name}.json"
+    cp "${work}/swarm-platform.json.native.json" "/tmp/kayra-swarm-platform-${vm_name}.native.json"
     echo "✓ Swarm discovery is read-only; Compose and Swarm serve with verified TLS"
     echo "  exact versions and results: /tmp/kayra-swarm-platform-${vm_name}.json"
     expect_serves v4

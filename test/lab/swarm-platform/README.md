@@ -35,3 +35,18 @@ VMs and prints their fleet and cleanup command; `--keep` also retains successful
 VMs. A failed probe leaves `kayra-lab-platform-http` for inspection, with
 `io.kayra.lab=swarm-platform` and the owned node ID labels. Removing the disposable
 VM cleans up that fixture as well.
+
+The native API probe checks additional lifecycle prerequisites using the same
+Unix-socket transport intended for the existing deployer process. A metadata-only
+service update advances Docker's version without replacing tasks; a write using
+the older version is refused. Docker 29.9.3 returned HTTP 500 with an
+out-of-sequence error, so a non-success status alone cannot classify an outcome.
+
+The probe then scales its fixture to zero, clears container environment and
+network attachments, and uses DNSRR without a VIP. The service name stays
+reserved, so a delayed duplicate create is refused. Recreating the fixture by a
+versioned update keeps its service ID; a stale versioned removal is refused.
+This tests a proposed native ownership tombstone, not an integrated Kayra removal
+command. The probe deletes its successful disposable fixture after every API
+request is acknowledged; failed fixtures are preserved and print cleanup IDs.
+Results are saved beside the routing report with `.native.json` appended.

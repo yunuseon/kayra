@@ -524,6 +524,32 @@ The response explicitly reports `admitted:false`; preview neither authorizes a
 runtime effect nor marks a release active. The initial supported subset and
 reproduction commands are documented in the registration-generation lab.
 
+### Native runtime fencing evidence
+
+The platform lab now verifies Docker service-version fencing through a bounded
+Unix-socket transport in the existing deployer container. A metadata-only update
+advanced the service version without replacing its task. A stale update was
+refused with HTTP 500 on the tested Docker 29.9.3; coordinators must inspect
+owned runtime state after an unsuccessful write rather than treating an HTTP
+status as proof of failure. Mutation intents must retain the exact service ID
+and expected version before effects, and retries must never rebase onto a fresh
+version implicitly. The transport performs no request retries.
+
+The tested removal design retains a native zero-replica service as an ownership
+tombstone. It clears container environment and network attachments and releases
+the VIP while reserving the service name. That name reservation prevents a late
+create from resurrecting removed workloads. Recreation uses a versioned update
+of the reserved object; a stale versioned removal cannot affect it. Ordinary
+removal must therefore stop and fence workloads without deleting the native name
+reservation. Volume purge remains a separately fenced operation; a purged volume
+identity must never be reused for newly created data. No per-release custom
+traffic switch is introduced.
+
+These are runtime prerequisites established by the lab. Application admission,
+release promotion, compensation and lifecycle commands still require integrated
+coordinator implementation and fault-injection tests before these guarantees can
+be attributed to Kayra.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

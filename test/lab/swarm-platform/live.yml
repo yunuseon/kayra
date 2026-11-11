@@ -56,3 +56,20 @@
         mode: "0600"
       delegate_to: localhost
       become: false
+
+    - name: Prove native version fencing and empty ownership tombstones
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, node, --input-type=module]
+        stdin: "{{ lookup('ansible.builtin.file', kayra_root ~ '/test/lab/swarm-platform/native-fences.mjs') }}"
+        chdir: /opt/platform
+      register: fences
+      changed_when: true
+
+    - name: Retain native ownership-fence results
+      ansible.builtin.copy:
+        content: "{{ fences.stdout }}
+"
+        dest: "{{ report_path }}.native.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

@@ -15,19 +15,20 @@ test("registration records the fleet's Compose selection, including the default"
     const parsed = yamlOf(readFileSync(join(root, "ansible/roles/app/tasks/main.yml"), "utf8"));
     assert.ok(parsed.ok);
     assert.ok(Array.isArray(parsed.value));
-    const task: unknown = parsed.value.find((entry: unknown) => typeof entry === "object" && entry !== null && Reflect.get(entry, "name") === "Register the app");
+    const task: unknown = parsed.value.find((entry: unknown) => typeof entry === "object" && entry !== null && Reflect.get(entry, "name") === "Apply Compose app registration");
     assert.ok(typeof task === "object" && task !== null);
-    const copy: unknown = Reflect.get(task, "ansible.builtin.copy");
-    assert.ok(typeof copy === "object" && copy !== null);
-    // Run the real registration task unprivileged in a temporary directory.
-    const copyForTest = Object.fromEntries(Object.entries(copy).filter(([key]) => key !== "owner" && key !== "group"));
+    const parameters: unknown = Reflect.get(task, "kayra_compose_registration");
+    assert.ok(typeof parameters === "object" && parameters !== null);
+    const content: unknown = Reflect.get(parameters, "registration");
+    assert.equal(typeof content, "string");
+    const varsForTask: unknown = Reflect.get(task, "vars");
     const platform = join(dir, "platform");
     mkdirSync(join(platform, "apps"), { recursive: true });
     for (const runtime of [undefined, "compose"] as const) {
       const app = { name: "shop", ...(runtime === undefined ? {} : { runtime }) };
       const vars = { app, app_repo: "https://example.test/shop.git", app_ref: "main", app_subdomains: ["www"], manifest: {}, platform_dir: platform, domain: "lab.test" };
       const play = join(dir, "play.json");
-      writeFileSync(play, JSON.stringify([{ hosts: "localhost", connection: "local", gather_facts: false, vars, tasks: [{ ...task, "ansible.builtin.copy": copyForTest, become: false }] }]));
+      writeFileSync(play, JSON.stringify([{ hosts: "localhost", connection: "local", gather_facts: false, vars, tasks: [{ vars: varsForTask, "ansible.builtin.copy": { content, dest: join(platform, "apps/shop.json") } }] }]));
       const result = spawnSync("ansible-playbook", ["-i", "localhost,", play], { encoding: "utf8", env: { ...process.env, ANSIBLE_NOCOLOR: "1" } });
       assert.equal(result.status, 0, result.stdout + result.stderr);
       const registration: unknown = JSON.parse(readFileSync(join(platform, "apps/shop.json"), "utf8"));
@@ -61,10 +62,11 @@ test("registration refuses rollout metadata or an unsupported runtime before wri
       execFileSync("git", ["-C", repo, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", `case-${String(index)}`]);
       if (existing !== undefined) {
         mkdirSync(join(platform, "apps"), { recursive: true });
+        mkdirSync(join(platform, "removal-locks"));
         writeFileSync(join(platform, "apps", "shop.json"), existing);
       }
       const app = { name: "shop", repo: `file://${repo}`, ref: "main", ...(runtime === undefined ? {} : { runtime }) };
-      const vars = { app, fleet_root: fleet, server_dir: server, server: "lab", kayra_root: root, apps_dir: join(dir, "apps"), platform_dir: platform, domain: "lab.test", git_token: "test", app_secrets: {} };
+      const vars = { ansible_become: false, app, fleet_root: fleet, server_dir: server, server: "lab", kayra_root: root, apps_dir: join(dir, "apps"), platform_dir: platform, domain: "lab.test", git_token: "test", app_secrets: {} };
       const play = join(dir, "play.json");
       writeFileSync(play, JSON.stringify([{ hosts: "localhost", connection: "local", gather_facts: false, vars, roles: ["app"] }]));
       const result = spawnSync("ansible-playbook", ["-i", "localhost,", play], {

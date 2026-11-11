@@ -87,67 +87,14 @@
     missing_config: "{{ manifest.config | default([]) | difference(app_config | default({}) | list) }}"
     reserved_subdomains: "{{ app_subdomains | intersect(lookup('file', kayra_root ~ '/hosts.conf').splitlines() | reject('match', '^\\s*(#|$)') | list) }}"
 
-# Do not overwrite a managed backend the compatibility deployer cannot own.
-- name: Inspect existing registration
-  ansible.builtin.stat:
-    path: "{{ platform_dir }}/apps/{{ app.name }}.json"
-  register: existing_registration
-  check_mode: false
-
-- name: Read existing registration
-  ansible.builtin.slurp:
-    src: "{{ platform_dir }}/apps/{{ app.name }}.json"
-  register: existing_registration_content
-  when: existing_registration.stat.exists
-  check_mode: false
-
-- name: Refuse an unsupported registered runtime
-  ansible.builtin.assert:
-    that:
-      - previous_registration is mapping
-      - previous_registration.runtime is not defined or previous_registration.runtime == 'compose'
-    fail_msg: "{{ app.name }}: the existing registration does not use a supported Compose runtime"
-    quiet: true
-  vars:
-    previous_registration: "{{ existing_registration_content.content | b64decode | from_json }}"
-  when: existing_registration.stat.exists
-
-- name: Create app directory
-  ansible.builtin.file:
-    path: "{{ apps_dir }}/{{ app.name }}"
-    state: directory
-    owner: deploy
-    group: deploy
-    mode: "0755"
-  become: true
-
-- name: Render app .env
-  ansible.builtin.template:
-    src: app.env.j2
-    dest: "{{ apps_dir }}/{{ app.name }}/.env"
-    owner: deploy
-    group: deploy
-    mode: "0644"
-  become: true
-
-# Secrets before the registration: a push in between finds them in place.
-- name: Apply secrets
-  ansible.builtin.command:
-    cmd: "{{ platform_dir }}/bin/app-apply {{ app.name }}"
-    stdin: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secret_values[key] }}\n{% endfor %}"
-  no_log: true
-  become: true
-  changed_when: true
-
-# What may deploy where, approved here: hosts and secret keys come from this
-# file, never from the app's repository at the commit being deployed.
-- name: Register the app
-  ansible.builtin.copy:
-    content: "{{ registration | to_nice_json }}\n"
-    dest: "{{ platform_dir }}/apps/{{ app.name }}.json"
-    owner: root
-    group: root
-    mode: "0644"
+- name: Apply Compose app registration
+  kayra_compose_registration:
+    app: "{{ app.name }}"
+    platform_dir: "{{ platform_dir }}"
+    apps_dir: "{{ apps_dir }}"
+    dotenv: "{{ lookup('ansible.builtin.template', 'app.env.j2') }}"
+    registration: "{{ registration | to_nice_json }}\n"
+    secrets: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secret_values[key] }}\n{% endfor %}"
   vars:
     registration:
       name: "{{ app.name }}"
@@ -157,6 +104,10 @@
       runtime: "{{ app.runtime | default('compose') }}"
       hosts: "{{ app_subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
       secrets: "{{ manifest.secrets | default([]) }}"
+  register: compose_registration
+  retries: 5
+  delay: 3
+  until: compose_registration is succeeded or not (compose_registration.retryable | default(false))
   become: true
 
 # A Docker update or a reboot stops every container, and one deployed before

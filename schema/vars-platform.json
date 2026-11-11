@@ -10,6 +10,50 @@
       "type": "string",
       "description": "The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*)."
     },
+    "experimental_swarm": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "const": true
+        },
+        "advertise_address": {
+          "type": "string",
+          "format": "ipv4",
+          "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cpu_millicores": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform_memory_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform_cpu_millicores": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "enabled",
+        "advertise_address",
+        "memory_bytes",
+        "cpu_millicores",
+        "platform_memory_bytes",
+        "platform_cpu_millicores"
+      ],
+      "additionalProperties": false,
+      "description": "Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications."
+    },
     "authelia_policy": {
       "type": "string",
       "enum": [

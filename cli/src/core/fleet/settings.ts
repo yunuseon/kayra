@@ -49,6 +49,15 @@ export const settings: readonly Setting[] = [
   setting("docker_version", ["platform", "edge"], text, "The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*)."),
 
   // platform: the platform role
+  setting("experimental_swarm", platform, z.object({
+    enabled: z.literal(true),
+    advertise_address: z.ipv4(),
+    memory_bytes: z.number().int().positive(),
+    cpu_millicores: z.number().int().positive(),
+    platform_memory_bytes: z.number().int().positive(),
+    platform_cpu_millicores: z.number().int().positive(),
+  }).strict().refine((profile) => profile.platform_memory_bytes < profile.memory_bytes && profile.platform_cpu_millicores < profile.cpu_millicores,
+    "platform overhead must leave workload capacity"), "Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications."),
   setting("authelia_policy", platform, z.enum(["one_factor", "two_factor"]), "What Authelia asks of staff: two_factor (default) or one_factor."),
   setting("authelia_smtp_address", platform, text, "SMTP server for Authelia's mails (passkey enrolment); empty: mails go to a file."),
   setting("authelia_smtp_username", platform, text, "SMTP user for Authelia."),

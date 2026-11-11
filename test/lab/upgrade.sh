@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -34,14 +34,16 @@ KAYRA_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 from=""
 keep=false
 indexed_registration=false
+swarm_host=false
 vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) [ $# -ge 2 ] || { echo "--from requires a version" >&2; exit 2; }; from="$2"; shift 2 ;;
         --vm-name) [ $# -ge 2 ] || { echo "--vm-name requires a name" >&2; exit 2; }; vm_name="$2"; shift 2 ;;
         --indexed-registration) indexed_registration=true; shift ;;
+        --swarm-host) swarm_host=true; shift ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--keep]" >&2; exit 2 ;;
     esac
 done
 [[ "$vm_name" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { echo "invalid Multipass VM name: ${vm_name}" >&2; exit 2; }
@@ -416,9 +418,31 @@ grep -q " poll " <<< "$run" || die "v4 deployed, but not by the poll: ${run}"
 expect_serves v4
 echo "✓ a push with no webhook deployed by deploy_poll"
 
+if [ "$swarm_host" = true ]; then
+    step "6a  explicit Swarm host setup alongside Compose"
+    KAYRA_LAB_ADVERTISE_ADDRESS="$address" yq -i '.experimental_swarm = {
+        "enabled": true, "advertise_address": strenv(KAYRA_LAB_ADVERTISE_ADDRESS),
+        "memory_bytes": 3221225472, "cpu_millicores": 2000,
+        "platform_memory_bytes": 1073741824, "platform_cpu_millicores": 500
+    }' "${fleet}/servers/${server}/vars.yml"
+    kayra_cmd plan "$server" >> "$log" 2>&1 || die "previewing explicit Swarm setup"
+    [ "$(multipass exec "$vm_name" -- sudo docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ] || die "Swarm preview changed membership"
+    kayra_cmd setup "$server" >> "$log" 2>&1 || die "explicit Swarm host setup"
+    ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" \
+        ANSIBLE_LIBRARY="${KAYRA_ROOT}/ansible/roles/platform/library" ansible-playbook \
+        -i "servers/${server}/inventory.ini" \
+        "${KAYRA_ROOT}/test/lab/swarm-platform/live.yml" \
+        -e "kayra_root=${KAYRA_ROOT}" -e "report_path=${work}/swarm-platform.json" >> "$log" 2>&1 || die "mixed Compose and Swarm routing"
+    cp "${work}/swarm-platform.json" "/tmp/kayra-swarm-platform-${vm_name}.json"
+    echo "✓ Swarm discovery is read-only; Compose and Swarm serve with verified TLS"
+    echo "  exact versions and results: /tmp/kayra-swarm-platform-${vm_name}.json"
+    expect_serves v4
+    kayra_cmd verify "$server" || die "platform verification after Swarm host setup"
+fi
+
 if [ "$indexed_registration" = true ]; then
     step "7  indexed registration through Ansible and the running deployer"
-    ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook         -i "servers/${server}/inventory.ini"         "${KAYRA_ROOT}/test/lab/registration-generation/live.yml"         -e "kayra_root=${KAYRA_ROOT}" >> "$log" 2>&1 || die "indexed registration through Ansible"
+    ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook         -i "servers/${server}/inventory.ini"         "${KAYRA_ROOT}/test/lab/registration-generation/live.yml"         -e "kayra_root=${KAYRA_ROOT}" -e "kayra_lab_swarm=${swarm_host}" >> "$log" 2>&1 || die "indexed registration through Ansible"
     echo "✓ indexed registration survived a deployer restart and protected its app name"
     indexed_repo="${work}/indexed-build"
     cp -R "${KAYRA_ROOT}/test/lab/app" "$indexed_repo"
@@ -435,7 +459,7 @@ if [ "$indexed_registration" = true ]; then
         "${KAYRA_ROOT}/test/lab/registration-generation/build-live.yml" \
         -e "kayra_root=${KAYRA_ROOT}" \
         -e "fixture_repo=http://${host_ip}:${port}/lab/indexed.git" \
-        -e "fixture_commit=${indexed_commit}" >> "$log" 2>&1 || die "building the indexed fixture"
+        -e "fixture_commit=${indexed_commit}" -e "kayra_lab_swarm=${swarm_host}" >> "$log" 2>&1 || die "building the indexed fixture"
     echo "✓ indexed build returned digest-qualified images and refused destructive GC"
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi

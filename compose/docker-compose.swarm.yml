@@ -1,0 +1,21 @@
+# Explicit experimental host setup creates the overlay and authority first.
+services:
+  traefik:
+    networks:
+      - swarm-public
+  socket-proxy:
+    environment:
+      - SERVICES=1
+      - TASKS=1
+      - NETWORKS=1
+      - NODES=1
+      - POST=0
+  deployer:
+    environment:
+      - KAYRA_SWARM_AUTHORITY=/run/kayra-platform/swarm.json
+    volumes:
+      - /var/lib/kayra/swarm/authority.json:/run/kayra-platform/swarm.json:ro
+networks:
+  swarm-public:
+    name: platform-swarm
+    external: true

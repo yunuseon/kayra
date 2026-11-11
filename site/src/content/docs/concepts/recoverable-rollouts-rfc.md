@@ -464,6 +464,27 @@ Compose content or resolved secret material. It explicitly reports incomplete
 coverage until active, candidate and rollback runtime plans are integrated;
 legacy registry GC remains refused for coordinator-managed app names.
 
+### Explicit experimental host setup
+
+The platform role accepts an omitted-by-default `experimental_swarm` setting.
+Enabling it requires an advertise address, declared host CPU/memory capacity
+and platform overhead. Setup validates capacity against Docker, records intent,
+initializes one manager and creates a uniquely owned attachable overlay. It
+refuses unmanaged membership, conflicting networks, changed owned identities,
+and implicit profile changes or retirement. Check mode observes without
+creating authority files, a cluster or a network. A root-owned public authority
+file records immutable cluster, node, network and budget identity; it contains
+no join tokens or application secrets.
+
+The optional platform override retains Compose discovery and adds Swarm
+read-only discovery plus Traefik's overlay attachment. The existing deployer
+receives a read-only authority mount; the builder receives none. No additional
+Docker-socket holder or internal service is introduced. The platform integration
+lab verifies mixed Compose/Swarm routes with real TLS and denied API writes.
+This establishes infrastructure connectivity only. Ordinary fleet app
+registration still selects Compose; the live Swarm application adapter,
+resource admission and coordinated rollout remain subsequent integration work.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

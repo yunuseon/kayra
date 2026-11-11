@@ -11,7 +11,7 @@
       registration: "{{ fixture.registration }}"
       configuration: "{{ fixture.configuration }}"
       secrets: "{{ fixture.secrets }}"
-    compose_files: docker-compose.yml:docker-compose.ci.yml:registration-lab.yml
+    compose_files: docker-compose.yml:docker-compose.ci.yml{{ ':docker-compose.swarm.yml' if kayra_lab_swarm | default(false) | bool else '' }}:registration-lab.yml
     compose_env:
       COMPOSE_FILE: "{{ compose_files }}"
   tasks:

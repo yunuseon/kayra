@@ -8,6 +8,11 @@
 # command is just `docker compose ...` run in {{ platform_dir }}.
 # =============================================================================
 
+- name: Reconcile explicitly enabled experimental Swarm host setup
+  kayra_swarm_host:
+    profile: "{{ experimental_swarm }}"
+  become: true
+
 - name: Check Renovate has a token
   ansible.builtin.assert:
     that: renovate_token | length > 0 or 'RENOVATE_TOKEN' in (forgejo_config.tokens | default([]) | map(attribute='secret'))
@@ -124,6 +129,7 @@
     - docker-compose.yml
     - docker-compose.ci.yml
     - docker-compose.acme-dns.yml
+    - docker-compose.swarm.yml
     - traefik/dynamic/
     - authelia/configuration.yml
     - buildkit/
@@ -197,7 +203,7 @@
 
 - name: Render Traefik static config
   ansible.builtin.copy:
-    content: "{{ (traefik_static_dns if acme_dns else traefik_static) ~ '\n' }}"
+    content: "{{ (traefik_static_swarm if experimental_swarm.enabled | default(false) else (traefik_static_dns if acme_dns else traefik_static)) ~ '\n' }}"
     dest: "{{ platform_dir }}/traefik/traefik.yml"
     owner: deploy
     group: deploy
@@ -215,6 +221,12 @@
              'email': acme_email, 'storage': '/acme/acme.json',
              'dnsChallenge': {'provider': acme_dns, 'resolvers': ['8.8.8.8:53', '9.9.9.9:53'],
                               'propagation': {'delayBeforeChecks': '60s'}}}}}})
+         | to_nice_yaml(indent=2) }}
+    traefik_static_swarm: >-
+      {{ (traefik_static_dns if acme_dns else traefik_static) | from_yaml
+         | combine({'providers': {'swarm': {
+             'endpoint': 'tcp://socket-proxy:2375',
+             'exposedByDefault': false, 'network': 'platform-swarm'}}}, recursive=true)
          | to_nice_yaml(indent=2) }}
   become: true
   register: traefik_static_config

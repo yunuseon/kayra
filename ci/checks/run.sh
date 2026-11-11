@@ -117,6 +117,7 @@ registry_gc_safety() { bash "$E/ci/tests/registry-gc-safety/run.sh"; }
 app_lifecycle_cases() { bash "$E/ci/tests/app-lifecycle/run.sh"; }
 upgrade_lab_safety() { python3 "$E/test/lab/upgrade-test.py"; }
 registration_generation_cases() { (cd "$E/test/lab/registration-generation" && python3 -B test_publisher.py); }
+swarm_host_cases() { python3 -B "$E/ci/tests/swarm-host/test_host.py"; }
 platform_registration_cases() { python3 -B "$E/ci/tests/registration-generation/test_generation.py"; }
 indexed_registration_cases() { node --test "$E/test/lab/registration-generation/indexed_flow.mjs"; }
 ansible_output() { bash "$E/ci/tests/ansible-output/run.sh"; }
@@ -312,6 +313,7 @@ if [ "$platform" = true ]; then
     check platform:registration-generation registration_generation_cases
     check platform:registration-storage platform_registration_cases
     check platform:indexed-registration indexed_registration_cases
+    check platform:swarm-host swarm_host_cases
     check platform:ansible-output ansible_output
     check platform:cli-typecheck cli_typecheck
     check platform:cli-lint cli_lint

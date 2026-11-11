@@ -1,3 +1,4 @@
+import type { Runtime } from "../../contracts/rollout.ts";
 import type { BuildPorts } from "../../contracts/build-artifact.ts";
 import { z } from "zod";
 import { names } from "../../lib/names.ts";
@@ -8,13 +9,20 @@ const request = z.object({
   app: z.string().regex(names.app.pattern),
   generation: registrationGenerationId,
 }).strict();
+const reserveRequest = request.extend({ runtime: z.enum(["compose", "swarm"]).default("compose") });
 const ticketRequest = request.extend({ ticket: z.string().max(80) });
 
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
-  "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
+  "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
-export const registrationControl = (index: AppIndex, canRegister: (app: string) => Promise<boolean>, builds?: BuildPorts) => async (path: string, input: unknown) => {
+export const registrationControl = (index: AppIndex, canRegister: (app: string) => Promise<boolean>, builds?: BuildPorts, runtimeEnabled: (runtime: Runtime) => Promise<boolean> = (runtime) => Promise.resolve(runtime === "compose")) => async (path: string, input: unknown) => {
   switch (path) {
+    case "/registration/policy": {
+      const parsed = z.object({ app: z.string().regex(names.app.pattern) }).strict().safeParse(input);
+      if (!parsed.success) return undefined;
+      if (!(await canRegister(parsed.data.app))) throw new Error("app is outside registration scope");
+      return index.registrationPolicy(parsed.data.app);
+    }
     case "/registration/pins": {
       if (builds === undefined || !z.object({}).strict().safeParse(input).success) return undefined;
       return index.imagePins(builds);
@@ -32,12 +40,13 @@ export const registrationControl = (index: AppIndex, canRegister: (app: string) 
       return index.verifiedRegistration(parsed.data.app);
     }
     case "/registration/reserve": {
-      const parsed = request.safeParse(input);
+      const parsed = reserveRequest.safeParse(input);
       if (!parsed.success) return undefined;
-      const { app, generation } = parsed.data;
+      const { app, generation, runtime } = parsed.data;
+      if (!(await runtimeEnabled(runtime))) throw new Error("selected registration runtime is not enabled");
       if (!(await canRegister(app))) throw new Error("app is outside initial registration scope");
       const incarnation = await index.prepareApp(app);
-      const ticket = await index.reserveRegistration(app, generation);
+      const ticket = await index.reserveRegistration(app, generation, runtime);
       return Object.freeze({ incarnation, ticket });
     }
     case "/registration/submit":

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import type { Runtime } from "../../contracts/rollout.ts";
 import { names } from "../../lib/names.ts";
 import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { typed } from "../../lib/typed.ts";
@@ -50,14 +51,14 @@ const syncDirectory = async (path: string) => {
   finally { await dir.close(); }
 };
 
-const prepareBeforeDeadline = async (ports: BuildPorts, registration: RegistrationGeneration, commit: string, deadline: number) => {
+const prepareBeforeDeadline = async (ports: BuildPorts, registration: RegistrationGeneration, commit: string, deadline: number, runtime: Runtime) => {
   const controller = new AbortController();
   const expired = Promise.withResolvers<string>();
   const timer = setTimeout(() => {
     controller.abort();
     expired.reject(new Error("build deadline expired"));
   }, Math.max(1, Math.min(45 * 60_000, deadline - ports.now())));
-  try { return await Promise.race([ports.prepare(registration, commit, deadline, controller.signal), expired.promise]); }
+  try { return await Promise.race([ports.prepare(registration, commit, deadline, controller.signal, runtime), expired.promise]); }
   finally { clearTimeout(timer); }
 };
 
@@ -148,9 +149,19 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     verifiedRegistration: (app: string) => useReady(app, async (store) => {
       return verifiedRegistration(app, await store.read());
     }),
+    registrationPolicy: (app: string) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const metadata = verifiedRegistration(app, envelope);
+      const runtime = envelope?.registrationAllocation?.runtime;
+      if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
+      return Object.freeze({ metadata, runtime });
+    }),
     prepareBuild: (app: string, commit: string, ports: BuildPorts) => useReady(app, async (store) => {
       if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("build requires a full commit id");
-      const registration = verifiedRegistration(app, await store.read());
+      const envelope = await store.read();
+      const registration = verifiedRegistration(app, envelope);
+      const runtime = envelope?.registrationAllocation?.runtime;
+      if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
       const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
       const intent = await serialIndex(async () => {
         const state = await readIndex();
@@ -165,7 +176,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return Object.freeze({ id, artifact: intent.artifact, registration, commit, deadline: intent.deadline });
       }
       if (ports.now() >= intent.deadline) throw new Error("build deadline expired; a new operation requires intervention");
-      const content = await prepareBeforeDeadline(ports, registration, commit, intent.deadline);
+      const content = await prepareBeforeDeadline(ports, registration, commit, intent.deadline, runtime);
       if (ports.now() >= intent.deadline) throw new Error("build deadline expired before artifact retention");
       const artifact = await ports.retain(content);
       if (!/^[0-9a-f]{64}$/.test(artifact)) throw new Error("invalid retained artifact identity");
@@ -199,7 +210,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         }));
       });
     },
-    reserveRegistration: (app: string, generation?: string) => useReady(app, (store) => store.reserveRegistration(generation)),
+    reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useReady(app, (store) => store.reserveRegistration(generation, runtime)),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.submitRegistration(ticket, generation)),
     reconcileRegistration: (app: string, ticket: string, generation: string) =>

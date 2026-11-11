@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { parseApp } from "../../contracts/app-registration.ts";
+import { parseIndexedApp } from "../../contracts/app-registration.ts";
 import type { AppName } from "../../contracts/identity.ts";
 import { matchRegistrationGeneration, parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { err, ok } from "../../lib/result.ts";
@@ -23,7 +23,7 @@ export const readPublicRegistrationGeneration = async (directory: string, expect
     const manifest = await readPublicRegistrationFile(join(generation, "manifest.json"));
     const matching = matchRegistrationGeneration(manifest, metadata, metadata);
     if (!matching.ok) return matching;
-    const registration = parseApp(metadata.app, await readPublicRegistrationFile(join(generation, "registration.json")));
+    const registration = parseIndexedApp(metadata.app, await readPublicRegistrationFile(join(generation, "registration.json")));
     return registration.ok ? ok(Object.freeze({ metadata: matching.value, app: registration.value })) : err("invalid public registration payload");
   } catch {
     return err("public registration is unavailable or invalid");

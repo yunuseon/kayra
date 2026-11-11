@@ -1,4 +1,6 @@
 /* eslint-disable functional/no-let -- owns the experimental registration journal across control requests */
+import type { Runtime } from "../contracts/rollout.ts";
+import { readSwarmAuthority } from "../server/platform/swarm-authority.ts";
 import type { RegistrationGeneration } from "../contracts/registration-generation.ts";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,7 +21,7 @@ const parseBundleRegistration = (registration: RegistrationGeneration, commit: S
 };
 
 /** Optional composition for the existing deployer control listener. */
-export const startRegistrationControl = async (platform: string, observations: string, publicRegistrations?: string, builder = "http://builder:8081") => {
+export const startRegistrationControl = async (platform: string, observations: string, publicRegistrations?: string, builder = "http://builder:8081", swarmAuthority?: string) => {
   const path = join(platform, "lifecycle", "app-index");
   const observer = registrationObservation(observations);
   const present = await lstat(path).catch((error: unknown) => {
@@ -41,14 +43,14 @@ export const startRegistrationControl = async (platform: string, observations: s
       return Object.freeze(app.value.images.map((image) => image.ref));
     },
     // eslint-disable-next-line functional/prefer-immutable-types -- AbortSignal is an externally owned cancellation notification
-    prepare: async (registration: RegistrationGeneration, commit: string, deadline: number, signal: AbortSignal) => {
+    prepare: async (registration: RegistrationGeneration, commit: string, deadline: number, signal: AbortSignal, runtime: Runtime) => {
       const snapshot = await readPublicRegistrationGeneration(publicRegistrations, registration);
       const fullCommit = sha(commit);
-      if (!snapshot.ok || !fullCommit.ok) throw new Error("build registration or commit is invalid");
+      if (!snapshot.ok || !fullCommit.ok || snapshot.value.app.runtime !== runtime) throw new Error("build registration or commit is invalid");
       const prepared = await builderPrepare(builder, snapshot.value.app, fullCommit.value, console.log, registration, deadline, signal);
       if (!prepared.ok) throw new Error("builder did not prepare the registered commit");
       const checked = parseBundle(snapshot.value.app.name, fullCommit.value, prepared.value, registration, "artifact");
-      if (!checked.ok) throw new Error("builder returned an invalid artifact");
+      if (!checked.ok || (runtime === "swarm" && checked.value.rollout === undefined)) throw new Error("builder returned an invalid or incomplete artifact");
       return JSON.stringify(bundleWire(checked.value));
     },
   });
@@ -71,7 +73,7 @@ export const startRegistrationControl = async (platform: string, observations: s
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
-      return registrationControl(await opening, canRegister, builds)(route, input);
+      return registrationControl(await opening, canRegister, builds, async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok))(route, input);
     },
     close: async () => {
       const index = await opening;

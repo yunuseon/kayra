@@ -164,3 +164,12 @@ validates its shape before building, and the coordinator validates it again
 before retention. Ordinary legacy requests still refuse any rollout declaration.
 Artifact retention grants no runtime capability and does not enable rollout
 execution.
+
+With `--swarm-host`, the upgrade scenario also registers a new `swarm-build`
+fixture with explicit resource and maintenance grants. Registration checks the
+current root-owned host authority and live Docker identities before claiming
+its name. Runtime selection is journaled with the generation before publication;
+`ctl registration policy <app>` reports it only after verification. The scenario
+builds and retains its rollout-bearing artifact and recovers the same receipt
+while the builder is stopped. It does not start this app's workloads. Ordinary
+fleet registration remains Compose-only until adapter/admission integration.

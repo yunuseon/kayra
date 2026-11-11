@@ -4,6 +4,7 @@
  * authenticate registration references. This is not a live endpoint or a
  * complete lifecycle owner. */
 /* eslint-disable functional/prefer-immutable-types */
+import type { Runtime } from "../../contracts/rollout.ts";
 import type { OperationJournal } from "./operation.ts";
 import { parseRegistrationObservation } from "../../contracts/registration-generation.ts";
 import { claimJournal } from "./journal-claim.ts";
@@ -89,12 +90,13 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       return persist({ version: 1, created: false, fence: null, tickets: tickets.value, operations: [] });
     }),
     /** The caller durably retains the generation ID before requesting a ticket. */
-    reserveRegistration: (generation?: string) => serial(async () => {
+    reserveRegistration: (generation?: string, runtime: Runtime = "compose") => serial(async () => {
+      if (runtime === "swarm" && generation === undefined) throw new Error("Swarm requires an indexed registration generation");
       if (generation !== undefined && !registrationGenerationId.safeParse(generation).success) throw new Error("invalid registration generation");
       const current = await required();
       const allocation = current.registrationAllocation;
       if (allocation !== undefined) {
-        if (allocation.generation !== generation) throw new Error("initial registration allocation conflict");
+        if (allocation.generation !== generation || allocation.runtime !== runtime) throw new Error("initial registration allocation conflict");
         return allocation.ticket;
       }
       if (current.created) throw new Error("initial registration is already in progress or complete");
@@ -103,7 +105,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       if (!reserved.ok) throw new Error(reserved.error);
       await persist({
         ...current, tickets: reserved.value.state,
-        ...(generation === undefined ? {} : { registrationAllocation: { generation, ticket: reserved.value.ticket } }),
+        ...(generation === undefined ? {} : { registrationAllocation: { generation, ticket: reserved.value.ticket, runtime } }),
       });
       return reserved.value.ticket;
     }),

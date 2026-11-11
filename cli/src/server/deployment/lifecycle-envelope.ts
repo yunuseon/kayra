@@ -29,7 +29,7 @@ const shape = z.object({
   created: z.boolean(),
   fence: z.unknown(),
   tickets: z.unknown(),
-  registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80) }).strict().optional(),
+  registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]).default("compose") }).strict().optional(),
   operations: z.array(z.object({ ticket: z.string().max(80), action: z.string().max(80), descriptor }).strict()).max(2),
 }).strict();
 

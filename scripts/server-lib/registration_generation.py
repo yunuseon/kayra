@@ -73,8 +73,15 @@ def _decode(data):
 
 
 def _registration(value, metadata):
-    _require(type(value) is dict and set(value) == {"name", "repo", "ref", "path", "runtime", "hosts", "secrets"})
-    _require(value["name"] == metadata["app"] and value["runtime"] == "compose")
+    _require(type(value) is dict and value.get("runtime") in ("compose", "swarm"))
+    fields = {"name", "repo", "ref", "path", "runtime", "hosts", "secrets"}
+    _require(set(value) == fields | ({"grants"} if value["runtime"] == "swarm" else set()))
+    _require(value["name"] == metadata["app"])
+    if value["runtime"] == "swarm":
+        _require(len(value["name"]) <= 48 and bool(re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", value["name"])), "invalid Swarm application name")
+        grants = value["grants"]
+        _require(type(grants) is dict and set(grants) == {"memory_bytes", "cpu_millicores", "maintenance"}, "explicit Swarm grants required")
+        _require(all(type(grants[key]) is int and 0 < grants[key] <= 2**53 - 1 for key in ("memory_bytes", "cpu_millicores")) and type(grants["maintenance"]) is bool, "invalid Swarm grants")
     _require(all(type(value[key]) is str and "\0" not in value[key] for key in ("repo", "ref", "path")))
     try:
         _require(all(len(value[key].encode("utf8")) <= 8192 for key in ("repo", "ref", "path")))
@@ -290,6 +297,11 @@ def publish(root, metadata, registration, configuration, secrets, private_gid, p
     try:
         with _app(root, expected, private_gid, create=True) as (public, public_generations, private_generations):
             _require(_pointer(public, expected["app"]) == previous, "registration pointer changed")
+            if previous is not None:
+                with _dir(public_generations, previous["registrationGeneration"], 0o555) as prior:
+                    _require(_metadata(_decode(_read_file(prior, "manifest.json", 0o444))) == previous, "previous registration manifest changed")
+                    old = _registration(_decode(_read_file(prior, "registration.json", 0o444)), previous)
+                    _require(old["runtime"] == registration["runtime"], "registration runtime changes are not supported")
             # Exclusive directory creation avoids overwriting any prior or partial generation.
             os.mkdir(generation, 0o700, dir_fd=private_generations)
             os.mkdir(generation, 0o700, dir_fd=public_generations)

@@ -35,16 +35,17 @@
     registration_root: /var/lib/kayra/registration-lab
     compose_env:
       COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml{{ ':docker-compose.swarm.yml' if kayra_lab_swarm | default(false) | bool else '' }}:registration-lab.yml
-    build_registration:
-      name: indexed-build
+    build_registration_base:
+      name: "{{ fixture_app | default('indexed-build') }}"
       repo: "{{ fixture_repo }}"
       ref: main
       path: .
-      runtime: compose
-      hosts: [indexed.lab.test]
+      runtime: "{{ fixture_runtime | default('compose') }}"
+      hosts: "{{ fixture_hosts | default(['indexed.lab.test']) }}"
       secrets: [GREETING]
+    build_registration: "{{ build_registration_base | combine({'grants': fixture_grants}) if fixture_runtime | default('compose') == 'swarm' else build_registration_base }}"
     request:
-      app: indexed-build
+      app: "{{ build_registration.name }}"
       registration: "{{ build_registration }}"
       configuration:
         MODE: lab
@@ -70,8 +71,23 @@
 
     - name: Read the build fixture's public pointer
       ansible.builtin.slurp:
-        src: "{{ registration_root }}/public/{{ 'indexed-build' | hash('sha256') }}/current.json"
+        src: "{{ registration_root }}/public/{{ build_registration.name | hash('sha256') }}/current.json"
       register: pointer
+
+    - name: Read the persisted registration policy
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, registration, policy, "{{ build_registration.name }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: selected_policy
+      changed_when: false
+
+    - name: Require the verified runtime selected by the platform caller
+      ansible.builtin.assert:
+        that:
+          - (selected_policy.stdout | from_json).runtime == build_registration.runtime
+          - (selected_policy.stdout | from_json).metadata == (pointer.content | b64decode | from_json)
+        quiet: true
 
     - name: Build and validate the bundle inside the deployer
       ansible.builtin.command:
@@ -86,13 +102,13 @@
           - -e
           - |
             import { text } from 'node:stream/consumers';
-            import { parseApp } from '/opt/kayra/contracts/app-registration.ts';
+            import { parseIndexedApp } from '/opt/kayra/contracts/app-registration.ts';
             import { parseRegistrationGeneration } from '/opt/kayra/contracts/registration-generation.ts';
             import { sha } from '/opt/kayra/deployer/brand.ts';
             import { builderPrepare } from '/opt/kayra/deployer/build/client.ts';
             import { parseBundle } from '/opt/kayra/deployer/build/bundle.ts';
             const input = JSON.parse(await text(process.stdin));
-            const app = parseApp('indexed-build', input.app);
+            const app = parseIndexedApp(input.app.name, input.app);
             const registration = parseRegistrationGeneration(input.registration);
             const commit = sha(input.commit);
             if (!app.ok || !registration.ok || !commit.ok) throw new Error('invalid fixture inputs');
@@ -111,13 +127,13 @@
       ansible.builtin.assert:
         that:
           - (bundle.stdout | from_json).images | length > 0
-          - (bundle.stdout | from_json).images | selectattr('ref', 'match', '^localhost:5000/indexed-build/.+@sha256:[0-9a-f]{64}$') | list | length == (bundle.stdout | from_json).images | length
+          - (bundle.stdout | from_json).images | selectattr('ref', 'match', '^localhost:5000/' ~ build_registration.name ~ '/.+@sha256:[0-9a-f]{64}$') | list | length == (bundle.stdout | from_json).images | length
           - (bundle.stdout | from_json).registration == (pointer.content | b64decode | from_json)
         quiet: true
 
     - name: Retain the build through the owning coordinator
       ansible.builtin.command:
-        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, indexed-build, "{{ fixture_commit }}"]
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ build_registration.name }}", "{{ fixture_commit }}"]
         chdir: "{{ platform_dir }}"
       environment: "{{ compose_env }}"
       register: retained_build
@@ -141,7 +157,7 @@
 
         - name: Recover the same build receipt while the builder is stopped
           ansible.builtin.command:
-            argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, indexed-build, "{{ fixture_commit }}"]
+            argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ build_registration.name }}", "{{ fixture_commit }}"]
             chdir: "{{ platform_dir }}"
           environment: "{{ compose_env }}"
           register: recovered_build

@@ -301,7 +301,7 @@ export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
   const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), async () => {
     const observations = env["KAYRA_REGISTRATION_EVIDENCE_DIR"];
     const registration = observations === undefined ? undefined
-      : await (await import("./registration-startup.ts")).startRegistrationControl(s.platformDir, observations, env["KAYRA_PUBLIC_REGISTRATIONS_DIR"], s.builder, env["KAYRA_SWARM_AUTHORITY"]);
+      : await (await import("./registration-startup.ts")).startRegistrationControl(s.platformDir, observations, env["KAYRA_PUBLIC_REGISTRATIONS_DIR"], s.builder, env["KAYRA_SWARM_AUTHORITY"], env["KAYRA_PRIVATE_REGISTRATIONS_DIR"], s.domain);
     if (registration !== undefined) process.once("exit", () => { void registration.close(); });
     abandonInterruptedRuns(runsDir(s), () => new Date().toISOString());
     createServer(pushHandler(s, gather)).listen(8090);

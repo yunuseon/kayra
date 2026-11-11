@@ -15,6 +15,14 @@
         directory_mode: "0755"
       loop: [deployer, server, contracts, lib]
 
+    - name: Copy the deployer build definition
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/compose/deployer/Dockerfile.deployer"
+        dest: "{{ platform_dir }}/deployer/Dockerfile.deployer"
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Copy the image resolver and GC guard
       ansible.builtin.copy:
         src: "{{ kayra_root }}/scripts/platform/{{ item }}"
@@ -174,6 +182,46 @@
               - (recovered_build.stdout | from_json).artifact is match('^[0-9a-f]{64}$')
               - (recovered_build.stdout | from_json).registration == (pointer.content | b64decode | from_json)
             quiet: true
+        - name: Prove Swarm planning does not materialize secrets
+          when: build_registration.runtime == 'swarm'
+          block:
+            - name: Temporarily hide the fixture's secret value
+              ansible.builtin.command:
+                argv:
+                  - mv
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING"
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING.planning-test"
+              changed_when: true
+
+            - name: Preview the verified artifact while the builder and secret value are unavailable
+              ansible.builtin.command:
+                argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, preview, "{{ build_registration.name }}", "{{ fixture_commit }}"]
+                chdir: "{{ platform_dir }}"
+              environment: "{{ compose_env }}"
+              register: preview
+              changed_when: false
+
+            - name: Require a proposal with exact grants and unresolved input references
+              ansible.builtin.assert:
+                that:
+                  - not (preview.stdout | from_json).admitted
+                  - (preview.stdout | from_json).plan.commit == fixture_commit
+                  - (preview.stdout | from_json).plan.registration == (pointer.content | b64decode | from_json)
+                  - (preview.stdout | from_json).plan.grants == build_registration.grants
+                  - (preview.stdout | from_json).plan.services.web.environment.GREETING == {'kind':'secret','key':'GREETING'}
+                  - (preview.stdout | from_json).plan.services.web.environment.MODE == {'kind':'configuration','key':'MODE'}
+                  - request.secrets.GREETING not in preview.stdout
+                quiet: true
+              no_log: true
+          always:
+            - name: Restore the fixture's hidden secret
+              ansible.builtin.command:
+                argv:
+                  - mv
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING.planning-test"
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING"
+              changed_when: true
+
       always:
         - name: Restore the isolated builder
           ansible.builtin.command:

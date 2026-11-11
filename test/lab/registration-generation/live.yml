@@ -63,9 +63,11 @@
               environment:
                 KAYRA_REGISTRATION_EVIDENCE_DIR: /run/kayra-registration/observations
                 KAYRA_PUBLIC_REGISTRATIONS_DIR: /run/kayra-registration/public
+                KAYRA_PRIVATE_REGISTRATIONS_DIR: /run/kayra-registration/private
               volumes:
                 - {{ registration_root }}/observations:/run/kayra-registration/observations:ro
                 - {{ registration_root }}/public:/run/kayra-registration/public:ro
+                - {{ registration_root }}/private:/run/kayra-registration/private:ro
                 - ./managed-apps:/opt/platform/managed-apps:ro
             builder:
               environment:

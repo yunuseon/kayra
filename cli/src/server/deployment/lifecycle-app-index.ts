@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
 import { names } from "../../lib/names.ts";
 import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
@@ -186,6 +187,18 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         await journal.write({ ...state, builds: state.builds.map((item) => item.id === id ? { ...item, artifact } : item) });
       });
       return Object.freeze({ id, artifact, registration, commit, deadline: intent.deadline });
+    }),
+    previewPlan: (app: string, commit: string, ports: HttpPlanPort) => useReady(app, async (store) => {
+      if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("plan preview requires a full commit id");
+      const envelope = await store.read();
+      const registration = verifiedRegistration(app, envelope);
+      const runtime = envelope?.registrationAllocation?.runtime;
+      if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
+      const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
+      const state = await readIndex();
+      const artifact = state.builds.find((build) => build.id === id)?.artifact;
+      if (artifact === undefined || artifact === null) throw new Error("no retained build for this commit; prepare its artifact first");
+      return ports.preview(registration, runtime, commit, artifact);
     }),
     imagePins: (ports: Pick<BuildPorts, "read" | "images">) => {
       if (closed) return Promise.reject(new Error("lifecycle app index is closed"));

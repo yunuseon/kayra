@@ -1,0 +1,18 @@
+services:
+  web:
+    image: ${WEB_IMAGE:?}
+    environment:
+      MODE: ${MODE:?required}
+      GREETING: ${GREETING:?required}
+      LITERAL: '$$HOME'
+    deploy:
+      resources:
+        limits: {memory: 64m, cpus: '0.1'}
+        reservations: {memory: 32m, cpus: '0.05'}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/']
+      interval: 1s
+      timeout: 1s
+      start_period: 1s
+      retries: 3
+    stop_grace_period: 30s

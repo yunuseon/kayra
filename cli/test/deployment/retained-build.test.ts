@@ -199,3 +199,22 @@ test("published build pins retain unresolved identities and refuse incomplete or
     await assert.rejects(reopened.imagePins(ports), { code: "ENOENT" });
   } finally { await reopened.close(); }
 });
+
+test("plan preview uses only the verified retained artifact and does not change build state", async (t) => {
+  const { path, index, ports } = await fixture(t);
+  try {
+    await assert.rejects(index.previewPlan("shop", commit, { preview: () => { throw new Error("preview must not run without an artifact"); } }), /no retained build/);
+    const retained = await index.prepareBuild("shop", commit, ports);
+    const before = await readFile(join(path, "state.json"), "utf8");
+    await assert.rejects(index.previewPlan("shop", commit, {
+      preview: (registration, runtime, givenCommit, artifact) => {
+        assert.deepEqual(registration, retained.registration);
+        assert.equal(runtime, "compose");
+        assert.equal(givenCommit, commit);
+        assert.equal(artifact, retained.artifact);
+        return Promise.reject(new Error("preview port observed its exact scope"));
+      },
+    }), /preview port observed/);
+    assert.equal(await readFile(join(path, "state.json"), "utf8"), before);
+  } finally { await index.close(); }
+});

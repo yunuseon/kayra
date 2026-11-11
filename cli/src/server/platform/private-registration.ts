@@ -13,6 +13,25 @@ const parseConfiguration = (input: unknown) => {
   return Object.freeze(Object.fromEntries(fields));
 };
 
+/** Read configuration without opening any secret file. */
+export const readPrivateConfiguration = async (directory: string, metadata: RegistrationGeneration, group: number) => {
+  const checked = parseRegistrationGeneration(metadata);
+  if (!checked.ok) return checked;
+  const key = createHash("sha256").update(checked.value.app, "utf8").digest("hex");
+  const generation = join(directory, key, "generations", checked.value.registrationGeneration);
+  try {
+    const manifest: unknown = JSON.parse(await readRegistrationFile(join(generation, "manifest.json"), 0o440, group));
+    if (!matchRegistrationGeneration(manifest, metadata, metadata).ok) return err("private registration identity mismatch");
+    const content = await readRegistrationFile(join(generation, "configuration.json"), 0o440, group);
+    const input: unknown = JSON.parse(content);
+    const configuration = parseConfiguration(input);
+    if (configuration === undefined) return err("invalid private registration configuration");
+    return ok(Object.freeze({ configuration, identity: "sha256:" + createHash("sha256").update(content, "utf8").digest("hex") }));
+  } catch {
+    return err("private registration configuration is unavailable or invalid");
+  }
+};
+
 /** Read only the private generation selected from the public registration. */
 export const readPrivateRegistration = async (
   directory: string, metadata: RegistrationGeneration, secretKeys: readonly string[], group: number,

@@ -25,7 +25,7 @@ const fixture = async (t: TestContext) => {
   await index.submitRegistration("shop", ticket, generation);
   await index.reconcileRegistration("shop", ticket, generation);
   await index.prepareApp("unverified");
-  const ports: BuildPorts = { now: () => 1000, ...artifacts, prepare: () => Promise.resolve('{"fixture":"content"}') };
+  const ports: BuildPorts = { images: () => ["localhost:5000/shop/web@sha256:" + "1".repeat(64)], now: () => 1000, ...artifacts, prepare: () => Promise.resolve('{"fixture":"content"}') };
   return { root, path, index, ports, artifacts };
 };
 
@@ -130,7 +130,7 @@ for (const boundary of ["intent", "retention"]) {
       const artifacts = await openArtifactStore(${JSON.stringify(join(root, "artifacts"))});
       const stop = () => { console.log("boundary"); return new Promise(() => setInterval(() => {}, 1000)); };
       await index.prepareBuild("shop", ${JSON.stringify(commit)}, {
-        now: () => 1000, read: artifacts.read,
+        now: () => 1000, read: artifacts.read, images: () => [],
         prepare: async () => ${boundary === "intent" ? 'stop()' : JSON.stringify('{"fixture":"content"}')},
         retain: async (content) => { const digest = await artifacts.retain(content); ${boundary === "retention" ? 'await stop();' : ''} return digest; },
       });
@@ -170,4 +170,32 @@ test("an unresponsive build port is cancelled at the persisted deadline", { time
     }), /deadline expired/);
     await cancelled.promise;
   } finally { await index.close(); }
+});
+
+test("published build pins retain unresolved identities and refuse incomplete or foreign artifacts", async (t) => {
+  const { root, path, index, ports } = await fixture(t);
+  await assert.rejects(index.prepareBuild("shop", commit, { ...ports, prepare: () => { throw new Error("interrupted"); } }), /interrupted/);
+  const pending = await index.imagePins(ports);
+  assert.equal(pending.complete, false);
+  assert.equal(pending.artifacts.length, 0);
+  assert.equal(pending.unresolved.length, 1);
+  assert.equal(pending.unresolved[0]?.commit, commit);
+  assert.equal(pending.unresolved[0].deadline, 1000 + 45 * 60_000);
+  const built = await index.prepareBuild("shop", commit, ports);
+  await index.close();
+  const reopened = await openLifecycleAppIndex(path);
+  try {
+    const pins = await reopened.imagePins(ports);
+    assert.deepEqual(pins, {
+      version: 1, complete: false, reason: "runtime plan pins are not integrated",
+      artifacts: [{ build: built.id, registration: built.registration, commit, artifact: built.artifact,
+        images: ["localhost:5000/shop/web@sha256:" + "1".repeat(64)] }],
+      unresolved: [],
+    });
+    assert.equal(JSON.stringify(pins).includes("fixture"), false);
+    assert.ok(Object.isFrozen(pins.artifacts));
+    await assert.rejects(reopened.imagePins({ ...ports, images: () => ["localhost:5000/other/web@sha256:" + "1".repeat(64)] }), /ownership/);
+    await rm(join(root, "artifacts", built.artifact + ".json"));
+    await assert.rejects(reopened.imagePins(ports), { code: "ENOENT" });
+  } finally { await reopened.close(); }
 });

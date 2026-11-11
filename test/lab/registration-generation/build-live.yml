@@ -166,6 +166,23 @@
           environment: "{{ compose_env }}"
           changed_when: true
 
+    - name: Read coordinator image pins
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, pins]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: pins
+      changed_when: false
+
+    - name: Require retained image pins without claiming GC readiness
+      ansible.builtin.assert:
+        that:
+          - not (pins.stdout | from_json).complete
+          - (pins.stdout | from_json).unresolved | length == 0
+          - (pins.stdout | from_json).artifacts | selectattr('artifact', 'equalto', (retained_build.stdout | from_json).artifact) | list | length == 1
+          - (pins.stdout | from_json).artifacts | map(attribute='images') | flatten | sort == (bundle.stdout | from_json).images | map(attribute='ref') | sort
+        quiet: true
+
     - name: Require GC to preserve coordinator-managed images
       ansible.builtin.command:
         argv: [docker, compose, exec, -T, deployer, bash, /opt/kayra/scripts/platform/registry-gc.sh]

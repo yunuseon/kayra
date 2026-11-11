@@ -6,7 +6,8 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { names } from "../../lib/names.ts";
 import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
-import type { BuildPorts } from "../../contracts/build-artifact.ts";
+import { typed } from "../../lib/typed.ts";
+import type { BuildImagePins, BuildPorts } from "../../contracts/build-artifact.ts";
 import { verifiedRegistration } from "./verified-registration.ts";
 import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
@@ -160,7 +161,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return requested;
       });
       if (intent.artifact !== null) {
-        await ports.read(intent.artifact);
+        ports.images(await ports.read(intent.artifact), registration, commit);
         return Object.freeze({ id, artifact: intent.artifact, registration, commit, deadline: intent.deadline });
       }
       if (ports.now() >= intent.deadline) throw new Error("build deadline expired; a new operation requires intervention");
@@ -175,6 +176,29 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       });
       return Object.freeze({ id, artifact, registration, commit, deadline: intent.deadline });
     }),
+    imagePins: (ports: Pick<BuildPorts, "read" | "images">) => {
+      if (closed) return Promise.reject(new Error("lifecycle app index is closed"));
+      return serialIndex(async () => {
+        const state = await readIndex();
+        const artifacts = await Promise.all(state.builds.flatMap((intent) => intent.artifact === null ? [] : [
+          (async () => {
+            const content = await ports.read(intent.artifact ?? "");
+            const images = ports.images(content, intent.registration, intent.commit);
+            const own = new RegExp(`^localhost:5000/${intent.registration.app}/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$`);
+            if (images.some((image) => !own.test(image))) throw new Error("invalid image pin ownership");
+            return Object.freeze({ build: intent.id, registration: Object.freeze({ ...intent.registration }), commit: intent.commit,
+              artifact: intent.artifact ?? "", images: Object.freeze([...new Set(images)].toSorted()) });
+          })(),
+        ]));
+        return typed<BuildImagePins>(Object.freeze({
+          version: 1, complete: false, reason: "runtime plan pins are not integrated",
+          artifacts: Object.freeze(artifacts),
+          unresolved: Object.freeze(state.builds.filter((intent) => intent.artifact === null).map((intent) => Object.freeze({
+            build: intent.id, registration: Object.freeze({ ...intent.registration }), commit: intent.commit, deadline: intent.deadline,
+          }))),
+        }));
+      });
+    },
     reserveRegistration: (app: string, generation?: string) => useReady(app, (store) => store.reserveRegistration(generation)),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.submitRegistration(ticket, generation)),
@@ -183,6 +207,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     close: async () => {
       closed = true;
       await Promise.all(pendingApps.values());
+      await pendingIndex;
       await journal.close();
     },
   };

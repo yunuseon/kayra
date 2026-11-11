@@ -11,10 +11,14 @@ const request = z.object({
 const ticketRequest = request.extend({ ticket: z.string().max(80) });
 
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
-  "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
+  "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
 export const registrationControl = (index: AppIndex, canRegister: (app: string) => Promise<boolean>, builds?: BuildPorts) => async (path: string, input: unknown) => {
   switch (path) {
+    case "/registration/pins": {
+      if (builds === undefined || !z.object({}).strict().safeParse(input).success) return undefined;
+      return index.imagePins(builds);
+    }
     case "/registration/build": {
       const parsed = z.object({ app: z.string().regex(names.app.pattern), commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().safeParse(input);
       if (!parsed.success || builds === undefined) return undefined;

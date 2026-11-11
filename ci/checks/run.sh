@@ -113,6 +113,7 @@ compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.s
 verify_cases() { bash "$E/ci/tests/verify/run.sh"; }
 monitor_cases() { bash "$E/ci/tests/monitor/run.sh"; }
 app_restore_cases() { bash "$E/ci/tests/app-restore/run.sh"; }
+registry_gc_safety() { bash "$E/ci/tests/registry-gc-safety/run.sh"; }
 app_lifecycle_cases() { bash "$E/ci/tests/app-lifecycle/run.sh"; }
 upgrade_lab_safety() { python3 "$E/test/lab/upgrade-test.py"; }
 registration_generation_cases() { (cd "$E/test/lab/registration-generation" && python3 -B test_publisher.py); }
@@ -306,6 +307,7 @@ if [ "$platform" = true ]; then
     check platform:monitor monitor_cases
     check platform:app-restore app_restore_cases
     check platform:app-lifecycle app_lifecycle_cases
+    check platform:registry-gc-safety registry_gc_safety
     check platform:upgrade-lab-safety upgrade_lab_safety
     check platform:registration-generation registration_generation_cases
     check platform:registration-storage platform_registration_cases

@@ -110,7 +110,7 @@
     - name: Require a verified registration receipt
       ansible.builtin.assert:
         that:
-          - (registration.stdout | from_json).status == 'verified'
+          - (registration.stdout | from_json) in [{'status':'verified'}, {'status':'terminal', 'outcome':'success'}]
         quiet: true
 
     - name: Restart the real deployer container

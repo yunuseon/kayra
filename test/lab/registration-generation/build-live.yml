@@ -1,0 +1,125 @@
+---
+- name: Update the isolated lab build context
+  hosts: servers
+  become: true
+  vars:
+    platform_dir: /opt/platform
+  tasks:
+    - name: Copy the checkout's server modules
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/cli/src/{{ item }}/"
+        dest: "{{ platform_dir }}/deployer/app/{{ item }}/"
+        owner: root
+        group: root
+        mode: "0644"
+        directory_mode: "0755"
+      loop: [deployer, server, contracts, lib]
+
+    - name: Copy the image resolver and GC guard
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/scripts/platform/{{ item }}"
+        dest: "{{ platform_dir }}/deployer/app/scripts/platform/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop: [resolve-images.sh, registry-gc.sh]
+
+- name: Reapply the explicit registration lab configuration
+  ansible.builtin.import_playbook: live.yml
+
+- name: Prepare a real bundle from the registered fixture repository
+  hosts: servers
+  become: true
+  vars:
+    platform_dir: /opt/platform
+    registration_root: /var/lib/kayra/registration-lab
+    compose_env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:registration-lab.yml
+    build_registration:
+      name: indexed-build
+      repo: "{{ fixture_repo }}"
+      ref: main
+      path: .
+      runtime: compose
+      hosts: [indexed.lab.test]
+      secrets: [GREETING]
+    request:
+      app: indexed-build
+      registration: "{{ build_registration }}"
+      configuration:
+        MODE: lab
+      secrets:
+        GREETING: synthetic-build-fixture
+  tasks:
+    - name: Register the build fixture through the host command
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -B
+          - "{{ platform_dir }}/registration-lib/registration_command.py"
+          - register
+          - --root
+          - "{{ registration_root }}"
+          - --private-gid
+          - "1000"
+          - --platform-dir
+          - "{{ platform_dir }}"
+        stdin: "{{ request | to_json }}"
+      no_log: true
+      changed_when: true
+
+    - name: Read the build fixture's public pointer
+      ansible.builtin.slurp:
+        src: "{{ registration_root }}/public/{{ 'indexed-build' | hash('sha256') }}/current.json"
+      register: pointer
+
+    - name: Build and validate the bundle inside the deployer
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - deployer
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import { text } from 'node:stream/consumers';
+            import { parseApp } from '/opt/kayra/contracts/app-registration.ts';
+            import { parseRegistrationGeneration } from '/opt/kayra/contracts/registration-generation.ts';
+            import { sha } from '/opt/kayra/deployer/brand.ts';
+            import { builderPrepare } from '/opt/kayra/deployer/build/client.ts';
+            import { parseBundle } from '/opt/kayra/deployer/build/bundle.ts';
+            const input = JSON.parse(await text(process.stdin));
+            const app = parseApp('indexed-build', input.app);
+            const registration = parseRegistrationGeneration(input.registration);
+            const commit = sha(input.commit);
+            if (!app.ok || !registration.ok || !commit.ok) throw new Error('invalid fixture inputs');
+            const built = await builderPrepare('http://builder:8081', app.value, commit.value, console.error, registration.value);
+            if (!built.ok) throw new Error(built.error);
+            const checked = parseBundle(app.value.name, commit.value, built.value, registration.value);
+            if (!checked.ok) throw new Error(checked.error);
+            console.log(JSON.stringify({images: checked.value.images, registration: checked.value.registration}));
+        stdin: "{{ {'app':build_registration, 'registration':(pointer.content | b64decode | from_json), 'commit':fixture_commit} | to_json }}"
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: bundle
+      changed_when: false
+
+    - name: Require immutable image references in the validated bundle
+      ansible.builtin.assert:
+        that:
+          - (bundle.stdout | from_json).images | length > 0
+          - (bundle.stdout | from_json).images | selectattr('ref', 'match', '^localhost:5000/indexed-build/.+@sha256:[0-9a-f]{64}$') | list | length == (bundle.stdout | from_json).images | length
+          - (bundle.stdout | from_json).registration == (pointer.content | b64decode | from_json)
+        quiet: true
+
+    - name: Require GC to preserve coordinator-managed images
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, bash, /opt/kayra/scripts/platform/registry-gc.sh]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: gc_refusal
+      failed_when: gc_refusal.rc == 0 or 'recovery image pins require pin-aware GC' not in gc_refusal.stderr
+      changed_when: false

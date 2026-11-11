@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { err, ok, type Result } from "../../lib/result.ts";
+import { all, err, ok, type Result } from "../../lib/result.ts";
 import { field, type App } from "../../contracts/app-registration.ts";
 import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { readPublicRegistrationGeneration } from "../platform/public-registration.ts";
@@ -99,6 +99,20 @@ const sequence = async (steps: readonly (() => Promise<Result<string, string>>)[
     return so.ok ? next() : so;
   }, Promise.resolve(ok("")));
 
+/** Resolve the registry's manifest digest after ensure has pushed the app image. */
+const immutableImage = async (reference: string) => {
+  const match = /^localhost:5000\/([^:]+):([a-f0-9]{40})$/.exec(reference);
+  if (match?.[1] === undefined || match[2] === undefined) return err("invalid built image reference");
+  const response = await fetch(`http://registry:5000/v2/${match[1]}/manifests/${match[2]}`, {
+    method: "HEAD",
+    headers: { Accept: "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" },
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined);
+  const digest = response?.headers.get("docker-content-digest");
+  return response?.ok === true && digest !== null && digest !== undefined && /^sha256:[a-f0-9]{64}$/.test(digest)
+    ? ok(`localhost:5000/${match[1]}@${digest}`) : err("could not resolve the built image digest");
+};
+
 /**
  * One app's checkout at a commit, its images built where the registry lacks
  * them (resolve-images.sh, through buildkitd), and the compose files app.yml
@@ -129,7 +143,7 @@ const prepareBundle = async (app: App, commit: Sha, s: Settings, line: Line, reg
   const rollout = await spawnLines(["yq", "-o=json", 'has("rollout")', join(root, "app.yml")], { capture: true }, () => undefined);
   if (rollout.code !== 0) return err("app.yml: could not validate rollout metadata");
   if (rollout.stdout.trim() !== "false") return err("app.yml: rollout metadata is not yet supported");
-  const buildEnv: Env = { REGISTRY: "localhost:5000" };
+  const buildEnv: Env = { REGISTRY: "localhost:5000", ...(registration === undefined ? {} : { KAYRA_IMMUTABLE_IMAGES: "true" }) };
   const planned = await run(["bash", s.resolveImages, app.name, root, "--plan"], { env: buildEnv, capture: true }, line);
   if (!planned.ok) return planned;
   const artifacts = planned.value
@@ -143,6 +157,15 @@ const prepareBundle = async (app: App, commit: Sha, s: Settings, line: Line, reg
     }),
   );
   if (!built.ok) return built;
+
+  const images = await Promise.all(artifacts.map(async ([, variable, ref]) => {
+    if (variable === undefined || ref === undefined) return err("invalid image plan");
+    if (registration === undefined) return ok(Object.freeze({ variable, ref }));
+    const pinned = await immutableImage(ref);
+    return pinned.ok ? ok(Object.freeze({ variable, ref: pinned.value })) : pinned;
+  }));
+  const checkedImages = all(images);
+  if (!checkedImages.ok) return checkedImages;
 
   const listed = await run(["yq", "-o=json", ".compose // []", join(root, "app.yml")], { capture: true }, line);
   if (!listed.ok) return listed;
@@ -158,7 +181,7 @@ const prepareBundle = async (app: App, commit: Sha, s: Settings, line: Line, reg
   return ok<unknown>({
     sha: commit,
     ...(registration === undefined ? {} : { registration }),
-    images: artifacts.map(([, variable, ref]) => ({ variable, ref } as const)),
+    images: checkedImages.value,
     compose: files.map((file) => ({ path: file, content: readFileSync(join(root, file), "utf8") } as const)),
     routes: routed,
   });

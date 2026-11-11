@@ -120,40 +120,37 @@ const ask = (s: Settings, request: Request) => {
 const newId = () => newRunId(new Date(), randomBytes(3).toString("hex"));
 
 const start = async (s: Settings, request: Request) => {
-  try {
-    const id = request.id;
-    const runs = runsDir(s);
-    const begun = asked(request, "running");
-    writeMeta(runs, request.owner, begun);
-    const log = (line: string) => {
-      appendLog(runs, request.owner, id, line);
-    };
-    const scratch = mkdtempSync(join(tmpdir(), `${id}-`));
-    const lease = leases.get(request.owner);
-    const outcome = await work(s, request, effects(s, request.owner, id, scratch, log, lease?.fd), commandExecution(log)).catch((error: unknown) => {
-      log(`deployer: ${String(error)}`);
-      return typed<Outcome>({ ok: false, error: "the deployer failed; see the log" });
-    });
-    writeMeta(runs, request.owner, {
-      ...begun,
-      ...(outcome.sha === undefined ? {} : { sha: outcome.sha }),
-      state: outcome.ok ? "success" : "failure",
-      finished: new Date().toISOString(),
-      ...(outcome.error === undefined ? {} : { error: outcome.error }),
-      ...(outcome.urls === undefined ? {} : { urls: outcome.urls }),
-      ...(outcome.checks === undefined ? {} : { checks: outcome.checks }),
-    });
-    await deliver(
-      s.notifier,
-      { server: s.server, request, ok: outcome.ok, ...(outcome.sha === undefined ? {} : { sha: outcome.sha }), page: runPage(s, request.owner, id) },
-      log,
-    );
-    prune(runs, request.owner, keepRuns);
-    rmSync(scratch, { recursive: true, force: true });
-  } finally {
-    swap(s, (queue) => finish(queue, request.owner));
-    releaseIdleLease(request.owner);
-  }
+  const id = request.id;
+  const runs = runsDir(s);
+  const begun = asked(request, "running");
+  writeMeta(runs, request.owner, begun);
+  const log = (line: string) => {
+    appendLog(runs, request.owner, id, line);
+  };
+  const scratch = mkdtempSync(join(tmpdir(), `${id}-`));
+  const lease = leases.get(request.owner);
+  const outcome = await work(s, request, effects(s, request.owner, id, scratch, log, lease?.fd), commandExecution(log)).catch((error: unknown) => {
+    log(`deployer: ${String(error)}`);
+    return typed<Outcome>({ ok: false, error: "the deployer failed; see the log" });
+  });
+  writeMeta(runs, request.owner, {
+    ...begun,
+    ...(outcome.sha === undefined ? {} : { sha: outcome.sha }),
+    state: outcome.ok ? "success" : "failure",
+    finished: new Date().toISOString(),
+    ...(outcome.error === undefined ? {} : { error: outcome.error }),
+    ...(outcome.urls === undefined ? {} : { urls: outcome.urls }),
+    ...(outcome.checks === undefined ? {} : { checks: outcome.checks }),
+  });
+  await deliver(
+    s.notifier,
+    { server: s.server, request, ok: outcome.ok, ...(outcome.sha === undefined ? {} : { sha: outcome.sha }), page: runPage(s, request.owner, id) },
+    log,
+  );
+  prune(runs, request.owner, keepRuns);
+  rmSync(scratch, { recursive: true, force: true });
+  swap(s, (queue) => finish(queue, request.owner));
+  releaseIdleLease(request.owner);
 };
 
 const deployRequest = (app: App, ref: string, why: Why) => typed<Request>({

@@ -192,3 +192,9 @@ labels and unsupported roles/strategies. It parses without resolving variables,
 reading host paths or invoking Docker. Multi-service/dependency/worker and
 maintenance semantics remain subsequent integration work; legacy Compose
 normalization is unchanged.
+
+The Linux interruption suite also checks the independent initial-registration
+receipt before and after restart. The unit recovery suite advances more than
+128 subsequent terminal tickets and reopens the app index: registration policy
+and historical registration retries must remain available after ticket eviction.
+A missing certificate after eviction requires intervention.

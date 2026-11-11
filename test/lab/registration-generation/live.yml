@@ -1,0 +1,157 @@
+---
+- name: Exercise indexed registration on an isolated upgrade lab host
+  hosts: servers
+  become: true
+  vars:
+    platform_dir: /opt/platform
+    registration_root: /var/lib/kayra/registration-lab
+    fixture: "{{ lookup('ansible.builtin.file', kayra_root ~ '/ci/tests/registration-generation/fixture.json') | from_json }}"
+    request:
+      app: "{{ fixture.metadata.app }}"
+      registration: "{{ fixture.registration }}"
+      configuration: "{{ fixture.configuration }}"
+      secrets: "{{ fixture.secrets }}"
+    compose_files: docker-compose.yml:docker-compose.ci.yml:registration-lab.yml
+    compose_env:
+      COMPOSE_FILE: "{{ compose_files }}"
+  tasks:
+    - name: Provision root-controlled registration ancestors
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /var/lib/kayra
+        - "{{ registration_root }}"
+        - "{{ registration_root }}/public"
+        - "{{ registration_root }}/observations"
+        - "{{ platform_dir }}/registration-lib"
+
+    - name: Provision private registration storage
+      ansible.builtin.file:
+        path: "{{ registration_root }}/private"
+        state: directory
+        owner: root
+        group: "1000"
+        mode: "0750"
+
+    - name: Install the root-side registration commands
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/scripts/server-lib/{{ item }}"
+        dest: "{{ platform_dir }}/registration-lib/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - registration_command.py
+        - registration_generation.py
+
+    - name: Write the explicit lab Compose override
+      ansible.builtin.copy:
+        dest: "{{ platform_dir }}/registration-lab.yml"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          services:
+            deployer:
+              build:
+                args:
+                  KAYRA_REGISTRATION_LAB: "true"
+              environment:
+                KAYRA_REGISTRATION_EVIDENCE_DIR: /run/kayra-registration/observations
+              volumes:
+                - {{ registration_root }}/observations:/run/kayra-registration/observations:ro
+                - ./managed-apps:/opt/platform/managed-apps:ro
+
+    - name: Start the explicitly opted-in deployer
+      ansible.builtin.command:
+        argv: [docker, compose, up, -d, --build, --no-deps, deployer]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      changed_when: true
+
+    - name: Explicitly initialize the app index
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, registration, initialize]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: index_ready
+      retries: 10
+      delay: 2
+      until: index_ready.rc == 0
+      changed_when: true
+
+    - name: Register the synthetic app through the host command
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -B
+          - "{{ platform_dir }}/registration-lib/registration_command.py"
+          - register
+          - --root
+          - "{{ registration_root }}"
+          - --private-gid
+          - "1000"
+          - --platform-dir
+          - "{{ platform_dir }}"
+        stdin: "{{ request | to_json }}"
+      no_log: true
+      register: registration
+      changed_when: true
+
+    - name: Require a verified registration receipt
+      ansible.builtin.assert:
+        that:
+          - (registration.stdout | from_json).status == 'verified'
+        quiet: true
+
+    - name: Restart the real deployer container
+      ansible.builtin.command:
+        argv: [docker, compose, restart, deployer]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      changed_when: true
+
+    - name: Retry the same host request after restart
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -B
+          - "{{ platform_dir }}/registration-lib/registration_command.py"
+          - register
+          - --root
+          - "{{ registration_root }}"
+          - --private-gid
+          - "1000"
+          - --platform-dir
+          - "{{ platform_dir }}"
+        stdin: "{{ request | to_json }}"
+      no_log: true
+      register: recovered
+      retries: 10
+      delay: 2
+      until: recovered.rc == 0
+      changed_when: false
+
+    - name: Require the existing durable receipt
+      ansible.builtin.assert:
+        that:
+          - (recovered.stdout | from_json) == {'status':'terminal', 'outcome':'success'}
+        quiet: true
+
+    - name: Verify legacy purge refuses the indexed app
+      ansible.builtin.command:
+        argv: ["{{ platform_dir }}/bin/app-purge", "{{ fixture.metadata.app }}"]
+      register: purge_refusal
+      failed_when: purge_refusal.rc == 0 or 'deployment coordinator owns' not in purge_refusal.stderr
+      changed_when: false
+
+    - name: Verify the builder has no private registration mount
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, builder, sh, -c, "test ! -e /run/kayra-registration/private"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      changed_when: false

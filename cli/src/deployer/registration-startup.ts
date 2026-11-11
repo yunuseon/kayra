@@ -6,12 +6,17 @@ import { readPublicRegistrationGeneration } from "../server/platform/public-regi
 import { openArtifactStore } from "../server/deployment/artifact-store.ts";
 import { builderPrepare } from "./build/client.ts";
 import { parseBundle, bundleWire } from "./build/bundle.ts";
-import { sha } from "./brand.ts";
+import { appName, sha, type Sha } from "./brand.ts";
 import { registrationObservation } from "../server/platform/registration-observation.ts";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../server/deployment/lifecycle-app-index.ts";
 import { registrationControl } from "../server/deployment/registration-control.ts";
 
 const missing = (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+
+const parseBundleRegistration = (registration: RegistrationGeneration, commit: Sha, payload: unknown) => {
+  const app = appName(registration.app);
+  return app.ok ? parseBundle(app.value, commit, payload, registration) : undefined;
+};
 
 /** Optional composition for the existing deployer control listener. */
 export const startRegistrationControl = async (platform: string, observations: string, publicRegistrations?: string, builder = "http://builder:8081") => {
@@ -27,7 +32,15 @@ export const startRegistrationControl = async (platform: string, observations: s
     now: Date.now,
     retain: artifacts.retain,
     read: artifacts.read,
-// eslint-disable-next-line functional/prefer-immutable-types -- AbortSignal is an externally owned cancellation notification
+    images: (content: string, registration: RegistrationGeneration, commit: string) => {
+      const fullCommit = sha(commit);
+      const snapshot: unknown = JSON.parse(content);
+      // The expected identity comes from the journal, never the retained payload.
+      const app = fullCommit.ok ? parseBundleRegistration(registration, fullCommit.value, snapshot) : undefined;
+      if (!app?.ok) throw new Error("retained bundle does not match build intent");
+      return Object.freeze(app.value.images.map((image) => image.ref));
+    },
+    // eslint-disable-next-line functional/prefer-immutable-types -- AbortSignal is an externally owned cancellation notification
     prepare: async (registration: RegistrationGeneration, commit: string, deadline: number, signal: AbortSignal) => {
       const snapshot = await readPublicRegistrationGeneration(publicRegistrations, registration);
       const fullCommit = sha(commit);

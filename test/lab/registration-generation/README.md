@@ -150,3 +150,11 @@ preparations can be retried at the same commit and original deadline; these
 operations build images only and do not authorize workload deployment or mark
 an active release. Files under `lifecycle/artifacts` are private coordinator
 storage, not a platform read interface.
+
+`kayra-deployer ctl pins` publishes registration identity, commit, artifact hash
+and image digests for retained builds, plus unresolved build identities and
+deadlines. It verifies retained content and ownership before reporting pins;
+missing artifacts cause refusal. The projection is explicitly incomplete until
+active, candidate and rollback runtime plans are integrated. It contains no
+Compose content, resolved configuration or secret values, and does not enable
+registry GC.

@@ -11,6 +11,8 @@ import { deployerControlHandler } from "../../../cli/src/deployer/deployer.ts";
 import { registrationControl } from "../../../cli/src/server/deployment/registration-control.ts";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../../cli/src/server/deployment/lifecycle-app-index.ts";
 
+import { readPrivateRegistration } from "../../../cli/src/server/platform/private-registration.ts";
+import { readPublicRegistration } from "../../../cli/src/server/platform/public-registration.ts";
 import { registrationObservation } from "../../../cli/src/server/platform/registration-observation.ts";
 
 const app = "fixture-app-";
@@ -143,6 +145,19 @@ if (process.argv[2] === "writer") {
           });
           if (unpublished) assert.deepEqual(await hostFlow(root), { status: "verified" });
           assert.deepEqual(await hostFlow(root), { status: "terminal", outcome: "success" });
+          const published = await readPublicRegistration(join(root, "platform", "public"), app);
+          assert.ok(published.ok);
+          assert.equal(published.value.metadata.registrationGeneration, generation);
+          assert.deepEqual(published.value.app, fixture.registration);
+          const privateInputs = await readPrivateRegistration(
+            join(root, "platform", "private"), published.value.metadata, published.value.app.secrets, 0,
+          );
+          assert.deepEqual(privateInputs, { ok: true, value: { configuration: fixture.configuration, secrets: fixture.secrets } });
+          const mismatched = await readPrivateRegistration(
+            join(root, "platform", "private"), { ...published.value.metadata, actionId: published.value.metadata.incarnation + ":2" },
+            published.value.app.secrets, 0,
+          );
+          assert.deepEqual(mismatched, { ok: false, error: "private registration identity mismatch" });
         } finally {
           await control.close();
           await index.close();

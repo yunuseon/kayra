@@ -113,3 +113,7 @@ the deployer's existing Compose exec control path to reserve, submit and
 reconcile it. A retry uses the same staged payload and accepts already-verified
 publication without replacing the generation. The storage suite covers a
 retry after publication with a pending receipt.
+
+The fixture also reads the public registration and then uses its exact
+generation identity to read private configuration and secrets. A mismatched
+private manifest is refused. Public consumers require only the public tree.

@@ -115,6 +115,57 @@
           - (bundle.stdout | from_json).registration == (pointer.content | b64decode | from_json)
         quiet: true
 
+    - name: Retain the build through the owning coordinator
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, indexed-build, "{{ fixture_commit }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: retained_build
+      changed_when: false
+
+    - name: Verify the retained artifact without builder access
+      block:
+        - name: Stop the isolated builder
+          ansible.builtin.command:
+            argv: [docker, compose, stop, builder]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+
+        - name: Restart the coordinator after retention
+          ansible.builtin.command:
+            argv: [docker, compose, restart, deployer]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+
+        - name: Recover the same build receipt while the builder is stopped
+          ansible.builtin.command:
+            argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, indexed-build, "{{ fixture_commit }}"]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          register: recovered_build
+          retries: 10
+          delay: 2
+          until: recovered_build.rc == 0
+          changed_when: false
+
+        - name: Require the exact retained receipt after restart
+          ansible.builtin.assert:
+            that:
+              - (retained_build.stdout | from_json) == (recovered_build.stdout | from_json)
+              - (recovered_build.stdout | from_json).commit == fixture_commit
+              - (recovered_build.stdout | from_json).artifact is match('^[0-9a-f]{64}$')
+              - (recovered_build.stdout | from_json).registration == (pointer.content | b64decode | from_json)
+            quiet: true
+      always:
+        - name: Restore the isolated builder
+          ansible.builtin.command:
+            argv: [docker, compose, up, -d, --no-deps, builder]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+
     - name: Require GC to preserve coordinator-managed images
       ansible.builtin.command:
         argv: [docker, compose, exec, -T, deployer, bash, /opt/kayra/scripts/platform/registry-gc.sh]

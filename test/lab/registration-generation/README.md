@@ -80,8 +80,8 @@ Unpublished operations stay pending. The two published operations settle
 without publishing again, and a second restart returns the durable receipt.
 
 CI runs these cases as `platform:indexed-registration`. The Python bridge and
-its temporary storage are lab fixtures. Live Ansible registration and its
-coordination with deploy, remove and purge still require integration tests.
+its temporary storage are lab fixtures. The opt-in upgrade scenario below
+exercises live Ansible registration; ordinary fleet registration remains legacy.
 
 The indexed fixture also stages the full initial request in root-only storage
 before ticket allocation. After each kill it reopens that storage to recover
@@ -92,8 +92,8 @@ payload under the same app is refused.
 After verifying publication, the platform writes a root-owned evidence record
 that contains only the operation identity and applied status. The coordinator
 reads that record using the platform adapter. The fixture exercises this
-handoff through ordinary files. Production integration still needs to mount the
-evidence directory read-only in the deployer and keep publication fenced.
+handoff through ordinary files. The upgrade scenario mounts evidence read-only
+and fences legacy writers; production enablement remains excluded.
 
 The fixture invokes the same root-side command intended for the platform
 caller. It sends bounded JSON on stdin for staging, publication and
@@ -104,9 +104,9 @@ to exercise that path validation.
 
 The fixture uses the deployer's localhost HTTP handler and `ctl registration`
 to reserve, submit and reconcile. It binds port 8091 inside the isolated guest
-and permits only the fixture app. Production startup supplies no registration
-handler yet. The app role and legacy lifecycle commands still need a shared
-fence before this path can be enabled on a platform host.
+and permits only the fixture app. Default startup supplies no registration
+handler. The explicit upgrade-lab override enables it in the existing deployer
+process and mounts the coordinator name claims read-only.
 
 The host command also exposes `register`, which stages the request and calls
 the deployer's existing Compose exec control path to reserve, submit and
@@ -139,3 +139,14 @@ repository. Its artifact tags use the full input commit and the builder
 returns manifest digests. The deployer validates the bundle's registration
 identity and digest references. The lab also verifies that legacy registry GC
 refuses cleanup while coordinator-managed app claims exist.
+
+The same scenario invokes `kayra-deployer ctl build indexed-build <full-commit>`.
+The coordinator records verified registration identity, full commit and an
+absolute 45-minute build deadline before calling the builder. It retains only
+validated bundle fields in content-addressed, synchronized files, then records
+the receipt. The lab stops the builder, restarts the deployer, and requires the
+same receipt. Missing or corrupted retained content fails closed. Interrupted
+preparations can be retried at the same commit and original deadline; these
+operations build images only and do not authorize workload deployment or mark
+an active release. Files under `lifecycle/artifacts` are private coordinator
+storage, not a platform read interface.

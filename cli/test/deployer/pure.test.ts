@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { parseApp } from "../../src/deployer/app.ts";
-import { parseBundle, imagesEnv } from "../../src/deployer/build/bundle.ts";
+import { parseBundle, bundleWire, imagesEnv } from "../../src/deployer/build/bundle.ts";
 import { config, policy, up } from "../../src/deployer/build/compose.ts";
 import { matches, parseCron } from "../../src/deployer/cron.ts";
 import { expired, moved, releaseName, releases } from "../../src/deployer/runs/records.ts";
@@ -64,7 +64,9 @@ test("a bundle may only name the app's own images and relative compose files", (
   deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, registration }).ok, false);
   deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, registration }, registration).ok, false);
   const immutable = { ...good, images: [{ variable: "WEB_IMAGE", ref: "localhost:5000/shop/web@sha256:" + "a".repeat(64) }] };
-  const pinned = must(parseBundle(name("shop"), commit("a"), { ...immutable, registration }, registration));
+  const pinned = must(parseBundle(name("shop"), commit("a"), { ...immutable, registration, ignored: "must not be retained" }, registration));
+  deepStrictEqual(must(parseBundle(name("shop"), commit("a"), bundleWire(pinned), registration)), pinned);
+  deepStrictEqual(Object.hasOwn(bundleWire(pinned), "ignored"), false);
   deepStrictEqual(pinned.registration, registration);
   deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...immutable, registration: { ...registration, actionId: incarnation + ":2" } }, registration).ok, false);
   const bundle = must(parseBundle(name("shop"), commit("a"), good));

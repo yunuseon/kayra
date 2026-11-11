@@ -1,3 +1,4 @@
+import type { BuildPorts } from "../../contracts/build-artifact.ts";
 import { z } from "zod";
 import { names } from "../../lib/names.ts";
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
@@ -10,10 +11,16 @@ const request = z.object({
 const ticketRequest = request.extend({ ticket: z.string().max(80) });
 
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
-  "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
+  "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
-export const registrationControl = (index: AppIndex, canRegister: (app: string) => Promise<boolean>) => async (path: string, input: unknown) => {
+export const registrationControl = (index: AppIndex, canRegister: (app: string) => Promise<boolean>, builds?: BuildPorts) => async (path: string, input: unknown) => {
   switch (path) {
+    case "/registration/build": {
+      const parsed = z.object({ app: z.string().regex(names.app.pattern), commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().safeParse(input);
+      if (!parsed.success || builds === undefined) return undefined;
+      if (!(await canRegister(parsed.data.app))) throw new Error("app is outside build scope");
+      return index.prepareBuild(parsed.data.app, parsed.data.commit, builds);
+    }
     case "/registration/verified": {
       const parsed = z.object({ app: z.string().regex(names.app.pattern) }).strict().safeParse(input);
       if (!parsed.success) return undefined;

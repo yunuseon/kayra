@@ -1,5 +1,5 @@
 /* eslint-disable functional/no-let -- owns the experimental registration journal across control requests */
-import { lstat } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { registrationObservation } from "../server/platform/registration-observation.ts";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../server/deployment/lifecycle-app-index.ts";
@@ -25,7 +25,12 @@ export const startRegistrationControl = async (platform: string, observations: s
       if (route === "/registration/initialize") {
         if (typeof input !== "object" || input === null || Array.isArray(input) || Object.keys(input).length !== 0) return undefined;
         // Only this explicit local control request can provision an empty index.
-        opening ??= createLifecycleAppIndex(path, observer);
+        // eslint-disable-next-line functional/prefer-immutable-types -- returns the live journal owner
+        opening ??= (async () => {
+          const claims = await readdir(join(platform, "managed-apps"));
+          if (claims.length !== 0) throw new Error("managed app claims exist without an index; intervention required");
+          return createLifecycleAppIndex(path, observer);
+        })();
         await opening;
         return Object.freeze({ status: "ready" });
       }

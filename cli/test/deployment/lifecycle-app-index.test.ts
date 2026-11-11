@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { test, type TestContext } from "node:test";
+import { registrationControl } from "../../src/server/deployment/registration-control.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index.ts";
 import { openLifecycleEnvelopeStore } from "../../src/server/deployment/lifecycle-envelope-store.ts";
@@ -256,4 +257,43 @@ test("the registration projection requires a verified durable receipt", async (t
   } finally {
     await reopened.close();
   }
+});
+
+test("a selected runtime is persisted before publication and refuses conversion across restart", async (t) => {
+  const root = await fixture(t);
+  const index = await createLifecycleAppIndex(root, (identity) => Promise.resolve({ ...identity, status: "applied" }));
+  await index.prepareApp("shop");
+  const ticket = await index.reserveRegistration("shop", generation, "swarm");
+  await assert.rejects(index.reserveRegistration("shop", generation, "compose"), /allocation conflict/);
+  await assert.rejects(index.registrationPolicy("shop"), /not been verified/);
+  await index.submitRegistration("shop", ticket, generation);
+  await index.reconcileRegistration("shop", ticket, generation);
+  const policy = await index.registrationPolicy("shop");
+  assert.equal(policy.runtime, "swarm");
+  assert.equal(policy.metadata.registrationGeneration, generation);
+  await index.close();
+  const reopened = await openLifecycleAppIndex(root);
+  try {
+    assert.deepEqual(await reopened.registrationPolicy("shop"), policy);
+    assert.equal(await reopened.reserveRegistration("shop", generation, "swarm"), ticket);
+    await assert.rejects(reopened.reserveRegistration("shop", generation), /allocation conflict/);
+  } finally { await reopened.close(); }
+});
+
+test("control refuses Swarm reservation without a platform capability and publishes only verified policy", async (t) => {
+  const root = await fixture(t);
+  const index = await createLifecycleAppIndex(root, (identity) => Promise.resolve({ ...identity, status: "applied" }));
+  try {
+    const disabled = registrationControl(index, () => Promise.resolve(true));
+    await assert.rejects(disabled("/registration/reserve", { app: "shop", generation, runtime: "swarm" }), /not enabled/);
+    await assert.rejects(index.registrationPolicy("shop"), /not ready/);
+    const enabled = registrationControl(index, () => Promise.resolve(true), undefined, () => Promise.resolve(true));
+    const reserved = await enabled("/registration/reserve", { app: "shop", generation, runtime: "swarm" });
+    assert.ok(reserved !== undefined && "ticket" in reserved);
+    await assert.rejects(enabled("/registration/policy", { app: "shop" }), /not been verified/);
+    await assert.rejects(enabled("/registration/reserve", { app: "shop", generation, runtime: "compose" }), /allocation conflict/);
+    await enabled("/registration/submit", { app: "shop", generation, ticket: reserved.ticket });
+    await enabled("/registration/reconcile", { app: "shop", generation, ticket: reserved.ticket });
+    assert.deepEqual(await disabled("/registration/policy", { app: "shop" }), await index.registrationPolicy("shop"));
+  } finally { await index.close(); }
 });

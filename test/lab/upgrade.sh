@@ -461,6 +461,33 @@ if [ "$indexed_registration" = true ]; then
         -e "fixture_repo=http://${host_ip}:${port}/lab/indexed.git" \
         -e "fixture_commit=${indexed_commit}" -e "kayra_lab_swarm=${swarm_host}" >> "$log" 2>&1 || die "building the indexed fixture"
     echo "✓ indexed build returned digest-qualified images and refused destructive GC"
+    if [ "$swarm_host" = true ]; then
+        swarm_repo="${work}/swarm-build"
+        git clone -q "$indexed_repo" "$swarm_repo"
+        yq -i '.name = "swarm-build" | .routes[0].host = "swarm" | .routes[0].check = "/" |
+            .rollout = {"strategy": "rolling", "mixed_version_compatible": true, "rollback_compatible": true,
+                        "services": {"web": {"role": "http", "overlap": "allowed"}}}' "${swarm_repo}/app.yml"
+        jq '.image = "swarm-build/web"' "${swarm_repo}/web/docker/image.json" > "${work}/swarm-image.json"
+        mv "${work}/swarm-image.json" "${swarm_repo}/web/docker/image.json"
+        yq -i 'del(.services.web.mem_limit) |
+            .services.web.deploy.resources = {"limits": {"memory": "64m", "cpus": "0.1"}, "reservations": {"memory": "32m", "cpus": "0.05"}} |
+            .services.web.healthcheck = {"test": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"], "interval": "1s", "timeout": "1s", "start_period": "1s", "retries": 3} |
+            .services.web.stop_grace_period = "30s"' "${swarm_repo}/deploy/compose.yml"
+        git -C "$swarm_repo" add -A
+        git -C "$swarm_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "new Swarm application fixture"
+        git clone -q --bare "$swarm_repo" "${served}/lab/swarm.git"
+        swarm_commit="$(git -C "$swarm_repo" rev-parse HEAD)"
+        jq -n --arg repo "http://${host_ip}:${port}/lab/swarm.git" --arg commit "$swarm_commit" '{
+            fixture_app: "swarm-build", fixture_runtime: "swarm", fixture_hosts: ["swarm.lab.test"],
+            fixture_grants: {memory_bytes: 268435456, cpu_millicores: 500, maintenance: false},
+            fixture_repo: $repo, fixture_commit: $commit, kayra_lab_swarm: true
+        }' > "${work}/swarm-registration-inputs.json"
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/registration-generation/build-live.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e "@${work}/swarm-registration-inputs.json" >> "$log" 2>&1 || die "registering and building the new Swarm application"
+        echo "✓ new Swarm registration retained its runtime, grants and build receipt across restart"
+    fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi
 

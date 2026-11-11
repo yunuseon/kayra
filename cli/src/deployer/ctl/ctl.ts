@@ -149,14 +149,14 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
   },
   registration: async ([operation, app, generation, ticket]) => {
     const initialize = operation === "initialize" && app === undefined;
-    const verified = operation === "verified" && app !== undefined && generation === undefined;
+    const verified = (operation === "verified" || operation === "policy") && app !== undefined && generation === undefined;
     if (!initialize && !verified && ((operation !== "reserve" && operation !== "submit" && operation !== "reconcile") ||
-      app === undefined || generation === undefined || (operation === "reserve") !== (ticket === undefined))) {
-      return fail("usage: ctl registration initialize | verified <app> | reserve|submit|reconcile <app> <generation> [ticket]");
+      app === undefined || generation === undefined || (operation === "reserve" ? ticket !== undefined && ticket !== "compose" && ticket !== "swarm" : ticket === undefined))) {
+      return fail("usage: ctl registration initialize | verified|policy <app> | reserve <app> <generation> [runtime] | submit|reconcile <app> <generation> <ticket>");
     }
     const response = await fetch(`http://127.0.0.1:8091/registration/${operation}`, {
       method: "POST",
-      body: JSON.stringify(initialize ? {} : { app, generation, ...(ticket === undefined ? {} : { ticket }) }),
+      body: JSON.stringify(initialize ? {} : { app, generation, ...(operation === "reserve" ? { runtime: ticket ?? "compose" } : ticket === undefined ? {} : { ticket }) }),
       signal: AbortSignal.timeout(15_000),
     }).catch(() => undefined);
     if (response === undefined) return fail("registration control unavailable");

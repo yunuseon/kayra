@@ -485,6 +485,26 @@ This establishes infrastructure connectivity only. Ordinary fleet app
 registration still selects Compose; the live Swarm application adapter,
 resource admission and coordinated rollout remain subsequent integration work.
 
+### Persisted runtime selection
+
+Initial indexed registration now allocates its runtime with the generation
+before publication. A retry with a different backend is refused, including
+after restart. Older indexed allocations default to Compose. The public policy
+command reports the backend only after registration has a verified receipt.
+Immutable generation readers require an explicit runtime; the legacy reader
+continues to refuse Swarm registrations.
+
+A root-side Swarm registration requires current platform authority, matching
+Docker cluster/node/overlay identities, explicit CPU/memory grants bounded by
+workload capacity, and an explicit maintenance grant. It refuses existing native
+objects when first claiming a name. Generation publication also refuses backend
+conversion. A Swarm artifact must contain validated rollout metadata, and build
+preparation checks the public backend against the coordinator's allocation.
+
+These checks are live only in the explicit lab registration path. Normal fleet
+app registration still refuses Swarm until the application adapter and admission
+path are integrated; infrastructure enablement does not convert an app.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

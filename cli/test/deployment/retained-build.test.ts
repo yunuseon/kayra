@@ -33,7 +33,7 @@ test("concurrent build retries retain one verified artifact and survive restart 
   const { root, path, index, ports, artifacts } = await fixture(t);
   // eslint-disable-next-line functional/no-let -- count effects, not request invocations
   let calls = 0;
-  const prepare: BuildPorts["prepare"] = async (identity, sha, deadline, signal) => {
+  const prepare: BuildPorts["prepare"] = async (identity, sha, deadline, signal, runtime) => {
     calls += 1;
     assert.equal(identity.registrationGeneration, generation);
     assert.equal(sha, commit);
@@ -41,7 +41,7 @@ test("concurrent build retries retain one verified artifact and survive restart 
     const journal = await readFile(join(path, "state.json"), "utf8");
     assert.ok(journal.includes('"artifact":null'));
     assert.ok(journal.includes(`"commit":"${commit}"`));
-    return ports.prepare(identity, sha, deadline, signal);
+    return ports.prepare(identity, sha, deadline, signal, runtime);
   };
   const [first, duplicate] = await Promise.all([
     index.prepareBuild("shop", commit, { ...ports, prepare }),

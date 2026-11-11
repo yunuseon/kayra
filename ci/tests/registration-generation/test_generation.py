@@ -389,6 +389,70 @@ class GenerationTest(unittest.TestCase):
         observed = [self.observation(self.next_metadata(number))["status"] for number in (3, 4)]
         self.assertEqual(sorted(observed), ["applied", "not-applied"])
 
+    def swarm_registration(self):
+        self.meta["app"] = "swarm-fixture"
+        self.fixture["registration"] = {**self.fixture["registration"], "name": "swarm-fixture", "runtime": "swarm",
+                                        "grants": {"memory_bytes": 268435456, "cpu_millicores": 500, "maintenance": False}}
+        self.key = hashlib.sha256(self.meta["app"].encode()).hexdigest()
+        return self.fixture["registration"]
+
+    def test_swarm_payloads_are_explicit_and_publication_refuses_backend_conversion(self):
+        registration = self.swarm_registration()
+        self.publish()
+        self.assertEqual(json.loads((self.path() / "registration.json").read_text())["runtime"], "swarm")
+        following = self.next_metadata()
+        self.fixture["registration"] = {key: value for key, value in registration.items() if key != "grants"}
+        self.fixture["registration"]["runtime"] = "compose"
+        with self.assertRaisesRegex(storage.RegistrationError, "runtime changes"):
+            self.publish(following, self.meta)
+        self.assertFalse(self.path(generation=following["registrationGeneration"]).exists())
+        for grants in ({}, {"memory_bytes": True, "cpu_millicores": 500, "maintenance": False}, {"memory_bytes": 268435456, "cpu_millicores": 500}):
+            with self.subTest(grants=grants), self.assertRaises(storage.RegistrationError):
+                storage._registration({**registration, "grants": grants}, self.meta)
+
+    def test_swarm_registration_requires_current_owned_host_authority_and_bounded_grants(self):
+        registration = self.swarm_registration()
+        authority = json.loads((ROOT / "ci/tests/swarm-host/authority.json").read_text())
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="kayra-swarm-authority-", dir="/var/lib"))) / "swarm"
+        directory.mkdir(mode=0o755)
+        public = directory / "authority.json"
+        def publish(value):
+            if public.exists():
+                public.unlink()
+            public.write_text(json.dumps(value))
+            public.chmod(0o444)
+        def observe(*args):
+            if args[0] == "info":
+                return {"LocalNodeState": "active", "ControlAvailable": True, "Nodes": 1, "Managers": 1, "NodeAddr": authority["profile"]["advertise_address"], "NodeID": authority["node"], "Cluster": {"ID": authority["cluster"]}}
+            return [{"Id": authority["network"]["id"], "Name": "platform-swarm", "Driver": "overlay", "Scope": "swarm", "Attachable": True, "Ingress": False}]
+        with self.assertRaises(FileNotFoundError):
+            command.admit_runtime(registration, str(directory), observe)
+        publish(authority)
+        command.admit_runtime(registration, str(directory), observe)
+        with self.assertRaisesRegex(storage.RegistrationError, "workload capacity"):
+            command.admit_runtime({**registration, "grants": {**registration["grants"], "memory_bytes": authority["profile"]["memory_bytes"]}}, str(directory), observe)
+        with self.assertRaisesRegex(storage.RegistrationError, "membership"):
+            command.admit_runtime(registration, str(directory), lambda *args: {"LocalNodeState": "inactive"})
+        with self.assertRaisesRegex(storage.RegistrationError, "overlay"):
+            command.admit_runtime(registration, str(directory), lambda *args: observe(*args) if args[0] == "info" else [])
+        publish({**authority, "profile": {**authority["profile"], "advertise_address": "invalid"}})
+        with self.assertRaisesRegex(storage.RegistrationError, "advertise"):
+            command.admit_runtime(registration, str(directory), observe)
+
+    def test_new_swarm_name_refuses_existing_native_objects_without_blocking_an_owned_retry(self):
+        app = "swarm-fixture"
+        for name in ("apps", "removing", "removal-locks", "managed-apps"):
+            (self.root / name).mkdir(mode=0o755)
+        marker = self.root / "managed-apps" / (app + ".json")
+        with self.assertRaisesRegex(storage.RegistrationError, "existing Swarm"):
+            with command.claim_experimental_app(self.root, app, lambda _: False, lambda _: True):
+                self.fail("native namespace collision was claimed")
+        self.assertFalse(marker.exists())
+        with command.claim_experimental_app(self.root, app, lambda _: False, lambda _: False):
+            pass
+        with command.claim_experimental_app(self.root, app, lambda _: False, lambda _: True):
+            self.assertTrue(marker.exists())
+
 
 if __name__ == "__main__":
     if sys.platform != "linux" or os.geteuid() != 0:

@@ -73,3 +73,15 @@ export const parseBundle = (app: AppName, expected: Sha, json: unknown, registra
 
 /** images.env, as compose reads it next to the app's own .env. */
 export const imagesEnv = (bundle: Bundle) => bundle.images.map((image) => `${image.variable}=${image.ref}\n`).join("");
+
+/** Only validated fields are retained; platform secrets never enter the builder bundle. */
+export const bundleWire = (bundle: Bundle) => Object.freeze({
+  ...(bundle.registration === undefined ? {} : { registration: bundle.registration }),
+  sha: bundle.sha, images: bundle.images, compose: bundle.compose,
+  routes: Object.freeze(bundle.routes.map((route) => Object.freeze({
+    host: route.host, service: route.service, port: route.port,
+    ...(route.path === undefined ? {} : { path: route.path }),
+    ...(route.check === undefined ? {} : { check: route.check }),
+    ...(route.rateLimit === undefined ? {} : { rate_limit: route.rateLimit }),
+  }))),
+});

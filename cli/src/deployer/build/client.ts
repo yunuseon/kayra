@@ -18,11 +18,12 @@ export const builderResolve = async (builder: string, app: App, ref: string, reg
 };
 
 /** The builder's NDJSON: log lines as they come, then the bundle or an error. */
-export const builderPrepare = async (builder: string, app: App, commit: Sha, log: (line: string) => void, registration?: RegistrationGeneration) => {
+// eslint-disable-next-line functional/prefer-immutable-types -- AbortSignal is an externally owned cancellation notification
+export const builderPrepare = async (builder: string, app: App, commit: Sha, log: (line: string) => void, registration?: RegistrationGeneration, deadline = Date.now() + 45 * 60_000, signal?: AbortSignal) => {
   const response = await fetch(`${builder}/prepare`, {
     method: "POST",
     body: JSON.stringify({ app: app.name, sha: commit, ...(registration === undefined ? {} : { registration }) }),
-    signal: AbortSignal.timeout(45 * 60_000),
+    signal: AbortSignal.any([AbortSignal.timeout(Math.max(1, Math.min(45 * 60_000, deadline - Date.now()))), ...(signal === undefined ? [] : [signal])]),
   }).catch(() => undefined);
   if (response?.body == null || !response.ok) return err("the builder did not prepare a bundle");
   const lines = createInterface({ input: Readable.fromWeb(response.body) });

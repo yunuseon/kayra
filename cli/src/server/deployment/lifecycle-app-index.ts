@@ -5,9 +5,9 @@ import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { names } from "../../lib/names.ts";
-import { admitTicket } from "./lifecycle-tickets.ts";
-import { lifecycleActionId } from "./lifecycle-fence.ts";
-import { parseRegistrationGeneration } from "../../contracts/registration-generation.ts";
+import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
+import type { BuildPorts } from "../../contracts/build-artifact.ts";
+import { verifiedRegistration } from "./verified-registration.ts";
 import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
 
@@ -17,9 +17,20 @@ const entry = z.object({
   incarnation: z.uuid(),
   phase: z.enum(["initializing", "ready"]),
 }).strict();
-const schema = z.object({ version: z.literal(1), apps: z.array(entry) }).strict().refine(({ apps }) =>
+const build = z.object({
+  id: z.string().regex(/^[0-9a-f]{64}$/),
+  registration: z.object({ version: z.literal(1), app: appName, incarnation: z.uuid(), actionId: z.string(), registrationGeneration: z.uuid() }).strict(),
+  commit: z.string().regex(/^[0-9a-f]{40}$/),
+  deadline: z.number().int().positive(),
+  artifact: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
+}).strict();
+const schema = z.object({ version: z.literal(1), builds: z.array(build).default([]), apps: z.array(entry) }).strict().refine(({ apps, builds }) =>
   new Set(apps.map((app) => app.app)).size === apps.length &&
-  new Set(apps.map((app) => app.incarnation)).size === apps.length,
+  new Set(apps.map((app) => app.incarnation)).size === apps.length &&
+  new Set(builds.map((item) => item.id)).size === builds.length &&
+  builds.every((item) => parseRegistrationGeneration(item.registration).ok &&
+    apps.some((app) => app.app === item.registration.app && app.incarnation === item.registration.incarnation) &&
+    item.id === createHash("sha256").update(JSON.stringify({ registration: item.registration, commit: item.commit })).digest("hex")),
 );
 type IndexEntry = z.infer<typeof entry>;
 type EnvelopeStore = ReturnType<typeof openLifecycleEnvelopeStore>;
@@ -36,6 +47,17 @@ const syncDirectory = async (path: string) => {
   const dir = await open(path, "r");
   try { await dir.sync(); }
   finally { await dir.close(); }
+};
+
+const prepareBeforeDeadline = async (ports: BuildPorts, registration: RegistrationGeneration, commit: string, deadline: number) => {
+  const controller = new AbortController();
+  const expired = Promise.withResolvers<string>();
+  const timer = setTimeout(() => {
+    controller.abort();
+    expired.reject(new Error("build deadline expired"));
+  }, Math.max(1, Math.min(45 * 60_000, deadline - ports.now())));
+  try { return await Promise.race([ports.prepare(registration, commit, deadline, controller.signal), expired.promise]); }
+  finally { clearTimeout(timer); }
 };
 
 const openIndex = async (directory: string, mode: "initialize" | "existing", observer?: RegistrationObserver) => {
@@ -123,21 +145,35 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return ownership.incarnation;
     })),
     verifiedRegistration: (app: string) => useReady(app, async (store) => {
-      const state = await store.read();
-      if (state === undefined) throw new Error("registration state is missing");
-      const allocation = state.registrationAllocation;
-      const fence = state.fence;
-      if (allocation === undefined || fence?.lifecycle.phase !== "registered") throw new Error("registration has not been verified");
-      const receipt = admitTicket(state.tickets, allocation.ticket, {
-        kind: "register", registrationGeneration: allocation.generation,
+      return verifiedRegistration(app, await store.read());
+    }),
+    prepareBuild: (app: string, commit: string, ports: BuildPorts) => useReady(app, async (store) => {
+      if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("build requires a full commit id");
+      const registration = verifiedRegistration(app, await store.read());
+      const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
+      const intent = await serialIndex(async () => {
+        const state = await readIndex();
+        const existing = state.builds.find((item) => item.id === id);
+        if (existing !== undefined) return existing;
+        const requested = build.parse({ id, registration, commit, deadline: ports.now() + 45 * 60_000 });
+        await journal.write({ ...state, builds: [...state.builds, requested] });
+        return requested;
       });
-      if (!receipt.ok || receipt.value.status !== "terminal" || receipt.value.outcome !== "success") throw new Error("registration has no verified receipt");
-      const metadata = parseRegistrationGeneration({
-        version: 1, app, incarnation: state.tickets.incarnation,
-        actionId: lifecycleActionId(fence, 1), registrationGeneration: allocation.generation,
+      if (intent.artifact !== null) {
+        await ports.read(intent.artifact);
+        return Object.freeze({ id, artifact: intent.artifact, registration, commit, deadline: intent.deadline });
+      }
+      if (ports.now() >= intent.deadline) throw new Error("build deadline expired; a new operation requires intervention");
+      const content = await prepareBeforeDeadline(ports, registration, commit, intent.deadline);
+      if (ports.now() >= intent.deadline) throw new Error("build deadline expired before artifact retention");
+      const artifact = await ports.retain(content);
+      if (!/^[0-9a-f]{64}$/.test(artifact)) throw new Error("invalid retained artifact identity");
+      if (ports.now() >= intent.deadline) throw new Error("build deadline expired before receipt persistence");
+      await serialIndex(async () => {
+        const state = await readIndex();
+        await journal.write({ ...state, builds: state.builds.map((item) => item.id === id ? { ...item, artifact } : item) });
       });
-      if (!metadata.ok) throw new Error(metadata.error);
-      return metadata.value;
+      return Object.freeze({ id, artifact, registration, commit, deadline: intent.deadline });
     }),
     reserveRegistration: (app: string, generation?: string) => useReady(app, (store) => store.reserveRegistration(generation)),
     submitRegistration: (app: string, ticket: string, generation: string) =>

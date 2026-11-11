@@ -128,6 +128,16 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     if (target === undefined || commit.length < 7) return fail(`${commit} is not an earlier release of ${name.value}`);
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
   },
+  build: async ([app, commit, extra]) => {
+    if (app === undefined || commit === undefined || extra !== undefined) return fail("usage: ctl build <app> <full-commit>");
+    const response = await fetch("http://127.0.0.1:8091/registration/build", {
+      method: "POST", body: JSON.stringify({ app, commit }), signal: AbortSignal.timeout(45 * 60_000),
+    }).catch(() => undefined);
+    if (response === undefined) return fail("build control unavailable; retry the same commit to reconstruct the outcome");
+    if (!response.ok) return fail(`build control returned ${String(response.status)}`);
+    console.log(await response.text());
+    return 0;
+  },
   registration: async ([operation, app, generation, ticket]) => {
     const initialize = operation === "initialize" && app === undefined;
     const verified = operation === "verified" && app !== undefined && generation === undefined;

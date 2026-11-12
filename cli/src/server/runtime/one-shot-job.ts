@@ -71,12 +71,33 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
     const clock = now(); const left = deadline - clock;
     return Number.isSafeInteger(clock) && clock > 0 && left > 0 ? Math.min(left, 10_000) : undefined;
   };
+  const imageReady = async (plan: JobPlan, deadline: number) => {
+    const inspect = () => api.request("GET", `/images/${encodeURIComponent(plan.image)}/json`);
+    const available = (value: unknown) => {
+      const digests = field(value, "RepoDigests");
+      return Array.isArray(digests) && digests.some((digest: unknown) => digest === plan.image);
+    };
+    const current = await inspect();
+    if (current.status === 200) return available(current.value);
+    if (current.status !== 404) return false;
+    const timeoutMs = remaining(plan, deadline); if (timeoutMs === undefined) return false;
+    const [repository, digest] = plan.image.split("@");
+    if (repository === undefined || digest === undefined) return false;
+    // Progress is not success evidence. Independently inspect the immutable reference afterward.
+    await api.request("POST", `/images/create?fromImage=${encodeURIComponent(repository)}&tag=${encodeURIComponent(digest)}`, undefined,
+      { response: "bytes", timeoutMs, maximumBytes: 4 * 1024 * 1024 });
+    const pulled = await inspect(); return pulled.status === 200 && available(pulled.value);
+  };
   const create = async (input: JobPlan, environment: Readonly<Record<string, string>>, barrier = false, deadline = input.deadline) => {
     const parsed = parseJobPlan(input); if (!parsed.ok) return typed<JobWrite>("refused");
     const plan = parsed.value; const timeoutMs = remaining(plan, deadline); if (timeoutMs === undefined) return typed<JobWrite>("refused");
     try {
       const body = render(plan, environment, barrier);
-      const response = await api.request("POST", `/containers/create?name=${encodeURIComponent(jobName(plan.scope))}`, body, { timeoutMs });
+      const existing = await get(plan);
+      if (existing.status !== "absent") return typed<JobWrite>(existing.status === "unavailable" ? "uncertain" : "conflict");
+      if (!(await imageReady(plan, deadline))) return typed<JobWrite>("uncertain");
+      const left = remaining(plan, deadline); if (left === undefined) return typed<JobWrite>("refused");
+      const response = await api.request("POST", `/containers/create?name=${encodeURIComponent(jobName(plan.scope))}`, body, { timeoutMs: left });
       return typed<JobWrite>(response.status === 201 && containerId(field(response.value, "Id")) ? "acknowledged" : response.status === 409 ? "conflict" : "uncertain");
     } catch { return typed<JobWrite>("uncertain"); }
   };

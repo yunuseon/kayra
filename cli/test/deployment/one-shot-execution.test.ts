@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { oneShotExecution, parseJobExecution } from "../../src/server/deployment/one-shot-execution.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
+import { oneShotJob } from "../../src/server/runtime/one-shot-job.ts";
 import { jobRuntime } from "./one-shot-fixture.ts";
 
 type Ports = Parameters<typeof oneShotExecution>[1];
@@ -113,4 +114,24 @@ test("a slow runtime observation cannot certify a fence after its persisted dead
     const value = await lab.native.observe(plan); lab.now(captured.fenceDeadline ?? 0); return value;
   } } });
   assert.equal((await restarted.tick()).phase, "held");
+});
+
+test("a duplicate Create arriving during cleanup is fenced without replacing the executed job's evidence", async (t) => {
+  const lab = await fixture(t); const entered = Promise.withResolvers<undefined>(); const release = Promise.withResolvers<undefined>();
+  const delayed = oneShotJob({ request: async (...args: Parameters<typeof lab.api.request>) => {
+    if (args[1].startsWith("/containers/create?")) { entered.resolve(undefined); await release.promise; }
+    return lab.api.request(...args);
+  } }, lab.clock);
+  const duplicate = delayed.create(lab.plan, { TOKEN: "secret-value" }); t.after(() => { release.resolve(undefined); }); await entered.promise;
+  await lab.owner.prepare(lab.plan); await lab.owner.tick(); await lab.owner.tick(); const captured = await lab.owner.tick();
+  const fencer = oneShotJob({ request: async (...args: Parameters<typeof lab.api.request>) => {
+    const reply = await lab.api.request(...args);
+    if (args[0] === "DELETE") { release.resolve(undefined); await duplicate; }
+    return reply;
+  } }, lab.clock);
+  const restarted = await lab.reopen({ ...lab.ports, native: fencer }); await restarted.tick();
+  const late = await lab.native.observe(lab.plan); assert.equal(late.status, "owned"); assert.equal(late.barrier, false); assert.notEqual(late.id, captured.container);
+  const fenced = await restarted.tick(); assert.deepEqual(fenced.fenceTargets, [late.id]);
+  const done = await restarted.tick(); assert.equal(done.phase, "complete"); assert.deepEqual(done.evidence, captured.evidence);
+  assert.equal(done.container, captured.container); assert.equal(lab.executions(), 1);
 });

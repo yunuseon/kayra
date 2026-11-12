@@ -85,3 +85,31 @@ test("a changed restart policy or image-declared volume refuses start before exe
   }
   assert.equal(lab.executions(), 0);
 });
+
+test("a cold job image is pulled by immutable digest and independently inspected before create", async () => {
+  const lab = jobRuntime(); lab.cache(false);
+  assert.equal(await lab.native.create(lab.plan, { TOKEN: "secret-value" }), "acknowledged");
+  const pull = lab.calls.findIndex((call) => call.path.startsWith("/images/create?"));
+  const create = lab.calls.findIndex((call) => call.path.startsWith("/containers/create?"));
+  assert.ok(pull >= 0 && create > pull);
+  assert.ok(lab.calls.slice(pull + 1, create).some((call) => call.method === "GET" && call.path.startsWith("/images/")));
+  assert.ok(lab.calls[pull]?.path.includes("tag=sha256%3A")); assert.equal(lab.executions(), 0);
+});
+
+test("successful image-pull HTTP status cannot replace verified image availability", async () => {
+  const lab = jobRuntime(); lab.cache(false);
+  const native = oneShotJob({ request: async (...args: Readonly<Parameters<typeof lab.api.request>>) => args[1].startsWith("/images/create?")
+    ? { status: 200, value: Buffer.from('{"error":"private registry diagnostic"}\n') } : lab.api.request(...args) }, lab.clock);
+  assert.equal(await native.create(lab.plan, { TOKEN: "secret-value" }), "uncertain");
+  assert.equal(lab.calls.filter((call) => call.path.startsWith("/containers/create?")).length, 0);
+  assert.equal(lab.executions(), 0);
+});
+
+test("image preparation never extends the job's original dispatch deadline", async () => {
+  const lab = jobRuntime(); lab.cache(false);
+  const native = oneShotJob({ request: async (...args: Readonly<Parameters<typeof lab.api.request>>) => {
+    const result = await lab.api.request(...args); if (args[1].startsWith("/images/create?")) lab.now(lab.plan.deadline); return result;
+  } }, lab.clock);
+  assert.equal(await native.create(lab.plan, { TOKEN: "secret-value" }), "refused");
+  assert.equal(lab.calls.filter((call) => call.path.startsWith("/containers/create?")).length, 0);
+});

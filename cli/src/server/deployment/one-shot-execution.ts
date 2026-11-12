@@ -12,16 +12,18 @@ const evidence = z.object({ kind: z.enum(["succeeded", "failed", "unknown", "not
 const schema = z.object({ version: z.literal(1), plan: id, scope: z.unknown(), createdAt: positive, deadline: positive,
   phase: z.enum(["create-intent", "start-intent", "observing", "fencing", "complete", "held"]),
   container: id.nullable(), evidence: evidence.nullable(), fenceDeadline: positive.nullable(), barrier: id.nullable(),
+  fenceTargets: z.array(id).max(8).readonly().default(Object.freeze([])),
 }).strict().readonly();
 
 export const parseJobExecution = (input: unknown) => {
   const parsed = schema.safeParse(input); if (!parsed.success) throw new Error("invalid one-shot execution record");
   const value = parsed.data; const scope = parseJobScope(value.scope);
-  if (!scope.ok || value.createdAt >= value.deadline ||
+  if (!scope.ok || value.createdAt >= value.deadline || new Set(value.fenceTargets).size !== value.fenceTargets.length || value.fenceTargets.includes(value.container ?? "") ||
+    (value.fenceTargets.length > 0 && value.phase !== "fencing" && value.phase !== "complete" && value.phase !== "held") ||
     (value.phase === "create-intent" && (value.container !== null || value.evidence !== null || value.fenceDeadline !== null)) ||
     ((value.phase === "start-intent" || value.phase === "observing") && (value.container === null || value.evidence !== null || value.fenceDeadline !== null)) ||
     ((value.phase === "fencing" || value.phase === "complete") && (value.evidence === null || value.fenceDeadline === null)) ||
-    ((value.phase === "complete") !== (value.barrier !== null)) || value.barrier !== null && value.barrier === value.container ||
+    ((value.phase === "complete") !== (value.barrier !== null)) || value.barrier !== null && (value.barrier === value.container || value.fenceTargets.includes(value.barrier)) ||
     (value.fenceDeadline !== null && value.fenceDeadline > value.deadline + 30_000) ||
     (value.evidence !== null && (value.evidence.observedAt < value.createdAt || value.evidence.id !== value.container ||
       ((value.evidence.kind === "succeeded" || value.evidence.kind === "failed") && (value.container === null || value.evidence.exitCode === null)) ||
@@ -61,7 +63,7 @@ export const oneShotExecution = (journal: OperationJournal, ports: Ports) => {
         if (previous.plan !== digest) throw new Error("one-shot journal belongs to a different plan"); return previous;
       }
       const now = clock(); if (now >= plan.deadline) throw new Error("one-shot deadline already expired");
-      return write({ version: 1, plan: digest, scope: plan.scope, createdAt: now, deadline: plan.deadline, phase: "create-intent", container: null, evidence: null, fenceDeadline: null, barrier: null });
+      return write({ version: 1, plan: digest, scope: plan.scope, createdAt: now, deadline: plan.deadline, phase: "create-intent", container: null, evidence: null, fenceDeadline: null, barrier: null, fenceTargets: [] });
     }),
     read: () => serial(load),
     tick: () => serial(async () => {
@@ -78,12 +80,13 @@ export const oneShotExecution = (journal: OperationJournal, ports: Ports) => {
         if (observed.status === "unavailable") return record;
         if (observed.status === "owned" && observed.barrier) return observed.state === "created" && observed.id !== record.container
           ? write({ ...record, phase: "complete", barrier: observed.id }) : hold(record);
-        if (observed.status === "owned" && record.container !== null && observed.id !== record.container) return hold(record);
-        // An uncertain create may have arrived since the previous absent observation.
-        const current = observed.status === "owned" && record.container === null
-          ? await write({ ...record, container: observed.id, evidence: record.evidence === null ? null : { ...record.evidence, id: observed.id } }) : record;
+        // A duplicate pending Create may arrive after deleting the executed ID.
+        // Preserve its original evidence, recording each additional ID before deletion.
+        const extra = observed.status === "owned" && observed.id !== record.container && !record.fenceTargets.includes(observed.id);
+        if (extra && record.fenceTargets.length >= 8) return hold(record);
+        const current = extra ? await write({ ...record, fenceTargets: [...record.fenceTargets, observed.id] }) : record;
         if (!(await ports.authorize(current, "fence"))) return hold(current);
-        await ports.native.fence(plan, current.container, record.fenceDeadline); return current;
+        await ports.native.fence(plan, observed.status === "owned" ? observed.id : current.container, record.fenceDeadline); return current;
       }
       const beginFence = async (kind: NonNullable<JobExecution["evidence"]>["kind"], container: string | null, exitCode: number | null, probe: NonNullable<JobExecution["evidence"]>["probe"] = null) => write({ ...record,
         container, phase: "fencing", evidence: { kind, id: container, exitCode, observedAt: clock(record.createdAt), probe }, fenceDeadline: Math.min(now + 30_000, record.deadline + 30_000),

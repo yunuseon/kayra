@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { parseApplicationPlan } from '../../../cli/src/contracts/application-plan.ts';
 import { openArtifactStore } from '../../../cli/src/server/deployment/artifact-store.ts';
 import { httpExecution } from '../../../cli/src/server/deployment/http-execution.ts';
-import { reconcileHttpWork } from '../../../cli/src/server/deployment/http-work.ts';
+import { startHttpController } from '../../../cli/src/server/composition/http-controller.ts';
 import { createLifecycleAppIndex, openLifecycleAppIndex } from '../../../cli/src/server/deployment/lifecycle-app-index.ts';
 import { routedReadiness } from '../../../cli/src/server/platform/routed-readiness.ts';
 import { swarmRouting } from '../../../cli/src/server/platform/swarm-routing.ts';
@@ -41,7 +41,7 @@ if (process.argv[2] === 'writer') {
 } else {
   const app = 'coordinator-lab-' + randomUUID().replaceAll('-', '');
   const root = await mkdtemp('/var/lib/kayra-http-coordinator-');
-  let index; let serviceId;
+  let index; let serviceId; let controller;
   try {
     const host = JSON.parse(await readFile('/var/lib/kayra/swarm/authority.json', 'utf8'));
     const template = JSON.parse(await readFile(new URL('../../../ci/tests/swarm-http/native-plan.json', import.meta.url), 'utf8'));
@@ -94,9 +94,10 @@ if (process.argv[2] === 'writer') {
     const interrupted = await index.httpOperation(app, b.request);
     assert.equal(interrupted.phase, 'applying'); assert.equal(interrupted.deadline, b.deadline);
     let replayedWrites = 0;
-    const resumed = httpExecution(index, { ...ports, native: { ...ports.native, apply: (...args) => { replayedWrites += 1; return ports.native.apply(...args); } } });
     assert.deepEqual(await index.pendingHttpOperations(), [{ app, request: b.request }]);
-    await wait(async () => (await reconcileHttpWork(index, resumed)).some((item) => item.app === app && item.request === b.request && item.outcome === 'succeeded'), 'reconstructed routed B');
+    controller = startHttpController(index, { ...ports, native: { ...ports.native, apply: (...args) => { replayedWrites += 1; return ports.native.apply(...args); } } });
+    await wait(async () => (await index.httpOperation(app, b.request)).phase === 'succeeded', 'automatically reconstructed routed B');
+    await controller.close(); controller = undefined;
     const activeB = await index.httpOperation(app, b.request);
     assert.equal(activeB.verified.native.id, serviceId);
     assert.equal(activeB.deadline, b.deadline); assert.equal(replayedWrites, 0);
@@ -151,8 +152,9 @@ if (process.argv[2] === 'writer') {
     console.log(JSON.stringify({ app, engine: version.Version, api: version.ApiVersion, image,
       trustedFixtureBuildInputs: true, continuityMeasured: false, initialPromotion: true, killedAfterAcknowledgement: true, reconstructedPromotion: true, replayedWrites,
       sameServiceId: true, originalDeadline: true, settledCapacity: true, journalContainsPrivateValues: false,
-      automaticRollback: true, automaticRecoveryMs, recoveryTrace, delayedCandidateFenced: true, reconstructedWorklist: true, publishedStatus: true }));
+      automaticRollback: true, automaticRecoveryMs, recoveryTrace, delayedCandidateFenced: true, reconstructedWorklist: true, publishedStatus: true, scheduledRestart: true }));
   } catch (error) {
+    await controller?.close();
     await index?.close();
     console.error(JSON.stringify({ app, root, serviceId, error: String(error), cleanup: `docker service rm ${serviceId ?? `kayra-${app}--web`}` })); process.exitCode = 1;
   }

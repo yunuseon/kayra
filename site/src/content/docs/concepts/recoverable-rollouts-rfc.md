@@ -615,8 +615,8 @@ and lifecycle fence in one app-journal write, then records global admission
 using that original deadline. It persists exact native CAS intent only after
 matching admission. An internal execution path now dispatches the recorded native intent, observes
 convergence and promotes a release only after fresh routed readiness. Recovery now observes native rollback, compensates to the recorded previous
-plan, or clears an unverified initial release. Startup scheduling and normal
-control/client integration are still required before opt-in application rollout commands are enabled. Retained
+plan, or clears an unverified initial release. The optional indexed composition
+now schedules recovery; normal control/client integration is still required before opt-in application rollout commands are enabled. Retained
 plans contain configuration identities and secret key references only. Rolling
 HTTP admission refuses changes to route, backend port or service identity,
 because a shared service VIP must continue routing the old tasks correctly.
@@ -698,9 +698,14 @@ The owner also derives a restart work list from validated journals, including
 terminal operations whose global resource accounting is still pending. It never
 creates request IDs, refreshes deadlines or includes held operations for automatic
 retry. One scheduling round reconciles independent apps concurrently and reports
-port failures without exposing their private error bodies. The composition root
-still needs to schedule those rounds; this interface alone starts no background
-controller and enables no ordinary Swarm deployment command.
+port failures without exposing their private error bodies. The optional indexed composition now schedules these rounds in the existing
+deployer process when public/private registration inputs and explicit Swarm
+authority are configured. It begins from the persisted index on startup, never
+initializes an absent index implicitly, runs one round at a time and waits for
+an in-flight round when closed. Timer and reporting ownership stay in the
+composition root; the decision logic owns neither. No additional process or
+Docker socket holder is introduced, and ordinary Swarm deployment control
+remains disabled.
 
 ## Delivery and acceptance
 

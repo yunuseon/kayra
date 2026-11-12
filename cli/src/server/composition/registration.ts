@@ -1,4 +1,11 @@
 /* eslint-disable functional/no-let -- owns the experimental registration journal across control requests */
+import { startHttpController } from "./http-controller.ts";
+import { httpEnvironment } from "../platform/http-environment.ts";
+import { routedReadiness } from "../platform/routed-readiness.ts";
+import { swarmRouting } from "../platform/swarm-routing.ts";
+import { dockerApi } from "../runtime/docker-api.ts";
+import { observeSwarmHost } from "../runtime/swarm-host.ts";
+import { swarmService } from "../runtime/swarm-service.ts";
 import { describeCompose } from "../runtime/compose-description.ts";
 import { compileHttpPlan } from "../deployment/http-plan.ts";
 import { readPrivateConfiguration } from "../platform/private-registration.ts";
@@ -87,6 +94,23 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       return compiled.value;
     },
   });
+  const api = dockerApi();
+  const executionPorts = artifacts === undefined || publicRegistrations === undefined || privateRegistrations === undefined || swarmAuthority === undefined ? undefined : Object.freeze({
+    ...artifacts, ...httpEnvironment(publicRegistrations, privateRegistrations, 1000), now: Date.now,
+    observeHost: (host: Parameters<typeof observeSwarmHost>[0]) => observeSwarmHost(host, api),
+    native: swarmService(api), routing: swarmRouting, readiness: routedReadiness(),
+  });
+  let controller: ReturnType<typeof startHttpController> | undefined;
+  let lastReport = "";
+  const startController = (index: Parameters<typeof startHttpController>[0]) => {
+    if (controller !== undefined || executionPorts === undefined) return;
+    controller = startHttpController(index, executionPorts, (result) => {
+      const content = JSON.stringify(result);
+      if (content !== lastReport && (result.status !== "ready" || result.work.length > 0)) console.log("http-coordinator: " + content);
+      lastReport = content;
+    });
+  };
+  if (opening !== undefined) startController(await opening);
   const canRegister = async (app: string) => {
     const claim = await lstat(join(platform, "managed-apps", app + ".json"));
     return claim.isFile() && claim.uid === 0 && claim.gid === 0 && (claim.mode & 0o7777) === 0o444 && claim.nlink === 1;
@@ -102,7 +126,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
           if (claims.length !== 0) throw new Error("managed app claims exist without an index; intervention required");
           return createLifecycleAppIndex(path, observer);
         })();
-        await opening;
+        startController(await opening);
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
@@ -111,6 +135,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       })(route, input);
     },
     close: async () => {
+      await controller?.close();
       const index = await opening;
       await index?.close();
     },

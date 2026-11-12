@@ -685,6 +685,23 @@ settles afterward from that receipt, including on restart or before the next
 request. Automatic rollback disruption is not described as uninterrupted service.
 These paths remain internal and still require the integrated continuity matrix.
 
+The coordinator now exposes a validated deployment-status projection through its
+own interface. It omits private journal tickets, native effect authority,
+configuration and secret bindings. Requested, desired, certified active and
+last-known-good release references are separate. A held operation reports
+`inspect-and-resolve`; indexed Compose applications remain `legacy-unverified`.
+The projection explicitly reports `runtimeObservation: not-observed`: historical
+release certification must not be presented as a fresh workload-health check.
+Client/control publication and live observations remain subsequent integration.
+
+The owner also derives a restart work list from validated journals, including
+terminal operations whose global resource accounting is still pending. It never
+creates request IDs, refreshes deadlines or includes held operations for automatic
+retry. One scheduling round reconciles independent apps concurrently and reports
+port failures without exposing their private error bodies. The composition root
+still needs to schedule those rounds; this interface alone starts no background
+controller and enables no ordinary Swarm deployment command.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

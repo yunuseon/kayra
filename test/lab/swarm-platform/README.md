@@ -121,3 +121,9 @@ The first fixture attempt was refused for an unresolved `$` argument before its
 failure candidate was admitted; its previously healthy disposable service and
 journals remain in the failed lab for inspection. Successful replay fixtures
 were removed. The lab VM itself was already retained from an earlier failure.
+
+Restart reconstruction now discovers the interrupted request through the
+coordinator's owner-only work list and runs the scheduling-round interface.
+After native rollback, the lab checks the public status contract: the rejected
+candidate stays requested, the previous plan is desired and certified active,
+and no fresh runtime observation is inferred from that certificate.

@@ -18,6 +18,18 @@
         that: not repeated_setup.changed
         quiet: true
 
+    - name: Build contract dependencies into the existing lab deployer image
+      ansible.builtin.command:
+        argv: [docker, compose, build, --build-arg, KAYRA_REGISTRATION_LAB=true, deployer]
+        chdir: /opt/platform
+      changed_when: true
+
+    - name: Recreate only the existing deployer with its lab dependencies
+      ansible.builtin.command:
+        argv: [docker, compose, up, -d, --no-build, --no-deps, deployer]
+        chdir: /opt/platform
+      changed_when: true
+
     - name: Copy the public lab certificate authority
       ansible.builtin.copy:
         src: "{{ lookup('ansible.builtin.pipe', 'mkcert -CAROOT') }}/rootCA.pem"
@@ -80,7 +92,7 @@
         dest: /var/lib/kayra/swarm/lab-native-plan.json
         owner: root
         group: root
-        mode: "0600"
+        mode: "0644"
 
     - name: Copy public fixture inputs into the existing deployer
       ansible.builtin.command:

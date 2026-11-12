@@ -10,7 +10,8 @@ import { parseResourceBook, reserveResources, settleResources } from "./resource
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
 import { lifecycleActionId } from "./lifecycle-fence.ts";
 import type { ServiceObservation } from "../../contracts/swarm-service.ts";
-import type { HttpNativeStep } from "./http-state.ts";
+import { parseHttpNativeStep } from "./http-state.ts";
+import type { HttpRecovery, HttpNativeStep } from "./http-state.ts";
 import type { ResourceCharge } from "./resource-book.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
@@ -137,6 +138,22 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return withEnvelope(appDirectory(app), ownership, use);
   });
 
+  const reconcileHttpResources = async (app: string, store: EnvelopeStore, ticket: string) => {
+    const envelope = await store.read();
+    const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
+    if (operation === undefined || envelope === undefined || (operation.phase === "succeeded" ? operation.verified === null : operation.phase !== "failed" || operation.recovery === null)) throw new Error("HTTP resource settlement requires a verified outcome");
+    const result = operation.phase === "succeeded" ? "target" as const : operation.previous === null ? "absent" as const : "previous" as const;
+    await serialIndex(async () => {
+      const state = await readIndex();
+      const charge = state.resources?.charges.find((item) => item.app === app);
+      if (charge?.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1])) return;
+      if (charge.target.plan !== operation.plan) throw new Error("HTTP resource settlement plan mismatch");
+      const settled = settleResources(state.resources, app, charge.incarnation, charge.sequence, result);
+      if (!settled.ok) throw new Error(settled.error);
+      await journal.write({ ...state, resources: settled.value });
+    });
+  };
+
   return {
     prepareApp: (app: string) => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
@@ -222,6 +239,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return existing;
       }
       if (envelope.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active !== null) throw new Error("HTTP lifecycle is busy or fenced");
+      const previous = envelope.http?.requests.at(-1);
+      if (previous !== undefined) await reconcileHttpResources(app, store, previous.ticket);
       const state = await readIndex();
       const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
       const artifact = state.builds.find((build) => build.id === id)?.artifact;
@@ -283,11 +302,23 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     authorizeHttpNative: (app: string, ticket: string, step: HttpNativeStep) => useReady(app, async (store) => {
       const envelope = await store.read();
       const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
-      if (operation === undefined || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null || lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action ||
-        !operation.steps.some((item) => JSON.stringify(item) === JSON.stringify(step)) || (operation.phase !== "applying" && operation.phase !== "verifying")) return false;
+      const parsed = parseHttpNativeStep(step);
+      if (!parsed.ok || operation === undefined || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null || lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action ||
+        !operation.steps.some((item) => JSON.stringify(item) === JSON.stringify(parsed.value)) || (operation.phase !== "applying" && operation.phase !== "verifying" && operation.phase !== "recovering")) return false;
       const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
       return charge?.result === "pending" && charge.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1]) && charge.target.plan === operation.plan && charge.deadline === operation.deadline;
     }),
+    beginHttpRecovery: (app: string, ticket: string, reason: "deadline" | "admission" | "runtime" | "routed", now: number) => useReady(app, (store) => store.beginHttpRecovery(ticket, reason, now)),
+    holdHttp: (app: string, ticket: string, reason: "deadline" | "admission" | "runtime" | "routed") => useReady(app, (store) => store.holdHttp(ticket, reason)),
+    recordHttpRecoveryIntent: (app: string, ticket: string, step: HttpNativeStep, native: ServiceObservation, now: number) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
+      const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
+      if (operation === undefined || charge?.result !== "pending" || charge.incarnation !== envelope?.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1]) || charge.target.plan !== operation.plan || charge.deadline !== operation.deadline) throw new Error("HTTP recovery effect has no matching durable admission");
+      return store.recordHttpRecoveryStep(ticket, step, native, now);
+    }),
+    finishHttpUnstarted: (app: string, ticket: string, reason: "deadline" | "admission" | "runtime") => useReady(app, (store) => store.finishHttpUnstarted(ticket, reason)),
+    finishHttpRecovery: (app: string, ticket: string, kind: Exclude<HttpRecovery["kind"], "unstarted">, native: ServiceObservation, routed: RoutedReadiness | null, now: number) => useReady(app, (store) => store.finishHttpRecovery(ticket, kind, native, routed, now)),
     markHttpDispatched: (app: string, ticket: string) => useReady(app, (store) => store.markHttpDispatched(ticket)),
     promoteHttpRollout: (app: string, ticket: string, native: ServiceObservation, routed: RoutedReadiness, now: number) => useReady(app, async (store) => {
       const envelope = await store.read();
@@ -304,20 +335,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       });
       return verified;
     }),
-    reconcileHttpResources: (app: string, ticket: string) => useReady(app, async (store) => {
-      const envelope = await store.read();
-      const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
-      if (operation?.phase !== "succeeded" || operation.verified === null || envelope === undefined) throw new Error("HTTP resource settlement requires a verified outcome");
-      await serialIndex(async () => {
-        const state = await readIndex();
-        const charge = state.resources?.charges.find((item) => item.app === app);
-        if (charge?.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1])) return;
-        if (charge.target.plan !== operation.plan) throw new Error("HTTP resource settlement plan mismatch");
-        const settled = settleResources(state.resources, app, charge.incarnation, charge.sequence, "target");
-        if (!settled.ok) throw new Error(settled.error);
-        await journal.write({ ...state, resources: settled.value });
-      });
-    }),
+    reconcileHttpResources: (app: string, ticket: string) => useReady(app, (store) => reconcileHttpResources(app, store, ticket)),
     resourceSnapshot: () => {
       if (closed) return Promise.reject(new Error("lifecycle app index is closed"));
       return serialIndex(async () => (await readIndex()).resources);

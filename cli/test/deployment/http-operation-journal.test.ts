@@ -23,7 +23,7 @@ test("request, lifecycle fence and ticket are durable together; restart does not
   assert.equal(operation.deadline, 91_000);
   assert.equal(operation.previous, null);
   assert.equal(operation.action, operation.ticket);
-  await assert.rejects(index.recordHttpNativeIntent("shop", operation.ticket, { effect: "apply", expected: null, plan: operation.plan, deadline: operation.deadline }), /no matching durable admission/);
+  await assert.rejects(index.recordHttpNativeIntent("shop", operation.ticket, { attempt: 1, effect: "apply", expected: null, plan: operation.plan, deadline: operation.deadline }), /no matching durable admission/);
   await index.close();
   const recovered = await openLifecycleAppIndex(path);
   t.after(() => recovered.close());
@@ -40,7 +40,7 @@ test("admission uses the recorded plan and deadline before a stable native CAS i
   assert.equal(admitted?.phase, "admitted");
   assert.equal(admitted.deadline, operation.deadline);
   assert.equal((await index.resourceSnapshot())?.charges[0]?.deadline, operation.deadline);
-  const intent = { effect: "apply" as const, expected: { id: "s".repeat(25), version: 42 }, plan: operation.plan, deadline: operation.deadline };
+  const intent = { attempt: 1, effect: "apply" as const, expected: { id: "s".repeat(25), version: 42 }, plan: operation.plan, deadline: operation.deadline };
   assert.equal((await index.recordHttpNativeIntent("shop", operation.ticket, intent)).status, "new");
   await assert.rejects(index.recordHttpNativeIntent("shop", operation.ticket, { ...intent, expected: { ...intent.expected, version: 99 } }), /versions cannot be refreshed/);
   await index.close();
@@ -106,7 +106,7 @@ test("SIGKILL after native intent preserves the original version and charged dea
       observeHost: (host) => Promise.resolve({ status: "ready", engine: "29.9.3", api: "1.56", node: host.node, cluster: host.cluster, network: host.network.id,
         capacity: { cpu: host.profile.cpu_millicores, memory: host.profile.memory_bytes }, standing: { cpu: host.profile.platform_cpu_millicores, memory: host.profile.platform_memory_bytes } }),
     });
-    const intent = { effect: "apply", plan: operation.plan, expected: null, deadline: operation.deadline };
+    const intent = { attempt: 1, effect: "apply", plan: operation.plan, expected: null, deadline: operation.deadline };
     await index.recordHttpNativeIntent("shop", operation.ticket, intent);
     console.log("durable-native-intent");
     setInterval(() => {}, 1000);
@@ -123,9 +123,9 @@ test("SIGKILL after native intent preserves the original version and charged dea
       const record = await recovered.httpOperation("shop", operation.request);
       assert.equal(record?.phase, "applying");
       assert.equal(record.deadline, operation.deadline);
-      assert.deepEqual(record.steps, [{ effect: "apply", plan: operation.plan, expected: null, deadline: operation.deadline }]);
+      assert.deepEqual(record.steps, [{ attempt: 1, effect: "apply", plan: operation.plan, expected: null, deadline: operation.deadline }]);
       assert.equal((await recovered.resourceSnapshot())?.charges[0]?.deadline, operation.deadline);
-      assert.equal((await recovered.recordHttpNativeIntent("shop", operation.ticket, record.steps[0] ?? { effect: "apply", plan: operation.plan, expected: null, deadline: operation.deadline })).status, "reconcile");
+      assert.equal((await recovered.recordHttpNativeIntent("shop", operation.ticket, record.steps[0] ?? { attempt: 1, effect: "apply", plan: operation.plan, expected: null, deadline: operation.deadline })).status, "reconcile");
     } finally { await recovered.close(); }
   } finally { lines.close(); child.kill("SIGKILL"); await exited; }
 });

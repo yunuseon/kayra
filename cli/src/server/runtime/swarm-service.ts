@@ -17,7 +17,7 @@ const field = (value: unknown, name: string): unknown => record(value) ? value[n
 const reference = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value) ? value : null;
 const effectReference = (value: unknown) => { const parsed = effectSchema.safeParse(value); return parsed.success ? parsed.data : null; };
 const planReference = (value: unknown) => reference(value, /^[0-9a-f]{64}$/);
-const actionReference = (value: unknown) => reference(value, /^[0-9a-f-]{36}:[1-9][0-9]*$/);
+const actionReference = (value: unknown) => reference(value, /^[0-9a-f-]{36}:[1-9][0-9]*(?::(?:apply|restore|fence|remove|scrub):[1-8])?$/);
 const states = new Set(["new", "allocated", "pending", "assigned", "accepted", "preparing", "ready", "starting", "running", "complete", "shutdown", "failed", "rejected", "remove", "orphaned"]);
 // Docker adds defaults. Compare every field Kayra supplies, retaining exact arrays.
 const matches = (observed: unknown, expected: unknown): boolean => {
@@ -51,7 +51,7 @@ const owned = (service: unknown, scope: ServiceScope) => {
 };
 const validAction = (input: ServiceAction) => {
   const parsed = actionSchema.safeParse(input);
-  if (!parsed.success || !new RegExp(`^${parsed.data.incarnation}:[1-9][0-9]*$`).test(parsed.data.action) || !Number.isSafeInteger(Number(parsed.data.action.split(":")[1])) || nativeName(parsed.data).length > 63) return undefined;
+  if (!parsed.success || !new RegExp(`^${parsed.data.incarnation}:[1-9][0-9]*(?::${parsed.data.effect}:[1-8])?$`).test(parsed.data.action) || !Number.isSafeInteger(Number(parsed.data.action.split(":")[1])) || nativeName(parsed.data).length > 63) return undefined;
   return Object.freeze(parsed.data);
 };
 
@@ -77,7 +77,7 @@ export const renderNativeHttp = (input: ApplicationPlan, requested: ServiceActio
       Placement: { Constraints: [`node.id==${plan.host.node}`] }, RestartPolicy: { Condition: "any", Delay: 1e9 }, Networks: [{ Target: plan.host.network.id }],
     },
     Mode: { Replicated: { Replicas: 1 } }, EndpointSpec: { Mode: "vip" },
-    UpdateConfig: { Parallelism: 1, Order: "start-first", Monitor: plan.policy.failureMonitorSeconds * 1e9, FailureAction: "rollback", MaxFailureRatio: 0 },
+    UpdateConfig: { Parallelism: 1, Order: "start-first", Monitor: plan.policy.failureMonitorSeconds * 1e9, FailureAction: action.effect === "restore" ? "pause" : "rollback", MaxFailureRatio: 0 },
     RollbackConfig: { Parallelism: 1, Order: "start-first", Monitor: plan.policy.failureMonitorSeconds * 1e9, FailureAction: "pause", MaxFailureRatio: 0 },
   };
 };

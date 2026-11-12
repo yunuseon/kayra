@@ -6,10 +6,14 @@ export type DockerReply = { readonly status: number; readonly value: unknown };
 
 /** Internal adapter transport. It never retries and never includes response bodies in errors. */
 export const dockerApi = (socketPath = "/var/run/docker.sock") => Object.freeze({
-  request: async (method: "GET" | "POST" | "DELETE", path: string, body?: unknown, options: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {}) => {
+  request: async (method: "GET" | "POST" | "DELETE", path: string, body?: unknown, options: {
+    readonly timeoutMs?: number; readonly signal?: AbortSignal; readonly response?: "json" | "bytes"; readonly maximumBytes?: number;
+  } = {}) => {
     if (!path.startsWith("/") || /[\r\n\0]/.test(path)) throw new Error("invalid Docker API path");
     const timeoutMs = options.timeoutMs ?? 10_000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 90_000) throw new Error("invalid Docker API request timeout");
+    const responseLimit = options.maximumBytes ?? maximumBytes;
+    if (!Number.isSafeInteger(responseLimit) || responseLimit < 1 || responseLimit > maximumBytes) throw new Error("invalid Docker API response limit");
     const payload = body === undefined ? undefined : JSON.stringify(body);
     if (payload !== undefined && Buffer.byteLength(payload, "utf8") > maximumBytes) throw new Error("Docker API request exceeds transport limit");
     const signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(options.signal === undefined ? [] : [options.signal])]);
@@ -22,7 +26,7 @@ export const dockerApi = (socketPath = "/var/run/docker.sock") => Object.freeze(
         let bytes = 0;
         response.on("data", (chunk: Buffer) => {
           bytes += chunk.length;
-          if (bytes > maximumBytes) {
+          if (bytes > responseLimit) {
             operation.destroy();
             reject(new Error("Docker API response exceeds transport limit"));
             return;
@@ -33,7 +37,9 @@ export const dockerApi = (socketPath = "/var/run/docker.sock") => Object.freeze(
         response.on("error", unavailable);
         response.on("end", () => {
           try {
-            const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks, bytes));
+            const buffer = Buffer.concat(chunks, bytes);
+            if (options.response === "bytes") { resolve(Object.freeze({ status: response.statusCode ?? 0, value: buffer })); return; }
+            const content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer);
             const value: unknown = content === "" ? null : JSON.parse(content);
             resolve(Object.freeze({ status: response.statusCode ?? 0, value }));
           } catch {

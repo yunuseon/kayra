@@ -266,3 +266,28 @@ fetches and successful-source cleanup. Its results are
 `/tmp/kayra-jobs-fixed-component.json`, `.json.jobs.json` and `.json.jobs.tar`;
 the run log is `/tmp/kayra-jobs-fixed-component.log`. Full CLI validation passed
 551 tests with one skip; all 16 focused Linux checks passed.
+
+## Application status-probe evidence
+
+`migration-probe.mjs <new-results-directory> <app-owned-web-image-digest>`
+exercises `applied`, `not-applied`, `unknown`, malformed private stdout, output
+overflow and a nonzero process exit that prints applied. It uses the same
+64 MiB/100 millicore, network-free disposable jobs as the interruption probe.
+Only a successful process with complete bounded non-TTY stdout containing
+`{"version":1,"outcome":"…"}` supplies a semantic outcome. Traces and journals
+retain only its enum; the secret supplied to the malformed-output fixture must
+not appear in either. No raw application output is exported.
+
+All six cases passed on 2026-11-12 against Engine 29.9.3/API 1.56 and Node
+24.22.1. The same source also passed all four native job SIGKILL checkpoints.
+The run logs are `/tmp/kayra-probes-native-{jobs,probes}.log`; exported evidence
+is retained at `/tmp/kayra-probes-native-evidence/`. The coordinator playbook
+fetches `.probes.json` and `.probes.tar` before successful source cleanup, and
+the upgrade lab retains both alongside job and HTTP evidence. This component
+still enables no migration rollout or app admission capability.
+
+The combined HTTP/job/probe component passed all 21 tasks, including evidence
+export and source cleanup. Results are `/tmp/kayra-probes-component.json` with
+`.json.probes.json` and `.json.probes.tar`; the log is
+`/tmp/kayra-probes-component.log`. Full CLI validation passed 556 tests with one
+skip, and all 30 focused Linux checks passed.

@@ -1,4 +1,27 @@
-# Experimental Swarm service fragment
+# Runtime effects
+
+The runtime boundary owns Docker operations and normalized observations. It
+receives validated immutable intent through typed ports; it owns no fleet
+interpretation, rollout decisions, release promotion or notification policy.
+
+- `compose.ts` preserves compatibility workload commands behind the runtime port.
+- `swarm-host.ts` observes the explicitly provisioned single-node host.
+- `swarm-service.ts` applies owned HTTP services with versioned native intent,
+  observes actual tasks and fences superseded effects. Routing is supplied by
+  the platform boundary; promotion and compensation belong to the coordinator.
+- `one-shot-job.ts` creates and starts individually identified jobs without
+  restart, then fences exact container IDs and retains inert name barriers.
+  Materialized inputs exist only in its native create request. Status-probe
+  output is bounded and normalized before crossing the observation port.
+- `docker-api.ts` owns bounded, non-retrying transport. Raw response bytes are
+  adapter temporaries, never journals or published reporting formats.
+
+These modules share the existing trusted process through the composition root.
+Their code boundaries establish no extra process isolation or socket holder.
+The one-shot primitive is not a public lifecycle entrypoint and enables no
+migration capability until the coordinator supplies admission and sequencing.
+
+## Disconnected service renderer
 
 `swarm.ts` is a disconnected pure renderer, not a runtime adapter that can
 start or update a service. Nothing in the existing deployer calls it. It only

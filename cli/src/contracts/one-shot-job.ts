@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { err, ok } from "../lib/result.ts";
+import type { MigrationProbe } from "./migration-probe.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const text = z.string().max(65536).refine((value) => !value.includes("\0"));
@@ -27,7 +28,8 @@ export type JobWrite = "acknowledged" | "uncertain" | "conflict" | "refused";
 export type JobObservation =
   | { readonly status: "absent" | "foreign" | "unavailable" }
   | { readonly status: "owned"; readonly id: string; readonly barrier: boolean; readonly plan: string;
-      readonly state: "created" | "running" | "succeeded" | "failed" | "unknown"; readonly exitCode: number | null };
+      readonly state: "created" | "running" | "succeeded" | "failed" | "unknown"; readonly exitCode: number | null;
+      readonly probe: MigrationProbe["outcome"] | null };
 export type JobPort = {
   readonly observe: (plan: JobPlan) => Promise<JobObservation>;
   readonly create: (plan: JobPlan, environment: Readonly<Record<string, string>>) => Promise<JobWrite>;

@@ -7,7 +7,7 @@ import type { OperationJournal } from "./operation.ts";
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const id = z.string().regex(/^[0-9a-f]{64}$/);
 const evidence = z.object({ kind: z.enum(["succeeded", "failed", "unknown", "not-started"]), id: id.nullable(),
-  exitCode: z.number().int().nullable(), observedAt: positive,
+  exitCode: z.number().int().nullable(), observedAt: positive, probe: z.enum(["applied", "not-applied", "unknown"]).nullable().default(null),
 }).strict().readonly();
 const schema = z.object({ version: z.literal(1), plan: id, scope: z.unknown(), createdAt: positive, deadline: positive,
   phase: z.enum(["create-intent", "start-intent", "observing", "fencing", "complete", "held"]),
@@ -26,6 +26,7 @@ export const parseJobExecution = (input: unknown) => {
     (value.evidence !== null && (value.evidence.observedAt < value.createdAt || value.evidence.id !== value.container ||
       ((value.evidence.kind === "succeeded" || value.evidence.kind === "failed") && (value.container === null || value.evidence.exitCode === null)) ||
       (value.evidence.kind === "succeeded" && value.evidence.exitCode !== 0) ||
+      (value.evidence.probe !== null && (scope.value.purpose !== "probe" || value.evidence.kind !== "succeeded")) ||
       ((value.evidence.kind === "unknown" || value.evidence.kind === "not-started") && value.evidence.exitCode !== null)))) throw new Error("inconsistent one-shot execution record");
   return Object.freeze({ ...value, scope: scope.value });
 };
@@ -84,14 +85,14 @@ export const oneShotExecution = (journal: OperationJournal, ports: Ports) => {
         if (!(await ports.authorize(current, "fence"))) return hold(current);
         await ports.native.fence(plan, current.container, record.fenceDeadline); return current;
       }
-      const beginFence = async (kind: NonNullable<JobExecution["evidence"]>["kind"], container: string | null, exitCode: number | null) => write({ ...record,
-        container, phase: "fencing", evidence: { kind, id: container, exitCode, observedAt: clock(record.createdAt) }, fenceDeadline: Math.min(now + 30_000, record.deadline + 30_000),
+      const beginFence = async (kind: NonNullable<JobExecution["evidence"]>["kind"], container: string | null, exitCode: number | null, probe: NonNullable<JobExecution["evidence"]>["probe"] = null) => write({ ...record,
+        container, phase: "fencing", evidence: { kind, id: container, exitCode, observedAt: clock(record.createdAt), probe }, fenceDeadline: Math.min(now + 30_000, record.deadline + 30_000),
       });
       if (observed.status === "unavailable") return now >= record.deadline ? hold(record) : record;
       if (observed.status === "owned") {
         if (observed.barrier || (record.container !== null && observed.id !== record.container)) return hold(record);
         if (record.phase === "create-intent" && observed.state !== "created") return hold(record);
-        if (observed.state === "succeeded" || observed.state === "failed") return beginFence(observed.state, observed.id, observed.exitCode);
+        if (observed.state === "succeeded" || observed.state === "failed") return beginFence(observed.state, observed.id, observed.exitCode, observed.probe);
         if (now >= record.deadline) return beginFence(record.phase === "create-intent" ? "not-started" : "unknown", observed.id, null);
         if (observed.state === "running") return record;
         if (observed.state !== "created" || record.phase !== "create-intent") return beginFence("unknown", observed.id, null);

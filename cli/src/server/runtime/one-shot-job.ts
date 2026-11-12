@@ -4,6 +4,7 @@ import { jobName, jobPlanDigest, parseJobPlan } from "../../contracts/one-shot-j
 import type { JobObservation, JobPlan, JobPort, JobWrite } from "../../contracts/one-shot-job.ts";
 import { typed } from "../../lib/typed.ts";
 import { dockerApi } from "./docker-api.ts";
+import { migrationProbeOutput } from "./migration-probe-output.ts";
 
 const object = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 const field = (value: unknown, key: string): unknown => object(value) ? value[key] : undefined;
@@ -27,7 +28,7 @@ const render = (plan: JobPlan, environment: Readonly<Record<string, string>>, ba
     Cmd: barrier ? ["/kayra-never-start"] : plan.command,
     ...(barrier ? { Entrypoint: ["/kayra-never-start"] } : plan.entrypoint === null ? {} : { Entrypoint: plan.entrypoint }),
     Env: barrier ? [] : [...names.toSorted().map((key) => `${key}=${environment[key] ?? ""}`), `KAYRA_OPERATION_ID=${plan.scope.run}:${plan.scope.step}`],
-    StopTimeout: plan.stopGraceSeconds,
+    StopTimeout: plan.stopGraceSeconds, Tty: false,
     HostConfig: { AutoRemove: false, RestartPolicy: { Name: "no", MaximumRetryCount: 0 }, Memory: plan.resources.memoryBytes, NanoCpus: plan.resources.nanoCpus,
       NetworkMode: barrier || plan.networks.length === 0 ? "none" : plan.networks[0], Privileged: false, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges:true"] },
     NetworkingConfig: { EndpointsConfig: barrier ? {} : Object.fromEntries(plan.networks.map((network) => [network, {}])) },
@@ -54,7 +55,15 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
       const code = field(field(result.value, "State"), "ExitCode");
       const exitCode = typeof code === "number" && Number.isSafeInteger(code) && (status === "exited" || status === "dead") ? code : null;
       const state = status === "created" ? "created" : status === "running" ? "running" : status === "exited" ? exitCode === 0 ? "succeeded" : "failed" : status === "dead" ? "failed" : "unknown";
-      return typed<JobObservation>({ status: "owned", id, barrier: field(field(field(result.value, "Config"), "Labels"), "com.kayra.barrier") === "true", plan: jobPlanDigest(plan), state, exitCode });
+      const barrier = field(field(field(result.value, "Config"), "Labels"), "com.kayra.barrier") === "true";
+      const probe = async () => {
+        if (plan.scope.purpose !== "probe" || state !== "succeeded" || barrier) return null;
+        try {
+          const logs = await api.request("GET", `/containers/${id}/logs?stdout=true&stderr=false&timestamps=false`, undefined, { response: "bytes", maximumBytes: 1024 });
+          return logs.status === 200 && Buffer.isBuffer(logs.value) ? migrationProbeOutput(logs.value) : "unknown";
+        } catch { return "unknown"; }
+      };
+      return typed<JobObservation>({ status: "owned", id, barrier, plan: jobPlanDigest(plan), state, exitCode, probe: await probe() });
     } catch { return typed<JobObservation>({ status: "unavailable" }); }
   };
   const remaining = (plan: JobPlan, deadline = plan.deadline) => {
@@ -81,7 +90,7 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
           field(field(current.value, "State"), "Status") !== "created") return "conflict";
         const host = field(current.value, "HostConfig"); const config = field(current.value, "Config");
         if (field(field(host, "RestartPolicy"), "Name") !== "no" || field(host, "Memory") !== plan.resources.memoryBytes || field(host, "NanoCpus") !== plan.resources.nanoCpus ||
-          !empty(field(host, "Binds")) || !empty(field(current.value, "Mounts")) || !empty(field(config, "Volumes")) ||
+          !empty(field(host, "Binds")) || !empty(field(current.value, "Mounts")) || !empty(field(config, "Volumes")) || field(config, "Tty") === true ||
           JSON.stringify(field(config, "Cmd")) !== JSON.stringify(plan.command) ||
           (plan.entrypoint !== null && JSON.stringify(field(config, "Entrypoint")) !== JSON.stringify(plan.entrypoint))) return "refused";
         const response = await api.request("POST", `/containers/${id}/start`, undefined, { timeoutMs });

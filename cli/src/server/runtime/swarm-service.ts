@@ -9,11 +9,13 @@ import { typed } from "../../lib/typed.ts";
 import { dockerApi } from "./docker-api.ts";
 
 const scopeSchema = z.object({ app: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/), service: z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/), incarnation: z.uuid() }).strict();
-const actionSchema = scopeSchema.extend({ action: z.string().max(80), plan: z.string().regex(/^[0-9a-f]{64}$/), deadline: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) });
+const effectSchema = z.enum(["apply", "restore", "fence", "remove", "scrub"]);
+const actionSchema = scopeSchema.extend({ action: z.string().max(80), plan: z.string().regex(/^[0-9a-f]{64}$/), deadline: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), effect: effectSchema });
 const versionSchema = z.object({ id: z.string().regex(/^[a-z0-9]{25}$/), version: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
 const record = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 const field = (value: unknown, name: string): unknown => record(value) ? value[name] : undefined;
 const reference = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value) ? value : null;
+const effectReference = (value: unknown) => { const parsed = effectSchema.safeParse(value); return parsed.success ? parsed.data : null; };
 const planReference = (value: unknown) => reference(value, /^[0-9a-f]{64}$/);
 const actionReference = (value: unknown) => reference(value, /^[0-9a-f-]{36}:[1-9][0-9]*$/);
 const states = new Set(["new", "allocated", "pending", "assigned", "accepted", "preparing", "ready", "starting", "running", "complete", "shutdown", "failed", "rejected", "remove", "orphaned"]);
@@ -26,8 +28,10 @@ const matches = (observed: unknown, expected: unknown): boolean => {
 const emptyDefault = (value: unknown): boolean => value === undefined || value === null || value === false || value === 0 || value === "" ||
   (Array.isArray(value) && value.length === 0) || (record(value) && Object.values(value).every(emptyDefault));
 const exactLabels = (actual: unknown, expected: unknown) => record(actual) && record(expected) && Object.keys(actual).length === Object.keys(expected).length && matches(actual, expected);
+const effectiveLabels = (value: unknown) => record(value) ? Object.fromEntries(Object.entries(value).filter(([key]) => !["com.kayra.action", "com.kayra.plan", "com.kayra.effect"].includes(key))) : undefined;
 const matchesSpec = (actual: unknown, expected: unknown) => {
-  if (!matches(actual, expected) || !exactLabels(field(actual, "Labels"), field(expected, "Labels"))) return false;
+  if (!record(actual) || !record(expected) || !matches({ ...actual, Labels: effectiveLabels(field(actual, "Labels")) }, { ...expected, Labels: effectiveLabels(field(expected, "Labels")) }) ||
+    !exactLabels(effectiveLabels(field(actual, "Labels")), effectiveLabels(field(expected, "Labels")))) return false;
   const container = field(field(actual, "TaskTemplate"), "ContainerSpec");
   const desired = field(field(expected, "TaskTemplate"), "ContainerSpec");
   if (!exactLabels(field(container, "Labels"), field(desired, "Labels"))) return false;
@@ -39,7 +43,7 @@ const matchesSpec = (actual: unknown, expected: unknown) => {
 const nativeName = (scope: ServiceScope) => `kayra-${scope.app}--${scope.service}`;
 const prefix = "com.kayra.";
 const ownership = (scope: ServiceScope) => ({ [prefix + "app"]: scope.app, [prefix + "service"]: scope.service, [prefix + "incarnation"]: scope.incarnation });
-const labelsFor = (action: ServiceAction) => ({ ...ownership(action), [prefix + "action"]: action.action, [prefix + "plan"]: action.plan });
+const labelsFor = (action: ServiceAction) => ({ ...ownership(action), [prefix + "action"]: action.action, [prefix + "plan"]: action.plan, [prefix + "effect"]: action.effect });
 const owned = (service: unknown, scope: ServiceScope) => {
   const spec = field(service, "Spec");
   const labels = field(spec, "Labels");
@@ -114,7 +118,7 @@ export const swarmService = (api = dockerApi(), now: () => number = Date.now) =>
         const health = desired === "running" && state === "running" && typeof container === "string"
           ? await api.request("GET", `/containers/${encodeURIComponent(container)}/json`) : undefined;
         const healthState = health?.status === 200 ? field(field(field(health.value, "State"), "Health"), "Status") : undefined;
-        return Object.freeze({ id: taskId, incarnation: String(field(labels, prefix + "incarnation")), desired, state, plan: planReference(field(labels, prefix + "plan")), action: actionReference(field(labels, prefix + "action")),
+        return Object.freeze({ id: taskId, effect: effectReference(field(labels, prefix + "effect")), incarnation: String(field(labels, prefix + "incarnation")), desired, state, plan: planReference(field(labels, prefix + "plan")), action: actionReference(field(labels, prefix + "action")),
           health: typed<"healthy" | "unhealthy" | "starting" | "absent" | "unknown">(health === undefined ? "absent" : healthState === "healthy" || healthState === "unhealthy" || healthState === "starting" ? healthState : "unknown") });
       }));
       const empty = (value: unknown) => value === undefined || value === null || (Array.isArray(value) && value.length === 0);
@@ -125,7 +129,7 @@ export const swarmService = (api = dockerApi(), now: () => number = Date.now) =>
       };
       const retainedInputsCleared = field(labels, prefix + "tombstone") === "true" && noInputs(spec) && noInputs(field(service.value, "PreviousSpec")) && empty(field(field(service.value, "Endpoint"), "VirtualIPs"));
       return Object.freeze({ status: "owned", id, version, replicas, endpoint, action: actionReference(field(labels, prefix + "action")), plan: planReference(field(labels, prefix + "plan")), taskPlan: planReference(field(taskLabels, prefix + "plan")),
-        tombstone: field(labels, prefix + "tombstone") === "true", retainedInputsCleared, specMatches: expectedSpec === undefined ? null : matchesSpec(spec, expectedSpec), update: reference(field(field(service.value, "UpdateStatus"), "State"), /^(?:updating|paused|completed|rollback_started|rollback_paused|rollback_completed)$/), tasks: Object.freeze(tasks) });
+        effect: effectReference(field(labels, prefix + "effect")), taskEffect: effectReference(field(taskLabels, prefix + "effect")), tombstone: field(labels, prefix + "tombstone") === "true", retainedInputsCleared, specMatches: expectedSpec === undefined ? null : matchesSpec(spec, expectedSpec), update: reference(field(field(service.value, "UpdateStatus"), "State"), /^(?:updating|paused|completed|rollback_started|rollback_paused|rollback_completed)$/), tasks: Object.freeze(tasks) });
     } catch { return { status: "unavailable" }; }
   };
   const replace = async (action: ServiceAction, expected: ServiceVersion | null, spec: unknown): Promise<ServiceWrite> => {
@@ -149,13 +153,13 @@ export const swarmService = (api = dockerApi(), now: () => number = Date.now) =>
     },
     apply: async (requested: ServiceAction, expected: ServiceVersion | null, plan: ApplicationPlan, environment: Readonly<Record<string, string>>, routing: Readonly<Record<string, string>>): Promise<ServiceWrite> => {
       const action = validAction(requested);
-      if (action === undefined || (expected !== null && !versionSchema.safeParse(expected).success)) return "refused";
+      if (action === undefined || (action.effect !== "apply" && action.effect !== "restore") || (expected !== null && !versionSchema.safeParse(expected).success)) return "refused";
       try { return await replace(action, expected, renderNativeHttp(plan, action, environment, routing)); }
       catch { return "refused"; }
     },
     fence: async (requested: ServiceAction, expected: ServiceVersion): Promise<ServiceWrite> => {
       const action = validAction(requested);
-      if (action === undefined || !versionSchema.safeParse(expected).success) return "refused";
+      if (action?.effect !== "fence" || !versionSchema.safeParse(expected).success) return "refused";
       try {
         const left = action.deadline - now();
         if (left <= 0 || left > 90_000) return "refused";
@@ -165,12 +169,12 @@ export const swarmService = (api = dockerApi(), now: () => number = Date.now) =>
         if (!record(spec)) return "uncertain";
         const labels = field(spec, "Labels");
         if (!record(labels)) return "uncertain";
-        return await replace(action, expected, { ...spec, Labels: { ...labels, [prefix + "action"]: action.action } });
+        return await replace(action, expected, { ...spec, Labels: { ...labels, [prefix + "action"]: action.action, [prefix + "effect"]: action.effect } });
       } catch { return "uncertain"; }
     },
-    tombstone: async (requested: ServiceAction, expected: ServiceVersion, image: string): Promise<ServiceWrite> => {
+    tombstone: async (requested: ServiceAction, expected: ServiceVersion | null, image: string): Promise<ServiceWrite> => {
       const action = validAction(requested);
-      if (action === undefined || !versionSchema.safeParse(expected).success || !new RegExp(`^localhost:5000/${action.app}/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$`).test(image) || image.includes("..")) return "refused";
+      if (action === undefined || (action.effect !== "remove" && action.effect !== "scrub") || (expected === null ? action.effect === "scrub" : !versionSchema.safeParse(expected).success) || !new RegExp(`^localhost:5000/${action.app}/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$`).test(image) || image.includes("..")) return "refused";
       return replace(action, expected, { Name: nativeName(action), Labels: { ...labelsFor(action), [prefix + "tombstone"]: "true" },
         TaskTemplate: { ContainerSpec: { Image: image, Labels: labelsFor(action) }, RestartPolicy: { Condition: "none" }, Networks: [] },
         Mode: { Replicated: { Replicas: 0 } }, EndpointSpec: { Mode: "dnsrr" } });

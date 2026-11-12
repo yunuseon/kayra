@@ -575,6 +575,20 @@ The adapter also compares desired fields of the actual native spec against the
 retained plan and materialized inputs; unchanged ownership labels alone do not
 prove convergence. This comparison returns a boolean without exposing values.
 
+Native intents distinguish the logical lifecycle action from its stable effect
+step (`apply`, `restore`, `fence`, `remove` or `scrub`). Both tombstone writes
+therefore remain under one removal identity while the scrub changes the task
+metadata needed to retire `PreviousSpec`. If removal races an unacknowledged
+first create, it can create the zero-replica name reservation itself; a delayed
+candidate create then conflicts instead of resurrecting the workload. Successful
+removal still requires observing all tasks stopped and retained inputs cleared.
+
+Desired verification treats the native task template as the effective release.
+Swarm can restore A while retaining B's service-level action metadata. Only those
+three mutable service-level metadata labels are excluded from the comparison;
+ownership, routing, task labels, materialized environment and workload settings
+must still match the recorded release exactly.
+
 The isolated adapter probe verifies these paths against the real engine and TLS
 router, including replacement, stale-write rejection and same-ID recreation.
 It uses a disposable unregistered fixture. Lifecycle authorization, integrated

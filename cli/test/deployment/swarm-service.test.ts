@@ -4,6 +4,8 @@ import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { typed } from "../../src/lib/typed.ts";
+import type { ServiceAction } from "../../src/contracts/swarm-service.ts";
 import { parseApplicationPlan } from "../../src/contracts/application-plan.ts";
 import { swarmRouting } from "../../src/server/platform/swarm-routing.ts";
 import { renderNativeHttp, swarmService } from "../../src/server/runtime/swarm-service.ts";
@@ -13,7 +15,7 @@ const input: unknown = JSON.parse(readFileSync(new URL("../../../ci/tests/swarm-
 const parsed = parseApplicationPlan(input);
 assert.ok(parsed.ok);
 const plan = parsed.value;
-const action = { app: plan.app, service: "web", incarnation: plan.registration.incarnation, action: plan.registration.incarnation + ":2", plan: createHash("sha256").update(JSON.stringify(plan)).digest("hex"), deadline: 91_000 };
+const action = typed<ServiceAction>({ app: plan.app, service: "web", incarnation: plan.registration.incarnation, action: plan.registration.incarnation + ":2", plan: createHash("sha256").update(JSON.stringify(plan)).digest("hex"), deadline: 91_000, effect: "apply" });
 const environment = { RELEASE: "A", TOKEN: "PRIVATE-TOKEN" };
 const routing = swarmRouting(plan);
 const spec = renderNativeHttp(plan, action, environment, routing);
@@ -73,13 +75,13 @@ test("tombstones retain native names without secrets, networks or VIPs; fences l
     return Promise.resolve({ status: 200, value: null });
   } };
   const adapter = swarmService(api, () => 1000);
-  const fence = { ...action, action: action.incarnation + ":3" };
+  const fence = typed<ServiceAction>({ ...action, action: action.incarnation + ":3", effect: "fence" });
   assert.equal(await adapter.fence(fence, version), "acknowledged");
-  assert.deepEqual(writes[0], { ...spec, Labels: { ...spec.Labels, "com.kayra.action": fence.action } });
-  assert.equal(await adapter.tombstone(fence, version, plan.services["web"]?.image ?? ""), "acknowledged");
+  assert.deepEqual(writes[0], { ...spec, Labels: { ...spec.Labels, "com.kayra.action": fence.action, "com.kayra.effect": "fence" } });
+  assert.equal(await adapter.tombstone({ ...fence, effect: "remove" }, version, plan.services["web"]?.image ?? ""), "acknowledged");
   assert.equal(JSON.stringify(writes[1]).includes("PRIVATE-TOKEN"), false);
-  assert.deepEqual(writes[1], { Name: spec.Name, Labels: { ...spec.TaskTemplate.ContainerSpec.Labels, "com.kayra.action": fence.action, "com.kayra.tombstone": "true" },
-    TaskTemplate: { ContainerSpec: { Image: spec.TaskTemplate.ContainerSpec.Image, Labels: { ...spec.TaskTemplate.ContainerSpec.Labels, "com.kayra.action": fence.action } }, RestartPolicy: { Condition: "none" }, Networks: [] }, Mode: { Replicated: { Replicas: 0 } }, EndpointSpec: { Mode: "dnsrr" } });
+  assert.deepEqual(writes[1], { Name: spec.Name, Labels: { ...spec.TaskTemplate.ContainerSpec.Labels, "com.kayra.action": fence.action, "com.kayra.effect": "remove", "com.kayra.tombstone": "true" },
+    TaskTemplate: { ContainerSpec: { Image: spec.TaskTemplate.ContainerSpec.Image, Labels: { ...spec.TaskTemplate.ContainerSpec.Labels, "com.kayra.action": fence.action, "com.kayra.effect": "remove" } }, RestartPolicy: { Condition: "none" }, Networks: [] }, Mode: { Replicated: { Replicas: 0 } }, EndpointSpec: { Mode: "dnsrr" } });
 });
 
 test("only a matching plan and exact materialized inputs reach native rendering", () => {
@@ -119,4 +121,31 @@ test("unexpected native privileges, mounts, published ports and extra routers ca
     const observation = await adapter.observeDesired(action, plan, environment, routing);
     assert.equal(observation.status, "owned"); assert.equal(observation.specMatches, false);
   }
+});
+
+
+test("automatic rollback verifies the old task spec despite newer service-level action metadata", async () => {
+  const actual = { ...service, Spec: { ...spec, Labels: { ...spec.Labels, "com.kayra.action": action.incarnation + ":9", "com.kayra.plan": "e".repeat(64), "com.kayra.effect": "apply" } }, UpdateStatus: { State: "rollback_completed" } };
+  const adapter = swarmService({ request: (_method, path) => Promise.resolve({ status: 200, value: path.startsWith("/services/") ? actual : [] }) });
+  const observation = await adapter.observeDesired(action, plan, environment, routing);
+  assert.equal(observation.status, "owned");
+  assert.equal(observation.plan, "e".repeat(64));
+  assert.equal(observation.taskPlan, action.plan);
+  assert.equal(observation.specMatches, true);
+});
+
+
+test("a removal tombstone can reserve an absent name and scrub uses the same logical action", async () => {
+  const calls: string[] = [];
+  const writes: unknown[] = [];
+  const adapter = swarmService({ request: (method, path, body) => {
+    calls.push(path);
+    if (method === "GET") return Promise.resolve({ status: 404, value: null });
+    assert.equal(path, "/services/create"); writes.push(body);
+    return Promise.resolve({ status: 201, value: { ID: id } });
+  } }, () => 1000);
+  assert.equal(await adapter.tombstone({ ...action, effect: "remove" }, null, spec.TaskTemplate.ContainerSpec.Image), "acknowledged");
+  assert.equal(await adapter.tombstone({ ...action, effect: "scrub" }, null, spec.TaskTemplate.ContainerSpec.Image), "refused");
+  assert.equal(calls.length, 2);
+  assert.equal(JSON.stringify(writes).includes("PRIVATE-TOKEN"), false);
 });

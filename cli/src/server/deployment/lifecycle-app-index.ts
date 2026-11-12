@@ -9,6 +9,7 @@ import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
 import { terminalHttp } from "./http-state.ts";
+import { hasHttpRecoveryPeak, httpRecoveryPeak } from "./http-admission.ts";
 import { deploymentStatus } from "./deployment-status.ts";
 import { lifecycleActionId } from "./lifecycle-fence.ts";
 import type { ServiceObservation } from "../../contracts/swarm-service.ts";
@@ -143,7 +144,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   const reconcileHttpResources = async (app: string, store: EnvelopeStore, ticket: string) => {
     const envelope = await store.read();
     const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
-    if (operation === undefined || envelope === undefined || (operation.phase === "succeeded" ? operation.verified === null : operation.phase !== "failed" || operation.recovery === null)) throw new Error("HTTP resource settlement requires a verified outcome");
+    if (operation === undefined || envelope === undefined || (operation.phase === "succeeded" ? operation.verified === null : (operation.phase !== "failed" && operation.phase !== "cancelled") || operation.recovery === null)) throw new Error("HTTP resource settlement requires a verified outcome");
     const result = operation.phase === "succeeded" ? "target" as const : operation.previous === null ? "absent" as const : "previous" as const;
     await serialIndex(async () => {
       const state = await readIndex();
@@ -286,7 +287,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const current = await readIndex();
         const previous = operation.previous === null || previousAmount === null ? null : { plan: operation.previous.plan, budget: previousAmount };
         const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence: Number(operation.action.split(":")[1]), previous,
-          target: { plan: operation.plan, budget: amount }, peak: { cpu: amount.cpu + (previous?.budget.cpu ?? 0), memory: amount.memory + (previous?.budget.memory ?? 0) }, deadline: operation.deadline, result: "pending" };
+          target: { plan: operation.plan, budget: amount }, peak: httpRecoveryPeak(amount, previous?.budget ?? null), deadline: operation.deadline, result: "pending" };
         const decision = reserveResources(current.resources, plan.host, observation, intent, ports.now());
         if (!decision.ok) throw new Error(decision.error);
         await journal.write({ ...current, resources: decision.value });
@@ -298,6 +299,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
       const resources = (await readIndex()).resources?.charges.find((item) => item.app === app);
       if (operation === undefined || resources?.result !== "pending" || resources.incarnation !== envelope?.tickets.incarnation || resources.sequence !== Number(operation.action.split(":")[1]) || resources.target.plan !== operation.plan || resources.deadline !== operation.deadline) throw new Error("HTTP native effect has no matching durable admission");
+      if (!hasHttpRecoveryPeak(resources)) throw new Error("HTTP native effect lacks reserved recovery overlap");
       return store.recordHttpStep(ticket, step);
     }),
     httpOperation: (app: string, request: string) => useReady(app, async (store) => (await store.read())?.http?.requests.find((item) => item.request === request)),
@@ -306,9 +308,18 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
       const parsed = parseHttpNativeStep(step);
       if (!parsed.ok || operation === undefined || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null || lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action ||
-        !operation.steps.some((item) => JSON.stringify(item) === JSON.stringify(parsed.value)) || (operation.phase !== "applying" && operation.phase !== "verifying" && operation.phase !== "recovering")) return false;
+        JSON.stringify(operation.steps.filter((item) => item.effect === parsed.value.effect).at(-1)) !== JSON.stringify(parsed.value) ||
+        (operation.phase === "recovering" ? parsed.value.effect === "apply" : parsed.value.effect !== "apply" || (operation.phase !== "applying" && operation.phase !== "verifying"))) return false;
       const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
-      return charge?.result === "pending" && charge.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1]) && charge.target.plan === operation.plan && charge.deadline === operation.deadline;
+      return charge?.result === "pending" && charge.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1]) && charge.target.plan === operation.plan && charge.deadline === operation.deadline &&
+        (parsed.value.effect !== "apply" && parsed.value.effect !== "restore" || hasHttpRecoveryPeak(charge));
+    }),
+    cancelHttpRollout: (app: string, request: string, now: number) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const operation = envelope?.http?.requests.find((item) => item.request === request);
+      if (operation === undefined) throw new Error("HTTP request is unavailable");
+      if (terminalHttp(operation.phase)) return operation;
+      return store.cancelHttp(operation.ticket, now);
     }),
     beginHttpRecovery: (app: string, ticket: string, reason: "deadline" | "admission" | "runtime" | "routed", now: number) => useReady(app, (store) => store.beginHttpRecovery(ticket, reason, now)),
     holdHttp: (app: string, ticket: string, reason: "deadline" | "admission" | "runtime" | "routed") => useReady(app, (store) => store.holdHttp(ticket, reason)),
@@ -317,6 +328,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
       const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
       if (operation === undefined || charge?.result !== "pending" || charge.incarnation !== envelope?.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1]) || charge.target.plan !== operation.plan || charge.deadline !== operation.deadline) throw new Error("HTTP recovery effect has no matching durable admission");
+      if (step.effect === "restore" && !hasHttpRecoveryPeak(charge)) throw new Error("HTTP restoration lacks reserved recovery overlap");
       return store.recordHttpRecoveryStep(ticket, step, native, now);
     }),
     finishHttpUnstarted: (app: string, ticket: string, reason: "deadline" | "admission" | "runtime") => useReady(app, (store) => store.finishHttpUnstarted(ticket, reason)),

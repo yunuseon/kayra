@@ -1,66 +1,12 @@
-/* The fake Engine models CAS, delayed requests and automatic rollback independently of the journal. */
-/* eslint-disable functional/no-let */
 import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
-import type { TestContext } from "node:test";
 import { test } from "node:test";
-import type { ServiceAction, ServiceObservation, ServiceVersion, SwarmServicePort } from "../../src/contracts/swarm-service.ts";
 import { httpExecution } from "../../src/server/deployment/http-execution.ts";
 import { openLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index.ts";
-import { fixture, commit } from "./http-test-fixture.ts";
-
-// eslint-disable-next-line functional/prefer-immutable-types -- owns test cleanup
-const scenario = async (t: TestContext, promote = true) => {
-  const data = await fixture(t);
-  let clock = 2000;
-  let current: ServiceObservation = { status: "absent" };
-  let delay = false;
-  let pending: (() => string) | undefined;
-  let writes = 0;
-  const matches = (expected: ServiceVersion | null) => expected === null ? current.status === "absent" : current.status === "owned" && current.id === expected.id && current.version === expected.version;
-  const apply = (action: ServiceAction, expected: ServiceVersion | null) => {
-    if (!matches(expected)) return "conflict" as const;
-    writes += 1;
-    current = { status: "owned", id: "s".repeat(25), version: expected === null ? 41 : expected.version + 1, action: action.action, plan: action.plan, effect: action.effect,
-      taskPlan: action.plan, taskEffect: action.effect, tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
-      tasks: [{ id: String(writes).padStart(25, "t"), incarnation: action.incarnation, action: action.action, plan: action.plan, effect: action.effect, state: "running", desired: "running", health: "healthy" }] };
-    return "acknowledged" as const;
-  };
-  const native: SwarmServicePort = {
-    observe: () => Promise.resolve(current),
-    observeDesired: (action) => Promise.resolve(current.status === "owned" ? { ...current, specMatches: !current.tombstone && current.taskPlan === action.plan && current.taskEffect === action.effect && current.tasks.some((task) => task.desired === "running" && task.action === action.action) } : current),
-    apply: (action, expected) => {
-      if (delay) { pending = () => apply(action, expected); return Promise.resolve("uncertain"); }
-      return Promise.resolve(apply(action, expected));
-    },
-    fence: (action, expected) => {
-      if (!matches(expected) || current.status !== "owned") return Promise.resolve("conflict");
-      writes += 1; current = { ...current, version: current.version + 1, action: action.action, effect: "fence" };
-      return Promise.resolve("acknowledged");
-    },
-    tombstone: (action, expected) => {
-      if (!matches(expected)) return Promise.resolve("conflict");
-      writes += 1;
-      current = { status: "owned", id: "s".repeat(25), version: expected === null ? 41 : expected.version + 1, action: action.action, plan: action.plan, effect: action.effect,
-        taskPlan: action.plan, taskEffect: action.effect, tombstone: true, retainedInputsCleared: current.status === "absent" || (current.status === "owned" && current.tombstone), specMatches: false, replicas: 0, endpoint: "dnsrr", update: null, tasks: [] };
-      return Promise.resolve("acknowledged");
-    },
-  };
-  const ports = { ...data.ports, now: () => clock, native, materialize: () => Promise.resolve({ TOKEN: "private-value" }), routing: () => ({}),
-    readiness: { check: (action: ServiceAction) => Promise.resolve({ ...action, checkedAt: clock, status: "ready" as const }) } };
-  const start = async (sha: string) => {
-    await data.index.prepareBuild("shop", sha, data.builds);
-    return data.index.prepareHttpRollout("shop", randomUUID(), sha, { ...data.ports, now: () => clock });
-  };
-  const execution = httpExecution(data.index, ports);
-  const initial = await start(commit);
-  if (promote) for (const expected of ["admitted", "applying", "verifying", "succeeded"]) assert.equal(await execution.tick("shop", initial.request), expected);
-  return { ...data, ports, start, execution, initial, now: (value: number) => { clock = value; }, delay: (value: boolean) => { delay = value; },
-    deliver: () => pending?.(), current: () => current, set: (value: ServiceObservation) => { current = value; }, writes: () => writes };
-};
+import { recoveryFixture } from "./http-recovery-fixture.ts";
 
 test("untouched A cannot settle while a delayed B write still owns its revision; a fence rejects late B", async (t) => {
-  const lab = await scenario(t);
+  const lab = await recoveryFixture(t);
   const b = await lab.start("b".repeat(40));
   await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request);
   lab.delay(true); assert.equal(await lab.execution.tick("shop", b.request), "write-uncertain");
@@ -82,7 +28,7 @@ test("untouched A cannot settle while a delayed B write still owns its revision;
 });
 
 test("automatic rollback is verified without another workload write; restart preserves recovery deadline", async (t) => {
-  const lab = await scenario(t); const a = lab.current(); assert.equal(a.status, "owned");
+  const lab = await recoveryFixture(t); const a = lab.current(); assert.equal(a.status, "owned");
   const b = await lab.start("b".repeat(40));
   await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request);
   const candidate = lab.current(); assert.equal(candidate.status, "owned");
@@ -100,7 +46,7 @@ test("automatic rollback is verified without another workload write; restart pre
 });
 
 test("explicit compensation seals a fresh A proof used by the next release", async (t) => {
-  const lab = await scenario(t); const b = await lab.start("b".repeat(40));
+  const lab = await recoveryFixture(t); const b = await lab.start("b".repeat(40));
   await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request);
   const bad = lab.current(); assert.equal(bad.status, "owned"); lab.set({ ...bad, update: "paused" });
   assert.equal(await lab.execution.tick("shop", b.request), "recovering");
@@ -117,7 +63,7 @@ test("explicit compensation seals a fresh A proof used by the next release", asy
 });
 
 test("recovery expiry holds capacity and never refreshes deadlines or writes", async (t) => {
-  const lab = await scenario(t); const b = await lab.start("b".repeat(40));
+  const lab = await recoveryFixture(t); const b = await lab.start("b".repeat(40));
   await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request);
   lab.now(b.deadline + 1); await lab.execution.tick("shop", b.request);
   const recovering = await lab.index.httpOperation("shop", b.request); assert.ok(recovering?.recoveryDeadline !== null && recovering?.recoveryDeadline !== undefined);
@@ -130,7 +76,7 @@ test("recovery expiry holds capacity and never refreshes deadlines or writes", a
 });
 
 test("superseded restore revisions get new immutable attempts; delayed old attempts cannot undo recovery", async (t) => {
-  const lab = await scenario(t); const b = await lab.start("b".repeat(40));
+  const lab = await recoveryFixture(t); const b = await lab.start("b".repeat(40));
   await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request);
   const bad = lab.current(); assert.equal(bad.status, "owned"); lab.set({ ...bad, update: "paused" });
   await lab.execution.tick("shop", b.request); lab.delay(true);
@@ -148,7 +94,7 @@ test("superseded restore revisions get new immutable attempts; delayed old attem
 });
 
 test("failed initial release retains a clean zero-replica name barrier before freeing capacity", async (t) => {
-  const lab = await scenario(t, false); const a = lab.initial;
+  const lab = await recoveryFixture(t, false); const a = lab.initial;
   await lab.execution.tick("shop", a.request); await lab.execution.tick("shop", a.request); await lab.execution.tick("shop", a.request);
   lab.now(a.deadline + 1); assert.equal(await lab.execution.tick("shop", a.request), "recovering");
   assert.equal(await lab.execution.tick("shop", a.request), "acknowledged");
@@ -169,7 +115,7 @@ test("failed initial release retains a clean zero-replica name barrier before fr
 });
 
 test("an absent first create is fenced by a retained name so its late arrival cannot expose the candidate", async (t) => {
-  const lab = await scenario(t, false); const a = lab.initial;
+  const lab = await recoveryFixture(t, false); const a = lab.initial;
   await lab.execution.tick("shop", a.request); await lab.execution.tick("shop", a.request); lab.delay(true);
   assert.equal(await lab.execution.tick("shop", a.request), "write-uncertain");
   lab.now(a.deadline + 1); await lab.execution.tick("shop", a.request);
@@ -181,7 +127,7 @@ test("an absent first create is fenced by a retained name so its late arrival ca
 });
 
 test("unstarted admission can expire safely, including a crash after the host reservation", async (t) => {
-  const lab = await scenario(t, false); const a = lab.initial;
+  const lab = await recoveryFixture(t, false); const a = lab.initial;
   await lab.index.admitHttpRollout("shop", a.ticket, lab.ports);
   lab.now(a.deadline + 1);
   assert.equal(await lab.execution.tick("shop", a.request), "failed");
@@ -194,7 +140,7 @@ test("unstarted admission can expire safely, including a crash after the host re
 });
 
 test("restart after restore acknowledgement seals A without dispatching restoration again", async (t) => {
-  const lab = await scenario(t); const b = await lab.start("b".repeat(40));
+  const lab = await recoveryFixture(t); const b = await lab.start("b".repeat(40));
   await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request);
   const bad = lab.current(); assert.equal(bad.status, "owned"); lab.set({ ...bad, update: "paused" });
   await lab.execution.tick("shop", b.request); await lab.execution.tick("shop", b.request);

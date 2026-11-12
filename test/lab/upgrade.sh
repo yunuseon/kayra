@@ -438,6 +438,8 @@ if [ "$swarm_host" = true ]; then
         "${KAYRA_ROOT}/test/lab/swarm-platform/http-coordinator.yml" \
         -e "kayra_root=${KAYRA_ROOT}" -e "report_path=${work}/http-coordinator.json" >> "$log" 2>&1 || die "durable HTTP coordinator component"
     cp "${work}/http-coordinator.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.json"
+    cp "${work}/http-coordinator.json.overlap.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.overlap.json"
+    cp "${work}/http-coordinator.json.overlap.native.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.overlap.native.json"
     cp "${work}/swarm-platform.json" "/tmp/kayra-swarm-platform-${vm_name}.json"
     cp "${work}/swarm-platform.json.native.json" "/tmp/kayra-swarm-platform-${vm_name}.native.json"
     cp "${work}/swarm-platform.json.adapter.json" "/tmp/kayra-swarm-platform-${vm_name}.adapter.json"

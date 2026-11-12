@@ -12,9 +12,9 @@ test("experimental control validates narrow caller input and authority before ac
   const { index, builds, ports } = await fixture(t);
   await index.prepareBuild("shop", commit, builds);
   const input = { app: "shop", commit, request: randomUUID() };
-  const enabled = deploymentControl({ index, plans: ports, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(true) });
-  const disabled = deploymentControl({ index, plans: ports, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(false) });
-  const denied = deploymentControl({ index, plans: ports, canAccess: () => Promise.resolve(false), enabled: () => Promise.resolve(true) });
+  const enabled = deploymentControl({ index, now: ports.now, plans: ports, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(true) });
+  const disabled = deploymentControl({ index, now: ports.now, plans: ports, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(false) });
+  const denied = deploymentControl({ index, now: ports.now, plans: ports, canAccess: () => Promise.resolve(false), enabled: () => Promise.resolve(true) });
   await assert.rejects(disabled("/deployment/prepare", input), /unavailable/);
   await assert.rejects(denied("/deployment/prepare", input), /outside scope/);
   assert.equal(await enabled("/deployment/prepare", { ...input, expected: null }), undefined);
@@ -36,10 +36,10 @@ test("experimental control validates narrow caller input and authority before ac
 test("lost request acknowledgement reopens the same receipt without rebuilding a moving plan", async (t) => {
   const { path, index, builds, ports } = await fixture(t); await index.prepareBuild("shop", commit, builds);
   const input = { app: "shop", commit, request: randomUUID() };
-  const control = deploymentControl({ index, plans: ports, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(true) });
+  const control = deploymentControl({ index, now: ports.now, plans: ports, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(true) });
   const original = await control("/deployment/prepare", input); await index.close();
   const recovered = await openLifecycleAppIndex(path); t.after(() => recovered.close());
-  const replay = deploymentControl({ index: recovered, plans: { ...ports, now: () => 999999, preview: () => { throw new Error("moving inputs must not be read"); } },
+  const replay = deploymentControl({ index: recovered, now: ports.now, plans: { ...ports, now: () => 999999, preview: () => { throw new Error("moving inputs must not be read"); } },
     canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(true) });
   assert.deepEqual(await replay("/deployment/prepare", input), original);
   await assert.rejects(replay("/deployment/prepare", { ...input, commit: "b".repeat(40) }), /conflicting commit/);
@@ -49,7 +49,7 @@ test("lost request acknowledgement reopens the same receipt without rebuilding a
 test("unsupported proposals are refused before workload intent or admission", async (t) => {
   const { index, builds, ports } = await fixture(t); await index.prepareBuild("shop", commit, builds);
   const input = { app: "shop", commit, request: randomUUID() };
-  const control = deploymentControl({ index, plans: { ...ports, preview: async (...args) => ({ ...await ports.preview(...args), unsupported: "feature" }) },
+  const control = deploymentControl({ index, now: ports.now, plans: { ...ports, preview: async (...args) => ({ ...await ports.preview(...args), unsupported: "feature" }) },
     canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(true) });
   await assert.rejects(control("/deployment/prepare", input), /invalid immutable/);
   assert.equal(await index.httpOperation("shop", input.request), undefined);
@@ -72,4 +72,18 @@ test("the existing loopback control handler delegates deployment routes and hide
   const failure = await fetch(url + "/deployment/prepare", { method: "POST", body: '{}' });
   assert.equal(failure.status, 409); assert.equal((await failure.text()).includes("PRIVATE"), false);
   assert.equal(calls, "/deployment/status\n/deployment/prepare\n");
+});
+
+test("cancellation is scoped to the recorded request and needs no new plan or resource authority", async (t) => {
+  const { index, builds, ports } = await fixture(t); await index.prepareBuild("shop", commit, builds);
+  const request = randomUUID(); await index.prepareHttpRollout("shop", request, commit, ports);
+  const control = deploymentControl({ index, now: () => 3000, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(false) });
+  assert.equal(await control("/deployment/cancel", { app: "shop", request, now: 999999 }), undefined);
+  assert.equal((await index.httpOperation("shop", request))?.phase, "prepared");
+  const denied = deploymentControl({ index, now: () => 3000, canAccess: () => Promise.resolve(false), enabled: () => Promise.resolve(true) });
+  await assert.rejects(denied("/deployment/cancel", { app: "shop", request }), /outside deployment scope/);
+  const result = parseDeploymentReceipt(await control("/deployment/cancel", { app: "shop", request }));
+  assert.ok(result.ok); assert.equal(result.value.phase, "cancelled"); assert.equal(result.value.cancelRequestedAt, 3000);
+  assert.deepEqual(await control("/deployment/cancel", { app: "shop", request }), result.value);
+  assert.equal(await index.resourceSnapshot(), null);
 });

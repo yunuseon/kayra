@@ -9,6 +9,7 @@ const verified = targetShape.extend({ verifiedAt: z.number().int().positive() })
 const operation = z.object({
   request: z.uuid(), phase: z.enum(["prepared", "admitted", "applying", "verifying", "recovering", "held", "succeeded", "failed", "cancelled"]),
   reason: z.enum(["deadline", "admission", "runtime", "routed", "cancelled"]).nullable(),
+  cancelRequestedAt: z.number().int().positive().nullable().default(null),
   updateDeadline: z.number().int().positive(), recoveryDeadline: z.number().int().positive().nullable(),
   recovery: z.enum(["automatic-rollback", "previous-preserved", "compensated", "removed-unverified", "unstarted"]).nullable(),
 }).strict().readonly();
@@ -23,6 +24,8 @@ const schema = z.object({
 }).strict().readonly().superRefine((value, context) => {
   if ((value.runtime === "compose" && (value.verification !== "legacy-unverified" || value.requested !== null || value.desired !== null || value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null)) ||
     (value.runtime === "swarm" && value.verification !== (value.verifiedActive === null ? "unverified" : "verified")) ||
+    (value.operation?.phase === "cancelled" && value.operation.cancelRequestedAt === null) ||
+    (value.operation?.cancelRequestedAt !== undefined && value.operation.cancelRequestedAt !== null && !["recovering", "held", "cancelled"].includes(value.operation.phase)) ||
     value.requiredAction !== (value.operation?.phase === "held" ? "inspect-and-resolve" : "none")) context.addIssue({ code: "custom", message: "inconsistent deployment projection" });
 });
 export type DeploymentStatus = z.infer<typeof schema>;

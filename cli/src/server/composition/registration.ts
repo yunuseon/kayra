@@ -131,7 +131,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
-      if (route.startsWith("/deployment/")) return deploymentControl({ index: await opening, canAccess: canRegister,
+      if (route.startsWith("/deployment/")) return deploymentControl({ index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
       })(route, input);

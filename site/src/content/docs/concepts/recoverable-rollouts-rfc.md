@@ -602,7 +602,7 @@ be attributed to Kayra.
 The coordinator index now has an internal resource-accounting interface for the
 first HTTP subset. It retains and validates the exact normalized plan before
 journaling a reservation. Each app contributes one charge: its verified resource
-baseline or the full A+B overlap envelope while an operation remains unresolved.
+baseline or the full replacement-and-recovery envelope (draining A + B + restored A) while an operation remains unresolved.
 A retry keeps the original plan, sequence and absolute 90-second deadline;
 expiry never releases capacity. Settlement requires the trusted lifecycle owner
 to establish target, previous or absent runtime state. Stale settlements are
@@ -725,6 +725,26 @@ read-only only in the explicit lab overlay. A managed fixture remains under the
 coordinator's ownership until the lifecycle removal integration is available;
 raw native deletion must not bypass its records or active charge. This proves
 one initial deployment, not replacement continuity, migrations or full completion.
+
+HTTP cancellation records its request time once and never refreshes an existing
+recovery deadline. Before native intent, the owner can atomically cancel the
+ticket and restore desired state without workload effects. After dispatch it
+uses the same fenced recovery protocol as failure, certifies the previous or
+absent outcome, then seals a cancelled receipt. A delayed old write cannot arrive
+after settlement, and cancellation of a finished UUID cannot affect a newer
+operation. Expired or held recovery remains an intervention case, with its
+capacity and image references retained. The public status includes cancellation
+intent separately from recovery failure reason. Recovery recognizes the accepted
+task template before its task exists, so scheduling delay cannot trigger another
+restore. Promotion still requires the actual healthy task and routed readiness.
+
+A real native compensation probe observed three concurrent containers while A
+drained, B existed and a restored A started. First-HTTP admission therefore
+reserves `2 * previous + target`, rather than only A+B. Per-release grants remain
+separate from that temporary host charge. New apply/restore effects cannot use
+an older undersized pending reservation; metadata fencing and cleanup that need
+no additional workload copy remain possible. This is conservative accounting,
+not a guarantee against global host OOM or Docker defects outside this scope.
 
 ## Delivery and acceptance
 

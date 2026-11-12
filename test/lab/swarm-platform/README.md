@@ -195,3 +195,36 @@ starting a replacement experiment. Successful managed fixtures remain owned
 by the coordinator until its removal interface is available.
 
 The completed real-deployer matrix passed 18/18 cases; see [HTTP-RESULTS.md](HTTP-RESULTS.md) for exact versions, failed-request counts, disruption and resource evidence. This does not complete experimental Swarm integration.
+
+The coordinator component also cancels a dispatched candidate, reopens its
+journal after native restoration acknowledgement, and reconstructs cancellation
+without repeating the restore. It verifies the original recovery deadline and
+settles capacity to the previous plan. `recovery-overlap.mjs` independently
+creates a disposable service with delayed termination and observes draining A,
+B and restored A concurrently. The observed peak is three containers; admission
+now reserves that recovery overlap. The probe uses no traffic or managed app
+records, removes its successful service, and preserves native snapshots beside
+the component report as `.overlap.native.json`.
+
+`http-cancel.mjs <manifest> <new-results-directory>` extends the prepared HTTP
+fixture with cancellation under traffic. The manifest uses the existing `app`,
+`commits.A` and `commits["slow-ready"]`, plus fresh persisted `resetRequest` and
+`updateRequest` UUIDs. Run it from the staged lab source with its Node runtime.
+It first certifies A, starts 20 requests/s and a 20-second request, dispatches
+slow B, cancels after native acknowledgement, and kills the existing deployer
+after restore acknowledgement. It requires automatic terminal cancellation
+after restart, one accepted restore, unchanged deadlines, only ready A responses
+and zero request failures through 30 seconds after recovery. Raw requests,
+receipts, normalized native observations and the original long response are
+retained. A failure preserves the directory and managed app for inspection.
+
+The 2026-11-12 real-control cancellation run passed with 1,535 short requests,
+zero failures and only ready A responses. The original A request completed in
+20,017 ms; cancellation recovered in 38,070 ms despite coordinator SIGKILL
+after restore acknowledgement. One restore was accepted and the sampled peak
+was three nonterminal tasks. Raw evidence is retained locally at
+`/tmp/kayra-http-cancel-results/`, with the run log at
+`/tmp/kayra-http-cancel-live.log`. The independent component's native overlap
+snapshots are `/tmp/kayra-cancellation-component.json.overlap.native.json`.
+These checks extend the HTTP subset; migrations and full lifecycle completion
+remain subsequent work.

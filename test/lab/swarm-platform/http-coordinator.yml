@@ -40,6 +40,7 @@
         - package.json
         - ci/tests/swarm-http/native-plan.json
         - test/lab/swarm-platform/http-coordinator.mjs
+        - test/lab/swarm-platform/recovery-overlap.mjs
 
     - name: Find the existing deployer container
       ansible.builtin.command:
@@ -75,6 +76,29 @@
         mode: "0600"
       delegate_to: localhost
       become: false
+
+    - name: Measure draining old, candidate and restored workload overlap
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/recovery-overlap.mjs"
+          - "{{ coordinator_source.path }}/recovery-overlap.json"
+      register: recovery_overlap
+      changed_when: true
+
+    - name: Retain the recovery-overlap result
+      ansible.builtin.copy:
+        content: "{{ recovery_overlap.stdout }}\n"
+        dest: "{{ report_path }}.overlap.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Preserve native recovery-overlap snapshots before source cleanup
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/recovery-overlap.json"
+        dest: "{{ report_path }}.overlap.native.json"
+        flat: true
 
     - name: Remove successful component source files
       ansible.builtin.file:

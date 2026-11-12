@@ -291,3 +291,22 @@ export and source cleanup. Results are `/tmp/kayra-probes-component.json` with
 `.json.probes.json` and `.json.probes.tar`; the log is
 `/tmp/kayra-probes-component.log`. Full CLI validation passed 556 tests with one
 skip, and all 30 focused Linux checks passed.
+
+## Cold image and late creation
+
+`one-shot-cold.mjs <new-results-directory> <fixture-image-digest>` creates an
+unregistered disposable image namespace, pushes it, removes only that local
+probe reference, and proves inspect returns 404. The executor must pull its
+exact digest once, independently verify it and execute before the unchanged
+deadline. Original and managed image references are never removed.
+
+The same probe delays a duplicate native Create until the executed container
+is deleted. Recovery must record and delete the newly arrived ID, retain the
+original exit evidence and complete its name barrier. Docker events require
+one Start for the original container and zero for the delayed container.
+Successful probes remove their own barriers and disposable image references;
+failures preserve evidence. The 2026-11-12 native run passed both checks against
+Engine 29.9.3/API 1.56 and Node 24.22.1. Its log is
+`/tmp/kayra-cold-race-native.log`, and exported evidence is retained at
+`/tmp/kayra-cold-race-evidence/`. The coordinator playbook and upgrade lab retain
+`.cold.json` and `.cold.tar` before source cleanup.

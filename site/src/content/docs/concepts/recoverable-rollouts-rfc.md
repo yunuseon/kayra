@@ -779,6 +779,18 @@ validation, ordered migration sequencing, status-probe interpretation and
 operator recovery before migration-bearing apps can be accepted. Existing
 HTTP admission continues to reject migration and worker declarations.
 
+Job creation prepares its exact app-owned image digest when the host cache
+is cold. Pull progress or HTTP success is not image evidence: the adapter
+independently inspects the immutable reference before creating the job. Image
+preparation preserves the original deadline and supplies no Start authority.
+
+A duplicate pending Create can arrive after the executed container is removed
+and before the name barrier is installed. Recovery records such additional
+owned IDs as cleanup targets before deleting them, without replacing original
+execution evidence or starting them. At most eight additional IDs are handled
+within the original fencing deadline; exhaustion holds the operation. Only
+then can the final name barrier certify that delayed creation is fenced.
+
 ## Application status-probe response
 
 A successful status-probe process writes exactly one JSON value to stdout:

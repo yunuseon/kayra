@@ -13,10 +13,12 @@ export const jobPlan = (): JobPlan => ({ version: 1,
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
 export const jobRuntime = (plan = jobPlan()) => {
-  let value: Record<string, unknown> | undefined; let serial = 0; let executions = 0; let clock = 1000;
+  let value: Record<string, unknown> | undefined; let serial = 0; let executions = 0; let clock = 1000; let cached = true;
   const calls: { readonly method: string; readonly path: string; readonly body: unknown }[] = [];
   const api = { request: async (method: "GET" | "POST" | "DELETE", path: string, body?: unknown) => {
     calls.push({ method, path, body });
+    if (method === "GET" && path.startsWith("/images/")) return cached ? { status: 200, value: { RepoDigests: [plan.image] } } : { status: 404, value: {} };
+    if (method === "POST" && path.startsWith("/images/create?")) { cached = true; return { status: 200, value: Buffer.from('{"status":"pulled"}\n') }; }
     if (method === "POST" && path.startsWith("/containers/create?")) {
       if (value !== undefined) return { status: 409, value: {} };
       assert.ok(object(body));
@@ -35,6 +37,7 @@ export const jobRuntime = (plan = jobPlan()) => {
   } };
   const native = oneShotJob(api, () => clock);
   return { plan, api, native, calls, executions: () => executions, raw: () => value,
+    cache: (present: boolean) => { cached = present; },
     now: (next: number) => { clock = next; }, clock: () => clock,
     state: (status: string, exitCode = 0) => { assert.ok(value !== undefined); value = { ...value, State: { Status: status, ExitCode: exitCode } }; },
   };

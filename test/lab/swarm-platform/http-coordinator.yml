@@ -43,6 +43,7 @@
         - test/lab/swarm-platform/recovery-overlap.mjs
         - test/lab/swarm-platform/one-shot.mjs
         - test/lab/swarm-platform/migration-probe.mjs
+        - test/lab/swarm-platform/one-shot-cold.mjs
 
     - name: Find the existing deployer container
       ansible.builtin.command:
@@ -153,6 +154,32 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/probes.tar"
         dest: "{{ report_path }}.probes.tar"
+        flat: true
+
+    - name: Prepare an uncached job image and fence a delayed duplicate creation
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot-cold.mjs"
+          - "{{ coordinator_source.path }}/cold"
+          - "{{ (coordinator_result.stdout | from_json).image }}"
+      changed_when: true
+
+    - name: Retain cold-image and delayed-create summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cold/result.json"
+        dest: "{{ report_path }}.cold.json"
+        flat: true
+
+    - name: Archive cold-image and delayed-create evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/cold.tar", -C, "{{ coordinator_source.path }}/cold", .]
+      changed_when: true
+
+    - name: Preserve cold-image and delayed-create evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cold.tar"
+        dest: "{{ report_path }}.cold.tar"
         flat: true
 
     - name: Remove successful component source files

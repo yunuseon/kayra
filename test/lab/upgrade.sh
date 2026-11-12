@@ -433,6 +433,11 @@ if [ "$swarm_host" = true ]; then
         -i "servers/${server}/inventory.ini" \
         "${KAYRA_ROOT}/test/lab/swarm-platform/live.yml" \
         -e "kayra_root=${KAYRA_ROOT}" -e "report_path=${work}/swarm-platform.json" >> "$log" 2>&1 || die "mixed Compose and Swarm routing"
+    ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+        -i "servers/${server}/inventory.ini" \
+        "${KAYRA_ROOT}/test/lab/swarm-platform/http-coordinator.yml" \
+        -e "kayra_root=${KAYRA_ROOT}" -e "report_path=${work}/http-coordinator.json" >> "$log" 2>&1 || die "durable HTTP coordinator component"
+    cp "${work}/http-coordinator.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.json"
     cp "${work}/swarm-platform.json" "/tmp/kayra-swarm-platform-${vm_name}.json"
     cp "${work}/swarm-platform.json.native.json" "/tmp/kayra-swarm-platform-${vm_name}.native.json"
     cp "${work}/swarm-platform.json.adapter.json" "/tmp/kayra-swarm-platform-${vm_name}.adapter.json"

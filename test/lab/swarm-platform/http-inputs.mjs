@@ -1,0 +1,20 @@
+// Read-only check against the existing root-published fixture generation.
+import { strict as assert } from 'node:assert';
+import { readFile } from "node:fs/promises";
+import { execFileSync } from 'node:child_process';
+import { httpEnvironment } from '../../../cli/src/server/platform/http-environment.ts';
+const [app, commit] = process.argv.slice(2);
+assert.ok(app && /^[0-9a-f]{40}$/.test(commit));
+const fromFile = process.argv[4];
+const container = fromFile === undefined ? execFileSync('docker', ['ps', '-q', '--filter', 'label=com.docker.compose.service=deployer', '--filter', 'label=com.docker.compose.project=platform'], { encoding: 'utf8' }).trim() : undefined;
+const { plan } = JSON.parse(fromFile === undefined ? execFileSync('docker', ['exec', container, 'kayra-deployer', 'ctl', 'preview', app, commit], { encoding: 'utf8' }) : await readFile(fromFile, 'utf8'));
+const inputs = httpEnvironment('/var/lib/kayra/registration-lab/public', '/var/lib/kayra/registration-lab/private', 1000);
+const environment = await inputs.materialize(plan);
+const name = Object.keys(plan.services)[0];
+const service = plan.services[name];
+assert.deepEqual(Object.keys(environment).sort(), Object.keys(service.environment).sort());
+const secret = Object.keys(service.environment).find((key) => service.environment[key].kind === 'secret');
+assert.ok(secret);
+await assert.rejects(inputs.materialize({ ...plan, configurationIdentity: 'sha256:' + '0'.repeat(64) }), /identity changed/);
+await assert.rejects(inputs.materialize({ ...plan, services: { [name]: { ...service, environment: { ...service.environment, [secret]: { kind: 'secret', key: 'KAYRA_LAB_NOT_GRANTED' } } } } }), /binding is unavailable/);
+console.log(JSON.stringify({ app, readerUid: process.getuid(), materialized: true, bindings: Object.keys(environment).sort(), changedConfigurationRefused: true, ungrantedSecretRefused: true }));

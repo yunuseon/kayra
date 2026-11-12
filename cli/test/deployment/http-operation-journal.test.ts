@@ -3,47 +3,13 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { test, type TestContext } from "node:test";
-import { parseApplicationPlan } from "../../src/contracts/application-plan.ts";
-import type { HttpPlanPort } from "../../src/contracts/http-plan.ts";
-import type { HostObserver } from "../../src/contracts/resource-authority.ts";
-import type { BuildPorts } from "../../src/contracts/build-artifact.ts";
-import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
-import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index.ts";
+import { test } from "node:test";
+import { openLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index.ts";
 import { parseLifecycleEnvelope } from "../../src/server/deployment/lifecycle-envelope.ts";
 import { openLifecycleEnvelopeStore } from "../../src/server/deployment/lifecycle-envelope-store.ts";
 import type { JournalValue } from "../../src/server/deployment/journal.ts";
 
-const parsed = parseApplicationPlan(JSON.parse(readFileSync(new URL("../../../ci/tests/swarm-http/native-plan.json", import.meta.url), "utf8")));
-assert.ok(parsed.ok);
-const template = parsed.value;
-const commit = "a".repeat(40);
-const generation = "22222222-2222-4222-8222-222222222222";
-// eslint-disable-next-line functional/prefer-immutable-types -- test cleanup context
-const fixture = async (t: TestContext) => {
-  const root = await mkdtemp(join(tmpdir(), "kayra-http-operation-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const path = join(root, "index");
-  const artifacts = await openArtifactStore(join(root, "artifacts"));
-  const index = await createLifecycleAppIndex(path, (identity) => Promise.resolve({ ...identity, status: "applied" }));
-  t.after(() => index.close());
-  await index.prepareApp("shop");
-  const ticket = await index.reserveRegistration("shop", generation, "swarm");
-  await index.submitRegistration("shop", ticket, generation);
-  await index.reconcileRegistration("shop", ticket, generation);
-  const builds: BuildPorts = { ...artifacts, now: () => 1000, images: () => [], prepare: () => Promise.resolve('{"fixture":"retained"}') };
-  const ports: HttpPlanPort & HostObserver & Pick<BuildPorts, "read" | "retain" | "now"> = {
-    ...artifacts, now: () => 1000,
-    preview: (registration, _runtime, sha, artifact) => Promise.resolve({ ...template, registration, commit: sha, artifact }),
-    observeHost: (host) => Promise.resolve({ status: "ready", engine: "29.9.3", api: "1.56", node: host.node, cluster: host.cluster, network: host.network.id,
-      capacity: { cpu: host.profile.cpu_millicores, memory: host.profile.memory_bytes }, standing: { cpu: host.profile.platform_cpu_millicores, memory: host.profile.platform_memory_bytes } }),
-  };
-  return { path, artifacts, index, ports, builds };
-};
+import { fixture, template, commit, generation } from "./http-test-fixture.ts";
 
 test("request, lifecycle fence and ticket are durable together; restart does not reconstruct a moving plan", async (t) => {
   const { path, index, ports, builds } = await fixture(t);

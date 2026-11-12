@@ -7,6 +7,9 @@ import { z } from "zod";
 import { parseApplicationPlan } from "../../contracts/application-plan.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
+import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
+import { lifecycleActionId } from "./lifecycle-fence.ts";
+import type { ServiceObservation } from "../../contracts/swarm-service.ts";
 import type { HttpNativeStep } from "./http-state.ts";
 import type { ResourceCharge } from "./resource-book.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
@@ -277,61 +280,48 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return store.recordHttpStep(ticket, step);
     }),
     httpOperation: (app: string, request: string) => useReady(app, async (store) => (await store.read())?.http?.requests.find((item) => item.request === request)),
-    /** Internal owner interface, deliberately not exposed by the registration controller.
-     * Reservation is not lifecycle authorization or proof of runtime convergence. */
-    reserveHttpResources: (app: string, sequence: number, commit: string, ports: HttpPlanPort & HostObserver & Pick<BuildPorts, "now" | "retain" | "read">) => useReady(app, async (store) => {
+    authorizeHttpNative: (app: string, ticket: string, step: HttpNativeStep) => useReady(app, async (store) => {
       const envelope = await store.read();
-      const registration = verifiedRegistration(app, envelope);
-      if (envelope?.registrationAllocation?.runtime !== "swarm" || !Number.isSafeInteger(sequence) || sequence < 1 || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("invalid Swarm resource request");
-      const state = await readIndex();
-      const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
-      const artifact = state.builds.find((build) => build.id === id)?.artifact;
-      if (artifact === undefined || artifact === null) throw new Error("resource admission requires a retained build");
-      const checked = parseApplicationPlan(await ports.preview(registration, "swarm", commit, artifact));
-      if (!checked.ok) throw new Error(checked.error);
-      const plan = checked.value;
-      if (JSON.stringify(plan.registration) !== JSON.stringify(registration) || plan.commit !== commit || plan.artifact !== artifact) throw new Error("resource plan ownership mismatch");
-      const content = JSON.stringify(plan);
-      const digest = createHash("sha256").update(content).digest("hex");
-      if (await ports.retain(content) !== digest) throw new Error("immutable plan retention mismatch");
-      const amount = Object.values(plan.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
-      const observation = await ports.observeHost(plan.host);
-      return serialIndex(async () => {
-        const current = await readIndex();
-        const existing = current.resources?.charges.find((item) => item.app === app);
-        const previous = existing === undefined ? null : existing.result === "target" ? existing.target : existing.result === "previous" ? existing.previous : null;
-        // One stable VIP cannot send A to B's new port during a rolling update.
-        if (previous !== null) {
-          const previousInput: unknown = JSON.parse(await ports.read(previous.plan));
-          const before = parseApplicationPlan(previousInput);
-          if (!before.ok || before.value.app !== app || before.value.registration.incarnation !== registration.incarnation || JSON.stringify(before.value.routes) !== JSON.stringify(plan.routes) || JSON.stringify(Object.keys(before.value.services)) !== JSON.stringify(Object.keys(plan.services))) throw new Error("rolling HTTP requires unchanged service and routing policy");
-        }
-        const replay = existing?.sequence === sequence && existing.incarnation === registration.incarnation;
-        const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence,
-          previous: replay ? existing.previous : previous, target: { plan: digest, budget: amount },
-          peak: replay ? existing.peak : { cpu: (previous?.budget.cpu ?? 0) + amount.cpu, memory: (previous?.budget.memory ?? 0) + amount.memory },
-          deadline: replay ? existing.deadline : ports.now() + 90_000, result: "pending" };
-        const decision = reserveResources(current.resources, plan.host, observation, intent, ports.now());
-        if (!decision.ok) throw new Error(decision.error);
-        await journal.write({ ...current, resources: decision.value });
-        return decision.value.charges.find((item) => item.app === app);
+      const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
+      if (operation === undefined || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null || lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action ||
+        !operation.steps.some((item) => JSON.stringify(item) === JSON.stringify(step)) || (operation.phase !== "applying" && operation.phase !== "verifying")) return false;
+      const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
+      return charge?.result === "pending" && charge.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1]) && charge.target.plan === operation.plan && charge.deadline === operation.deadline;
+    }),
+    markHttpDispatched: (app: string, ticket: string) => useReady(app, (store) => store.markHttpDispatched(ticket)),
+    promoteHttpRollout: (app: string, ticket: string, native: ServiceObservation, routed: RoutedReadiness, now: number) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
+      const resources = (await readIndex()).resources?.charges.find((item) => item.app === app);
+      if (operation === undefined || resources?.result !== "pending" || resources.incarnation !== envelope?.tickets.incarnation || resources.sequence !== Number(operation.action.split(":")[1]) || resources.target.plan !== operation.plan || resources.deadline !== operation.deadline) throw new Error("HTTP promotion has no matching durable admission");
+      const verified = await store.promoteHttp(ticket, native, routed, now);
+      // A crash here preserves a conservative overlap charge. Recovery settles from the sealed proof.
+      await serialIndex(async () => {
+        const state = await readIndex();
+        const settled = settleResources(state.resources, app, resources.incarnation, resources.sequence, "target");
+        if (!settled.ok) throw new Error(settled.error);
+        await journal.write({ ...state, resources: settled.value });
+      });
+      return verified;
+    }),
+    reconcileHttpResources: (app: string, ticket: string) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
+      if (operation?.phase !== "succeeded" || operation.verified === null || envelope === undefined) throw new Error("HTTP resource settlement requires a verified outcome");
+      await serialIndex(async () => {
+        const state = await readIndex();
+        const charge = state.resources?.charges.find((item) => item.app === app);
+        if (charge?.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1])) return;
+        if (charge.target.plan !== operation.plan) throw new Error("HTTP resource settlement plan mismatch");
+        const settled = settleResources(state.resources, app, charge.incarnation, charge.sequence, "target");
+        if (!settled.ok) throw new Error(settled.error);
+        await journal.write({ ...state, resources: settled.value });
       });
     }),
     resourceSnapshot: () => {
       if (closed) return Promise.reject(new Error("lifecycle app index is closed"));
       return serialIndex(async () => (await readIndex()).resources);
     },
-    /** Call only after the owning lifecycle reconciler has established runtime state. */
-    settleHttpResources: (app: string, incarnation: string, sequence: number, result: "target" | "previous" | "absent") => useReady(app, async (store) => {
-      const registration = verifiedRegistration(app, await store.read());
-      if (registration.incarnation !== incarnation) throw new Error("resource settlement incarnation mismatch");
-      return serialIndex(async () => {
-        const state = await readIndex();
-        const settled = settleResources(state.resources, app, incarnation, sequence, result);
-        if (!settled.ok) throw new Error(settled.error);
-        await journal.write({ ...state, resources: settled.value });
-      });
-    }),
     imagePins: (ports: Pick<BuildPorts, "read" | "images">) => {
       if (closed) return Promise.reject(new Error("lifecycle app index is closed"));
       return serialIndex(async () => {

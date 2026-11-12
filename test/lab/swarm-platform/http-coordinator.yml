@@ -1,0 +1,82 @@
+---
+- name: Check durable HTTP coordination with the real runtime and TLS router
+  hosts: servers
+  become: true
+  tasks:
+    - name: Create an isolated component source directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: coordinator-source-
+      register: coordinator_source
+
+    - name: Create fixture source parents
+      ansible.builtin.file:
+        path: "{{ coordinator_source.path }}/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: [cli/src, ci/tests/swarm-http, test/lab/swarm-platform]
+
+    - name: Copy server code into the isolated source tree
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/cli/src/"
+        dest: "{{ coordinator_source.path }}/cli/src/"
+        owner: root
+        group: root
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Copy component fixture inputs
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/{{ item }}"
+        dest: "{{ coordinator_source.path }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+        directory_mode: "0755"
+      loop:
+        - package.json
+        - ci/tests/swarm-http/native-plan.json
+        - test/lab/swarm-platform/http-coordinator.mjs
+
+    - name: Find the existing deployer container
+      ansible.builtin.command:
+        argv: [docker, compose, ps, -q, deployer]
+        chdir: /opt/platform
+      register: coordinator_deployer
+      changed_when: false
+
+    - name: Copy the existing image's Node runtime and contract dependencies
+      ansible.builtin.command:
+        argv:
+          - docker
+          - cp
+          - "{{ coordinator_deployer.stdout | trim }}:{{ item.source }}"
+          - "{{ coordinator_source.path }}/{{ item.target }}"
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Reconcile and promote with a SIGKILL after native acknowledgement
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/http-coordinator.mjs"
+      register: coordinator_result
+      changed_when: true
+
+    - name: Retain the component result
+      ansible.builtin.copy:
+        content: "{{ coordinator_result.stdout }}\n"
+        dest: "{{ report_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Remove successful component source files
+      ansible.builtin.file:
+        path: "{{ coordinator_source.path }}"
+        state: absent

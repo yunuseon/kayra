@@ -613,8 +613,10 @@ These accounting methods are deliberately unavailable through registration
 control. The internal HTTP path now binds a retained plan and request UUID to a ticket
 and lifecycle fence in one app-journal write, then records global admission
 using that original deadline. It persists exact native CAS intent only after
-matching admission. Native dispatch, convergence, promotion and recovery still
-need to be connected before an application effect can be authorized. Retained
+matching admission. An internal execution path now dispatches the recorded native intent, observes
+convergence and promotes a release only after fresh routed readiness. Failure
+compensation, startup scheduling and normal control/client integration are still
+required before opt-in application rollout commands are enabled. Retained
 plans contain configuration identities and secret key references only. Rolling
 HTTP admission refuses changes to route, backend port or service identity,
 because a shared service VIP must continue routing the old tasks correctly.
@@ -625,13 +627,41 @@ acknowledgement returns the same request, ticket, action and deadline. Native
 intent replay returns `reconcile`, and replacing its expected Docker version
 is refused. Requested/desired and certified active/last-known-good references
 are separate fields; preparing or admitting a candidate creates no active proof.
-These internal interfaces have no control route and dispatch no workload writes.
+The preparation interfaces dispatch no workload writes. Execution remains an
+internal coordinator interface with no normal control route; the isolated lab
+invokes it explicitly.
 
 The current experimental HTTP journal bounds non-evicted request UUID history at
 1,024 entries per incarnation and refuses further requests at that limit. It
 never silently reuses an evicted UUID. Long-lived history compaction or separate
 immutable receipt storage must preserve that property before this limit can be
 relaxed. This is a storage guard, not a production-retention guarantee.
+
+HTTP promotion now seals the native service identity/version, verified plan and
+commit, active/last-known-good references, lifecycle settlement and successful
+ticket in one app-journal write. It requires the expected task identity and
+healthy state, matching actual native settings, completed runtime convergence,
+all older tasks stopped, and a fresh routed TLS check for the same request.
+Historical failed tasks do not themselves make the current service unhealthy.
+
+Only after that proof is durable does the owner settle the overlap charge to
+the target budget. A crash between those writes leaves conservative accounting;
+restart settles it from the sealed proof without another service update. The
+older direct reservation/release API has been removed, leaving lifecycle intent
+as the admission entrypoint.
+
+The platform materializes configuration and secrets from the exact registered
+generation immediately before runtime use. It checks the configuration identity,
+operator grants and declared bindings and returns only the service's environment.
+Resolved values never enter journal records or public observations. Routed
+readiness connects to the platform router with app SNI/Host, verifies TLS, uses
+a fresh connection and neither redirects nor retries. Lab trust uses a public
+CA certificate, not a private TLS key or the router's certificate directory.
+
+The component lab uses trusted fixture build inputs, real journals, Swarm and
+TLS. It kills the writer after update acknowledgement and reconstructs promotion
+with zero repeated writes, the same service ID and the original deadline. It
+does not replace the end-to-end builder/registration or continuity matrix tests.
 
 ## Delivery and acceptance
 

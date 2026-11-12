@@ -150,3 +150,48 @@ removal must go through the upcoming lifecycle owner. This run establishes
 initial promotion and receipt replay, not continuity under load. The full
 upgrade lab invokes it when both Swarm and indexed registration are requested
 and retains `/tmp/kayra-swarm-platform-<vm>.control.json` after successful cleanup.
+
+## Real-deployer continuity matrix
+
+`http-fixture/` is an application-owned Node service with release/task identity,
+readiness delay, permanent readiness failure, a post-health crash and graceful
+20-second responses. Its 20-second health start period admits the 15-second
+readiness case without killing preparation early. Resource limits, health,
+shutdown and rollout declarations remain in the fixture's app/Compose files.
+
+`prepare-http-fixture.mjs <new-source> <new-bare-repo> <lab-git-url> <manifest>`
+creates seven immutable commits and 18 stable reset/update request pairs. Do
+not reuse those request IDs for another measurement. `http-load.yml` registers
+the fixture through the platform caller, enables JSON access evidence on the
+existing lab router before measurement, and stages a temporary observer. It
+changes no discovery interval and adds no retry middleware or socket service.
+The router configuration is preserved before the lab-only logging change.
+
+Run the staged `node http-load.mjs <manifest> <new-prepare-dir> prepare` to build
+and retain every case before load. Run the same driver with a new results
+directory and `run` to measure a 30-second baseline, then three repeats of each
+HTTP case through the real deployer's lifecycle interface. All workload writes
+go through that interface. Read-only runtime observations, task/health events,
+app logs, filtered Traefik access logs and VM CPU/memory samples are retained.
+Fresh and persistent TLS connections split 20 short requests/s with absolute
+two-second deadlines and no client retry. Requests continue for 30 seconds
+after convergence. The interruption case kills/restarts the existing deployer
+container after native acknowledgement while traffic and Swarm continue.
+
+The load generator uses absolute scheduled starts; a relative timer drifted to
+356 requests in a 30-second baseline on the VM and that run was rejected before
+any measured replacement. Every request succeeded in that invalid baseline; it
+is not counted as continuity evidence. Its raw evidence is preserved at
+`/tmp/kayra-http-baseline-invalid/`, with analysis explicitly marked incomplete.
+The corrected run's baseline sent 601 successful requests in 30 seconds.
+
+`analyze-http.mjs <results-dir>` independently reads per-request records and
+health/crash evidence and writes `analysis.json` and `REPORT.md`. It reports
+failed requests by connection class, cadence, premature exposure, sampled
+failure windows and VM resource peaks. A post-readiness crash is disruptive
+automatic recovery, never an uninterrupted-rollback claim. A held operation,
+collector failure or bad cadence preserves the run rather than silently
+starting a replacement experiment. Successful managed fixtures remain owned
+by the coordinator until its removal interface is available.
+
+The completed real-deployer matrix passed 18/18 cases; see [HTTP-RESULTS.md](HTTP-RESULTS.md) for exact versions, failed-request counts, disruption and resource evidence. This does not complete experimental Swarm integration.

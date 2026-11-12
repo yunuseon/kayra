@@ -1,0 +1,134 @@
+---
+- name: Prepare an isolated real-deployer HTTP continuity experiment
+  hosts: servers
+  become: true
+  vars:
+    fixture: "{{ lookup('ansible.builtin.file', manifest_path) | from_json }}"
+    registration_root: /var/lib/kayra/registration-lab
+    registration:
+      app: "{{ fixture.app }}"
+      registration:
+        name: "{{ fixture.app }}"
+        repo: "{{ fixture.repo }}"
+        ref: main
+        path: .
+        runtime: swarm
+        hosts: ["{{ fixture.host }}"]
+        secrets: [GREETING]
+        grants: {memory_bytes: 268435456, cpu_millicores: 500, maintenance: false}
+      configuration: {MODE: lab}
+      secrets: {GREETING: synthetic-http-fixture}
+  tasks:
+    - name: Require the dedicated fixture namespace
+      ansible.builtin.assert:
+        that:
+          - fixture.app == 'rollout-http'
+          - fixture.host == 'rollout.lab.test'
+          - fixture.matrix | length == 18
+        quiet: true
+
+    - name: Register the new explicitly opted-in fixture through the host lifecycle caller
+      ansible.builtin.command:
+        argv: [python3, -B, /opt/platform/registration-lib/registration_command.py, register, --root, "{{ registration_root }}", --private-gid, '1000', --platform-dir, /opt/platform]
+        stdin: "{{ registration | to_json }}"
+      no_log: true
+      changed_when: true
+
+    - name: Check the retained static-router backup
+      ansible.builtin.stat:
+        path: /var/lib/kayra/swarm/http-load-traefik-original.yml
+      register: static_backup
+
+    - name: Preserve the router configuration before enabling lab-only evidence
+      ansible.builtin.copy:
+        src: /opt/platform/traefik/traefik.yml
+        dest: /var/lib/kayra/swarm/http-load-traefik-original.yml
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      when: not static_backup.stat.exists
+
+    - name: Enable JSON access evidence without changing discovery or routing settings
+      ansible.builtin.blockinfile:
+        path: /opt/platform/traefik/traefik.yml
+        marker: '# {mark} KAYRA HTTP CONTINUITY LAB'
+        block: |
+          accessLog:
+            format: json
+        owner: root
+        group: root
+        mode: '0644'
+      register: access_logging
+
+    - name: Restart the existing router before measurement when evidence settings changed
+      ansible.builtin.command:
+        argv: [docker, compose, up, -d, --no-deps, --force-recreate, traefik]
+        chdir: /opt/platform
+      when: access_logging.changed
+      changed_when: true
+
+    - name: Create the isolated observer source directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: http-load-source-
+      register: source
+
+    - name: Create source parents
+      ansible.builtin.file:
+        path: "{{ source.path }}/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: [cli/src, test/lab/swarm-platform]
+
+    - name: Copy observer contract and runtime readers
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/cli/src/"
+        dest: "{{ source.path }}/cli/src/"
+        owner: root
+        group: root
+        mode: '0644'
+        directory_mode: '0755'
+
+    - name: Copy the observer and probe
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/{{ item }}"
+        dest: "{{ source.path }}/{{ item }}"
+        owner: root
+        group: root
+        mode: '0644'
+      loop: [package.json, test/lab/swarm-platform/http-load.mjs, test/lab/swarm-platform/http-probe.mjs]
+
+    - name: Copy the stable experiment requests and immutable commits
+      ansible.builtin.copy:
+        src: "{{ manifest_path }}"
+        dest: "{{ source.path }}/manifest.json"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Locate the existing deployer
+      ansible.builtin.command:
+        argv: [docker, compose, ps, -q, deployer]
+        chdir: /opt/platform
+      register: deployer
+      changed_when: false
+
+    - name: Copy the existing runtime and contract dependencies for the temporary observer
+      ansible.builtin.command:
+        argv: [docker, cp, "{{ deployer.stdout | trim }}:{{ item.source }}", "{{ source.path }}/{{ item.target }}"]
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Retain reproducible experiment paths
+      ansible.builtin.copy:
+        content: "{{ {'vm': lab_vm, 'source': source.path, 'node': source.path ~ '/node', 'driver': source.path ~ '/test/lab/swarm-platform/http-load.mjs', 'manifest': source.path ~ '/manifest.json', 'prepared': source.path ~ '/prepared', 'results': source.path ~ '/results'} | to_json }}\n"
+        dest: "{{ context_path }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false

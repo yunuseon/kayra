@@ -1,0 +1,12 @@
+name: rollout-http
+compose: [deploy/compose.yml]
+routes:
+  - {host: rollout, service: web, port: 8080, check: /version}
+secrets: [GREETING]
+config: [MODE]
+rollout:
+  strategy: rolling
+  mixed_version_compatible: true
+  rollback_compatible: true
+  services:
+    web: {role: http, overlap: allowed}

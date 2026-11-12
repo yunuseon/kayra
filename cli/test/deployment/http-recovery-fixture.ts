@@ -58,4 +58,3 @@ export const recoveryFixture = async (t: TestContext, promote = true, transform:
   return { ...data, ports, start, execution, initial, now: (value: number) => { clock = value; }, delay: (value: boolean) => { delay = value; },
     deliver: () => pending?.(), current: () => current, set: (value: ServiceObservation) => { current = value; }, writes: () => writes };
 };
-

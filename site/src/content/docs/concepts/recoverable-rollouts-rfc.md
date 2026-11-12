@@ -555,6 +555,23 @@ release promotion, compensation and lifecycle commands still require integrated
 coordinator implementation and fault-injection tests before these guarantees can
 be attributed to Kayra.
 
+The coordinator index now has an internal resource-accounting interface for the
+first HTTP subset. It retains and validates the exact normalized plan before
+journaling a reservation. Each app contributes one charge: its verified resource
+baseline or the full A+B overlap envelope while an operation remains unresolved.
+A retry keeps the original plan, sequence and absolute 90-second deadline;
+expiry never releases capacity. Settlement requires the trusted lifecycle owner
+to establish target, previous or absent runtime state. Stale settlements are
+refused. The standing platform budget includes ambient legacy Compose workloads;
+it is an operator declaration, not a guarantee against global host exhaustion.
+
+These accounting methods are deliberately unavailable through registration
+control. Lifecycle ticket/fence authorization and native runtime reconciliation
+must be connected before they can authorize an application effect. Retained
+plans contain configuration identities and secret key references only. Rolling
+HTTP admission refuses changes to route, backend port or service identity,
+because a shared service VIP must continue routing the old tasks correctly.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

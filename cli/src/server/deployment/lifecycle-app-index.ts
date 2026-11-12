@@ -4,6 +4,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { parseApplicationPlan } from "../../contracts/application-plan.ts";
+import type { HostObserver } from "../../contracts/resource-authority.ts";
+import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
+import type { ResourceCharge } from "./resource-book.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
 import { names } from "../../lib/names.ts";
@@ -27,7 +31,7 @@ const build = z.object({
   deadline: z.number().int().positive(),
   artifact: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
 }).strict();
-const schema = z.object({ version: z.literal(1), builds: z.array(build).default([]), apps: z.array(entry) }).strict().refine(({ apps, builds }) =>
+const schema = z.object({ version: z.literal(1), resources: z.unknown().default(null), builds: z.array(build).default([]), apps: z.array(entry) }).strict().refine(({ apps, builds }) =>
   new Set(apps.map((app) => app.app)).size === apps.length &&
   new Set(apps.map((app) => app.incarnation)).size === apps.length &&
   new Set(builds.map((item) => item.id)).size === builds.length &&
@@ -69,7 +73,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   const readIndex = async () => {
     const checked = schema.safeParse(await journal.read());
     if (!checked.success) throw new Error("lifecycle app index is invalid; intervention required");
-    return checked.data;
+    const resources = checked.data.resources === null ? null : parseResourceBook(checked.data.resources);
+    if (resources !== null && !resources.ok) throw new Error("lifecycle resource accounting is invalid; intervention required");
+    if (resources?.value.charges.some((charge) => !checked.data.apps.some((app) => app.app === charge.app && app.incarnation === charge.incarnation))) throw new Error("resource ownership disagrees with app index");
+    return { ...checked.data, resources: resources === null ? null : resources.value };
   };
   try {
     if (mode === "initialize") await journal.write({ version: 1, apps: [] });
@@ -199,6 +206,61 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const artifact = state.builds.find((build) => build.id === id)?.artifact;
       if (artifact === undefined || artifact === null) throw new Error("no retained build for this commit; prepare its artifact first");
       return ports.preview(registration, runtime, commit, artifact);
+    }),
+    /** Internal owner interface, deliberately not exposed by the registration controller.
+     * Reservation is not lifecycle authorization or proof of runtime convergence. */
+    reserveHttpResources: (app: string, sequence: number, commit: string, ports: HttpPlanPort & HostObserver & Pick<BuildPorts, "now" | "retain" | "read">) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const registration = verifiedRegistration(app, envelope);
+      if (envelope?.registrationAllocation?.runtime !== "swarm" || !Number.isSafeInteger(sequence) || sequence < 1 || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("invalid Swarm resource request");
+      const state = await readIndex();
+      const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
+      const artifact = state.builds.find((build) => build.id === id)?.artifact;
+      if (artifact === undefined || artifact === null) throw new Error("resource admission requires a retained build");
+      const checked = parseApplicationPlan(await ports.preview(registration, "swarm", commit, artifact));
+      if (!checked.ok) throw new Error(checked.error);
+      const plan = checked.value;
+      if (JSON.stringify(plan.registration) !== JSON.stringify(registration) || plan.commit !== commit || plan.artifact !== artifact) throw new Error("resource plan ownership mismatch");
+      const content = JSON.stringify(plan);
+      const digest = createHash("sha256").update(content).digest("hex");
+      if (await ports.retain(content) !== digest) throw new Error("immutable plan retention mismatch");
+      const amount = Object.values(plan.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
+      const observation = await ports.observeHost(plan.host);
+      return serialIndex(async () => {
+        const current = await readIndex();
+        const existing = current.resources?.charges.find((item) => item.app === app);
+        const previous = existing === undefined ? null : existing.result === "target" ? existing.target : existing.result === "previous" ? existing.previous : null;
+        // One stable VIP cannot send A to B's new port during a rolling update.
+        if (previous !== null) {
+          const previousInput: unknown = JSON.parse(await ports.read(previous.plan));
+          const before = parseApplicationPlan(previousInput);
+          if (!before.ok || before.value.app !== app || before.value.registration.incarnation !== registration.incarnation || JSON.stringify(before.value.routes) !== JSON.stringify(plan.routes) || JSON.stringify(Object.keys(before.value.services)) !== JSON.stringify(Object.keys(plan.services))) throw new Error("rolling HTTP requires unchanged service and routing policy");
+        }
+        const replay = existing?.sequence === sequence && existing.incarnation === registration.incarnation;
+        const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence,
+          previous: replay ? existing.previous : previous, target: { plan: digest, budget: amount },
+          peak: replay ? existing.peak : { cpu: (previous?.budget.cpu ?? 0) + amount.cpu, memory: (previous?.budget.memory ?? 0) + amount.memory },
+          deadline: replay ? existing.deadline : ports.now() + 90_000, result: "pending" };
+        const decision = reserveResources(current.resources, plan.host, observation, intent, ports.now());
+        if (!decision.ok) throw new Error(decision.error);
+        await journal.write({ ...current, resources: decision.value });
+        return decision.value.charges.find((item) => item.app === app);
+      });
+    }),
+    resourceSnapshot: () => {
+      if (closed) return Promise.reject(new Error("lifecycle app index is closed"));
+      return serialIndex(async () => (await readIndex()).resources);
+    },
+    /** Call only after the owning lifecycle reconciler has established runtime state. */
+    settleHttpResources: (app: string, incarnation: string, sequence: number, result: "target" | "previous" | "absent") => useReady(app, async (store) => {
+      const registration = verifiedRegistration(app, await store.read());
+      if (registration.incarnation !== incarnation) throw new Error("resource settlement incarnation mismatch");
+      return serialIndex(async () => {
+        const state = await readIndex();
+        const settled = settleResources(state.resources, app, incarnation, sequence, result);
+        if (!settled.ok) throw new Error(settled.error);
+        await journal.write({ ...state, resources: settled.value });
+      });
     }),
     imagePins: (ports: Pick<BuildPorts, "read" | "images">) => {
       if (closed) return Promise.reject(new Error("lifecycle app index is closed"));

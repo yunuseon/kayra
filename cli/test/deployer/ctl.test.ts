@@ -190,7 +190,8 @@ test("ctl lifecycle forwards an explicit stable request and reads status through
   try {
     strictEqual((await ctlLater("lifecycle", "prepare", "shop", "a".repeat(40), request)).code, 0);
     strictEqual((await ctlLater("lifecycle", "status", "shop")).stdout, '{"version":1}\n');
-    strictEqual(calls, JSON.stringify(["/deployment/prepare", JSON.stringify({ app: "shop", commit: "a".repeat(40), request })]) + "\n" + JSON.stringify(["/deployment/status", '{"app":"shop"}']) + "\n");
+    strictEqual((await ctlLater("lifecycle", "cancel", "shop", request)).code, 0);
+    strictEqual(calls, JSON.stringify(["/deployment/prepare", JSON.stringify({ app: "shop", commit: "a".repeat(40), request })]) + "\n" + JSON.stringify(["/deployment/status", '{"app":"shop"}']) + "\n" + JSON.stringify(["/deployment/cancel", JSON.stringify({ app: "shop", request })]) + "\n");
     strictEqual((await ctlLater("lifecycle", "prepare", "shop", "a".repeat(40))).code, 1);
   } finally { control.close(); }
 });

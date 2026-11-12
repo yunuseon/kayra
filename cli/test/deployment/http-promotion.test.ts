@@ -53,7 +53,7 @@ test("dispatch, convergence and routed readiness seal active proof before releas
   assert.equal(second.previous?.plan, operation.plan);
   await execution.tick("shop", second.request);
   const overlap = await index.resourceSnapshot();
-  assert.equal(overlap?.charges[0]?.peak.cpu, 200);
+  assert.equal(overlap?.charges[0]?.peak.cpu, 300);
   await execution.tick("shop", second.request); await execution.tick("shop", second.request);
   const candidate = runtime.current(); assert.equal(candidate.status, "owned");
   const candidateTask = candidate.tasks[0]; assert.ok(candidateTask !== undefined);

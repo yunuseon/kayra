@@ -144,6 +144,29 @@ if (process.argv[2] === 'writer') {
     assert.equal(recoveredD.recovery.verified.plan, b.plan);
     await recovery.tick(app, d.request);
     assert.equal((await index.resourceSnapshot()).charges[0].result, 'previous');
+    // Cancel after native dispatch, then lose the observer after restoration.
+    await index.prepareBuild(app, 'e'.repeat(40), builds);
+    const e = await index.prepareHttpRollout(app, randomUUID(), 'e'.repeat(40), plans);
+    assert.equal(await recovery.tick(app, e.request), 'admitted');
+    assert.equal((await index.resourceSnapshot()).charges[0].peak.cpu, 300);
+    assert.equal(await recovery.tick(app, e.request), 'applying');
+    assert.equal(await recovery.tick(app, e.request), 'verifying');
+    const cancellation = await index.cancelHttpRollout(app, e.request, Date.now());
+    assert.equal(cancellation.phase, 'recovering');
+    await wait(async () => (await recovery.tick(app, e.request)) === 'acknowledged', 'native restoration acknowledgement');
+    await index.close(); index = undefined;
+    index = await openLifecycleAppIndex(join(root, 'index'));
+    let cancellationReplayedWrites = 0;
+    controller = startHttpController(index, { ...ports, native: { ...ports.native, apply: (...args) => { cancellationReplayedWrites += 1; return ports.native.apply(...args); } } });
+    await wait(async () => (await index.httpOperation(app, e.request)).phase === 'cancelled', 'reconstructed cancellation');
+    await controller.close(); controller = undefined;
+    const cancelled = await index.httpOperation(app, e.request);
+    assert.equal(cancelled.cancelRequestedAt, cancellation.cancelRequestedAt);
+    assert.equal(cancelled.recoveryDeadline, cancellation.recoveryDeadline);
+    assert.equal(cancelled.recovery.kind, 'compensated');
+    assert.equal(cancelled.recovery.verified.plan, b.plan); assert.equal(cancellationReplayedWrites, 0);
+    await index.reconcileHttpResources(app, e.ticket);
+    assert.equal((await index.resourceSnapshot()).charges[0].result, 'previous');
     const version = (await api.request('GET', '/version')).value;
     await index.close(); index = undefined;
     // Disposable fixture only; no platform-managed registration or late unacknowledged RPC remains.
@@ -152,7 +175,7 @@ if (process.argv[2] === 'writer') {
     console.log(JSON.stringify({ app, engine: version.Version, api: version.ApiVersion, image,
       trustedFixtureBuildInputs: true, continuityMeasured: false, initialPromotion: true, killedAfterAcknowledgement: true, reconstructedPromotion: true, replayedWrites,
       sameServiceId: true, originalDeadline: true, settledCapacity: true, journalContainsPrivateValues: false,
-      automaticRollback: true, automaticRecoveryMs, recoveryTrace, delayedCandidateFenced: true, reconstructedWorklist: true, publishedStatus: true, scheduledRestart: true }));
+      automaticRollback: true, automaticRecoveryMs, recoveryTrace, delayedCandidateFenced: true, reconstructedWorklist: true, publishedStatus: true, scheduledRestart: true, cancellationRecovered: true, cancellationReplayedWrites, recoveryCopiesReserved: 3 }));
   } catch (error) {
     await controller?.close();
     await index?.close();

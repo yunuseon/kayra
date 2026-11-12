@@ -213,6 +213,25 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         return Object.freeze({ status: "new" as const, request: next.http?.requests.find((item) => item.ticket === ticket) });
       });
     },
+    cancelHttp: (ticket: string, now: number) => serial(async () => {
+      const current = await required(); const { request, http, fence: ownership } = ownedHttp(current, ticket);
+      if (request.phase === "held" || request.cancelRequestedAt !== null) return request;
+      if (!Number.isSafeInteger(now) || now <= 0 || now < request.deadline - 90_000) throw new Error("HTTP cancellation clock is unavailable");
+      if (request.steps.length === 0) {
+        const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "cancelled");
+        if (!fence.ok || !tickets.ok) throw new Error("invalid unstarted HTTP cancellation");
+        const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+          http: { ...http, desired: request.previous?.plan ?? null, requests: http.requests.map((item) => item === request ? { ...request, phase: "cancelled", cancelRequestedAt: now, reason: "cancelled",
+            recovery: { kind: "unstarted", verified: null, cleared: null } } : item) } });
+        return next.http?.requests.find((item) => item.ticket === ticket);
+      }
+      const deadline = request.recoveryDeadline ?? Math.min(now + 90_000, request.deadline + 90_000);
+      if (!Number.isSafeInteger(deadline)) throw new Error("HTTP cancellation deadline is invalid");
+      const expired = deadline <= now || deadline < request.deadline;
+      const next = await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request,
+        cancelRequestedAt: now, phase: expired ? "held" : "recovering", reason: expired ? "deadline" : request.reason ?? "cancelled", recoveryDeadline: deadline } : item) } });
+      return next.http?.requests.find((item) => item.ticket === ticket);
+    }),
     beginHttpRecovery: (ticket: string, reason: "deadline" | "admission" | "runtime" | "routed", now: number) => serial(async () => {
       const current = await required();
       const { request, http } = ownedHttp(current, ticket);
@@ -234,7 +253,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const step = parsed.value;
       return serial(async () => {
         const current = await required(); const { request, http } = ownedHttp(current, ticket);
-        if (request.phase !== "recovering" || request.recoveryDeadline === null || step.deadline !== request.recoveryDeadline || now >= step.deadline || !Number.isSafeInteger(now)) throw new Error("HTTP recovery deadline or ownership expired");
+        if (request.phase !== "recovering" || request.recoveryDeadline === null || step.deadline !== request.recoveryDeadline || now >= step.deadline || !Number.isSafeInteger(now) || now < Math.max(request.deadline - 90_000, request.cancelRequestedAt ?? 0)) throw new Error("HTTP recovery deadline or ownership expired");
         const existing = request.steps.find((item) => item.effect === step.effect && item.attempt === step.attempt);
         if (existing !== undefined) {
           if (JSON.stringify(existing) !== JSON.stringify(step)) throw new Error("recovery intent conflicts; revisions cannot be refreshed");
@@ -258,9 +277,9 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
     }),
     finishHttpRecovery: (ticket: string, kind: Exclude<HttpRecovery["kind"], "unstarted">, native: ServiceObservation, routed: RoutedReadiness | null, now: number) => serial(async () => {
       const current = await required(); const { request, http, fence: ownership } = ownedHttp(current, ticket);
-      if (request.phase !== "recovering" || request.recoveryDeadline === null || !Number.isSafeInteger(now) || now > request.recoveryDeadline || native.status !== "owned" || !fencedHttpEffects(request.steps, native)) throw new Error("HTTP recovery lacks a fenced outcome");
+      if (request.phase !== "recovering" || request.recoveryDeadline === null || !Number.isSafeInteger(now) || now < Math.max(request.deadline - 90_000, request.cancelRequestedAt ?? 0) || now > request.recoveryDeadline || native.status !== "owned" || !fencedHttpEffects(request.steps, native)) throw new Error("HTTP recovery lacks a fenced outcome");
       const previous = request.previous;
-      const restored = request.steps.find((step) => step.effect === "restore" && native.tasks.some((task) => task.action === serviceEffectAction(request.action, "restore", step.attempt) && task.effect === "restore"));
+      const restored = request.steps.find((step) => step.effect === "restore" && native.tasks.some((task) => task.desired === "running" && task.state === "running" && task.action === serviceEffectAction(request.action, "restore", step.attempt) && task.effect === "restore"));
       const expected: ServiceAction | undefined = previous === null ? undefined : { app: current.tickets.app, incarnation: current.tickets.incarnation, service: request.service,
         action: kind === "compensated" && restored !== undefined ? serviceEffectAction(request.action, "restore", restored.attempt) : previous.action,
         effect: kind === "compensated" ? "restore" : previous.effect, plan: previous.plan, deadline: request.recoveryDeadline };
@@ -269,11 +288,12 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const verified = expected === undefined || previous === null ? null : Object.freeze({ plan: previous.plan, commit: previous.commit, action: expected.action, effect: kind === "compensated" ? "restore" as const : previous.effect,
         service: request.service, native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
       const recovery: HttpRecovery = { kind, verified, cleared: kind === "removed-unverified" ? { id: native.id, version: native.version } : null };
-      const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "failure");
+      const cancelled = request.cancelRequestedAt !== null;
+      const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, cancelled ? "cancelled" : "failure");
       if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP recovery settlement");
       await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket), http: { ...http,
         desired: previous?.plan ?? null, active: verified, lastKnownGood: verified ?? http.lastKnownGood,
-        requests: http.requests.map((item) => item === request ? { ...request, phase: "failed", recovery } : item),
+        requests: http.requests.map((item) => item === request ? { ...request, phase: cancelled ? "cancelled" : "failed", recovery } : item),
       } });
       return recovery;
     }),

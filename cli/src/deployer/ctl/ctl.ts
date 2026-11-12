@@ -130,10 +130,11 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
   },
   lifecycle: async ([operation, app, commit, request, extra]) => {
     const query = operation === "status" && app !== undefined && commit === undefined;
+    const cancel = operation === "cancel" && app !== undefined && commit !== undefined && request === undefined;
     const prepare = operation === "prepare" && app !== undefined && commit !== undefined && request !== undefined && extra === undefined;
-    if (!query && !prepare) return fail("usage: ctl lifecycle status <app> | prepare <app> <full-commit> <request-uuid>");
-    const response = await fetch(`http://127.0.0.1:8091/deployment/${query ? "status" : "prepare"}`, {
-      method: "POST", body: JSON.stringify(query ? { app } : { app, commit, request }), signal: AbortSignal.timeout(15_000),
+    if (!query && !prepare && !cancel) return fail("usage: ctl lifecycle status <app> | prepare <app> <full-commit> <request-uuid> | cancel <app> <request-uuid>");
+    const response = await fetch(`http://127.0.0.1:8091/deployment/${query ? "status" : cancel ? "cancel" : "prepare"}`, {
+      method: "POST", body: JSON.stringify(query ? { app } : cancel ? { app, request: commit } : { app, commit, request }), signal: AbortSignal.timeout(15_000),
     }).catch(() => undefined);
     if (!response?.ok) return fail("deployment control unavailable; inspect status and retry only the same request identity");
     console.log(await response.text());

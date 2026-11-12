@@ -15,7 +15,7 @@ export const deploymentStatus = (app: string, incarnation: string, runtime: Runt
   const parsed = parseDeploymentStatus({ version: 1, app, incarnation, runtime, lifecycle,
     verification: runtime === "compose" ? "legacy-unverified" : state?.active === null || state?.active === undefined ? "unverified" : "verified",
     requested: target(state?.requested), desired: target(state?.desired), verifiedActive: verified(state?.active), lastKnownGood: verified(state?.lastKnownGood),
-    operation: latest === undefined ? null : { request: latest.request, phase: latest.phase, reason: latest.reason,
+    operation: latest === undefined ? null : { request: latest.request, phase: latest.phase, reason: latest.reason, cancelRequestedAt: latest.cancelRequestedAt,
       updateDeadline: latest.deadline, recoveryDeadline: latest.recoveryDeadline, recovery: latest.recovery?.kind ?? null },
     requiredAction: latest?.phase === "held" ? "inspect-and-resolve" : "none", runtimeObservation: "not-observed",
   });

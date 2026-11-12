@@ -7,6 +7,8 @@ import type { HttpOperation } from "./http-state.ts";
 import { clearedHttp, convergedHttp, fencedHttpEffects } from "./http-convergence.ts";
 
 export const recoverHttp = async (index: HttpExecutionIndex, ports: HttpExecutionPorts, app: string, operation: HttpOperation) => {
+  const clock = ports.now();
+  if (!Number.isSafeInteger(clock) || clock < Math.max(operation.deadline - 90_000, operation.cancelRequestedAt ?? 0)) return "clock-unavailable";
   const deadline = operation.recoveryDeadline;
   if (deadline === null || ports.now() >= deadline) { await index.holdHttp(app, operation.ticket, "deadline"); return "held"; }
   const scope = { app, service: operation.service, incarnation: operation.action.split(":")[0] ?? "" };
@@ -49,7 +51,7 @@ export const recoverHttp = async (index: HttpExecutionIndex, ports: HttpExecutio
   if (operation.previous === null) {
     if (clearedHttp(observed) && fencedHttpEffects(operation.steps, observed)) {
       await index.finishHttpRecovery(app, operation.ticket, "removed-unverified", observed, null, ports.now());
-      return "failed";
+      return (await index.httpOperation(app, operation.request))?.phase ?? "runtime-unavailable";
     }
     if (observed.status === "owned" && observed.retainedInputsCleared && observed.tombstone && fencedHttpEffects(operation.steps, observed)) return "recovering";
     return write(observed.status === "owned" && observed.tombstone ? "scrub" : "remove", observed);
@@ -58,17 +60,25 @@ export const recoverHttp = async (index: HttpExecutionIndex, ports: HttpExecutio
     await index.holdHttp(app, operation.ticket, "runtime"); return "held";
   }
   const previous = operation.previous;
-  const restore = operation.steps.find((step) => step.effect === "restore" && observed.tasks.some((task) => task.desired === "running" && task.action === serviceEffectAction(operation.action, "restore", step.attempt)));
-  const action: ServiceAction = { ...scope, action: restore === undefined ? previous.action : serviceEffectAction(operation.action, "restore", restore.attempt),
-    effect: restore === undefined ? previous.effect : "restore", plan: previous.plan, deadline };
+  const restore = operation.steps.filter((step) => step.effect === "restore").at(-1);
+  const previousAction: ServiceAction = { ...scope, action: previous.action, effect: previous.effect, plan: previous.plan, deadline };
+  const restoreAction: ServiceAction = restore === undefined ? previousAction : { ...previousAction, action: serviceEffectAction(operation.action, "restore", restore.attempt), effect: "restore" };
   const plan = await load(previous.plan, previous.commit);
-  const native = await ports.native.observeDesired(action, plan, await ports.materialize(plan), ports.routing(plan));
+  const environment = await ports.materialize(plan); const routing = ports.routing(plan);
+  // Accepted task templates are authoritative before their replacement task exists.
+  const inspected = await ports.native.observeDesired(restoreAction, plan, environment, routing);
+  const prior = restore !== undefined && inspected.status === "owned" && inspected.specMatches !== true
+    ? await ports.native.observeDesired(previousAction, plan, environment, routing) : undefined;
+  const selected = prior?.status === "owned" && prior.specMatches === true
+    ? Object.freeze({ native: prior, action: previousAction, restoring: false })
+    : Object.freeze({ native: inspected, action: restoreAction, restoring: restore !== undefined });
+  const { native, action } = selected;
   if (convergedHttp(action, native)) {
     if (!fencedHttpEffects(operation.steps, native)) return write("fence", native);
     const routed = await ports.readiness.check(action, plan);
     if (routed.status !== "ready") return "recovering";
-    await index.finishHttpRecovery(app, operation.ticket, restore !== undefined ? "compensated" : native.status === "owned" && native.update === "rollback_completed" ? "automatic-rollback" : "previous-preserved", native, routed, ports.now());
-    return "failed";
+    await index.finishHttpRecovery(app, operation.ticket, selected.restoring ? "compensated" : native.status === "owned" && native.update === "rollback_completed" ? "automatic-rollback" : "previous-preserved", native, routed, ports.now());
+    return (await index.httpOperation(app, operation.request))?.phase ?? "runtime-unavailable";
   }
   if (native.status !== "owned") return "runtime-unavailable";
   if (native.update === "rollback_started" || native.specMatches === true) return "recovering";

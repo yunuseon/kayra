@@ -16,7 +16,7 @@ const recovery = z.object({ kind: z.enum(["automatic-rollback", "previous-preser
 const operation = z.object({
   request: z.uuid(), ticket: action, action, plan: digest, commit: z.string().regex(/^[0-9a-f]{40}$/),
   service: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/), deadline: positive,
-  previous: verified.nullable(), recoveryDeadline: positive.nullable(),
+  previous: verified.nullable(), recoveryDeadline: positive.nullable(), cancelRequestedAt: positive.nullable().default(null),
   phase: z.enum(["prepared", "admitted", "applying", "verifying", "recovering", "held", "succeeded", "failed", "cancelled"]),
   reason: z.enum(["deadline", "admission", "runtime", "routed", "cancelled"]).nullable(),
   steps: z.array(step).max(25).readonly(), verified: verified.nullable(), recovery: recovery.nullable().default(null),
@@ -47,7 +47,7 @@ export const parseHttpState = (input: unknown, app: string, incarnation: string)
     state.requests.filter((item) => !terminalHttp(item.phase)).length > 1) return err("duplicate or competing HTTP operation");
   if (state.requests.some((item, index) => !terminalHttp(item.phase) && index !== state.requests.length - 1)) return err("unsettled HTTP operation is not current");
   const valid = state.requests.every((item, index) => {
-    if (!id(item.action) || !id(item.ticket) || (index > 0 && Number(item.action.split(":")[1]) <= Number(state.requests[index - 1]?.action.split(":")[1])) ||
+    if ((item.cancelRequestedAt !== null && item.cancelRequestedAt < item.deadline - 90_000) || !id(item.action) || !id(item.ticket) || (index > 0 && Number(item.action.split(":")[1]) <= Number(state.requests[index - 1]?.action.split(":")[1])) ||
       new Set(item.steps.map((step) => `${step.effect}:${String(step.attempt)}`)).size !== item.steps.length ||
       item.steps.some((step) => (step.plan !== item.plan && step.plan !== item.previous?.plan) || (step.effect === "apply" ? step.plan !== item.plan || step.deadline !== item.deadline : step.deadline !== item.recoveryDeadline)) ||
       (item.recoveryDeadline !== null && (item.recoveryDeadline < item.deadline || item.recoveryDeadline - item.deadline > 90_000))) return false;
@@ -58,9 +58,10 @@ export const parseHttpState = (input: unknown, app: string, incarnation: string)
         (earlier.expected !== null && (earlier.expected.id !== step.expected.id || earlier.expected.version >= step.expected.version));
     })) return false;
     if (item.previous !== null && !state.requests.slice(0, index).some((prior) => same(prior.verified, item.previous) || same(prior.recovery?.verified, item.previous))) return false;
-    if (item.phase === "prepared" || item.phase === "admitted") return item.steps.length === 0 && item.verified === null && item.reason === null && item.recoveryDeadline === null && item.recovery === null;
+    if (item.phase === "prepared" || item.phase === "admitted") return item.cancelRequestedAt === null && item.steps.length === 0 && item.verified === null && item.reason === null && item.recoveryDeadline === null && item.recovery === null;
     if (item.phase === "held") return item.reason !== null && item.verified === null && item.recovery === null;
     if (item.phase === "failed" || item.phase === "cancelled") {
+      if ((item.phase === "cancelled") !== (item.cancelRequestedAt !== null)) return false;
       const proof = item.recovery;
       if (item.reason === null || item.verified !== null || proof === null) return false;
       if (proof.kind === "unstarted") return item.steps.length === 0 && proof.verified === null && proof.cleared === null;
@@ -74,9 +75,9 @@ export const parseHttpState = (input: unknown, app: string, incarnation: string)
     }
     if (item.phase === "recovering") return item.reason !== null && item.recoveryDeadline !== null && item.recovery === null && item.verified === null;
     if (item.reason !== null) return false;
-    if (item.phase === "succeeded") return item.verified !== null && item.verified.plan === item.plan && item.verified.commit === item.commit && item.verified.action === item.action && item.verified.service === item.service && item.verified.verifiedAt <= item.deadline && item.verified.effect === "apply" && item.recovery === null && item.steps.at(-1)?.effect === "apply";
+    if (item.phase === "succeeded") return item.cancelRequestedAt === null && item.verified !== null && item.verified.plan === item.plan && item.verified.commit === item.commit && item.verified.action === item.action && item.verified.service === item.service && item.verified.verifiedAt <= item.deadline && item.verified.effect === "apply" && item.recovery === null && item.steps.at(-1)?.effect === "apply";
     if (item.verified !== null) return false;
-    return item.steps.length === 1 && item.steps[0]?.effect === "apply" && item.recovery === null;
+    return item.cancelRequestedAt === null && item.steps.length === 1 && item.steps[0]?.effect === "apply" && item.recovery === null;
   });
   const certified = (release: HttpVerifiedRelease | null) => release === null || state.requests.some((item) => (item.phase === "succeeded" && same(item.verified, release)) || ((item.phase === "failed" || item.phase === "cancelled") && same(item.recovery?.verified, release)));
   const latest = state.requests.at(-1);

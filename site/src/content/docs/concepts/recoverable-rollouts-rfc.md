@@ -550,6 +550,27 @@ reservation. Volume purge remains a separately fenced operation; a purged volume
 identity must never be reused for newly created data. No per-release custom
 traffic switch is introduced.
 
+The typed native adapter now renders admitted HTTP plans with platform-generated
+TLS/VIP routing, node placement, explicit resources and 30-second update/rollback
+monitoring. Its writer takes the recorded service ID and version, clamps each
+request to the original absolute deadline and never retries or refreshes the
+version on replay. Failed or interrupted writes remain uncertain until observed.
+Normalized observations distinguish service labels from the current task template,
+including automatic rollback, and never publish Docker environments or health logs.
+Metadata fences preserve tasks; removal installs a zero-replica, secret-free,
+network-free DNSRR tombstone instead of deleting the native service name.
+Docker retains `PreviousSpec` after the first update, including the old
+environment. Removal therefore requires a second separately journaled,
+version-fenced tombstone update and a clean-history observation before settlement.
+The adapter also compares desired fields of the actual native spec against the
+retained plan and materialized inputs; unchanged ownership labels alone do not
+prove convergence. This comparison returns a boolean without exposing values.
+
+The isolated adapter probe verifies these paths against the real engine and TLS
+router, including replacement, stale-write rejection and same-ID recreation.
+It uses a disposable unregistered fixture. Lifecycle authorization, integrated
+coordinator recovery and continuity under load still require their own tests.
+
 These are runtime prerequisites established by the lab. Application admission,
 release promotion, compensation and lifecycle commands still require integrated
 coordinator implementation and fault-injection tests before these guarantees can

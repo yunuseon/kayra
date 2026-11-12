@@ -50,3 +50,14 @@ This tests a proposed native ownership tombstone, not an integrated Kayra remova
 command. The probe deletes its successful disposable fixture after every API
 request is acknowledged; failed fixtures are preserved and print cleanup IDs.
 Results are saved beside the routing report with `.native.json` appended.
+
+The native adapter probe additionally creates a unique, never-registered HTTP
+fixture through Kayra's typed adapter. It verifies TLS routing, unchanged tasks
+after a metadata fence, completed start-first replacement, stale-version refusal,
+a zero-replica tombstone, a second fenced scrub of Docker
+`PreviousSpec`, exact desired-spec verification and recreation on the same service ID. It uses
+the existing deployer process/image and socket, with public lab CA material only.
+The result is written beside the report as `.adapter.json`. Successful disposable
+services are removed; failures print their service identity and cleanup command.
+This proves adapter behavior, not coordinator recovery or HTTP continuity under
+load. No registered application is changed by this probe.

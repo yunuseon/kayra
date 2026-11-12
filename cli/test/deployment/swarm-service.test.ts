@@ -149,3 +149,18 @@ test("a removal tombstone can reserve an absent name and scrub uses the same log
   assert.equal(calls.length, 2);
   assert.equal(JSON.stringify(writes).includes("PRIVATE-TOKEN"), false);
 });
+
+test("explicit restoration pauses on failure and uses a distinct recorded effect identity", async () => {
+  const restore = { ...action, action: action.action + ":restore:2", effect: "restore" as const };
+  const restored = renderNativeHttp(plan, restore, environment, routing);
+  assert.equal(restored.UpdateConfig.FailureAction, "pause");
+  assert.equal(spec.UpdateConfig.FailureAction, "rollback");
+  assert.equal(restored.TaskTemplate.ContainerSpec.Labels["com.kayra.action"], restore.action);
+  const adapter = swarmService({ request: (method, path, body) => {
+    if (method === "GET") return Promise.resolve({ status: 200, value: service });
+    assert.ok(path.endsWith("?version=42")); assert.deepEqual(body, restored);
+    return Promise.resolve({ status: 200, value: null });
+  } }, () => 1000);
+  assert.equal(await adapter.apply(restore, version, plan, environment, routing), "acknowledged");
+  assert.equal(await adapter.apply({ ...restore, action: action.action + ":fence:2" }, version, plan, environment, routing), "refused");
+});

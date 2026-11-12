@@ -22,3 +22,8 @@ export type SwarmServicePort = {
   readonly fence: (action: ServiceAction, expected: ServiceVersion) => Promise<ServiceWrite>;
   readonly tombstone: (action: ServiceAction, expected: ServiceVersion | null, image: string) => Promise<ServiceWrite>;
 };
+
+
+/** A new attempt is a new durable effect identity, never an overwritten CAS intent. */
+export const serviceEffectAction = (logical: string, effect: ServiceEffect, attempt = 1) =>
+  effect === "apply" && attempt === 1 ? logical : `${logical}:${effect}:${String(attempt)}`;

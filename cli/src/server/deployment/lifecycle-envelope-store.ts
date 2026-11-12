@@ -5,8 +5,9 @@
  * complete lifecycle owner. */
 /* eslint-disable functional/prefer-immutable-types */
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
+import { serviceEffectAction } from "../../contracts/swarm-service.ts";
 import type { ServiceAction, ServiceObservation } from "../../contracts/swarm-service.ts";
-import { convergedHttp, routedHttp } from "./http-convergence.ts";
+import { clearedHttp, convergedHttp, fencedHttpEffects, routedHttp } from "./http-convergence.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
 import type { OperationJournal } from "./operation.ts";
 import { parseRegistrationObservation } from "../../contracts/registration-generation.ts";
@@ -14,7 +15,7 @@ import { claimJournal } from "./journal-claim.ts";
 import { parseLifecycleEnvelope, registrationGenerationId } from "./lifecycle-envelope.ts";
 import { z } from "zod";
 import { parseHttpNativeStep } from "./http-state.ts";
-import type { HttpNativeStep } from "./http-state.ts";
+import type { HttpNativeStep, HttpRecovery } from "./http-state.ts";
 import { beginLifecycleWork, beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
 
@@ -81,6 +82,11 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
     const value = await load();
     if (value === undefined) throw new Error("lifecycle envelope is not initialized");
     return value;
+  };
+  const ownedHttp = (current: Awaited<ReturnType<typeof required>>, ticket: string) => {
+    const request = current.http?.requests.find((item) => item.ticket === ticket);
+    if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+    return Object.freeze({ request, http: current.http, fence: current.fence });
   };
   return {
     read: () => serial(load),
@@ -207,6 +213,70 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         return Object.freeze({ status: "new" as const, request: next.http?.requests.find((item) => item.ticket === ticket) });
       });
     },
+    beginHttpRecovery: (ticket: string, reason: "deadline" | "admission" | "runtime" | "routed", now: number) => serial(async () => {
+      const current = await required();
+      const { request, http } = ownedHttp(current, ticket);
+      if (request.phase === "recovering" || request.phase === "held") return request;
+      if ((request.phase !== "applying" && request.phase !== "verifying") || !Number.isSafeInteger(now) || now <= 0) throw new Error("HTTP recovery has no native intent or valid clock");
+      const deadline = Math.min(now + 90_000, request.deadline + 90_000);
+      const held = !Number.isSafeInteger(deadline) || deadline <= now || deadline < request.deadline;
+      const next = await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request,
+        phase: held ? "held" : "recovering", reason: held ? "deadline" : reason, recoveryDeadline: held ? request.recoveryDeadline : deadline } : item) } });
+      return next.http?.requests.find((item) => item.ticket === ticket);
+    }),
+    holdHttp: (ticket: string, reason: "deadline" | "admission" | "runtime" | "routed") => serial(async () => {
+      const current = await required(); const { request, http } = ownedHttp(current, ticket);
+      await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request, phase: "held", reason } : item) } });
+    }),
+    recordHttpRecoveryStep: (ticket: string, input: HttpNativeStep, observed: ServiceObservation, now: number) => {
+      const parsed = parseHttpNativeStep(input);
+      if (!parsed.ok) return Promise.reject(new Error(parsed.error));
+      const step = parsed.value;
+      return serial(async () => {
+        const current = await required(); const { request, http } = ownedHttp(current, ticket);
+        if (request.phase !== "recovering" || request.recoveryDeadline === null || step.deadline !== request.recoveryDeadline || now >= step.deadline || !Number.isSafeInteger(now)) throw new Error("HTTP recovery deadline or ownership expired");
+        const existing = request.steps.find((item) => item.effect === step.effect && item.attempt === step.attempt);
+        if (existing !== undefined) {
+          if (JSON.stringify(existing) !== JSON.stringify(step)) throw new Error("recovery intent conflicts; revisions cannot be refreshed");
+          return Object.freeze({ status: "reconcile" as const, step: existing });
+        }
+        if (step.effect === "apply" || (step.effect === "restore" ? step.plan !== request.previous?.plan : step.plan !== request.plan) ||
+          ((step.effect === "remove" || step.effect === "scrub") && request.previous !== null)) throw new Error("recovery effect is outside recorded rollback policy");
+        if (step.expected === null ? observed.status !== "absent" || step.effect !== "remove" : observed.status !== "owned" || observed.id !== step.expected.id || observed.version !== step.expected.version) throw new Error("recovery CAS intent lacks current ownership evidence");
+        const next = await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request, steps: [...request.steps, step] } : item) } });
+        return Object.freeze({ status: "new" as const, step: next.http?.requests.find((item) => item.ticket === ticket)?.steps.at(-1) });
+      });
+    },
+    finishHttpUnstarted: (ticket: string, reason: "deadline" | "admission" | "runtime") => serial(async () => {
+      const current = await required(); const { request, http, fence: ownership } = ownedHttp(current, ticket);
+      if (request.steps.length !== 0) throw new Error("HTTP action may already have native effects");
+      const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "failure");
+      if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP unstarted settlement");
+      await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+        http: { ...http, desired: request.previous?.plan ?? null, requests: http.requests.map((item) => item === request ? { ...request, phase: "failed", reason,
+          recovery: { kind: "unstarted", verified: null, cleared: null } } : item) } });
+    }),
+    finishHttpRecovery: (ticket: string, kind: Exclude<HttpRecovery["kind"], "unstarted">, native: ServiceObservation, routed: RoutedReadiness | null, now: number) => serial(async () => {
+      const current = await required(); const { request, http, fence: ownership } = ownedHttp(current, ticket);
+      if (request.phase !== "recovering" || request.recoveryDeadline === null || !Number.isSafeInteger(now) || now > request.recoveryDeadline || native.status !== "owned" || !fencedHttpEffects(request.steps, native)) throw new Error("HTTP recovery lacks a fenced outcome");
+      const previous = request.previous;
+      const restored = request.steps.find((step) => step.effect === "restore" && native.tasks.some((task) => task.action === serviceEffectAction(request.action, "restore", step.attempt) && task.effect === "restore"));
+      const expected: ServiceAction | undefined = previous === null ? undefined : { app: current.tickets.app, incarnation: current.tickets.incarnation, service: request.service,
+        action: kind === "compensated" && restored !== undefined ? serviceEffectAction(request.action, "restore", restored.attempt) : previous.action,
+        effect: kind === "compensated" ? "restore" : previous.effect, plan: previous.plan, deadline: request.recoveryDeadline };
+      if (kind === "removed-unverified" ? previous !== null || !clearedHttp(native) : expected === undefined || routed === null || !convergedHttp(expected, native) || !routedHttp(expected, routed, now) ||
+        (kind === "automatic-rollback" && native.update !== "rollback_completed") || (kind === "compensated" && restored === undefined)) throw new Error("HTTP recovery has no verified previous or absent state");
+      const verified = expected === undefined || previous === null ? null : Object.freeze({ plan: previous.plan, commit: previous.commit, action: expected.action, effect: kind === "compensated" ? "restore" as const : previous.effect,
+        service: request.service, native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
+      const recovery: HttpRecovery = { kind, verified, cleared: kind === "removed-unverified" ? { id: native.id, version: native.version } : null };
+      const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "failure");
+      if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP recovery settlement");
+      await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket), http: { ...http,
+        desired: previous?.plan ?? null, active: verified, lastKnownGood: verified ?? http.lastKnownGood,
+        requests: http.requests.map((item) => item === request ? { ...request, phase: "failed", recovery } : item),
+      } });
+      return recovery;
+    }),
     markHttpDispatched: (ticket: string) => serial(async () => {
       const current = await required();
       const request = current.http?.requests.find((item) => item.ticket === ticket);
@@ -229,7 +299,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const fence = settleLifecycleWork(current.fence, request.action);
       const tickets = completeTicket(current.tickets, ticket, "success");
       if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP promotion settlement");
-      const verified = Object.freeze({ plan: request.plan, commit: request.commit, action: request.action, service: request.service,
+      const verified = Object.freeze({ plan: request.plan, commit: request.commit, action: request.action, effect: "apply" as const, service: request.service,
         native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
       await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((operation) => operation.ticket !== ticket),
         http: { ...current.http, desired: request.plan, active: verified, lastKnownGood: verified,

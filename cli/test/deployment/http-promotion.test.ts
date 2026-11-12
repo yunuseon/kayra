@@ -113,7 +113,7 @@ test("failed routed checks, draining tasks and expiry cannot promote an acknowle
   runtime.set({ ...current, tasks: [...current.tasks, { ...current.tasks[0], id: "old", incarnation: operation.action.split(":")[0] ?? "", action: "old", plan: "c".repeat(64), effect: "apply", desired: "shutdown", state: "running", health: "healthy" }] });
   assert.equal(await execution.tick("shop", operation.request), "verifying");
   runtime.set(current);
-  const expired = httpExecution(index, { ...executionPorts, now: () => operation.deadline + 1 });
-  assert.equal(await expired.tick("shop", operation.request), "deadline-exceeded");
+  const expired = httpExecution(index, { ...executionPorts, now: () => operation.deadline + 1, materialize: () => { throw new Error("expired candidate inputs must not block recovery"); } });
+  assert.equal(await expired.tick("shop", operation.request), "recovering");
   assert.equal((await index.httpOperation("shop", operation.request))?.verified, null);
 });

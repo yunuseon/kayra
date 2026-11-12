@@ -96,3 +96,28 @@ platform materialization against an existing indexed fixture generation. A
 preview file permits running it as UID 1000 without Docker CLI access. It reports
 binding names only and checks that altered configuration identity and ungranted
 secret references are refused. No materialized values are printed.
+
+The coordinator component also deploys a candidate that exits after becoming
+healthy inside Swarm's monitoring window, verifies the native rollback to the
+previous release, and retains its recovery trace and elapsed time. It injects
+a delayed candidate write and proves that a metadata revision fence rejects it
+before the unchanged previous release can be settled. This still measures no
+request continuity or automatic recovery of the existing release UI.
+
+A component run on 2026-11-12 with Engine 29.9.3 / API 1.56 verified native
+rollback in 41.9 seconds from update preparation, then rejected the injected
+delayed candidate after fencing. This is elapsed recovery time, not an outage
+measurement. Results: `/tmp/kayra-http-recovery-fixed.json`; command log:
+`/tmp/kayra-http-recovery-fixed.log`. Reproduce with the component playbook:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 ANSIBLE_CONFIG="$PWD/ansible/ansible.cfg" \
+  ansible-playbook -i <isolated-lab-inventory> \
+  test/lab/swarm-platform/http-coordinator.yml \
+  -e kayra_root=<frozen-checkout> -e report_path=<local-result.json>
+```
+
+The first fixture attempt was refused for an unresolved `$` argument before its
+failure candidate was admitted; its previously healthy disposable service and
+journals remain in the failed lab for inspection. Successful replay fixtures
+were removed. The lab VM itself was already retained from an earlier failure.

@@ -61,9 +61,11 @@ if (process.argv[2] === 'writer') {
     const plans = { ...ports, preview: async (registration, _runtime, commit, artifact) => {
       const plan = parseApplicationPlan({ ...template, app, registration, host, commit, artifact,
         routes: template.routes.map((route) => ({ ...route, host: `${app}.lab.test` })),
-        services: { web: { ...template.services.web, image, environment: { RELEASE: { kind: 'literal', value: commit[0] === 'a' ? 'A' : 'B' }, TOKEN: { kind: 'secret', key: 'TOKEN' } } } },
+        services: { web: { ...template.services.web, image,
+          command: commit[0] === 'c' ? ['sh', '-c', 'httpd -p 8080 -h /www; sleep 8; killall httpd; exit 1'] : null,
+          environment: { RELEASE: { kind: 'literal', value: commit[0].toUpperCase() }, TOKEN: { kind: 'secret', key: 'TOKEN' } } } },
       });
-      assert.ok(plan.ok); return plan.value;
+      assert.ok(plan.ok, plan.error); return plan.value;
     } };
     const wait = async (action, label) => {
       const deadline = Date.now() + 90_000;
@@ -98,6 +100,41 @@ if (process.argv[2] === 'writer') {
     assert.equal(activeB.deadline, b.deadline); assert.equal(replayedWrites, 0);
     assert.equal((await index.resourceSnapshot()).charges[0].result, 'target');
     assert.equal(JSON.stringify(activeB).includes(privateValue), false);
+    // C starts healthy, then exits inside Swarm's native monitoring window.
+    await index.prepareBuild(app, 'c'.repeat(40), builds);
+    const c = await index.prepareHttpRollout(app, randomUUID(), 'c'.repeat(40), plans);
+    const recovery = httpExecution(index, ports);
+    const failureStarted = Date.now();
+    const recoveryTrace = [];
+    await wait(async () => {
+      const phase = await recovery.tick(app, c.request); recoveryTrace.push({ at: Date.now(), phase });
+      assert.notEqual(phase, 'succeeded'); assert.notEqual(phase, 'held');
+      return phase === 'failed';
+    }, 'native rollback to B');
+    await recovery.tick(app, c.request);
+    const recoveredC = await index.httpOperation(app, c.request);
+    assert.equal(recoveredC.recovery.kind, 'automatic-rollback');
+    assert.equal(recoveredC.recovery.verified.plan, b.plan);
+    assert.equal((await index.resourceSnapshot()).charges[0].result, 'previous');
+    const automaticRecoveryMs = Date.now() - failureStarted;
+    // D's write is delayed before reaching Docker. A native version fence must
+    // reject it before the coordinator can settle the unchanged healthy B.
+    await index.prepareBuild(app, 'd'.repeat(40), builds);
+    const d = await index.prepareHttpRollout(app, randomUUID(), 'd'.repeat(40), plans);
+    let delayed;
+    const uncertain = httpExecution(index, { ...ports, native: { ...ports.native, apply: (...args) => { delayed = args; return Promise.resolve('uncertain'); } } });
+    assert.equal(await uncertain.tick(app, d.request), 'admitted');
+    assert.equal(await uncertain.tick(app, d.request), 'applying');
+    assert.equal(await uncertain.tick(app, d.request), 'write-uncertain');
+    await index.beginHttpRecovery(app, d.ticket, 'runtime', Date.now());
+    assert.equal(await recovery.tick(app, d.request), 'acknowledged');
+    assert.notEqual(await ports.native.apply(...delayed), 'acknowledged');
+    await wait(async () => (await recovery.tick(app, d.request)) === 'failed', 'fenced unchanged B');
+    const recoveredD = await index.httpOperation(app, d.request);
+    assert.equal(recoveredD.recovery.kind, 'previous-preserved');
+    assert.equal(recoveredD.recovery.verified.plan, b.plan);
+    await recovery.tick(app, d.request);
+    assert.equal((await index.resourceSnapshot()).charges[0].result, 'previous');
     const version = (await api.request('GET', '/version')).value;
     await index.close(); index = undefined;
     // Disposable fixture only; no platform-managed registration or late unacknowledged RPC remains.
@@ -105,7 +142,8 @@ if (process.argv[2] === 'writer') {
     await rm(root, { recursive: true });
     console.log(JSON.stringify({ app, engine: version.Version, api: version.ApiVersion, image,
       trustedFixtureBuildInputs: true, continuityMeasured: false, initialPromotion: true, killedAfterAcknowledgement: true, reconstructedPromotion: true, replayedWrites,
-      sameServiceId: true, originalDeadline: true, settledCapacity: true, journalContainsPrivateValues: false }));
+      sameServiceId: true, originalDeadline: true, settledCapacity: true, journalContainsPrivateValues: false,
+      automaticRollback: true, automaticRecoveryMs, recoveryTrace, delayedCandidateFenced: true }));
   } catch (error) {
     await index?.close();
     console.error(JSON.stringify({ app, root, serviceId, error: String(error), cleanup: `docker service rm ${serviceId ?? `kayra-${app}--web`}` })); process.exitCode = 1;

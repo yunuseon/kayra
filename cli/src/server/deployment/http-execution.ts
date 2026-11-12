@@ -1,26 +1,14 @@
 /* Owns live per-app reconciliation promises, not runtime effects. */
 import { createHash } from "node:crypto";
-import type { ApplicationPlan } from "../../contracts/http-plan.ts";
 import { parseApplicationPlan } from "../../contracts/application-plan.ts";
-import type { HostObserver } from "../../contracts/resource-authority.ts";
-import type { RoutedReadinessPort } from "../../contracts/routed-readiness.ts";
-import type { ServiceAction, SwarmServicePort } from "../../contracts/swarm-service.ts";
+import type { ServiceAction } from "../../contracts/swarm-service.ts";
 import { convergedHttp } from "./http-convergence.ts";
-import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
+import type { HttpExecutionIndex, HttpExecutionPorts } from "./http-execution-ports.ts";
+import { recoverHttp } from "./http-recovery.ts";
 import { terminalHttp } from "./http-state.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "httpOperation" | "admitHttpRollout" | "recordHttpNativeIntent" | "authorizeHttpNative" | "markHttpDispatched" | "promoteHttpRollout" | "reconcileHttpResources">>;
-type Ports = HostObserver & {
-  readonly now: () => number;
-  readonly read: (digest: string) => Promise<string>;
-  readonly materialize: (plan: ApplicationPlan) => Promise<Readonly<Record<string, string>>>;
-  readonly routing: (plan: ApplicationPlan) => Readonly<Record<string, string>>;
-  readonly native: SwarmServicePort;
-  readonly readiness: RoutedReadinessPort;
-};
-
-/** Internal single-tick integration. Failure compensation and public control are not enabled here. */
-export const httpExecution = (index: Index, ports: Ports) => {
+/** Internal single-tick integration; public control is not enabled here. */
+export const httpExecution = (index: HttpExecutionIndex, ports: HttpExecutionPorts) => {
   const running = new Map<string, { readonly request: string; readonly result: Promise<string> }>();
   const execute = async (app: string, request: string) => {
     const clock = ports.now();
@@ -28,14 +16,23 @@ export const httpExecution = (index: Index, ports: Ports) => {
     const operation = await index.httpOperation(app, request);
     if (operation === undefined) throw new Error("HTTP operation is unavailable");
     if (terminalHttp(operation.phase)) {
-      if (operation.phase === "succeeded") await index.reconcileHttpResources(app, operation.ticket);
+      await index.reconcileHttpResources(app, operation.ticket);
       return operation.phase;
+    }
+    if (operation.steps.length === 0 && clock >= operation.deadline) {
+      await index.finishHttpUnstarted(app, operation.ticket, "deadline");
+      return "failed";
     }
     if (operation.phase === "prepared") {
       await index.admitHttpRollout(app, operation.ticket, ports);
       return "admitted";
     }
-    if (operation.phase === "held" || operation.phase === "recovering") return operation.phase;
+    if (operation.phase === "held") return "held";
+    if (operation.phase === "recovering") return recoverHttp(index, ports, app, operation);
+    if (clock >= operation.deadline) {
+      await index.beginHttpRecovery(app, operation.ticket, "deadline", clock);
+      return "recovering";
+    }
     const content = await ports.read(operation.plan);
     const input: unknown = JSON.parse(content);
     const parsed = parseApplicationPlan(input);
@@ -47,7 +44,10 @@ export const httpExecution = (index: Index, ports: Ports) => {
     const routing = ports.routing(plan);
     const observed = await ports.native.observeDesired(action, plan, environment, routing);
     const recorded = operation.steps[0];
-    if (ports.now() >= operation.deadline) return "deadline-exceeded";
+    if (ports.now() >= operation.deadline || (recorded !== undefined && observed.status === "owned" && ["paused", "rollback_started", "rollback_paused", "rollback_completed"].includes(observed.update ?? "") && (recorded.expected === null || observed.version > recorded.expected.version))) {
+      await index.beginHttpRecovery(app, operation.ticket, ports.now() >= operation.deadline ? "deadline" : "runtime", ports.now());
+      return "recovering";
+    }
     if (recorded !== undefined && convergedHttp(action, observed)) {
       const routed = await ports.readiness.check(action, plan);
       if (routed.status === "ready" && ports.now() <= operation.deadline) {
@@ -65,11 +65,11 @@ export const httpExecution = (index: Index, ports: Ports) => {
         const input: unknown = JSON.parse(bytes);
         const checked = parseApplicationPlan(input);
         if (createHash("sha256").update(bytes).digest("hex") !== previous.plan || !checked.ok || checked.value.app !== app || checked.value.commit !== previous.commit || checked.value.registration.incarnation !== scope.incarnation) throw new Error("HTTP previous plan integrity failed");
-        return ports.native.observeDesired({ ...action, action: previous.action, plan: previous.plan }, checked.value,
+        return ports.native.observeDesired({ ...action, action: previous.action, plan: previous.plan, effect: previous.effect }, checked.value,
           await ports.materialize(checked.value), ports.routing(checked.value));
       })();
       if (previous !== null && (baseline.status !== "owned" || baseline.id !== previous.native.id || baseline.specMatches !== true || baseline.tombstone || baseline.replicas !== 1)) return "runtime-conflict";
-      const step = { effect: "apply" as const, plan: operation.plan, deadline: operation.deadline,
+      const step = { attempt: 1, effect: "apply" as const, plan: operation.plan, deadline: operation.deadline,
         expected: baseline.status === "owned" ? { id: baseline.id, version: baseline.version } : null };
       if (operation.previous !== null && step.expected === null) return "runtime-conflict";
       await index.recordHttpNativeIntent(app, operation.ticket, step);

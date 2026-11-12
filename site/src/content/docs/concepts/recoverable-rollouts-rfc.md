@@ -614,9 +614,9 @@ control. The internal HTTP path now binds a retained plan and request UUID to a 
 and lifecycle fence in one app-journal write, then records global admission
 using that original deadline. It persists exact native CAS intent only after
 matching admission. An internal execution path now dispatches the recorded native intent, observes
-convergence and promotes a release only after fresh routed readiness. Failure
-compensation, startup scheduling and normal control/client integration are still
-required before opt-in application rollout commands are enabled. Retained
+convergence and promotes a release only after fresh routed readiness. Recovery now observes native rollback, compensates to the recorded previous
+plan, or clears an unverified initial release. Startup scheduling and normal
+control/client integration are still required before opt-in application rollout commands are enabled. Retained
 plans contain configuration identities and secret key references only. Rolling
 HTTP admission refuses changes to route, backend port or service identity,
 because a shared service VIP must continue routing the old tasks correctly.
@@ -662,6 +662,28 @@ The component lab uses trusted fixture build inputs, real journals, Swarm and
 TLS. It kills the writer after update acknowledgement and reconstructs promotion
 with zero repeated writes, the same service ID and the original deadline. It
 does not replace the end-to-end builder/registration or continuity matrix tests.
+
+Recovery records an absolute deadline once, capped at 90 seconds after the
+original update deadline. Expiry holds the operation and its full charge for
+intervention. It never creates fresh scheduling time after restart. Each restore,
+metadata fence, zero-replica removal and input scrub has an immutable effect
+identity and expected native revision. A superseded revision permits a new
+recorded attempt; it never overwrites the earlier intent. Explicit restoration
+pauses on failure, so Swarm cannot roll it back to the rejected candidate.
+
+Before settling recovery, every recorded native write must be fenced by a newer
+revision of the same owned service, or by its still-reserved name for initial
+creation. Merely finding the previous release healthy is insufficient: a delayed
+candidate write may still arrive. Metadata fencing preserves the task template.
+Initial release cleanup keeps a zero-replica name barrier and waits for drained
+tasks and cleared current/previous private inputs before releasing capacity.
+
+A failed candidate retains its requested identity; desired, verified active and
+last-known-good point to the restored release only after native and fresh routed
+proof. The failed receipt and lifecycle settlement are atomic. Host accounting
+settles afterward from that receipt, including on restart or before the next
+request. Automatic rollback disruption is not described as uninterrupted service.
+These paths remain internal and still require the integrated continuity matrix.
 
 ## Delivery and acceptance
 

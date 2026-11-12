@@ -123,3 +123,9 @@ test("a failed candidate remains requested while the restored release is desired
   assert.equal(restored.requiredAction, "none");
   assert.equal(parseDeploymentStatus({ ...restored, verification: "unverified" }).ok, false);
 });
+
+test("the reporting contract preserves legacy Compose app-name compatibility", () => {
+  const parsed = parseDeploymentStatus({ version: 1, app: "legacy-" + "a".repeat(300), incarnation: randomUUID(), runtime: "compose", lifecycle: "registered",
+    verification: "legacy-unverified", requested: null, desired: null, verifiedActive: null, lastKnownGood: null, operation: null, requiredAction: "none", runtimeObservation: "not-observed" });
+  assert.ok(parsed.ok);
+});

@@ -172,3 +172,25 @@ test("ctl deploy: a failed run exits 1 with its reason; a superseded one says wh
     control.close();
   }
 });
+
+test("ctl lifecycle forwards an explicit stable request and reads status through the existing control listener", async () => {
+  const request = "11111111-1111-4111-8111-111111111111";
+  // eslint-disable-next-line functional/no-let -- owns the request trace
+  let calls = "";
+  const control = createServer((incoming, response) => {
+    // eslint-disable-next-line functional/no-let -- owns the HTTP body
+    let body = "";
+    incoming.setEncoding("utf8").on("data", (chunk: string) => { body += chunk; });
+    incoming.on("end", () => {
+      calls += JSON.stringify([incoming.url ?? "", body]) + "\n";
+      response.writeHead(200, { "content-type": "application/json" }).end('{"version":1}');
+    });
+  });
+  await new Promise<void>((resolve) => { control.listen(8091, "127.0.0.1", resolve); });
+  try {
+    strictEqual((await ctlLater("lifecycle", "prepare", "shop", "a".repeat(40), request)).code, 0);
+    strictEqual((await ctlLater("lifecycle", "status", "shop")).stdout, '{"version":1}\n');
+    strictEqual(calls, JSON.stringify(["/deployment/prepare", JSON.stringify({ app: "shop", commit: "a".repeat(40), request })]) + "\n" + JSON.stringify(["/deployment/status", '{"app":"shop"}']) + "\n");
+    strictEqual((await ctlLater("lifecycle", "prepare", "shop", "a".repeat(40))).code, 1);
+  } finally { control.close(); }
+});

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { names } from "../lib/names.ts";
 import { err, ok } from "../lib/result.ts";
 
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
@@ -12,7 +13,7 @@ const operation = z.object({
   recovery: z.enum(["automatic-rollback", "previous-preserved", "compensated", "removed-unverified", "unstarted"]).nullable(),
 }).strict().readonly();
 const schema = z.object({
-  version: z.literal(1), app: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/), incarnation: z.uuid(), runtime: z.enum(["compose", "swarm"]),
+  version: z.literal(1), app: z.string().regex(names.app.pattern), incarnation: z.uuid(), runtime: z.enum(["compose", "swarm"]),
   lifecycle: z.enum(["registering", "registered", "removal-requested", "removing", "removed", "purging", "purged"]),
   verification: z.enum(["legacy-unverified", "unverified", "verified"]),
   requested: target.nullable(), desired: target.nullable(), verifiedActive: verified.nullable(), lastKnownGood: verified.nullable(),

@@ -616,7 +616,7 @@ using that original deadline. It persists exact native CAS intent only after
 matching admission. An internal execution path now dispatches the recorded native intent, observes
 convergence and promotes a release only after fresh routed readiness. Recovery now observes native rollback, compensates to the recorded previous
 plan, or clears an unverified initial release. The optional indexed composition
-now schedules recovery; normal control/client integration is still required before opt-in application rollout commands are enabled. Retained
+now schedules recovery; ordinary deployment/client integration is still required. Retained
 plans contain configuration identities and secret key references only. Rolling
 HTTP admission refuses changes to route, backend port or service identity,
 because a shared service VIP must continue routing the old tasks correctly.
@@ -628,8 +628,9 @@ intent replay returns `reconcile`, and replacing its expected Docker version
 is refused. Requested/desired and certified active/last-known-good references
 are separate fields; preparing or admitting a candidate creates no active proof.
 The preparation interfaces dispatch no workload writes. Execution remains an
-internal coordinator interface with no normal control route; the isolated lab
-invokes it explicitly.
+experimental indexed interface. Its local control route accepts only an app,
+full commit and stable request UUID for a retained artifact; the normal legacy
+deployment route and fleet CLI remain unchanged.
 
 The current experimental HTTP journal bounds non-evicted request UUID history at
 1,024 entries per incarnation and refuses further requests at that limit. It
@@ -692,7 +693,8 @@ last-known-good release references are separate. A held operation reports
 `inspect-and-resolve`; indexed Compose applications remain `legacy-unverified`.
 The projection explicitly reports `runtimeObservation: not-observed`: historical
 release certification must not be presented as a fresh workload-health check.
-Client/control publication and live observations remain subsequent integration.
+The local experimental status query publishes this projection. Ordinary client
+presentation and live observations remain subsequent integration.
 
 The owner also derives a restart work list from validated journals, including
 terminal operations whose global resource accounting is still pending. It never
@@ -704,8 +706,25 @@ authority are configured. It begins from the persisted index on startup, never
 initializes an absent index implicitly, runs one round at a time and waits for
 an in-flight round when closed. Timer and reporting ownership stay in the
 composition root; the decision logic owns neither. No additional process or
-Docker socket holder is introduced, and ordinary Swarm deployment control
-remains disabled.
+Docker socket holder is introduced, and the ordinary fleet deployment commands remain unchanged.
+
+The experimental indexed lifecycle control now prepares a retained build through
+`/deployment/prepare` and returns a public receipt with the original request,
+plan and deadline. Caller-provided native revisions, configuration, secrets or
+runtime overrides are rejected. The host must explicitly enable Swarm and the
+app must have a verified managed registration. Replaying a request never rebuilds
+its plan, changes its commit or refreshes its deadline. `/deployment/status`
+returns the coordinator projection. Both use the existing loopback listener and
+internal `ctl lifecycle` interface; ordinary app deployment/client integration
+is still pending.
+
+The real deployer lab now exercises builder artifact retention, private platform
+materialization, host admission, native creation, routed TLS readiness, promotion
+and same-request replay through those interfaces. Its public lab CA is mounted
+read-only only in the explicit lab overlay. A managed fixture remains under the
+coordinator's ownership until the lifecycle removal integration is available;
+raw native deletion must not bypass its records or active charge. This proves
+one initial deployment, not replacement continuity, migrations or full completion.
 
 ## Delivery and acceptance
 

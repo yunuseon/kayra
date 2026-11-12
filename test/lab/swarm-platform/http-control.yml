@@ -1,0 +1,117 @@
+---
+- name: Exercise the real indexed deployer's experimental HTTP lifecycle
+  hosts: servers
+  become: true
+  vars:
+    platform_dir: /opt/platform
+    request_file: "/var/lib/kayra/swarm/control-lab-{{ fixture_app }}-{{ fixture_commit }}.json"
+    compose_env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:docker-compose.swarm.yml:registration-lab.yml
+  tasks:
+    - name: Check for an existing stable lab request
+      ansible.builtin.stat:
+        path: "{{ request_file }}"
+      register: request_stat
+
+    - name: Allocate the lab request identity once
+      ansible.builtin.command:
+        argv: [python3, -c, "import uuid; print(uuid.uuid4())"]
+      register: new_request
+      when: not request_stat.stat.exists
+      changed_when: false
+
+    - name: Retain the lab request before contacting the coordinator
+      ansible.builtin.copy:
+        content: "{{ {'app': fixture_app, 'commit': fixture_commit, 'request': new_request.stdout | trim} | to_json }}\n"
+        dest: "{{ request_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+      when: not request_stat.stat.exists
+
+    - name: Read the original lab request
+      ansible.builtin.slurp:
+        src: "{{ request_file }}"
+      register: stored_request
+
+    - name: Require the recorded request to match the fixture
+      ansible.builtin.assert:
+        that:
+          - (stored_request.content | b64decode | from_json).app == fixture_app
+          - (stored_request.content | b64decode | from_json).commit == fixture_commit
+        quiet: true
+
+    - name: Prepare the retained build through the existing control listener
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, lifecycle, prepare, "{{ fixture_app }}", "{{ fixture_commit }}", "{{ (stored_request.content | b64decode | from_json).request }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: accepted
+      changed_when: true
+
+    - name: Observe the coordinator-owned outcome
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, lifecycle, status, "{{ fixture_app }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: observed
+      changed_when: false
+      retries: 90
+      delay: 1
+      until: observed.rc == 0 and (observed.stdout | from_json).operation.phase in ['succeeded', 'failed', 'held']
+
+    - name: Require verified promotion of the retained immutable plan
+      ansible.builtin.assert:
+        that:
+          - (observed.stdout | from_json).operation.request == (stored_request.content | b64decode | from_json).request
+          - (observed.stdout | from_json).operation.phase == 'succeeded'
+          - (observed.stdout | from_json).verifiedActive.commit == fixture_commit
+          - (observed.stdout | from_json).verifiedActive.plan == (accepted.stdout | from_json).plan
+          - (observed.stdout | from_json).desired == (observed.stdout | from_json).requested
+          - (observed.stdout | from_json).runtime == 'swarm'
+        quiet: true
+
+    - name: Replay the same request without refreshing its deadline
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, lifecycle, prepare, "{{ fixture_app }}", "{{ fixture_commit }}", "{{ (stored_request.content | b64decode | from_json).request }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: replayed
+      changed_when: false
+
+    - name: Require a stable terminal receipt
+      ansible.builtin.assert:
+        that:
+          - (replayed.stdout | from_json).phase == 'succeeded'
+          - (replayed.stdout | from_json).request == (accepted.stdout | from_json).request
+          - (replayed.stdout | from_json).plan == (accepted.stdout | from_json).plan
+          - (replayed.stdout | from_json).deadline == (accepted.stdout | from_json).deadline
+        quiet: true
+
+    - name: Read exact Engine and CLI versions
+      ansible.builtin.command:
+        argv: [docker, version, --format, "{{ '{{json .}}' }}"]
+      register: versions
+      changed_when: false
+
+    - name: Read the Compose version
+      ansible.builtin.command:
+        argv: [docker, compose, version, --short]
+      register: compose_version
+      changed_when: false
+
+    - name: Read the coordinator's retained image references
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, pins]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: image_pins
+      changed_when: false
+
+    - name: Retain the end-to-end control result
+      ansible.builtin.copy:
+        content: "{{ {'accepted': accepted.stdout | from_json, 'status': observed.stdout | from_json, 'replayed': replayed.stdout | from_json, 'registeredFixtureRetained': true, 'continuityMeasured': false, 'versions': versions.stdout | from_json, 'compose': compose_version.stdout | trim, 'pins': image_pins.stdout | from_json} | to_json }}\n"
+        dest: "{{ report_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

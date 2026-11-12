@@ -135,3 +135,18 @@ reconstructs the acknowledged candidate with zero repeated updates. It is also
 wired into the optional indexed deployer composition when Swarm authority and
 public/private registration inputs are present. This enables restart recovery
 for durable internal operations, not ordinary Swarm deployment requests.
+
+`http-control.yml` submits the registered fixture's retained build through the
+existing deployer's loopback lifecycle interface, observes automatic promotion
+and retries the same UUID without changing the deadline. It stores the request
+before contacting the daemon, so interrupted lab reruns reuse its identity. The
+explicit Swarm registration lab mounts only the public CA through
+`NODE_EXTRA_CA_CERTS`; no router key or TLS directory enters the deployer.
+
+The first real control run passed on 2026-11-12. Results and commands are in
+`/tmp/kayra-http-control-live.json` and `/tmp/kayra-http-control-live.log`. The
+fixture remains a managed Swarm application in the preserved failed lab VM; its
+removal must go through the upcoming lifecycle owner. This run establishes
+initial promotion and receipt replay, not continuity under load. The full
+upgrade lab invokes it when both Swarm and indexed registration are requested
+and retains `/tmp/kayra-swarm-platform-<vm>.control.json` after successful cleanup.

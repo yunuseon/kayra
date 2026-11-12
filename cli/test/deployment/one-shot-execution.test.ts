@@ -8,12 +8,12 @@ import type { TestContext } from "node:test";
 import { oneShotExecution, parseJobExecution } from "../../src/server/deployment/one-shot-execution.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 import { oneShotJob } from "../../src/server/runtime/one-shot-job.ts";
-import { jobRuntime } from "./one-shot-fixture.ts";
+import { jobPlan, jobRuntime } from "./one-shot-fixture.ts";
 
 type Ports = Parameters<typeof oneShotExecution>[1];
-const fixture = async (t: TestContext, change: (ports: Ports) => Ports = (ports) => ports) => {
+const fixture = async (t: TestContext, change: (ports: Ports) => Ports = (ports) => ports, plan = jobPlan()) => {
   const path = await mkdtemp(join(tmpdir(), "kayra-job-test-")); t.after(() => rm(path, { recursive: true, force: true }));
-  const lab = jobRuntime(); const journal = await openJournal(path); t.after(() => journal.close());
+  const lab = jobRuntime(plan); const journal = await openJournal(path); t.after(() => journal.close());
   const ports: Ports = { native: lab.native, now: lab.clock, read: () => Promise.resolve(lab.plan), authorize: () => Promise.resolve(true), materialize: () => Promise.resolve({ TOKEN: "secret-value" }) };
   const owner = oneShotExecution(journal, change(ports));
   const reopen = async (changed = ports) => {
@@ -134,4 +134,59 @@ test("a duplicate Create arriving during cleanup is fenced without replacing the
   const fenced = await restarted.tick(); assert.deepEqual(fenced.fenceTargets, [late.id]);
   const done = await restarted.tick(); assert.equal(done.phase, "complete"); assert.deepEqual(done.evidence, captured.evidence);
   assert.equal(done.container, captured.container); assert.equal(lab.executions(), 1);
+});
+
+const separated = () => ({ ...jobPlan(), deadline: 120_000, startDeadline: 90_000, executionTimeoutSeconds: 10 });
+
+test("image preparation and scheduling do not consume or refresh the declared execution window", async (t) => {
+  const lab = await fixture(t, (ports) => ports, separated()); await lab.owner.prepare(lab.plan); await lab.owner.tick(); lab.now(50_000);
+  const started = await lab.owner.tick(); assert.equal(started.executionDeadline, 60_000); assert.equal(started.deadline, 120_000);
+  lab.state("running"); lab.now(59_999); assert.equal((await lab.owner.tick()).phase, "observing");
+  const reopened = await lab.reopen(); lab.now(60_000); const expired = await reopened.tick();
+  assert.equal(expired.phase, "fencing"); assert.equal(expired.expiry, "execution"); assert.equal(expired.executionDeadline, 60_000);
+  assert.equal(expired.fenceDeadline, 90_000); assert.equal(expired.evidence?.kind, "unknown"); assert.equal(lab.executions(), 1);
+});
+
+test("scheduling expires independently while the overall job ceiling is still in the future", async (t) => {
+  const lab = await fixture(t, (ports) => ports, separated()); await lab.owner.prepare(lab.plan); lab.now(90_000);
+  const expired = await lab.owner.tick(); assert.equal(expired.phase, "fencing"); assert.equal(expired.expiry, "scheduling");
+  assert.equal(expired.executionDeadline, null); assert.equal(expired.evidence?.kind, "not-started"); assert.equal(lab.executions(), 0);
+  await lab.owner.tick(); const complete = await lab.owner.tick(); assert.equal(complete.phase, "complete"); assert.equal(complete.expiry, "scheduling");
+});
+
+test("restart can establish timely completion from Docker's timestamp without granting another execution window", async (t) => {
+  const lab = await fixture(t, (ports) => ports, separated()); await lab.owner.prepare(lab.plan); await lab.owner.tick(); lab.now(50_000); await lab.owner.tick();
+  lab.state("exited", 0, 58_000); lab.now(70_000); const reopened = await lab.reopen();
+  const recovered = await reopened.tick(); assert.equal(recovered.expiry, null); assert.equal(recovered.evidence?.finishedAt, 58_000);
+  assert.equal(recovered.executionDeadline, 60_000); assert.equal(recovered.evidence.kind, "succeeded"); assert.equal(lab.executions(), 1);
+});
+
+test("late success retains actual exit evidence and explicit expiry instead of silently extending a timeout", async (t) => {
+  const lab = await fixture(t, (ports) => ports, separated()); await lab.owner.prepare(lab.plan); await lab.owner.tick(); lab.now(50_000); await lab.owner.tick();
+  lab.state("exited", 0, 65_000); lab.now(70_000);
+  const late = await lab.owner.tick(); assert.equal(late.expiry, "execution"); assert.equal(late.evidence?.kind, "succeeded"); assert.equal(late.evidence.finishedAt, 65_000);
+  await lab.owner.tick(); const complete = await lab.owner.tick(); assert.equal(complete.phase, "complete"); assert.equal(complete.expiry, "execution");
+});
+
+test("older job records retain their recorded ceiling rather than deriving a fresh deadline on restart", async (t) => {
+  const lab = await fixture(t); await lab.owner.prepare(lab.plan); await lab.owner.tick(); const before = await lab.owner.tick();
+  const { executionDeadline: _deadline, expiry: _expiry, ...legacy } = before;
+  assert.equal(_deadline, 10_000); assert.equal(_expiry, null);
+  const parsed = parseJobExecution(legacy); assert.equal(parsed.executionDeadline, 10_000); assert.equal(parsed.expiry, null);
+});
+
+test("an unavailable runtime cannot defer execution expiry to the larger overall ceiling", async (t) => {
+  const lab = await fixture(t, (ports) => ({ ...ports, native: { ...ports.native, observe: (plan) => ports.now() >= 60_000 && ports.now() < 61_000
+    ? Promise.resolve({ status: "unavailable" }) : ports.native.observe(plan) } }), separated());
+  await lab.owner.prepare(lab.plan); await lab.owner.tick(); lab.now(50_000); await lab.owner.tick(); lab.state("running");
+  lab.now(60_000); const expired = await lab.owner.tick(); assert.equal(expired.phase, "fencing"); assert.equal(expired.expiry, "execution");
+  assert.equal(expired.fenceDeadline, 90_000); lab.now(61_000); await lab.owner.tick();
+  assert.equal((await lab.owner.tick()).phase, "complete"); assert.equal(lab.executions(), 1);
+});
+
+test("legacy unstarted cleanup does not invent an execution deadline merely because a container existed", async (t) => {
+  const lab = await fixture(t); await lab.owner.prepare(lab.plan); await lab.owner.tick(); lab.now(10_000);
+  const expired = await lab.owner.tick(); assert.equal(expired.evidence?.kind, "not-started"); assert.ok(expired.container !== null);
+  const { executionDeadline, expiry, ...legacy } = expired; assert.equal(executionDeadline, null); assert.equal(expiry, "scheduling");
+  const restored = parseJobExecution(legacy); assert.equal(restored.executionDeadline, null); assert.equal(restored.expiry, "scheduling");
 });

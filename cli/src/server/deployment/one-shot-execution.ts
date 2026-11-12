@@ -8,24 +8,38 @@ const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const id = z.string().regex(/^[0-9a-f]{64}$/);
 const evidence = z.object({ kind: z.enum(["succeeded", "failed", "unknown", "not-started"]), id: id.nullable(),
   exitCode: z.number().int().nullable(), observedAt: positive, probe: z.enum(["applied", "not-applied", "unknown"]).nullable().default(null),
+  finishedAt: positive.nullable().default(null),
 }).strict().readonly();
 const schema = z.object({ version: z.literal(1), plan: id, scope: z.unknown(), createdAt: positive, deadline: positive,
   phase: z.enum(["create-intent", "start-intent", "observing", "fencing", "complete", "held"]),
   container: id.nullable(), evidence: evidence.nullable(), fenceDeadline: positive.nullable(), barrier: id.nullable(),
   fenceTargets: z.array(id).max(8).readonly().default(Object.freeze([])),
+  executionDeadline: positive.nullable().optional(), expiry: z.enum(["scheduling", "execution"]).nullable().optional(),
 }).strict().readonly();
 
 export const parseJobExecution = (input: unknown) => {
   const parsed = schema.safeParse(input); if (!parsed.success) throw new Error("invalid one-shot execution record");
-  const value = parsed.data; const scope = parseJobScope(value.scope);
+  const raw = parsed.data;
+  // Legacy records keep their original ceiling; recovery never mints a new execution window.
+  const priorDeadline = raw.container === null || raw.evidence?.kind === "not-started" ? null : raw.deadline;
+  const priorExpiry: "scheduling" | "execution" | null = raw.evidence === null || raw.evidence.observedAt < raw.deadline ? null
+    : raw.evidence.kind === "not-started" ? "scheduling" : "execution";
+  const value = { ...raw, executionDeadline: raw.executionDeadline === undefined ? priorDeadline : raw.executionDeadline,
+    expiry: raw.expiry === undefined ? priorExpiry : raw.expiry };
+  const scope = parseJobScope(value.scope);
   if (!scope.ok || value.createdAt >= value.deadline || new Set(value.fenceTargets).size !== value.fenceTargets.length || value.fenceTargets.includes(value.container ?? "") ||
+    (value.executionDeadline !== null && (value.executionDeadline <= value.createdAt || value.executionDeadline > value.deadline)) ||
+    (value.expiry === "scheduling" && (value.executionDeadline !== null || value.evidence?.kind !== "not-started")) ||
+    (value.expiry === "execution" && value.executionDeadline === null) ||
     (value.fenceTargets.length > 0 && value.phase !== "fencing" && value.phase !== "complete" && value.phase !== "held") ||
-    (value.phase === "create-intent" && (value.container !== null || value.evidence !== null || value.fenceDeadline !== null)) ||
-    ((value.phase === "start-intent" || value.phase === "observing") && (value.container === null || value.evidence !== null || value.fenceDeadline !== null)) ||
+    (value.phase === "create-intent" && (value.container !== null || value.evidence !== null || value.fenceDeadline !== null || value.executionDeadline !== null || value.expiry !== null)) ||
+    ((value.phase === "start-intent" || value.phase === "observing") && (value.container === null || value.evidence !== null || value.fenceDeadline !== null || value.executionDeadline === null || value.expiry !== null)) ||
     ((value.phase === "fencing" || value.phase === "complete") && (value.evidence === null || value.fenceDeadline === null)) ||
     ((value.phase === "complete") !== (value.barrier !== null)) || value.barrier !== null && (value.barrier === value.container || value.fenceTargets.includes(value.barrier)) ||
     (value.fenceDeadline !== null && value.fenceDeadline > value.deadline + 30_000) ||
     (value.evidence !== null && (value.evidence.observedAt < value.createdAt || value.evidence.id !== value.container ||
+      (value.evidence.finishedAt !== null && (value.evidence.finishedAt < value.createdAt || value.evidence.finishedAt > value.evidence.observedAt)) ||
+      (value.executionDeadline !== null && value.evidence.observedAt >= value.executionDeadline && (value.evidence.finishedAt === null || value.evidence.finishedAt > value.executionDeadline) && value.expiry !== "execution") ||
       ((value.evidence.kind === "succeeded" || value.evidence.kind === "failed") && (value.container === null || value.evidence.exitCode === null)) ||
       (value.evidence.kind === "succeeded" && value.evidence.exitCode !== 0) ||
       (value.evidence.probe !== null && (scope.value.purpose !== "probe" || value.evidence.kind !== "succeeded")) ||
@@ -62,8 +76,8 @@ export const oneShotExecution = (journal: OperationJournal, ports: Ports) => {
       if (previous !== undefined) {
         if (previous.plan !== digest) throw new Error("one-shot journal belongs to a different plan"); return previous;
       }
-      const now = clock(); if (now >= plan.deadline) throw new Error("one-shot deadline already expired");
-      return write({ version: 1, plan: digest, scope: plan.scope, createdAt: now, deadline: plan.deadline, phase: "create-intent", container: null, evidence: null, fenceDeadline: null, barrier: null, fenceTargets: [] });
+      const now = clock(); if (now >= (plan.startDeadline ?? plan.deadline)) throw new Error("one-shot deadline already expired");
+      return write({ version: 1, plan: digest, scope: plan.scope, createdAt: now, deadline: plan.deadline, phase: "create-intent", container: null, evidence: null, fenceDeadline: null, barrier: null, fenceTargets: [], executionDeadline: null, expiry: null });
     }),
     read: () => serial(load),
     tick: () => serial(async () => {
@@ -88,24 +102,34 @@ export const oneShotExecution = (journal: OperationJournal, ports: Ports) => {
         if (!(await ports.authorize(current, "fence"))) return hold(current);
         await ports.native.fence(plan, observed.status === "owned" ? observed.id : current.container, record.fenceDeadline); return current;
       }
-      const beginFence = async (kind: NonNullable<JobExecution["evidence"]>["kind"], container: string | null, exitCode: number | null, probe: NonNullable<JobExecution["evidence"]>["probe"] = null) => write({ ...record,
-        container, phase: "fencing", evidence: { kind, id: container, exitCode, observedAt: clock(record.createdAt), probe }, fenceDeadline: Math.min(now + 30_000, record.deadline + 30_000),
+      const beginFence = async (kind: NonNullable<JobExecution["evidence"]>["kind"], container: string | null, exitCode: number | null, probe: NonNullable<JobExecution["evidence"]>["probe"] = null,
+        finishedAt: number | null = null, expiry: JobExecution["expiry"] = null) => write({ ...record,
+        container, phase: "fencing", evidence: { kind, id: container, exitCode, observedAt: clock(record.createdAt), probe, finishedAt }, expiry, fenceDeadline: Math.min(now + 30_000, record.deadline + 30_000),
       });
-      if (observed.status === "unavailable") return now >= record.deadline ? hold(record) : record;
+      if (observed.status === "unavailable") {
+        const limit = record.phase === "create-intent" ? plan.startDeadline ?? plan.deadline : record.executionDeadline ?? record.deadline;
+        return now >= limit ? beginFence(record.phase === "create-intent" ? "not-started" : "unknown", record.container, null, null, null,
+          record.phase === "create-intent" ? "scheduling" : "execution") : record;
+      }
       if (observed.status === "owned") {
         if (observed.barrier || (record.container !== null && observed.id !== record.container)) return hold(record);
         if (record.phase === "create-intent" && observed.state !== "created") return hold(record);
-        if (observed.state === "succeeded" || observed.state === "failed") return beginFence(observed.state, observed.id, observed.exitCode, observed.probe);
-        if (now >= record.deadline) return beginFence(record.phase === "create-intent" ? "not-started" : "unknown", observed.id, null);
+        const executionDeadline = record.executionDeadline ?? record.deadline;
+        if (observed.state === "succeeded" || observed.state === "failed") return beginFence(observed.state, observed.id, observed.exitCode, observed.probe, observed.finishedAt,
+          now >= executionDeadline && (observed.finishedAt === null || observed.finishedAt > executionDeadline) ? "execution" : null);
+        if (now >= (record.phase === "create-intent" ? plan.startDeadline ?? plan.deadline : executionDeadline)) return beginFence(record.phase === "create-intent" ? "not-started" : "unknown", observed.id, null, null, null,
+          record.phase === "create-intent" ? "scheduling" : "execution");
         if (observed.state === "running") return record;
         if (observed.state !== "created" || record.phase !== "create-intent") return beginFence("unknown", observed.id, null);
         // This transition is durable BEFORE the only Start dispatch. Restart never replays it.
-        const intent = await write({ ...record, phase: "start-intent", container: observed.id });
+        const intent = await write({ ...record, phase: "start-intent", container: observed.id,
+          executionDeadline: plan.executionTimeoutSeconds === undefined ? record.deadline : Math.min(record.deadline, clock(record.createdAt) + plan.executionTimeoutSeconds * 1000) });
         if (!(await ports.authorize(intent, "start"))) return hold(intent);
-        const result = await ports.native.start(plan, observed.id);
+        const result = await ports.native.start(plan, observed.id, intent.executionDeadline ?? record.deadline);
         return result === "acknowledged" ? write({ ...intent, phase: "observing" }) : intent;
       }
-      if (now >= record.deadline || record.phase !== "create-intent") return beginFence(record.phase === "create-intent" ? "not-started" : "unknown", record.container, null);
+      if (now >= (plan.startDeadline ?? plan.deadline) || record.phase !== "create-intent") return beginFence(record.phase === "create-intent" ? "not-started" : "unknown", record.container, null, null, null,
+        record.phase === "create-intent" ? "scheduling" : null);
       if (!(await ports.authorize(record, "create"))) return hold(record);
       await ports.native.create(plan, await ports.materialize(plan)); return record;
     }),

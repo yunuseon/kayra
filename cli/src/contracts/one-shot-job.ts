@@ -21,6 +21,7 @@ const schema = z.object({ version: z.literal(1), scope,
   resources: z.object({ memoryBytes: positive, nanoCpus: positive }).strict().readonly(),
   networks: z.array(z.string().regex(/^[a-z0-9]{25}$/)).max(2).readonly(),
   deadline: positive, stopGraceSeconds: positive.max(30),
+  startDeadline: positive.optional(), executionTimeoutSeconds: positive.max(86400).optional(),
 }).strict().readonly();
 export type JobScope = z.infer<typeof scope>;
 export type JobPlan = z.infer<typeof schema>;
@@ -29,12 +30,12 @@ export type JobObservation =
   | { readonly status: "absent" | "foreign" | "unavailable" }
   | { readonly status: "owned"; readonly id: string; readonly barrier: boolean; readonly plan: string;
       readonly state: "created" | "running" | "succeeded" | "failed" | "unknown"; readonly exitCode: number | null;
-      readonly probe: MigrationProbe["outcome"] | null };
+      readonly probe: MigrationProbe["outcome"] | null; readonly finishedAt: number | null };
 export type JobPort = {
   readonly observe: (plan: JobPlan) => Promise<JobObservation>;
   readonly create: (plan: JobPlan, environment: Readonly<Record<string, string>>) => Promise<JobWrite>;
   /** Exactly one dispatch per durable start intent. An uncertain start must be observed/fenced, never replayed. */
-  readonly start: (plan: JobPlan, id: string) => Promise<JobWrite>;
+  readonly start: (plan: JobPlan, id: string, executionDeadline?: number) => Promise<JobWrite>;
   /** Deletes only the recorded ID, then reserves the stable name with an inert, never-started barrier. */
   readonly fence: (plan: JobPlan, id: string | null, deadline: number) => Promise<JobWrite>;
 };
@@ -49,6 +50,7 @@ export const parseJobPlan = (input: unknown) => {
   const plan = parsed.data;
   const component = "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
   if (!new RegExp(`^localhost:5000/${plan.scope.app}/${component}(?:/${component})*@sha256:[0-9a-f]{64}$`).test(plan.image) ||
+    (plan.startDeadline !== undefined && plan.startDeadline > plan.deadline) ||
     new Set(plan.networks).size !== plan.networks.length || Object.keys(plan.environment).includes("KAYRA_OPERATION_ID")) return err("invalid one-shot image, networks or reserved environment");
   return ok<JobPlan>(plan);
 };

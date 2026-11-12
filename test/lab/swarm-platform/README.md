@@ -127,3 +127,11 @@ coordinator's owner-only work list and runs the scheduling-round interface.
 After native rollback, the lab checks the public status contract: the rejected
 candidate stays requested, the previous plan is desired and certified active,
 and no fresh runtime observation is inferred from that certificate.
+
+The restart replay now starts the existing process's HTTP controller and waits
+for the durable outcome, without manually ticking the operation. The controller
+discovers work from the index, preserves native CAS intent and deadlines, and
+reconstructs the acknowledged candidate with zero repeated updates. It is also
+wired into the optional indexed deployer composition when Swarm authority and
+public/private registration inputs are present. This enables restart recovery
+for durable internal operations, not ordinary Swarm deployment requests.

@@ -494,6 +494,13 @@ if [ "$indexed_registration" = true ]; then
             "${KAYRA_ROOT}/test/lab/registration-generation/build-live.yml" \
             -e "kayra_root=${KAYRA_ROOT}" -e "@${work}/swarm-registration-inputs.json" >> "$log" 2>&1 || die "registering and building the new Swarm application"
         echo "✓ new Swarm registration retained its runtime, grants and build receipt across restart"
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/http-control.yml" \
+            -e "fixture_app=swarm-build" -e "fixture_commit=${swarm_commit}" \
+            -e "report_path=${work}/http-control.json" >> "$log" 2>&1 || die "experimental HTTP control and promotion"
+        cp "${work}/http-control.json" "/tmp/kayra-swarm-platform-${vm_name}.control.json"
+        echo "✓ the real deployer promoted the retained Swarm plan with routed TLS readiness"
     fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi

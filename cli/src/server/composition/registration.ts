@@ -21,6 +21,7 @@ import { parseBundle, bundleWire } from "../../deployer/build/bundle.ts";
 import { appName, sha, type Sha } from "../../deployer/brand.ts";
 import { registrationObservation } from "../platform/registration-observation.ts";
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../deployment/lifecycle-app-index.ts";
+import { deploymentControl } from "../deployment/deployment-control.ts";
 import { registrationControl } from "../deployment/registration-control.ts";
 
 const missing = (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
@@ -130,6 +131,10 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
+      if (route.startsWith("/deployment/")) return deploymentControl({ index: await opening, canAccess: canRegister,
+        enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
+        plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
+      })(route, input);
       return registrationControl({ index: await opening, canRegister, builds, plans,
         runtimeEnabled: async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok),
       })(route, input);

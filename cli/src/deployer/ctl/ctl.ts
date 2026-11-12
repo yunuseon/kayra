@@ -128,6 +128,17 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     if (target === undefined || commit.length < 7) return fail(`${commit} is not an earlier release of ${name.value}`);
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
   },
+  lifecycle: async ([operation, app, commit, request, extra]) => {
+    const query = operation === "status" && app !== undefined && commit === undefined;
+    const prepare = operation === "prepare" && app !== undefined && commit !== undefined && request !== undefined && extra === undefined;
+    if (!query && !prepare) return fail("usage: ctl lifecycle status <app> | prepare <app> <full-commit> <request-uuid>");
+    const response = await fetch(`http://127.0.0.1:8091/deployment/${query ? "status" : "prepare"}`, {
+      method: "POST", body: JSON.stringify(query ? { app } : { app, commit, request }), signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+    if (!response?.ok) return fail("deployment control unavailable; inspect status and retry only the same request identity");
+    console.log(await response.text());
+    return 0;
+  },
   preview: async ([app, commit, extra]) => {
     if (app === undefined || commit === undefined || extra !== undefined) return fail("usage: ctl preview <app> <full-commit>");
     const response = await fetch("http://127.0.0.1:8091/registration/preview", {

@@ -64,11 +64,17 @@
                 KAYRA_REGISTRATION_EVIDENCE_DIR: /run/kayra-registration/observations
                 KAYRA_PUBLIC_REGISTRATIONS_DIR: /run/kayra-registration/public
                 KAYRA_PRIVATE_REGISTRATIONS_DIR: /run/kayra-registration/private
+          {% if kayra_lab_swarm | default(false) | bool %}
+                NODE_EXTRA_CA_CERTS: /run/kayra-platform/lab-ca.pem
+          {% endif %}
               volumes:
                 - {{ registration_root }}/observations:/run/kayra-registration/observations:ro
                 - {{ registration_root }}/public:/run/kayra-registration/public:ro
                 - {{ registration_root }}/private:/run/kayra-registration/private:ro
                 - ./managed-apps:/opt/platform/managed-apps:ro
+          {% if kayra_lab_swarm | default(false) | bool %}
+                - /var/lib/kayra/swarm/lab-ca.pem:/run/kayra-platform/lab-ca.pem:ro
+          {% endif %}
             builder:
               environment:
                 KAYRA_PUBLIC_REGISTRATIONS_DIR: /run/kayra-registration/public

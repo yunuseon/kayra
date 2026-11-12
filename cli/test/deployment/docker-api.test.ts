@@ -72,3 +72,12 @@ test("Docker transport bounds bytes and time and does not disclose malformed res
   await assert.rejects(api.request("GET", "/unsafe\r\nHeader:value"), /invalid Docker API path/);
   await assert.rejects(api.request("GET", "/", undefined, { timeoutMs: 0 }), /timeout/);
 });
+
+test("Docker transport returns bounded adapter-only bytes without UTF-8 or JSON coercion", async (t) => {
+  const bytes = Buffer.from([1, 0, 0, 0, 0, 0, 0, 2, 0xff, 0xfe]);
+  const api = await fixture(t, (_request, response) => { response.writeHead(200); response.end(bytes); });
+  assert.deepEqual(await api.request("GET", "/logs", undefined, { response: "bytes", maximumBytes: 10 }), { status: 200, value: bytes });
+  await assert.rejects(api.request("GET", "/logs", undefined, { response: "bytes", maximumBytes: 9 }), /transport limit/);
+  await assert.rejects(api.request("GET", "/logs", undefined, { response: "bytes", maximumBytes: 0 }), /response limit/);
+  await assert.rejects(api.request("GET", "/logs", undefined, { response: "bytes", maximumBytes: 4 * 1024 * 1024 + 1 }), /response limit/);
+});

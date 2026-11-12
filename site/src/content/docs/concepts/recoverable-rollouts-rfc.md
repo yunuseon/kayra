@@ -779,6 +779,28 @@ validation, ordered migration sequencing, status-probe interpretation and
 operator recovery before migration-bearing apps can be accepted. Existing
 HTTP admission continues to reject migration and worker declarations.
 
+## Application status-probe response
+
+A successful status-probe process writes exactly one JSON value to stdout:
+`{"version":1,"outcome":"applied"}`, with `not-applied` or `unknown` as the
+other outcomes. The process must exit zero for any semantic result. A nonzero
+exit, unavailable output, invalid UTF-8, malformed JSON, unknown field or
+oversized response supplies no authoritative semantic outcome. Kayra treats
+those cases as unknown. Stderr is never interpreted as a status response.
+
+The runtime reads at most 1 KiB of complete Docker non-TTY stdout frames and
+accepts a JSON response of at most 256 UTF-8 bytes. Truncated tails and raw TTY
+streams cannot establish an outcome. Only the normalized enum enters the
+coordinator record before fencing removes the original container. Raw probe
+stdout and materialized inputs never enter journals or public reporting. Job
+execution completion and successful process exit remain distinct from the
+application's semantic outcome.
+
+The isolated probe component covers every declared outcome plus malformed
+private output, oversized output and an unsuccessful process that prints an
+otherwise valid applied response. This implements evidence collection, not
+ordered migration admission, automatic unsafe retries or operator resolution.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

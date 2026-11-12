@@ -442,6 +442,8 @@ if [ "$swarm_host" = true ]; then
     cp "${work}/http-coordinator.json.overlap.native.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.overlap.native.json"
     cp "${work}/http-coordinator.json.jobs.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.jobs.json"
     cp "${work}/http-coordinator.json.jobs.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.jobs.tar"
+    cp "${work}/http-coordinator.json.probes.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.probes.json"
+    cp "${work}/http-coordinator.json.probes.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.probes.tar"
     cp "${work}/swarm-platform.json" "/tmp/kayra-swarm-platform-${vm_name}.json"
     cp "${work}/swarm-platform.json.native.json" "/tmp/kayra-swarm-platform-${vm_name}.native.json"
     cp "${work}/swarm-platform.json.adapter.json" "/tmp/kayra-swarm-platform-${vm_name}.adapter.json"

@@ -1,9 +1,10 @@
 import type { Migration } from "../../contracts/rollout.ts";
+import type { MigrationProbe } from "../../contracts/migration-probe.ts";
 import { typed } from "../../lib/typed.ts";
 
 /** An authoritative lookup of the migration's stable runtime identity. */
 export type MigrationObservation = "unobserved" | "missing" | "running" | "succeeded" | "failed" | "unavailable";
-export type ProbeOutcome = "applied" | "not-applied" | "unknown";
+export type ProbeOutcome = MigrationProbe["outcome"];
 export type ProbeObservation = "unobserved" | "missing" | "running" | "unavailable" | ProbeOutcome;
 export type ProbeIntent = { readonly deadline: number; readonly observation: ProbeObservation };
 export type MigrationRecovery = {

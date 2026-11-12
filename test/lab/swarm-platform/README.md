@@ -260,3 +260,9 @@ run incorrectly assumed that this BusyBox image contained Node. It preserved
 the unstarted attempt as unknown; its failed source remains at
 `/var/lib/kayra/swarm/coordinator-source-_j_rxj3_` in the kept lab VM. The
 portable `sh` fixture command corrected that lab failure.
+
+The corrected combined component passed all 17 tasks, including evidence
+fetches and successful-source cleanup. Its results are
+`/tmp/kayra-jobs-fixed-component.json`, `.json.jobs.json` and `.json.jobs.tar`;
+the run log is `/tmp/kayra-jobs-fixed-component.log`. Full CLI validation passed
+551 tests with one skip; all 16 focused Linux checks passed.

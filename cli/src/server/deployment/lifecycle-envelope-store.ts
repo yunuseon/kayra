@@ -4,6 +4,9 @@
  * authenticate registration references. This is not a live endpoint or a
  * complete lifecycle owner. */
 /* eslint-disable functional/prefer-immutable-types */
+import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
+import type { ServiceAction, ServiceObservation } from "../../contracts/swarm-service.ts";
+import { convergedHttp, routedHttp } from "./http-convergence.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
 import type { OperationJournal } from "./operation.ts";
 import { parseRegistrationObservation } from "../../contracts/registration-generation.ts";
@@ -204,6 +207,36 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         return Object.freeze({ status: "new" as const, request: next.http?.requests.find((item) => item.ticket === ticket) });
       });
     },
+    markHttpDispatched: (ticket: string) => serial(async () => {
+      const current = await required();
+      const request = current.http?.requests.find((item) => item.ticket === ticket);
+      if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+      if (request.phase === "verifying") return;
+      if (request.phase !== "applying") throw new Error("HTTP action has no dispatch intent");
+      await persist({ ...current, http: { ...current.http, requests: current.http.requests.map((item) => item === request ? { ...request, phase: "verifying" } : item) } });
+    }),
+    /** Native acknowledgement is not promotion: require observed convergence and routed readiness. */
+    promoteHttp: (ticket: string, native: ServiceObservation, routed: RoutedReadiness, now: number) => serial(async () => {
+      const current = await required();
+      const request = current.http?.requests.find((item) => item.ticket === ticket);
+      if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+      const intent = request.steps[0];
+      const action: ServiceAction = { app: current.tickets.app, incarnation: current.tickets.incarnation, service: request.service,
+        action: request.action, plan: request.plan, deadline: request.deadline, effect: "apply" };
+      if ((request.phase !== "applying" && request.phase !== "verifying") || intent?.effect !== "apply" || now > request.deadline ||
+        !convergedHttp(action, native) || !routedHttp(action, routed, now) || native.status !== "owned" ||
+        (intent.expected !== null && (intent.expected.id !== native.id || native.version <= intent.expected.version))) throw new Error("HTTP release lacks current convergence proof");
+      const fence = settleLifecycleWork(current.fence, request.action);
+      const tickets = completeTicket(current.tickets, ticket, "success");
+      if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP promotion settlement");
+      const verified = Object.freeze({ plan: request.plan, commit: request.commit, action: request.action, service: request.service,
+        native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
+      await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((operation) => operation.ticket !== ticket),
+        http: { ...current.http, desired: request.plan, active: verified, lastKnownGood: verified,
+          requests: current.http.requests.map((item) => item === request ? { ...item, phase: "succeeded", verified } : item) },
+      });
+      return verified;
+    }),
     /** Only the injected trusted observer may establish an applied outcome. */
     reconcileRegistration: (ticket: string, registrationGeneration: string) => {
       if (typeof ticket !== "string" || typeof registrationGeneration !== "string") return Promise.reject(new Error("invalid registration request"));

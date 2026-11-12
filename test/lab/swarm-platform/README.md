@@ -77,3 +77,22 @@ of the later indexed-registration phase. The initial full upgrade exposed this
 missing prerequisite after all legacy deployment checks had passed. Public
 fixture files are readable by the existing unprivileged deployer user after
 `docker compose cp`; they contain declarations, not materialized secrets.
+
+`http-coordinator.yml` copies a frozen source tree into a disposable host directory
+and uses the existing deployer image's Node runtime and contract dependencies.
+It runs `http-coordinator.mjs` against the real engine/router, promotes A, kills
+the writer immediately after B's update acknowledgement, then reopens the journal
+and verifies B without another update. The report records the original deadline,
+service identity and settled accounting. Successful sources and fixtures are
+removed; failures retain their source/journal paths and print cleanup commands.
+
+This component test supplies trusted fixture build/registration inputs. It is
+not the full builder/platform integration or a request-continuity measurement.
+The upgrade lab invokes it after the adapter prerequisites are ready and saves
+its report as `/tmp/kayra-swarm-platform-<vm>.coordinator.json`.
+
+`http-inputs.mjs <app> <full-commit> [preview-json-file]` is a read-only check of
+platform materialization against an existing indexed fixture generation. A
+preview file permits running it as UID 1000 without Docker CLI access. It reports
+binding names only and checks that altered configuration identity and ungranted
+secret references are refused. No materialized values are printed.

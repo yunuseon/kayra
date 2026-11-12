@@ -791,6 +791,29 @@ execution evidence or starting them. At most eight additional IDs are handled
 within the original fencing deadline; exhaustion holds the operation. Only
 then can the final name barrier certify that delayed creation is fenced.
 
+Job scheduling and execution use separate persisted bounds. A normalized job
+may provide a start deadline and an execution timeout under its fixed overall
+ceiling. Image preparation and queueing consume the start window. Immediately
+before its only Start dispatch, the coordinator persists the execution deadline
+from the current time and declared timeout, capped by that overall ceiling.
+Restart reuses this timestamp; it never grants another execution window. Older
+records retain their already-recorded ceiling rather than receiving a new one.
+
+Recovery records scheduling or execution expiry separately from actual exit
+evidence. Docker's completion timestamp can establish that a job finished
+before its execution deadline while the coordinator was absent. Late success
+retains both the successful exit and an execution-expired flag; execution
+completion must not be mistaken for a timely rollout outcome. Missing runtime
+observations cannot postpone expiry to the larger overall ceiling. Capacity
+remains held until execution is fenced and the lifecycle owner settles it.
+
+Docker containers provide no native hard execution deadline in this primitive.
+A job can continue while the coordinator is absent. After restart, the owner
+observes it and resumes bounded fencing against the original deadline. This
+cannot undo an already-issued database request; app status probes and recovery
+declarations remain necessary. Applications needing database-side statement or
+transaction limits own those limits.
+
 ## Application status-probe response
 
 A successful status-probe process writes exactly one JSON value to stdout:

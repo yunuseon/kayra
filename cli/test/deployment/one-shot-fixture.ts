@@ -31,7 +31,7 @@ export const jobRuntime = (plan = jobPlan()) => {
     if (method === "GET") return { status: 200, value };
     if (method === "DELETE") { value = undefined; return { status: 204, value: null }; }
     if (path.endsWith("/start")) {
-      executions++; value = { ...value, State: { Status: "exited", ExitCode: 0 } }; return { status: 204, value: null };
+      executions++; value = { ...value, State: { Status: "exited", ExitCode: 0, FinishedAt: new Date(clock).toISOString() } }; return { status: 204, value: null };
     }
     throw new Error("unexpected native request");
   } };
@@ -39,6 +39,7 @@ export const jobRuntime = (plan = jobPlan()) => {
   return { plan, api, native, calls, executions: () => executions, raw: () => value,
     cache: (present: boolean) => { cached = present; },
     now: (next: number) => { clock = next; }, clock: () => clock,
-    state: (status: string, exitCode = 0) => { assert.ok(value !== undefined); value = { ...value, State: { Status: status, ExitCode: exitCode } }; },
+    state: (status: string, exitCode = 0, finishedAt = clock) => { assert.ok(value !== undefined); value = { ...value, State: { Status: status, ExitCode: exitCode,
+      ...(status === "exited" || status === "dead" ? { FinishedAt: new Date(finishedAt).toISOString() } : {}) } }; },
   };
 };

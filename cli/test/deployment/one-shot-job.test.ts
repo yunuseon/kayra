@@ -113,3 +113,12 @@ test("image preparation never extends the job's original dispatch deadline", asy
   assert.equal(await native.create(lab.plan, { TOKEN: "secret-value" }), "refused");
   assert.equal(lab.calls.filter((call) => call.path.startsWith("/containers/create?")).length, 0);
 });
+
+test("native dispatch respects both recorded start and execution deadlines", async () => {
+  const plan = { ...jobPlan(), deadline: 120_000, startDeadline: 90_000, executionTimeoutSeconds: 10 }; const lab = jobRuntime(plan);
+  await lab.native.create(plan, { TOKEN: "secret-value" }); const created = await lab.native.observe(plan); assert.equal(created.status, "owned");
+  lab.now(60_000); assert.equal(await lab.native.start(plan, created.id, 60_000), "refused");
+  lab.now(90_000); assert.equal(await lab.native.start(plan, created.id, 100_000), "refused");
+  assert.equal(await lab.native.start(plan, created.id, 120_001), "refused"); assert.equal(lab.executions(), 0);
+  assert.equal(parseJobPlan({ ...plan, startDeadline: 120_001 }).ok, false);
+});

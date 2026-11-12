@@ -316,3 +316,26 @@ evidence export and successful-source cleanup. The result is
 `/tmp/kayra-cold-component.json` with `.json.cold.json` and `.json.cold.tar`;
 the run log is `/tmp/kayra-cold-component.log`. Full CLI validation passed 560
 tests with one skip; all 34 focused Linux checks passed.
+
+## Separate job deadlines
+
+`one-shot-deadlines.mjs run <new-results-directory> <fixture-image-digest>`
+covers scheduling expiry without execution, delayed preparation followed by a
+full execution window, a still-running job after coordinator SIGKILL, late
+success, and timely completion observed only after restart. The execution
+deadline is persisted before Start and must remain identical after restart.
+Docker completion timestamps and expiry flags remain separate from exit codes.
+All five native cases passed on 2026-11-12 against Engine 29.9.3/API 1.56 and
+Node 24.22.1. Raw results are `/tmp/kayra-job-deadlines-native-evidence/`, and
+the log is `/tmp/kayra-job-deadlines-native.log`. The coordinator playbook and
+upgrade lab retain `.deadlines.json` and `.deadlines.tar` before cleanup.
+
+The late-success case deliberately demonstrates that a Docker job can run
+past its deadline while the coordinator is absent. Recovery retains that exit
+evidence and marks execution expiry; this is not native hard-timeout evidence.
+
+The combined component passed all 29 tasks, including evidence export and
+source cleanup. Its result is `/tmp/kayra-deadlines-component.json` with
+`.json.deadlines.json` and `.json.deadlines.tar`; the log is
+`/tmp/kayra-deadlines-component.log`. Full CLI validation passed 568 tests with
+one skip; all 42 focused Linux checks passed, including legacy record recovery.

@@ -55,6 +55,9 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
       const code = field(field(result.value, "State"), "ExitCode");
       const exitCode = typeof code === "number" && Number.isSafeInteger(code) && (status === "exited" || status === "dead") ? code : null;
       const state = status === "created" ? "created" : status === "running" ? "running" : status === "exited" ? exitCode === 0 ? "succeeded" : "failed" : status === "dead" ? "failed" : "unknown";
+      const finished = field(field(result.value, "State"), "FinishedAt");
+      const timestamp = typeof finished === "string" && finished.length <= 64 ? Date.parse(finished) : NaN;
+      const finishedAt = exitCode !== null && Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
       const barrier = field(field(field(result.value, "Config"), "Labels"), "com.kayra.barrier") === "true";
       const probe = async () => {
         if (plan.scope.purpose !== "probe" || state !== "succeeded" || barrier) return null;
@@ -63,7 +66,7 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
           return logs.status === 200 && Buffer.isBuffer(logs.value) ? migrationProbeOutput(logs.value) : "unknown";
         } catch { return "unknown"; }
       };
-      return typed<JobObservation>({ status: "owned", id, barrier, plan: jobPlanDigest(plan), state, exitCode, probe: await probe() });
+      return typed<JobObservation>({ status: "owned", id, barrier, plan: jobPlanDigest(plan), state, exitCode, probe: await probe(), finishedAt });
     } catch { return typed<JobObservation>({ status: "unavailable" }); }
   };
   const remaining = (plan: JobPlan, deadline = plan.deadline) => {
@@ -88,7 +91,7 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
       { response: "bytes", timeoutMs, maximumBytes: 4 * 1024 * 1024 });
     const pulled = await inspect(); return pulled.status === 200 && available(pulled.value);
   };
-  const create = async (input: JobPlan, environment: Readonly<Record<string, string>>, barrier = false, deadline = input.deadline) => {
+  const create = async (input: JobPlan, environment: Readonly<Record<string, string>>, barrier = false, deadline = input.startDeadline ?? input.deadline) => {
     const parsed = parseJobPlan(input); if (!parsed.ok) return typed<JobWrite>("refused");
     const plan = parsed.value; const timeoutMs = remaining(plan, deadline); if (timeoutMs === undefined) return typed<JobWrite>("refused");
     try {
@@ -102,9 +105,11 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
     } catch { return typed<JobWrite>("uncertain"); }
   };
   return typed<JobPort>(Object.freeze({ observe, create: (plan, environment) => create(plan, environment),
-    start: async (input, id) => {
+    start: async (input, id, executionDeadline = input.deadline) => {
       const parsed = parseJobPlan(input); if (!parsed.ok || !containerId(id)) return "refused";
-      const plan = parsed.value; const timeoutMs = remaining(plan); if (timeoutMs === undefined) return "refused";
+      const plan = parsed.value;
+      if (!Number.isSafeInteger(executionDeadline) || executionDeadline <= 0 || executionDeadline > plan.deadline) return "refused";
+      const timeoutMs = remaining(plan, Math.min(executionDeadline, plan.startDeadline ?? plan.deadline)); if (timeoutMs === undefined) return "refused";
       try {
         const current = await get(plan, id);
         if (current.status !== "owned" || field(current.value, "Id") !== id || field(field(field(current.value, "Config"), "Labels"), "com.kayra.barrier") !== "false" ||

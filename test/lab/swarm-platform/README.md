@@ -193,3 +193,5 @@ automatic recovery, never an uninterrupted-rollback claim. A held operation,
 collector failure or bad cadence preserves the run rather than silently
 starting a replacement experiment. Successful managed fixtures remain owned
 by the coordinator until its removal interface is available.
+
+The completed real-deployer matrix passed 18/18 cases; see [HTTP-RESULTS.md](HTTP-RESULTS.md) for exact versions, failed-request counts, disruption and resource evidence. This does not complete experimental Swarm integration.

@@ -38,14 +38,16 @@ export async function analyze(directory) {
   const observations = await jsonl(join(directory, 'observer.jsonl'));
   const docker = await jsonl(join(directory, 'docker-events.jsonl'));
   const vm = await jsonl(join(directory, 'vm.jsonl'));
+  const environment = await json(join(directory, '..', 'prepared', 'environment.json')).catch(() => null);
+  const acceptedByCase = new Map(observations.filter((value) => value.kind === 'update-accepted').map((value) => [`${value.case.name}-${value.case.repeat}`, value.accepted]));
   const base = summarizeRequests(baseline);
   const baselinePassed = base.count >= 570 && base.failed === 0 && base.achievedRequestsPerSecond >= 19 && base.maximumStartGapMs < 2000 && baseline.every((value) => value.release === 'A' && value.ready === true);
   const cases = [];
   for (const item of summary.results) {
     const records = await jsonl(join(directory, `${item.name}-${item.repeat}-requests.jsonl`));
     const requests = summarizeRequests(records);
-    const accepted = observations.find((value) => value.kind === 'update-accepted' && value.case?.name === item.name && value.case?.repeat === item.repeat)?.accepted;
-    const candidate = docker.filter((event) => event.Actor?.Attributes?.['com.kayra.plan'] === accepted?.plan);
+    const accepted = acceptedByCase.get(`${item.name}-${item.repeat}`);
+    const candidate = docker.filter((event) => event.Actor?.Attributes?.['com.kayra.plan'] === accepted?.plan && event.timeNano / 1_000_000 >= item.submittedAt && event.timeNano / 1_000_000 <= item.convergedAt);
     const crashes = candidate.filter((event) => event.Action === 'die' && event.Actor?.Attributes?.exitCode === '42');
     const healthyBeforeCrash = crashes.some((crash) => candidate.some((event) => event.Action === 'health_status: healthy' && event.Actor.ID === crash.Actor.ID && event.timeNano < crash.timeNano));
     const premature = records.filter((value) => value.release === item.release && (value.ready !== true || (value.readyAt !== null && value.requestStartedAt < value.readyAt)));
@@ -65,15 +67,20 @@ export async function analyze(directory) {
     if (event.Action === 'die' || event.Action === 'destroy') live.delete(event.Actor.ID);
     changes.push({ at: event.timeNano / 1_000_000, count: live.size });
   }
-  const overlapping = vm.filter((sample) => sample.case !== null && sample.phase !== 'reset' && [...changes].reverse().find((event) => event.at <= sample.at)?.count >= 2);
+  let changeIndex = 0; let liveCount = 0;
+  const overlapping = [...vm].sort((a, b) => a.at - b.at).filter((sample) => {
+    while (changeIndex < changes.length && changes[changeIndex].at <= sample.at) liveCount = changes[changeIndex++].count;
+    return sample.case !== null && sample.phase !== 'reset' && liveCount >= 2;
+  });
   const failedWindow = vm.filter((sample) => cases.some((item) => item.failureStartsAt !== null && sample.at >= item.failureStartsAt && sample.at <= item.failureEndsAt));
-  const recovering = vm.filter((sample) => cases.some((item) => {
-    const accepted = observations.find((value) => value.kind === 'update-accepted' && value.case?.name === item.name && value.case?.repeat === item.repeat)?.accepted;
-    const firstDeath = docker.find((event) => event.Action === 'die' && event.Actor?.Attributes?.['com.kayra.plan'] === accepted?.plan);
-    return firstDeath !== undefined && sample.at >= firstDeath.timeNano / 1_000_000 && sample.at <= item.convergedAt;
-  }));
+  const recoveryWindows = cases.flatMap((item) => {
+    const accepted = acceptedByCase.get(`${item.name}-${item.repeat}`);
+    const deaths = docker.filter((event) => event.Action === 'die' && event.Actor?.Attributes?.['com.kayra.plan'] === accepted?.plan && event.timeNano / 1_000_000 >= item.submittedAt && event.timeNano / 1_000_000 <= item.convergedAt);
+    return deaths.length === 0 ? [] : [{ start: Math.min(...deaths.map((event) => event.timeNano / 1_000_000)), end: item.convergedAt }];
+  });
+  const recovering = vm.filter((sample) => recoveryWindows.some((window) => sample.at >= window.start && sample.at <= window.end));
   const report = { complete: summary.complete === true && cases.length === manifest.matrix.length,
-    passed: summary.complete === true && cases.length === manifest.matrix.length && baselinePassed && cases.every((item) => item.passed),
+    environment, passed: environment !== null && summary.complete === true && cases.length === manifest.matrix.length && baselinePassed && cases.every((item) => item.passed),
     baseline: { ...base, passed: baselinePassed }, cases,
     resources: { baseline: resourcePeaks(vm.filter((value) => value.phase === 'baseline')), overlap: resourcePeaks(overlapping),
       sampledFailureWindow: resourcePeaks(failedWindow), recovery: resourcePeaks(recovering), overall: resourcePeaks(vm) },

@@ -8,6 +8,8 @@ import { parseApplicationPlan } from "../../contracts/application-plan.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
+import { terminalHttp } from "./http-state.ts";
+import { deploymentStatus } from "./deployment-status.ts";
 import { lifecycleActionId } from "./lifecycle-fence.ts";
 import type { ServiceObservation } from "../../contracts/swarm-service.ts";
 import { parseHttpNativeStep } from "./http-state.ts";
@@ -336,6 +338,26 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return verified;
     }),
     reconcileHttpResources: (app: string, ticket: string) => useReady(app, (store) => reconcileHttpResources(app, store, ticket)),
+    deploymentStatus: (app: string) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const registration = verifiedRegistration(app, envelope);
+      if (envelope?.fence === null || envelope?.fence === undefined || envelope.registrationAllocation === undefined) throw new Error("deployment status lacks lifecycle authority");
+      return deploymentStatus(app, registration.incarnation, envelope.registrationAllocation.runtime, envelope.fence.lifecycle.phase, envelope.http);
+    }),
+    /** Owner-only restart work list; consumers get identities, never journal paths or mutable intent. */
+    pendingHttpOperations: async () => {
+      if (closed) throw new Error("lifecycle app index is closed");
+      const snapshot = await serialIndex(readIndex);
+      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
+        const envelope = await store.read();
+        const latest = envelope?.http?.requests.at(-1);
+        if (latest === undefined || latest.phase === "held") return [];
+        const charge = snapshot.resources?.charges.find((item) => item.app === app.app);
+        const unsettled = charge?.result === "pending" && charge.incarnation === app.incarnation && charge.sequence === Number(latest.action.split(":")[1]);
+        return terminalHttp(latest.phase) && !unsettled ? [] : [Object.freeze({ app: app.app, request: latest.request })];
+      })));
+      return Object.freeze(work.flat());
+    },
     resourceSnapshot: () => {
       if (closed) return Promise.reject(new Error("lifecycle app index is closed"));
       return serialIndex(async () => (await readIndex()).resources);

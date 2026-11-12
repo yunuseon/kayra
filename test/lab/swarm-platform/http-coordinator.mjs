@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { parseApplicationPlan } from '../../../cli/src/contracts/application-plan.ts';
 import { openArtifactStore } from '../../../cli/src/server/deployment/artifact-store.ts';
 import { httpExecution } from '../../../cli/src/server/deployment/http-execution.ts';
+import { reconcileHttpWork } from '../../../cli/src/server/deployment/http-work.ts';
 import { createLifecycleAppIndex, openLifecycleAppIndex } from '../../../cli/src/server/deployment/lifecycle-app-index.ts';
 import { routedReadiness } from '../../../cli/src/server/platform/routed-readiness.ts';
 import { swarmRouting } from '../../../cli/src/server/platform/swarm-routing.ts';
@@ -94,11 +95,13 @@ if (process.argv[2] === 'writer') {
     assert.equal(interrupted.phase, 'applying'); assert.equal(interrupted.deadline, b.deadline);
     let replayedWrites = 0;
     const resumed = httpExecution(index, { ...ports, native: { ...ports.native, apply: (...args) => { replayedWrites += 1; return ports.native.apply(...args); } } });
-    await wait(async () => (await resumed.tick(app, b.request)) === 'succeeded', 'reconstructed routed B');
+    assert.deepEqual(await index.pendingHttpOperations(), [{ app, request: b.request }]);
+    await wait(async () => (await reconcileHttpWork(index, resumed)).some((item) => item.app === app && item.request === b.request && item.outcome === 'succeeded'), 'reconstructed routed B');
     const activeB = await index.httpOperation(app, b.request);
     assert.equal(activeB.verified.native.id, serviceId);
     assert.equal(activeB.deadline, b.deadline); assert.equal(replayedWrites, 0);
     assert.equal((await index.resourceSnapshot()).charges[0].result, 'target');
+    assert.deepEqual(await index.pendingHttpOperations(), []);
     assert.equal(JSON.stringify(activeB).includes(privateValue), false);
     // C starts healthy, then exits inside Swarm's native monitoring window.
     await index.prepareBuild(app, 'c'.repeat(40), builds);
@@ -115,6 +118,11 @@ if (process.argv[2] === 'writer') {
     const recoveredC = await index.httpOperation(app, c.request);
     assert.equal(recoveredC.recovery.kind, 'automatic-rollback');
     assert.equal(recoveredC.recovery.verified.plan, b.plan);
+    const status = await index.deploymentStatus(app);
+    assert.equal(status.requested.plan, c.plan); assert.equal(status.desired.plan, b.plan);
+    assert.equal(status.verifiedActive.plan, b.plan); assert.equal(status.lastKnownGood.plan, b.plan);
+    assert.equal(status.operation.phase, 'failed'); assert.equal(status.operation.recovery, 'automatic-rollback');
+    assert.equal(status.runtimeObservation, 'not-observed');
     assert.equal((await index.resourceSnapshot()).charges[0].result, 'previous');
     const automaticRecoveryMs = Date.now() - failureStarted;
     // D's write is delayed before reaching Docker. A native version fence must
@@ -143,7 +151,7 @@ if (process.argv[2] === 'writer') {
     console.log(JSON.stringify({ app, engine: version.Version, api: version.ApiVersion, image,
       trustedFixtureBuildInputs: true, continuityMeasured: false, initialPromotion: true, killedAfterAcknowledgement: true, reconstructedPromotion: true, replayedWrites,
       sameServiceId: true, originalDeadline: true, settledCapacity: true, journalContainsPrivateValues: false,
-      automaticRollback: true, automaticRecoveryMs, recoveryTrace, delayedCandidateFenced: true }));
+      automaticRollback: true, automaticRecoveryMs, recoveryTrace, delayedCandidateFenced: true, reconstructedWorklist: true, publishedStatus: true }));
   } catch (error) {
     await index?.close();
     console.error(JSON.stringify({ app, root, serviceId, error: String(error), cleanup: `docker service rm ${serviceId ?? `kayra-${app}--web`}` })); process.exitCode = 1;

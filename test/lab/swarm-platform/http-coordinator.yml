@@ -41,6 +41,7 @@
         - ci/tests/swarm-http/native-plan.json
         - test/lab/swarm-platform/http-coordinator.mjs
         - test/lab/swarm-platform/recovery-overlap.mjs
+        - test/lab/swarm-platform/one-shot.mjs
 
     - name: Find the existing deployer container
       ansible.builtin.command:
@@ -98,6 +99,33 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/recovery-overlap.json"
         dest: "{{ report_path }}.overlap.native.json"
+        flat: true
+
+    - name: Interrupt isolated one-shot jobs at create, start and fence checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot.mjs"
+          - run
+          - "{{ coordinator_source.path }}/jobs"
+          - "{{ (coordinator_result.stdout | from_json).image }}"
+      changed_when: true
+
+    - name: Retain one-shot interruption summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/jobs/result.json"
+        dest: "{{ report_path }}.jobs.json"
+        flat: true
+
+    - name: Archive one-shot journals, traces and Docker events before cleanup
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/jobs.tar", -C, "{{ coordinator_source.path }}/jobs", .]
+      changed_when: true
+
+    - name: Preserve one-shot interruption evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/jobs.tar"
+        dest: "{{ report_path }}.jobs.tar"
         flat: true
 
     - name: Remove successful component source files

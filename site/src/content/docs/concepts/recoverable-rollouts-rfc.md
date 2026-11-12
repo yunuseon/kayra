@@ -746,6 +746,39 @@ an older undersized pending reservation; metadata fencing and cleanup that need
 no additional workload copy remain possible. This is conservative accounting,
 not a guarantee against global host OOM or Docker defects outside this scope.
 
+## One-shot execution foundation
+
+The migration runtime primitive now separates container creation, start and
+fencing behind a typed port. Its immutable plan binds an app-owned image
+digest, stable run/step/purpose/attempt, input references, explicit limits and
+absolute deadline. Materialized values enter only the native create request.
+`KAYRA_OPERATION_ID` identifies the logical run and step across attempts.
+Automatic restart and removal are disabled. The current primitive supports no
+mounts; it refuses image-declared volumes before starting application code.
+
+The coordinator persists start intent before its single Start dispatch. An
+interrupted start is observed, never repeated, even if Docker still reports
+the container as created. Terminal exit evidence is captured before removing
+the exact container ID and reserving its stable name with an inert, never-started
+container. This fences delayed Start-by-ID and Create-by-name requests. The
+cleanup deadline is separately persisted, bounded to 30 seconds beyond the job
+deadline, and never refreshed on restart. Unfinished cleanup holds the record.
+The barrier retains neither resolved inputs nor application network access.
+
+Execution completion means runtime evidence and fencing are durable. Its
+outcome remains separately `succeeded`, `failed`, `unknown` or `not-started`;
+`complete` never turns an ambiguous migration into an applied migration. A
+container fence cannot revoke a database request already in flight. Application
+status probes and audited recovery must resolve those semantic outcomes.
+Post-rollout checks require their own execution inside admitted app containers;
+they are not implemented by cloning a one-shot migration container.
+
+This primitive is not a deployment entrypoint and enables no new app capability.
+The lifecycle owner must still provide admission, retained dependencies, plan
+validation, ordered migration sequencing, status-probe interpretation and
+operator recovery before migration-bearing apps can be accepted. Existing
+HTTP admission continues to reject migration and worker declarations.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

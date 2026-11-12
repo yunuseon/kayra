@@ -228,3 +228,35 @@ was three nonterminal tasks. Raw evidence is retained locally at
 snapshots are `/tmp/kayra-cancellation-component.json.overlap.native.json`.
 These checks extend the HTTP subset; migrations and full lifecycle completion
 remain subsequent work.
+
+## Isolated one-shot interruption checks
+
+`one-shot.mjs run <new-results-directory> <app-owned-web-image-digest>` runs
+four disposable jobs, killing the coordinator process after Create, before
+Start dispatch, after Start acknowledgement and after fencing acknowledgement.
+Run it with the staged source's Node and dependencies on an isolated lab VM.
+The image must contain `sh` and use the local registry's `<app>/web@sha256:…`
+namespace. Jobs use 64 MiB/100 millicores, no network or mounts, and a fixed
+60-second deadline. A never-started container reserves each job's stable name
+after its exact ID is removed; the probe demonstrates late Start receives 404
+and late Create conflicts. Production barriers remain retained. The probe
+removes only its own barriers after every dispatch has settled.
+
+Every completed job must have exactly one native Start event. The interrupted
+pre-start job must have zero; its semantic outcome remains unknown. The
+results include synchronized journals, normalized traces, Docker events, exact
+image/Engine/API/Node versions and unchanged deadlines. Failures retain their
+source and jobs. These are component checks for the job primitive, without
+application admission or migration rollout integration. `http-coordinator.yml`
+now runs them with its app-owned fixture image, fetches the summary and raw tar
+archive before successful source cleanup, and the upgrade lab preserves both.
+
+On 2026-11-12 all four corrected checkpoints passed against Engine 29.9.3,
+API 1.56 and Node 24.22.1, using the HTTP component's pinned BusyBox image
+`localhost:5000/coordinator-lab-28130d1f10774fe3a093107efb3828bf/web@sha256:5d0cfdad46188b05682bfa22f79d4933134db5eef2606b2904a32ef980e66edf`.
+Raw journals, traces, native events and source provenance are preserved at
+`/tmp/kayra-jobs-fixed-evidence/` and its adjacent `.tar`. A first integrated
+run incorrectly assumed that this BusyBox image contained Node. It preserved
+the unstarted attempt as unknown; its failed source remains at
+`/var/lib/kayra/swarm/coordinator-source-_j_rxj3_` in the kept lab VM. The
+portable `sh` fixture command corrected that lab failure.

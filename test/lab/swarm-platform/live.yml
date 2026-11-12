@@ -73,3 +73,53 @@
         mode: "0600"
       delegate_to: localhost
       become: false
+
+    - name: Install the native adapter plan fixture
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/ci/tests/swarm-http/native-plan.json"
+        dest: /var/lib/kayra/swarm/lab-native-plan.json
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Copy public fixture inputs into the existing deployer
+      ansible.builtin.command:
+        argv: [docker, compose, cp, "{{ item.source }}", "deployer:{{ item.target }}"]
+        chdir: /opt/platform
+      loop:
+        - {source: /var/lib/kayra/swarm/lab-native-plan.json, target: /tmp/kayra-lab-native-plan.json}
+        - {source: /var/lib/kayra/swarm/lab-ca.pem, target: /tmp/kayra-lab-ca.pem}
+      changed_when: true
+
+    - name: Exercise the typed native adapter in the existing deployer
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - -e
+          - KAYRA_LAB_SOURCE_ROOT=/opt/kayra
+          - -e
+          - KAYRA_LAB_NATIVE_PLAN=/tmp/kayra-lab-native-plan.json
+          - -e
+          - KAYRA_LAB_CA=/tmp/kayra-lab-ca.pem
+          - -e
+          - KAYRA_LAB_AUTHORITY=/run/kayra-platform/swarm.json
+          - -e
+          - "KAYRA_LAB_ADDRESS={{ ansible_host }}"
+          - deployer
+          - node
+          - --input-type=module
+        stdin: "{{ lookup('ansible.builtin.file', kayra_root ~ '/test/lab/swarm-platform/native-adapter.mjs') }}"
+        chdir: /opt/platform
+      register: native_adapter
+      changed_when: true
+
+    - name: Retain the native adapter result
+      ansible.builtin.copy:
+        content: "{{ native_adapter.stdout }}\n"
+        dest: "{{ report_path }}.adapter.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

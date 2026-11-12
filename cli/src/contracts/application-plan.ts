@@ -7,7 +7,7 @@ import { parseRollout, validateAdmission } from "./rollout.ts";
 import { admitSwarmGrants, parseSwarmAuthority, parseSwarmGrants } from "./swarm-authority.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const seconds = positive.max(86400);
+const seconds = positive.max(300);
 const text = z.string().max(65536).refine((value) => !value.includes("\0"));
 const key = z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/);
 const serviceName = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
@@ -16,14 +16,16 @@ const binding = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("configuration"), key }).strict(),
   z.object({ kind: z.literal("secret"), key }).strict(),
 ]);
+const argument = z.string().max(4096).refine((value) => !value.includes("\0") && !value.includes("$"));
+const words = z.array(argument).min(1).max(128).refine((value) => value[0] !== "");
 const service = z.object({
-  image: z.string(), environment: z.record(key, binding), command: z.array(text).max(256).nullable(), entrypoint: z.array(text).max(256).nullable(),
+  image: z.string(), environment: z.record(key, binding), command: words.nullable(), entrypoint: words.nullable(),
   resources: z.object({ memoryBytes: positive, reserveMemoryBytes: positive, nanoCpus: positive, reserveNanoCpus: positive }).strict(),
-  health: z.object({ command: z.array(text).min(1).max(256), intervalSeconds: seconds, timeoutSeconds: seconds,
-    startPeriodSeconds: z.number().int().min(0).max(86400), retries: positive.max(100) }).strict(),
+  health: z.object({ command: words, intervalSeconds: seconds, timeoutSeconds: seconds,
+    startPeriodSeconds: z.number().int().min(0).max(300), retries: positive.max(100) }).strict(),
   stopGraceSeconds: seconds,
 }).strict();
-const path = z.string().max(2048).regex(/^\/[^\r\n\0]*$/);
+const path = z.string().max(2048).regex(/^\/[a-zA-Z0-9_./%~-]*$/);
 const schema = z.object({
   version: z.literal(1), runtime: z.literal("swarm"), app: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/),
   registration: z.unknown(), commit: z.string().regex(/^[0-9a-f]{40}$/), artifact: z.string().regex(/^[0-9a-f]{64}$/),

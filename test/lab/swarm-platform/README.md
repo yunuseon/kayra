@@ -310,3 +310,9 @@ Engine 29.9.3/API 1.56 and Node 24.22.1. Its log is
 `/tmp/kayra-cold-race-native.log`, and exported evidence is retained at
 `/tmp/kayra-cold-race-evidence/`. The coordinator playbook and upgrade lab retain
 `.cold.json` and `.cold.tar` before source cleanup.
+
+The combined HTTP/job/probe/cold-image component passed all 25 tasks, including
+evidence export and successful-source cleanup. The result is
+`/tmp/kayra-cold-component.json` with `.json.cold.json` and `.json.cold.tar`;
+the run log is `/tmp/kayra-cold-component.log`. Full CLI validation passed 560
+tests with one skip; all 34 focused Linux checks passed.

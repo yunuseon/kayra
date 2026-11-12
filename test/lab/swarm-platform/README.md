@@ -68,3 +68,12 @@ RPC. Desired verification recognizes a restored task template even when Swarm
 retains newer service-level action metadata; routing and actual task inputs must
 still match exactly. These checks remain isolated prerequisites for lifecycle
 integration.
+
+The platform probe builds the existing deployer image with the explicit
+`KAYRA_REGISTRATION_LAB=true` dependency flag before running contract-aware
+adapter checks. It recreates only that existing service, with no registration
+control environment or extra socket holder. This makes the probe independent
+of the later indexed-registration phase. The initial full upgrade exposed this
+missing prerequisite after all legacy deployment checks had passed. Public
+fixture files are readable by the existing unprivileged deployer user after
+`docker compose cp`; they contain declarations, not materialized secrets.

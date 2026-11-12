@@ -9,7 +9,7 @@ import { readPublicRegistrationGeneration } from "../platform/public-registratio
 import { registered } from "../platform/legacy-registration.ts";
 import { owner, runId, sha, type Sha } from "../../deployer/brand.ts";
 import type { Argv } from "../../contracts/process.ts";
-import { body, json, send } from "../../deployer/http/http.ts";
+import { body, json, send } from "../../lib/http.ts";
 import { page, runPage } from "../../deployer/http/page.ts";
 import { spawnLines } from "../../deployer/process.ts";
 type Env = Readonly<Record<string, string>>;

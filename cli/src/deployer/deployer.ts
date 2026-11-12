@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { field, registered, registrations, type App } from "./app.ts";
 import { appName, appOwner, newRunId, type Owner } from "./brand.ts";
 import { builderResolve } from "./build/client.ts";
-import { json, send } from "./http/http.ts";
+import { json, send } from "../lib/http.ts";
 import { jobRequest, type Why } from "./runs/queue.ts";
 import type { Request } from "../contracts/legacy-work.ts";
 import { describe, empty, enqueue, finish, type Queue } from "../server/deployment/legacy-queue.ts";
@@ -301,7 +301,10 @@ export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
   const journal = await startWithLifecycle(join(s.platformDir, "lifecycle"), async () => {
     const observations = env["KAYRA_REGISTRATION_EVIDENCE_DIR"];
     const registration = observations === undefined ? undefined
-      : await (await import("./registration-startup.ts")).startRegistrationControl(s.platformDir, observations, env["KAYRA_PUBLIC_REGISTRATIONS_DIR"], s.builder, env["KAYRA_SWARM_AUTHORITY"], env["KAYRA_PRIVATE_REGISTRATIONS_DIR"], s.domain);
+      : await (await import("./registration-startup.ts")).startRegistrationControl({
+        platformDirectory: s.platformDir, registrationObservations: observations, publicRegistrations: env["KAYRA_PUBLIC_REGISTRATIONS_DIR"],
+        builderUrl: s.builder, swarmAuthority: env["KAYRA_SWARM_AUTHORITY"], privateRegistrations: env["KAYRA_PRIVATE_REGISTRATIONS_DIR"], domain: s.domain,
+      });
     if (registration !== undefined) process.once("exit", () => { void registration.close(); });
     abandonInterruptedRuns(runsDir(s), () => new Date().toISOString());
     createServer(pushHandler(s, gather)).listen(8090);

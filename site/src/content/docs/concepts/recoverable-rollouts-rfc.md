@@ -610,11 +610,28 @@ refused. The standing platform budget includes ambient legacy Compose workloads;
 it is an operator declaration, not a guarantee against global host exhaustion.
 
 These accounting methods are deliberately unavailable through registration
-control. Lifecycle ticket/fence authorization and native runtime reconciliation
-must be connected before they can authorize an application effect. Retained
+control. The internal HTTP path now binds a retained plan and request UUID to a ticket
+and lifecycle fence in one app-journal write, then records global admission
+using that original deadline. It persists exact native CAS intent only after
+matching admission. Native dispatch, convergence, promotion and recovery still
+need to be connected before an application effect can be authorized. Retained
 plans contain configuration identities and secret key references only. Rolling
 HTTP admission refuses changes to route, backend port or service identity,
 because a shared service VIP must continue routing the old tasks correctly.
+
+HTTP request recovery reads the already-retained immutable plan; it never
+reconstructs it from a moving branch or current platform settings. A lost
+acknowledgement returns the same request, ticket, action and deadline. Native
+intent replay returns `reconcile`, and replacing its expected Docker version
+is refused. Requested/desired and certified active/last-known-good references
+are separate fields; preparing or admitting a candidate creates no active proof.
+These internal interfaces have no control route and dispatch no workload writes.
+
+The current experimental HTTP journal bounds non-evicted request UUID history at
+1,024 entries per incarnation and refuses further requests at that limit. It
+never silently reuses an evicted UUID. Long-lived history compaction or separate
+immutable receipt storage must preserve that property before this limit can be
+relaxed. This is a storage guard, not a production-retention guarantee.
 
 ## Delivery and acceptance
 

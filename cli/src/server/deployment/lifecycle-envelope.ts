@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { err, ok } from "../../lib/result.ts";
 import { parseRegistrationGeneration } from "../../contracts/registration-generation.ts";
+import { parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
 
@@ -32,6 +33,7 @@ const shape = z.object({
   tickets: z.unknown(),
   registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]).default("compose") }).strict().optional(),
   registrationReceipt: z.object({ ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]), metadata: z.unknown() }).strict().optional(),
+  http: z.unknown().optional(),
   operations: z.array(z.object({ ticket: z.string().max(80), action: z.string().max(80), descriptor }).strict()).max(2),
 }).strict();
 
@@ -90,8 +92,22 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     return admitted.ok && admitted.value.status === "accepted";
   });
   if (!consistent) return err("invalid lifecycle envelope");
+  const http = parsed.data.http === undefined ? undefined : parseHttpState(parsed.data.http, tickets.value.app, tickets.value.incarnation);
+  if (http !== undefined && (!http.ok || receipt?.runtime !== "swarm")) return err("invalid Swarm HTTP envelope");
+  if (http?.ok) {
+    for (const request of http.value.requests) {
+      const lookup = lookupTicket(tickets.value, request.ticket);
+      const binding = admitTicket(tickets.value, request.ticket, { kind: "deploy", planDigest: request.plan });
+      if (!lookup.ok) return err("HTTP request has an unissued ticket");
+      if (terminalHttp(request.phase)) {
+        const outcome = request.phase === "succeeded" ? "success" : request.phase === "cancelled" ? "cancelled" : "failure";
+        if (lookup.value.status !== "expired" && (!binding.ok || binding.value.status !== "terminal" || binding.value.outcome !== outcome)) return err("HTTP receipt conflicts with ticket history");
+      } else if (!binding.ok || binding.value.status !== "accepted" || !operations.some((operation) => operation.ticket === request.ticket && operation.action === request.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === request.plan)) return err("HTTP request lacks lifecycle intent");
+    }
+  }
   operations.forEach((operation) => { Object.freeze(operation.descriptor); Object.freeze(operation); });
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
-    ...(receipt === undefined ? {} : { registrationReceipt: receipt }) }));
+    ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
+    ...(http?.ok ? { http: http.value } : {}) }));
 };

@@ -198,3 +198,11 @@ receipt before and after restart. The unit recovery suite advances more than
 128 subsequent terminal tickets and reopens the app index: registration policy
 and historical registration retries must remain available after ticket eviction.
 A missing certificate after eviction requires intervention.
+
+The HTTP journal tests bind a request, ticket and lifecycle fence atomically,
+retain its normalized plan, and acquire host-wide capacity at the original
+90-second deadline before recording a native service/version intent. They cover
+lost acknowledgements, plan corruption, expired admission and SIGKILL after the
+native intent is durable. Recovery returns `reconcile` and cannot refresh the
+Docker version. These tests do not dispatch a native write or promote a release;
+those paths remain subsequent integration work.

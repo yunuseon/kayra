@@ -9,7 +9,10 @@ import type { OperationJournal } from "./operation.ts";
 import { parseRegistrationObservation } from "../../contracts/registration-generation.ts";
 import { claimJournal } from "./journal-claim.ts";
 import { parseLifecycleEnvelope, registrationGenerationId } from "./lifecycle-envelope.ts";
-import { beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
+import { z } from "zod";
+import { parseHttpNativeStep } from "./http-state.ts";
+import type { HttpNativeStep } from "./http-state.ts";
+import { beginLifecycleWork, beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
 
 type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
@@ -136,6 +139,69 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         const actionId = lifecycleActionId(fence.value, 1);
         await persist({ ...current, created: true, fence: fence.value, tickets: admitted.value.state, operations: [{ ticket, action: actionId, descriptor }] });
         return Object.freeze({ status: "new" as const, actionId });
+      });
+    },
+    /** Internal lifecycle owner only. A prepared request cannot dispatch effects. */
+    prepareHttp: (input: { readonly request: string; readonly plan: string; readonly commit: string; readonly service: string }, now: number) => {
+      const parsed = z.object({ request: z.uuid(), plan: z.string().regex(/^[0-9a-f]{64}$/), commit: z.string().regex(/^[0-9a-f]{40}$/), service: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/) }).strict().safeParse(input);
+      if (!parsed.success || !Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + 90_000)) return Promise.reject(new Error("invalid HTTP request or clock"));
+      const requested = Object.freeze(parsed.data);
+      return serial(async () => {
+        const current = await required();
+        if (current.registrationReceipt?.runtime !== "swarm" || current.fence?.lifecycle.phase !== "registered") throw new Error("verified Swarm registration required");
+        const existing = current.http?.requests.find((item) => item.request === requested.request);
+        if (existing !== undefined) {
+          if (existing.plan !== requested.plan || existing.commit !== requested.commit || existing.service !== requested.service) throw new Error("HTTP request identity has conflicting intent");
+          return existing;
+        }
+        if ((current.http?.requests.length ?? 0) >= 1024) throw new Error("HTTP request history exhausted; intervention required");
+        const fence = beginLifecycleWork(current.fence, "deploy");
+        const reserved = reserveTicket(current.tickets);
+        if (!fence.ok || !reserved.ok) throw new Error("HTTP lifecycle is busy or exhausted");
+        const descriptor = Object.freeze({ kind: "deploy" as const, planDigest: requested.plan });
+        const admitted = admitTicket(reserved.value.state, reserved.value.ticket, descriptor);
+        if (!admitted.ok || admitted.value.status !== "new") throw new Error("invalid HTTP ticket allocation");
+        const action = lifecycleActionId(fence.value, fence.value.nextAction - 1);
+        const operation = { ...requested, ticket: reserved.value.ticket, action, deadline: now + 90_000,
+          previous: current.http?.active ?? null, recoveryDeadline: null, phase: "prepared", reason: null, steps: [], verified: null };
+        const next = await persist({ ...current, fence: fence.value, tickets: admitted.value.state,
+          operations: [...current.operations, { ticket: reserved.value.ticket, action, descriptor }],
+          http: { version: 1, app: current.tickets.app, incarnation: current.tickets.incarnation,
+            requested: requested.plan, desired: requested.plan, active: current.http?.active ?? null, lastKnownGood: current.http?.lastKnownGood ?? null,
+            requests: [...(current.http?.requests ?? []), operation] },
+        });
+        const saved = next.http?.requests.find((item) => item.request === requested.request);
+        if (saved === undefined) throw new Error("HTTP intent was not retained");
+        return saved;
+      });
+    },
+    /** Call only after matching host-wide admission is durable. */
+    admitHttp: (ticket: string) => serial(async () => {
+      const current = await required();
+      const request = current.http?.requests.find((item) => item.ticket === ticket);
+      if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+      if (request.phase === "admitted") return request;
+      if (request.phase !== "prepared") throw new Error("HTTP action cannot be admitted in this phase");
+      const next = await persist({ ...current, http: { ...current.http, requests: current.http.requests.map((item) => item === request ? { ...request, phase: "admitted" } : item) } });
+      return next.http?.requests.find((item) => item.ticket === ticket);
+    }),
+    /** Persist exact native CAS authority before dispatch; replay must observe first. */
+    recordHttpStep: (ticket: string, input: HttpNativeStep) => {
+      const parsed = parseHttpNativeStep(input);
+      if (!parsed.ok) return Promise.reject(new Error(parsed.error));
+      const step = parsed.value;
+      return serial(async () => {
+        const current = await required();
+        const request = current.http?.requests.find((item) => item.ticket === ticket);
+        if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+        const existing = request.steps.find((item) => item.effect === step.effect);
+        if (existing !== undefined) {
+          if (JSON.stringify(existing) !== JSON.stringify(step)) throw new Error("native HTTP intent conflicts; versions cannot be refreshed");
+          return Object.freeze({ status: "reconcile" as const, request });
+        }
+        if (request.phase !== "admitted" || step.effect !== "apply" || step.plan !== request.plan || step.deadline !== request.deadline) throw new Error("native HTTP intent is outside admitted phase");
+        const next = await persist({ ...current, http: { ...current.http, requests: current.http.requests.map((item) => item === request ? { ...request, phase: "applying", steps: [...request.steps, step] } : item) } });
+        return Object.freeze({ status: "new" as const, request: next.http?.requests.find((item) => item.ticket === ticket) });
       });
     },
     /** Only the injected trusted observer may establish an applied outcome. */

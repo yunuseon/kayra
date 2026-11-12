@@ -7,6 +7,7 @@ import { z } from "zod";
 import { parseApplicationPlan } from "../../contracts/application-plan.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
+import type { HttpNativeStep } from "./http-state.ts";
 import type { ResourceCharge } from "./resource-book.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
@@ -207,6 +208,75 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (artifact === undefined || artifact === null) throw new Error("no retained build for this commit; prepare its artifact first");
       return ports.preview(registration, runtime, commit, artifact);
     }),
+    prepareHttpRollout: (app: string, request: string, commit: string, ports: HttpPlanPort & Pick<BuildPorts, "now" | "retain">) => useReady(app, async (store) => {
+      if (!z.uuid().safeParse(request).success || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("HTTP rollout requires a request identity and full commit");
+      const envelope = await store.read();
+      const registration = verifiedRegistration(app, envelope);
+      if (envelope?.registrationAllocation?.runtime !== "swarm") throw new Error("HTTP rollout requires the persisted Swarm runtime");
+      const existing = envelope.http?.requests.find((item) => item.request === request);
+      if (existing !== undefined) {
+        if (existing.commit !== commit) throw new Error("HTTP request identity has conflicting commit");
+        return existing;
+      }
+      if (envelope.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active !== null) throw new Error("HTTP lifecycle is busy or fenced");
+      const state = await readIndex();
+      const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
+      const artifact = state.builds.find((build) => build.id === id)?.artifact;
+      if (artifact === undefined || artifact === null) throw new Error("HTTP rollout requires a retained build");
+      const checked = parseApplicationPlan(await ports.preview(registration, "swarm", commit, artifact));
+      if (!checked.ok) throw new Error(checked.error);
+      const plan = checked.value;
+      if (JSON.stringify(plan.registration) !== JSON.stringify(registration) || plan.commit !== commit || plan.artifact !== artifact) throw new Error("HTTP plan ownership mismatch");
+      const content = JSON.stringify(plan);
+      const digest = createHash("sha256").update(content).digest("hex");
+      if (await ports.retain(content) !== digest) throw new Error("HTTP plan retention mismatch");
+      const service = Object.keys(plan.services)[0];
+      if (service === undefined) throw new Error("HTTP plan has no service");
+      return store.prepareHttp({ request, plan: digest, commit, service }, ports.now());
+    }),
+    /** Reconcile intent against the exact retained plan, never a current branch or settings snapshot. */
+    admitHttpRollout: (app: string, ticket: string, ports: HostObserver & Pick<BuildPorts, "read" | "now">) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const registration = verifiedRegistration(app, envelope);
+      const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
+      if (operation?.phase !== "prepared") {
+        if (operation?.phase === "admitted") return operation;
+        throw new Error("HTTP operation is not prepared for admission");
+      }
+      const loadPlan = async (digest: string) => {
+        const content = await ports.read(digest);
+        if (createHash("sha256").update(content).digest("hex") !== digest) throw new Error("retained HTTP plan integrity failed");
+        const input: unknown = JSON.parse(content);
+        const parsed = parseApplicationPlan(input);
+        if (!parsed.ok || JSON.stringify(parsed.value.registration) !== JSON.stringify(registration)) throw new Error("retained HTTP plan authority mismatch");
+        return parsed.value;
+      };
+      const plan = await loadPlan(operation.plan);
+      if (plan.commit !== operation.commit || Object.keys(plan.services)[0] !== operation.service) throw new Error("retained HTTP plan request mismatch");
+      const amount = Object.values(plan.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
+      const previousPlan = operation.previous === null ? null : await loadPlan(operation.previous.plan);
+      if (previousPlan !== null && (JSON.stringify(previousPlan.routes) !== JSON.stringify(plan.routes) || JSON.stringify(Object.keys(previousPlan.services)) !== JSON.stringify(Object.keys(plan.services)))) throw new Error("rolling HTTP requires unchanged service and routing policy");
+      const previousAmount = previousPlan === null ? null : Object.values(previousPlan.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
+      const observation = await ports.observeHost(plan.host);
+      await serialIndex(async () => {
+        const current = await readIndex();
+        const previous = operation.previous === null || previousAmount === null ? null : { plan: operation.previous.plan, budget: previousAmount };
+        const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence: Number(operation.action.split(":")[1]), previous,
+          target: { plan: operation.plan, budget: amount }, peak: { cpu: amount.cpu + (previous?.budget.cpu ?? 0), memory: amount.memory + (previous?.budget.memory ?? 0) }, deadline: operation.deadline, result: "pending" };
+        const decision = reserveResources(current.resources, plan.host, observation, intent, ports.now());
+        if (!decision.ok) throw new Error(decision.error);
+        await journal.write({ ...current, resources: decision.value });
+      });
+      return store.admitHttp(ticket);
+    }),
+    recordHttpNativeIntent: (app: string, ticket: string, step: HttpNativeStep) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
+      const resources = (await readIndex()).resources?.charges.find((item) => item.app === app);
+      if (operation === undefined || resources?.result !== "pending" || resources.incarnation !== envelope?.tickets.incarnation || resources.sequence !== Number(operation.action.split(":")[1]) || resources.target.plan !== operation.plan || resources.deadline !== operation.deadline) throw new Error("HTTP native effect has no matching durable admission");
+      return store.recordHttpStep(ticket, step);
+    }),
+    httpOperation: (app: string, request: string) => useReady(app, async (store) => (await store.read())?.http?.requests.find((item) => item.request === request)),
     /** Internal owner interface, deliberately not exposed by the registration controller.
      * Reservation is not lifecycle authorization or proof of runtime convergence. */
     reserveHttpResources: (app: string, sequence: number, commit: string, ports: HttpPlanPort & HostObserver & Pick<BuildPorts, "now" | "retain" | "read">) => useReady(app, async (store) => {

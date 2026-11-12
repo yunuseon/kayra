@@ -6,6 +6,8 @@ import tseslint from "typescript-eslint";
 // Types taken as ReadonlyDeep wherever they sit: inside another (readonly Setting[], a Record of
 // Operation) or in an inferred return, which ignoreTypePattern never reaches (it skips a type only where it is named).
 // Setting and Operation hold Zod schemas: immutable once built, but classes the rule cannot see into.
+const serverImplementations = ["**/deployer/**", ...["deployment", "runtime", "platform", "builder", "composition"].map((boundary) => `**/server/${boundary}/**`)];
+
 const immutableHere = [
   { type: { from: "file", name: "Setting" }, to: "ReadonlyDeep" },
   { type: { from: "file", name: "Operation" }, to: "ReadonlyDeep" },
@@ -120,11 +122,11 @@ export default defineConfig(
   ...(
     [
       ["src/core/**/*.ts", ["**/clients/**", "**/deployer/**", "**/server/**", "**/main.ts", "**/serve.ts"]],
-      ["src/clients/cli/**/*.ts", ["**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
-      ["src/clients/api/**/*.ts", ["**/clients/cli/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
-      ["src/clients/ui/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
-      ["src/clients/mcp/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"]],
-      ["src/clients/wire/**/*.ts", ["**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/cli/**/*.ts", [...serverImplementations, "**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/api/**/*.ts", [...serverImplementations, "**/clients/cli/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/ui/**/*.ts", [...serverImplementations, "**/clients/cli/**", "**/clients/api/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/mcp/**/*.ts", [...serverImplementations, "**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/main.ts", "**/serve.ts"]],
+      ["src/clients/wire/**/*.ts", [...serverImplementations, "**/clients/cli/**", "**/clients/api/**", "**/clients/ui/**", "**/clients/mcp/**", "**/main.ts", "**/serve.ts"]],
       ["src/contracts/**/*.ts", ["**/server/**", "**/deployer/**", "**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"]],
       // The deployer's image installs no packages: of lib/, only what imports none.
       ["src/deployer/**/*.ts", ["**/core/**", "**/clients/**", "**/main.ts", "**/serve.ts", "**/lib/schema.ts", "**/lib/yaml.ts"]],
@@ -148,14 +150,14 @@ export default defineConfig(
     // Platform code consumes public facts and commands, never coordinator internals.
     files: ["src/server/platform/**/*.ts"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [{ group: ["**/deployer/**", "**/deployment/**", "**/core/**", "**/clients/**"], message: "Platform code must use published contracts and commands, not component internals." }] }],
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/deployer/**", "**/deployment/**", "**/composition/**", "**/runtime/**", "**/core/**", "**/clients/**"], message: "Platform code must use published contracts and commands, not component internals." }] }],
     },
   },
   {
     // Builder code does not choose or invoke workload runtime adapters.
     files: ["src/server/builder/**/*.ts"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [{ group: ["**/runtime/**", "**/deployer/runs/**", "**/deployer/app.ts", "**/deployer/app.js", "**/deployer/build/compose.ts", "**/deployer/build/compose.js"], message: "Builders produce bundles; workload runtime operations belong to adapters." }] }],
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/runtime/**", "**/composition/**", "**/deployer/runs/**", "**/deployer/app.ts", "**/deployer/app.js", "**/deployer/build/compose.ts", "**/deployer/build/compose.js"], message: "Builders produce bundles; workload runtime operations belong to adapters." }] }],
       "no-restricted-syntax": ["error", { selector: "ImportExpression", message: "Builders must use statically checked imports." }],
     },
   },
@@ -163,7 +165,7 @@ export default defineConfig(
     // Runtime adapters consume normalized inputs, not policy or other components' internals.
     files: ["src/server/runtime/**/*.ts"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [{ group: ["**/deployer/**", "**/deployment/**", "**/platform/**", "**/core/**", "**/clients/**"], message: "Runtime adapters must use normalized inputs rather than other components' internals." }] }],
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/deployer/**", "**/deployment/**", "**/platform/**", "**/builder/**", "**/composition/**", "**/core/**", "**/clients/**"], message: "Runtime adapters must use normalized inputs rather than other components' internals." }] }],
     },
   },
   {
@@ -176,7 +178,7 @@ export default defineConfig(
           { name, message: "Use a typed runtime port." },
           { name: `node:${name}`, message: "Use a typed runtime port." },
         ]),
-        patterns: [{ group: ["**/deployer/**", "**/builder/**", "**/platform/**", "**/runtime/**", "**/core/**", "**/clients/**"], message: "Use a typed port or shared contract rather than component internals." }],
+        patterns: [{ group: ["**/deployer/**", "**/builder/**", "**/platform/**", "**/runtime/**", "**/composition/**", "**/core/**", "**/clients/**"], message: "Use a typed port or shared contract rather than component internals." }],
       }],
       "no-restricted-syntax": ["error",
         { selector: "ImportExpression", message: "Coordinator imports must be statically checked." },
@@ -187,6 +189,12 @@ export default defineConfig(
       "no-restricted-properties": ["error", ...["getBuiltinModule", "binding", "_linkedBinding", "dlopen", "mainModule"].map((property) => ({
         object: "process", property, message: "Use a typed port and statically checked imports.",
       }))],
+    },
+  },
+  {
+    files: ["src/server/composition/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["**/core/**", "**/clients/**"], message: "Composition assembles server ports; fleet interpretation and presentation stay outside." }] }],
     },
   },
   {

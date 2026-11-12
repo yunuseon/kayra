@@ -109,7 +109,7 @@ model {
       description 'Untrusted immutable bundle; no Docker socket or app secrets'
     }
     trusted = service 'Existing privileged server process' {
-      description 'One composition root assembles trusted modules; these are code boundaries, not process isolation'
+      description 'server/composition assembles trusted typed ports; these are code boundaries, not process isolation'
       platform = tool 'Platform' {
         description 'Host, grants, secrets and routing policy; consumes published lifecycle projections'
       }

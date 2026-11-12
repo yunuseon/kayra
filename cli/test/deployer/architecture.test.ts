@@ -52,3 +52,23 @@ test("builder cannot bypass static import restrictions with dynamic imports", as
   await refused("src/server/builder/builder.ts", 'void import("../runtime/compose.ts");', "no-restricted-syntax");
   await refused("src/server/builder/builder.ts", 'const path = "../runtime/compose.ts"; void import(path);', "no-restricted-syntax");
 });
+
+
+test("components cannot import the composition root back into their decision logic", async () => {
+  for (const [boundary, file] of [["platform", "cron.ts"], ["builder", "builder.ts"], ["runtime", "compose.ts"], ["deployment", "journal.ts"]] as const) {
+    await refused(`src/server/${boundary}/${file}`, 'import "../composition/registration.ts";');
+  }
+  await refused("src/server/composition/registration.ts", 'import "../../core/fleet/parse.ts";');
+  await refused("src/server/composition/registration.ts", 'import "../../clients/cli/terminal.ts";');
+});
+
+
+test("clients use published contracts rather than server implementation modules", async () => {
+  for (const [client, file] of [["cli", "terminal.ts"], ["api", "api.ts"], ["ui", "opener.ts"], ["mcp", "server.ts"], ["wire", "contract.ts"]] as const) {
+    for (const boundary of ["composition", "deployment", "platform", "runtime", "builder"]) {
+      await refused(`src/clients/${client}/${file}`, `import "../../server/${boundary}/example.ts";`);
+    }
+  }
+  const [sdk] = await eslint.lintText('import { serveStdio } from "@modelcontextprotocol/server/stdio";', { filePath: "src/clients/mcp/server.ts" });
+  ok(sdk !== undefined && !sdk.messages.some((message) => message.ruleId === "no-restricted-imports"));
+});

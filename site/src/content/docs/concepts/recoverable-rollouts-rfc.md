@@ -56,6 +56,15 @@ the existing privileged deployer process. No second Docker-socket holder and no
 new internal RPC service are introduced. The platform owns routing policy;
 app-generated routing labels do not become authority over shared routing.
 
+Trusted experimental registration/build/plan wiring now lives in
+`cli/src/server/composition/registration.ts`. The legacy startup path is a thin
+compatibility export, and registration control receives named typed ports rather
+than positional optional capabilities. Composition remains inside the existing
+privileged deployer; it creates no new daemon, socket holder or internal RPC.
+Import rules reject dependencies from component logic back into composition,
+from clients into server implementations, and from composition into fleet/client
+policy. The MCP SDK's own server package remains a supported client dependency.
+
 ## Contracts and admission
 
 A registration carries its selected runtime and grants. The managed app

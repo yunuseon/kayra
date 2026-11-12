@@ -284,10 +284,10 @@ test("control refuses Swarm reservation without a platform capability and publis
   const root = await fixture(t);
   const index = await createLifecycleAppIndex(root, (identity) => Promise.resolve({ ...identity, status: "applied" }));
   try {
-    const disabled = registrationControl(index, () => Promise.resolve(true));
+    const disabled = registrationControl({ index, canRegister: () => Promise.resolve(true) });
     await assert.rejects(disabled("/registration/reserve", { app: "shop", generation, runtime: "swarm" }), /not enabled/);
     await assert.rejects(index.registrationPolicy("shop"), /not ready/);
-    const enabled = registrationControl(index, () => Promise.resolve(true), undefined, () => Promise.resolve(true));
+    const enabled = registrationControl({ index, canRegister: () => Promise.resolve(true), runtimeEnabled: () => Promise.resolve(true) });
     const reserved = await enabled("/registration/reserve", { app: "shop", generation, runtime: "swarm" });
     assert.ok(reserved !== undefined && "ticket" in reserved);
     await assert.rejects(enabled("/registration/policy", { app: "shop" }), /not been verified/);

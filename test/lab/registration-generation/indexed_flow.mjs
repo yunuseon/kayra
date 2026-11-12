@@ -56,7 +56,7 @@ with trusted_root(sys.argv[1]) as root:
 const observe = (root) => registrationObservation(join(root, "platform", "observations"));
 
 async function localControl(root, index) {
-  const handler = deployerControlHandler({ PLATFORM_DIR: join(root, "legacy") }, registrationControl(index, async (name) => name === app));
+  const handler = deployerControlHandler({ PLATFORM_DIR: join(root, "legacy") }, registrationControl({ index, canRegister: async (name) => name === app }));
   const server = createServer(handler).listen(8091, "127.0.0.1");
   await once(server, "listening");
   const main = fileURLToPath(new URL("../../../cli/src/deployer/main.ts", import.meta.url));

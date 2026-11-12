@@ -8,7 +8,7 @@ import { isOperation, operation } from "../../core/operations/catalog.ts";
 import { contextFor, invocation, isQuery, isStream, stream } from "../../core/operations/dispatch.ts";
 import type { Network, Tofu } from "../../core/status/ports.ts";
 import { follow } from "../../core/status/updates.ts";
-import { json, send } from "../../deployer/http/http.ts";
+import { json, send } from "../../lib/http.ts";
 import { facts } from "./commands.ts";
 import type * as wire from "../wire/contract.gen.ts";
 import { catalog } from "../wire/contract.ts";

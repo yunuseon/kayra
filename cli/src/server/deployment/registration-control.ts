@@ -16,7 +16,14 @@ const ticketRequest = request.extend({ ticket: z.string().max(80) });
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
   "previewPlan" | "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
-export const registrationControl = (index: AppIndex, canRegister: (app: string) => Promise<boolean>, builds?: BuildPorts, runtimeEnabled: (runtime: Runtime) => Promise<boolean> = (runtime) => Promise.resolve(runtime === "compose"), plans?: HttpPlanPort) => async (path: string, input: unknown) => {
+export type RegistrationPorts = {
+  readonly index: AppIndex;
+  readonly canRegister: (app: string) => Promise<boolean>;
+  readonly builds?: BuildPorts | undefined;
+  readonly runtimeEnabled?: ((runtime: Runtime) => Promise<boolean>) | undefined;
+  readonly plans?: HttpPlanPort | undefined;
+};
+export const registrationControl = ({ index, canRegister, builds, runtimeEnabled = (runtime) => Promise.resolve(runtime === "compose"), plans }: RegistrationPorts) => async (path: string, input: unknown) => {
   switch (path) {
     case "/registration/preview": {
       const parsed = z.object({ app: z.string().regex(names.app.pattern), commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().safeParse(input);

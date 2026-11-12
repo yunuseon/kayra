@@ -61,3 +61,10 @@ The result is written beside the report as `.adapter.json`. Successful disposabl
 services are removed; failures print their service identity and cleanup command.
 This proves adapter behavior, not coordinator recovery or HTTP continuity under
 load. No registered application is changed by this probe.
+
+Effect-step coverage keeps the same logical removal action across `remove` and
+`scrub`, and proves that a zero-replica reservation rejects a delayed first-create
+RPC. Desired verification recognizes a restored task template even when Swarm
+retains newer service-level action metadata; routing and actual task inputs must
+still match exactly. These checks remain isolated prerequisites for lifecycle
+integration.

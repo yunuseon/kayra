@@ -12,7 +12,7 @@ import { parseRegistrationObservation } from "../../contracts/registration-gener
 import { claimJournal } from "./journal-claim.ts";
 import { parseLifecycleEnvelope, registrationGenerationId } from "./lifecycle-envelope.ts";
 import { z } from "zod";
-import { parseHttpNativeStep } from "./http-state.ts";
+import { httpReleasePlan, parseHttpNativeStep, terminalHttp } from "./http-state.ts";
 import type { HttpNativeStep, HttpRecovery } from "./http-state.ts";
 import { beginLifecycleWork, beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
@@ -157,8 +157,12 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const preparation = initialRolloutPreparation(checked.value, request, now);
       const current = await required(); const existing = current.rollout;
       if (existing !== undefined) {
-        if (existing.preparation.run !== request || existing.preparation.plan !== preparation.plan) throw new Error("rollout request identity conflicts or lifecycle is busy");
-        return existing;
+        if (existing.preparation.run === request) {
+          if (existing.preparation.plan !== preparation.plan) throw new Error("rollout request identity conflicts"); return existing;
+        }
+        const previous = current.http?.requests.find((item) => item.request === existing.preparation.run);
+        if (previous === undefined || !terminalHttp(previous.phase)) throw new Error("complete rollout lifecycle is busy");
+        if ((current.rollouts?.length ?? 0) >= 1024) throw new Error("complete rollout history exhausted; intervention required");
       }
       if (current.registrationReceipt?.runtime !== "swarm" || current.fence?.lifecycle.phase !== "registered" ||
         JSON.stringify(current.registrationReceipt.metadata) !== JSON.stringify(checked.value.workload.registration)) throw new Error("complete rollout requires matching verified Swarm registration");
@@ -170,6 +174,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const action = lifecycleActionId(fence.value, fence.value.nextAction - 1);
       const next = await persist({ ...current, fence: fence.value, tickets: accepted.value.state,
         operations: [...current.operations, { ticket: reserved.value.ticket, action, descriptor }],
+        ...(existing === undefined ? {} : { rollouts: [...(current.rollouts ?? []), existing] }),
         rollout: { ticket: reserved.value.ticket, action, commit: checked.value.workload.commit, admissionDeadline: now + 90_000, admitted: false, preparation } });
       if (next.rollout === undefined) throw new Error("complete rollout intent was not retained"); return next.rollout;
     }),
@@ -195,6 +200,22 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
           await persist({ ...state, rollout: { ...state.rollout, preparation: checked } });
         } };
       return rolloutPreparation(view, ports).tick();
+    }),
+    /** The parent hands its existing action to HTTP; no new ticket, lease or deadline is minted. */
+    handoffRollout: (ticket: string, service: string, now: number) => serial(async () => {
+      const current = await required(); const owner = current.rollout; const preparation = owner?.preparation;
+      if (owner?.ticket !== ticket || !owner.admitted || preparation?.phase !== "ready" || preparation.httpDeadline === null ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== owner.action) throw new Error("rollout is not ready for HTTP handoff");
+      const existing = current.http?.requests.find((item) => item.request === preparation.run);
+      if (existing !== undefined) return existing;
+      if (!Number.isSafeInteger(now) || now < preparation.httpDeadline - 90_000 || now >= preparation.httpDeadline) throw new Error("HTTP handoff deadline expired or clock is unavailable");
+      if ((current.http?.requests.length ?? 0) >= 1024) throw new Error("HTTP request history exhausted; intervention required");
+      const request = { request: preparation.run, ticket, action: owner.action, plan: preparation.workload, deployment: preparation.plan, commit: owner.commit,
+        service, deadline: preparation.httpDeadline, previous: current.http?.active ?? null, recoveryDeadline: null, phase: "admitted", reason: null, steps: [], verified: null };
+      const next = await persist({ ...current, http: { version: 1, app: current.tickets.app, incarnation: current.tickets.incarnation,
+        requested: preparation.plan, desired: preparation.plan, active: current.http?.active ?? null, lastKnownGood: current.http?.lastKnownGood ?? null,
+        requests: [...(current.http?.requests ?? []), request] } });
+      const saved = next.http?.requests.find((item) => item.request === preparation.run); if (saved === undefined) throw new Error("HTTP handoff was not retained"); return saved;
     }),
     /** Internal lifecycle owner only. A prepared request cannot dispatch effects. */
     prepareHttp: (input: { readonly request: string; readonly plan: string; readonly commit: string; readonly service: string }, now: number) => {
@@ -267,7 +288,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "cancelled");
         if (!fence.ok || !tickets.ok) throw new Error("invalid unstarted HTTP cancellation");
         const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
-          http: { ...http, desired: request.previous?.plan ?? null, requests: http.requests.map((item) => item === request ? { ...request, phase: "cancelled", cancelRequestedAt: now, reason: "cancelled",
+          http: { ...http, desired: request.previous === null ? null : httpReleasePlan(request.previous), requests: http.requests.map((item) => item === request ? { ...request, phase: "cancelled", cancelRequestedAt: now, reason: "cancelled",
             recovery: { kind: "unstarted", verified: null, cleared: null } } : item) } });
         return next.http?.requests.find((item) => item.ticket === ticket);
       }
@@ -318,7 +339,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "failure");
       if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP unstarted settlement");
       await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
-        http: { ...http, desired: request.previous?.plan ?? null, requests: http.requests.map((item) => item === request ? { ...request, phase: "failed", reason,
+        http: { ...http, desired: request.previous === null ? null : httpReleasePlan(request.previous), requests: http.requests.map((item) => item === request ? { ...request, phase: "failed", reason,
           recovery: { kind: "unstarted", verified: null, cleared: null } } : item) } });
     }),
     finishHttpRecovery: (ticket: string, kind: Exclude<HttpRecovery["kind"], "unstarted">, native: ServiceObservation, routed: RoutedReadiness | null, now: number) => serial(async () => {
@@ -331,14 +352,14 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         effect: kind === "compensated" ? "restore" : previous.effect, plan: previous.plan, deadline: request.recoveryDeadline };
       if (kind === "removed-unverified" ? previous !== null || !clearedHttp(native) : expected === undefined || routed === null || !convergedHttp(expected, native) || !routedHttp(expected, routed, now) ||
         (kind === "automatic-rollback" && native.update !== "rollback_completed") || (kind === "compensated" && restored === undefined)) throw new Error("HTTP recovery has no verified previous or absent state");
-      const verified = expected === undefined || previous === null ? null : Object.freeze({ plan: previous.plan, commit: previous.commit, action: expected.action, effect: kind === "compensated" ? "restore" as const : previous.effect,
+      const verified = expected === undefined || previous === null ? null : Object.freeze({ plan: previous.plan, ...(previous.deployment === undefined ? {} : { deployment: previous.deployment }), commit: previous.commit, action: expected.action, effect: kind === "compensated" ? "restore" as const : previous.effect,
         service: request.service, native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
       const recovery: HttpRecovery = { kind, verified, cleared: kind === "removed-unverified" ? { id: native.id, version: native.version } : null };
       const cancelled = request.cancelRequestedAt !== null;
       const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, cancelled ? "cancelled" : "failure");
       if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP recovery settlement");
       await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket), http: { ...http,
-        desired: previous?.plan ?? null, active: verified, lastKnownGood: verified ?? http.lastKnownGood,
+        desired: previous === null ? null : httpReleasePlan(previous), active: verified, lastKnownGood: verified ?? http.lastKnownGood,
         requests: http.requests.map((item) => item === request ? { ...request, phase: cancelled ? "cancelled" : "failed", recovery } : item),
       } });
       return recovery;
@@ -365,10 +386,10 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const fence = settleLifecycleWork(current.fence, request.action);
       const tickets = completeTicket(current.tickets, ticket, "success");
       if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP promotion settlement");
-      const verified = Object.freeze({ plan: request.plan, commit: request.commit, action: request.action, effect: "apply" as const, service: request.service,
+      const verified = Object.freeze({ plan: request.plan, ...(request.deployment === undefined ? {} : { deployment: request.deployment }), commit: request.commit, action: request.action, effect: "apply" as const, service: request.service,
         native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
       await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((operation) => operation.ticket !== ticket),
-        http: { ...current.http, desired: request.plan, active: verified, lastKnownGood: verified,
+        http: { ...current.http, desired: httpReleasePlan(request), active: verified, lastKnownGood: verified,
           requests: current.http.requests.map((item) => item === request ? { ...item, phase: "succeeded", verified } : item) },
       });
       return verified;

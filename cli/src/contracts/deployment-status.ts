@@ -13,20 +13,31 @@ const operation = z.object({
   updateDeadline: z.number().int().positive(), recoveryDeadline: z.number().int().positive().nullable(),
   recovery: z.enum(["automatic-rollback", "previous-preserved", "compensated", "removed-unverified", "unstarted"]).nullable(),
 }).strict().readonly();
+const preparation = z.object({ request: z.uuid(), phase: z.enum(["prepared", "admitted", "migrating", "ready-for-http", "held"]),
+  reason: z.enum(["deadline", "migration"]).nullable(), admissionDeadline: z.number().int().positive(), deadline: z.number().int().positive(),
+  migrationDeadline: z.number().int().positive(), httpDeadline: z.number().int().positive().nullable(),
+  step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/).nullable(),
+}).strict().readonly();
 const schema = z.object({
   version: z.literal(1), app: z.string().regex(names.app.pattern), incarnation: z.uuid(), runtime: z.enum(["compose", "swarm"]),
   lifecycle: z.enum(["registering", "registered", "removal-requested", "removing", "removed", "purging", "purged"]),
   verification: z.enum(["legacy-unverified", "unverified", "verified"]),
   requested: target.nullable(), desired: target.nullable(), verifiedActive: verified.nullable(), lastKnownGood: verified.nullable(),
   operation: operation.nullable(), requiredAction: z.enum(["none", "inspect-and-resolve"]),
+  preparation: preparation.nullable().default(null),
   // A certified release is historical evidence, not a fresh runtime health observation.
   runtimeObservation: z.literal("not-observed"),
 }).strict().readonly().superRefine((value, context) => {
-  if ((value.runtime === "compose" && (value.verification !== "legacy-unverified" || value.requested !== null || value.desired !== null || value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null)) ||
+  if ((value.runtime === "compose" && (value.verification !== "legacy-unverified" || value.requested !== null || value.desired !== null || value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null || value.preparation !== null)) ||
     (value.runtime === "swarm" && value.verification !== (value.verifiedActive === null ? "unverified" : "verified")) ||
     (value.operation?.phase === "cancelled" && value.operation.cancelRequestedAt === null) ||
     (value.operation?.cancelRequestedAt !== undefined && value.operation.cancelRequestedAt !== null && !["recovering", "held", "cancelled"].includes(value.operation.phase)) ||
-    value.requiredAction !== (value.operation?.phase === "held" ? "inspect-and-resolve" : "none")) context.addIssue({ code: "custom", message: "inconsistent deployment projection" });
+    value.requiredAction !== (value.operation?.phase === "held" || value.preparation?.phase === "held" ? "inspect-and-resolve" : "none") ||
+    value.preparation !== null && (value.operation !== null || value.requested === null || JSON.stringify(value.requested) !== JSON.stringify(value.desired) ||
+      (value.preparation.phase === "held") !== (value.preparation.reason !== null) ||
+      (value.preparation.phase === "ready-for-http") !== (value.preparation.httpDeadline !== null) ||
+      value.preparation.admissionDeadline > value.preparation.migrationDeadline || value.preparation.migrationDeadline !== value.preparation.deadline - 180_000 ||
+      value.preparation.httpDeadline !== null && value.preparation.httpDeadline > value.preparation.deadline - 90_000)) context.addIssue({ code: "custom", message: "inconsistent deployment projection" });
 });
 export type DeploymentStatus = z.infer<typeof schema>;
 

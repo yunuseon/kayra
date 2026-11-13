@@ -67,6 +67,13 @@ and prints where. Look before you change anything:
     that was a gap in kayra, fixed there, with a case added.
 - Tear the kept VM down with the printed command before the next run.
 
+When a fixture locates a persistent Compose service by Docker labels, exclude
+`com.docker.compose.oneoff=True` containers and require exactly one ID. A
+concurrent `docker compose run --rm` control command has the same project and
+service labels and can otherwise turn a single-container inspect into an
+invalid multiline identifier. Preserve the failed source, fix the selector,
+and rerun against a fresh source snapshot.
+
 ## After a pass
 
 The VM and the temp fleet are destroyed unless `--keep`. Report the five

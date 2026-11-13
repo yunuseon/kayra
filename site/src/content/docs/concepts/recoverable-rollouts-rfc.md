@@ -859,9 +859,9 @@ rerun; not-applied and unknown probes hold the sequence for audited recovery.
 The application fixture owns its data effects and deduplication. Native tests
 exercise effect-before-failure, unsafe probe recovery, explicit holds and
 SIGKILL before Start, after Start acknowledgement and after step advancement.
-This phase library enables no app capability by itself. Real-deployer admission,
-parent lifecycle integration, maintenance and operator resolution remain
-subsequent delivery work.
+This phase library enables no app capability by itself. Indexed parent ownership
+and admission are described below. Public deployer integration, maintenance and
+audited operator resolution remain subsequent delivery work.
 
 ## Complete rollout plans and workload projections
 
@@ -880,8 +880,8 @@ projections before admission. It preserves exact image/input references and
 operator policy without materializing secrets. Migration descriptions bind the
 logical run to the complete-plan digest. The operation's finite upper budget
 accounts for scheduling, shared retry windows, bounded cleanup and HTTP
-update/recovery. This format prepares parent lifecycle integration; it is not
-itself an admission grant or an enabled app capability.
+update/recovery. The format itself is neither an admission grant nor an enabled
+app capability; the indexed parent below supplies lifecycle ownership.
 
 ## Indexed rollout preparation
 
@@ -908,10 +908,48 @@ Only completed migration preparation can persist the HTTP handoff deadline.
 It is bounded by the original operation budget and is not refreshed on restart.
 HTTP-only complete plans receive a finite preparation window too. These owner
 methods remain internal: the public deployer still accepts only the legacy
-HTTP path and rejects migration-bearing artifacts. HTTP handoff execution,
-audited resolution, cancellation and terminal settlement of complete rollouts
-must be connected before enabling that capability. Maintenance, retained
+HTTP path and rejects migration-bearing artifacts. Internal HTTP handoff is
+described below. Audited resolution, cancellation and terminal settlement before
+handoff must be connected before enabling that capability. Maintenance, retained
 dependencies, worker behavior and normal fleet opt-in remain subsequent work.
+
+## Complete rollout HTTP ownership
+
+The internal complete-rollout owner now drives admission, migration preparation,
+HTTP handoff, convergence, routed readiness and release promotion. Handoff uses
+the parent's existing action, ticket and resource reservation. The separate
+HTTP execution deadline is the value already persisted after migrations; it is
+never minted again on restart. An expired handoff cannot create HTTP intent.
+
+Native task labels and service comparisons identify the immutable workload
+projection. The HTTP request and verified release additionally bind the complete
+deployment digest. Tickets, published requested/desired/active identities and
+host resource accounting identify that complete deployment. Recovery retains
+both identities when certifying a restored release. Legacy HTTP journals omit
+this additional field and retain their original interpretation.
+
+Completed parent records retain their migration evidence in private history.
+Every HTTP projection referencing a complete deployment must match its parent,
+including the action, ticket, commit, workload digest and handoff deadline.
+New complete requests archive only a terminal parent; an unsettled reservation
+is reconciled from its sealed HTTP outcome before another admission. Once an app
+uses complete rollouts, ordinary HTTP admission cannot bypass this ownership.
+
+Published status exposes preparation phase, current step, original deadlines and
+required intervention before HTTP intent exists. It preserves the historical
+verified release and omits private execution records and materialized inputs.
+After handoff, the existing HTTP operation projection reports convergence and
+recovery. Restart work lists dispatch complete rollouts to their parent owner;
+the legacy HTTP work list excludes those child operations.
+
+Native component tests use fixture registration/build ports with real resource
+observations, one-shot containers, Swarm services and TLS readiness. They cover
+initial complete deployment, SIGKILL after HTTP acknowledgement, automatic
+rollback to the previous complete release and a migration probe that remains
+unknown. They establish neither public deployer integration nor database-volume
+safety, and carry no HTTP continuity claim. Public acceptance remains disabled
+pending audited resolution, cancellation before handoff and integration through
+the normal platform/builder/coordinator composition.
 
 ## Delivery and acceptance
 

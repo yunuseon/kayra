@@ -129,6 +129,8 @@ test("run records retain their history and session identity, and only live runs 
 });
 
 const samples = {
+  "app.migration.audit": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema" },
+  "app.migration.resolve": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", outcome: "applied", reason: "Verified migration ledger" },
   up: { server: "lab" }, provision: { server: "lab" }, deploy: { server: "lab" }, setup: { server: "lab" }, plan: { server: "lab" }, verify: { server: "lab" }, apps: { server: "lab" }, hosts: { server: "lab" },
   down: { server: "lab" }, adopt: { server: "prod" }, "backup.test": { server: "lab" }, ssh: { server: "lab" }, "ssh.exec": { server: "lab", command: ["uptime"] },
   "app.values": { server: "lab", app: "shop", dir: "app" },

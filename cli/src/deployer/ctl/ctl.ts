@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { parseMigrationResolutionQuery, parseMigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import { releasesAnswer, runAnswer, runsAnswer } from "./answers.ts";
 import { field } from "../app.ts";
 import { appOwner, appName, owner as mintOwner, runId, type AppName, type Owner, type RunId } from "../brand.ts";
@@ -127,6 +128,20 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     const target = earlier.find((release) => release.sha.startsWith(commit));
     if (target === undefined || commit.length < 7) return fail(`${commit} is not an earlier release of ${name.value}`);
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
+  },
+  migration: async ([operation, encoded, extra]) => {
+    if ((operation !== "resolve" && operation !== "audit") || encoded === undefined || extra !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(encoded)) return fail("usage: ctl migration resolve|audit <base64url-request>");
+    const decoded: unknown = await Promise.resolve(Buffer.from(encoded, "base64url").toString("utf8")).then((text) => {
+      try { const value: unknown = JSON.parse(text); return value; } catch { return undefined; }
+    });
+    const request = operation === "resolve" ? parseMigrationResolutionRequest(decoded) : parseMigrationResolutionQuery(decoded);
+    if (!request.ok) return fail(request.error);
+    const response = await fetch(`http://127.0.0.1:8091/deployment/migration-${operation}`, {
+      method: "POST", body: JSON.stringify(request.value), signal: AbortSignal.timeout(30_000),
+    }).catch(() => undefined);
+    if (!response?.ok) return fail("migration control unavailable or refused; read the audit before repeating the same decision");
+    console.log(await response.text());
+    return 0;
   },
   lifecycle: async ([operation, app, commit, request, extra]) => {
     const query = operation === "status" && app !== undefined && commit === undefined;

@@ -8,6 +8,8 @@ import { parseApplicationPlan } from "../../contracts/application-plan.ts";
 import { parseRolloutPlan, rolloutMigrationDescription, rolloutWorkloadDigest } from "../../contracts/rollout-plan.ts";
 import type { RolloutPlanPort } from "../../contracts/rollout-plan.ts";
 import type { rolloutPreparation } from "./rollout-preparation.ts";
+import type { resolveRolloutMigration } from "./rollout-resolution.ts";
+import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { parseResourceBook, reserveResources, resourceHostReady, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
@@ -160,14 +162,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await journal.write({ ...state, resources: settled.value });
     });
   };
-  const reconcileUnstartedRolloutResources = async (app: string, store: EnvelopeStore, ticket: string) => {
+  const reconcileRolloutResources = async (app: string, store: EnvelopeStore, ticket: string) => {
     const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.ticket === ticket);
     const completion = operation?.completion;
-    if (operation === undefined || completion === undefined || envelope === undefined) throw new Error("unstarted rollout settlement requires durable completion proof");
+    if (operation === undefined || completion === undefined || envelope === undefined) throw new Error("rollout resource settlement requires durable completion proof");
     await serialIndex(async () => {
       const state = await readIndex(); const charge = state.resources?.charges.find((item) => item.app === app);
       if (charge?.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1])) return;
-      if (charge.target.plan !== operation.preparation.plan || charge.deadline !== operation.admissionDeadline || (charge.previous?.plan ?? null) !== completion.previous) throw new Error("unstarted rollout resource settlement proof conflicts");
+      if (charge.target.plan !== operation.preparation.plan || charge.deadline !== operation.admissionDeadline || (charge.previous?.plan ?? null) !== completion.previous) throw new Error("rollout resource settlement proof conflicts");
       const settled = settleResources(state.resources, app, charge.incarnation, charge.sequence, completion.previous === null ? "absent" : "previous");
       if (!settled.ok) throw new Error(settled.error); await journal.write({ ...state, resources: settled.value });
     });
@@ -257,7 +259,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       }
       if (envelope.http?.requests.some((item) => item.request === request)) throw new Error("request identity already belongs to legacy HTTP work");
       if (envelope.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active !== null) throw new Error("complete rollout lifecycle is busy or fenced");
-      if (envelope.rollout?.completion !== undefined) await reconcileUnstartedRolloutResources(app, store, envelope.rollout.ticket);
+      if (envelope.rollout?.completion !== undefined) await reconcileRolloutResources(app, store, envelope.rollout.ticket);
       const previous = envelope.http?.requests.at(-1); if (previous !== undefined) await reconcileHttpResources(app, store, previous.ticket);
       const state = await readIndex(); const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
       const artifact = state.builds.find((build) => build.id === id)?.artifact;
@@ -275,12 +277,33 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     rolloutOperation: (app: string, request: string) => useReady(app, async (store) => {
       const state = await store.read(); return [...(state?.rollouts ?? []), ...(state?.rollout === undefined ? [] : [state.rollout])].find((item) => item.preparation.run === request);
     }),
+    /** The control transport authenticates the operator; requests cannot choose that identity. */
+    resolveMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: Parameters<typeof resolveRolloutMigration>[4]) => useReady(app, async (store) => {
+      const envelope = await store.read();
+      const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request.run);
+      if (request.app !== app || operation === undefined || envelope === undefined) throw new Error("migration resolution rollout scope is unavailable");
+      const existing = operation.preparation.sequence?.steps.find((step) => step.id === request.step)?.resolution;
+      if (existing === undefined) {
+        const charge = (await serialIndex(readIndex)).resources?.charges.find((item) => item.app === app);
+        if (operation !== envelope.rollout || !operation.admitted || charge?.result !== "pending" || charge.incarnation !== envelope.tickets.incarnation ||
+          charge.sequence !== Number(operation.action.split(":")[1]) || charge.target.plan !== operation.preparation.plan || charge.deadline !== operation.admissionDeadline ||
+          !hasHttpRecoveryPeak(charge)) throw new Error("migration resolution has no matching durable admission");
+      }
+      const receipt = await store.resolveMigration(request, actor, ports);
+      const after = await store.read();
+      if (after?.rollout?.preparation.run === request.run && after.rollout.completion !== undefined) await reconcileRolloutResources(app, store, operation.ticket);
+      return receipt;
+    }),
+    migrationAudit: (app: string, run: string, step: string) => useReady(app, async (store) => {
+      const state = await store.read(); const operation = [...(state?.rollouts ?? []), ...(state?.rollout === undefined ? [] : [state.rollout])].find((item) => item.preparation.run === run);
+      return operation?.preparation.sequence?.steps.find((item) => item.id === step)?.resolution;
+    }),
     cancelUnstartedRollout: (app: string, request: string, now: number) => useReady(app, async (store) => {
       const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request);
       if (operation === undefined) throw new Error("complete rollout request is unavailable");
-      if (operation.completion !== undefined) { await reconcileUnstartedRolloutResources(app, store, operation.ticket); return operation; }
+      if (operation.completion !== undefined) { await reconcileRolloutResources(app, store, operation.ticket); return operation; }
       const completed = await store.completeUnstartedRollout(operation.ticket, "cancelled", now);
-      await reconcileUnstartedRolloutResources(app, store, operation.ticket); return completed;
+      await reconcileRolloutResources(app, store, operation.ticket); return completed;
     }),
     expireRolloutAdmission: (app: string, request: string, now: number) => useReady(app, async (store) => {
       const envelope = await store.read(); const operation = envelope?.rollout;
@@ -291,9 +314,9 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return "reserved";
       }
       await store.completeUnstartedRollout(operation.ticket, "deadline", now);
-      await reconcileUnstartedRolloutResources(app, store, operation.ticket); return "failed";
+      await reconcileRolloutResources(app, store, operation.ticket); return "failed";
     }),
-    reconcileUnstartedRolloutResources: (app: string, ticket: string) => useReady(app, (store) => reconcileUnstartedRolloutResources(app, store, ticket)),
+    reconcileRolloutResources: (app: string, ticket: string) => useReady(app, (store) => reconcileRolloutResources(app, store, ticket)),
     admitRollout: (app: string, ticket: string, ports: HostObserver & Pick<BuildPorts, "read" | "now">) => useReady(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope); const operation = envelope?.rollout;
       if (operation?.ticket !== ticket || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
@@ -488,7 +511,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const snapshot = await serialIndex(readIndex);
       const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
         const state = await store.read(); const operation = state?.rollout;
-        if (operation === undefined || operation.preparation.phase === "held") return [];
+        if (operation === undefined || operation.completion === undefined && operation.preparation.phase === "held") return [];
         const http = state?.http?.requests.find((item) => item.request === operation.preparation.run);
         if (http?.phase === "held") return [];
         const charge = snapshot.resources?.charges.find((item) => item.app === app.app);

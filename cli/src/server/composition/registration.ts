@@ -4,6 +4,7 @@ import { httpEnvironment } from "../platform/http-environment.ts";
 import { routedReadiness } from "../platform/routed-readiness.ts";
 import { swarmRouting } from "../platform/swarm-routing.ts";
 import { dockerApi } from "../runtime/docker-api.ts";
+import { oneShotJob } from "../runtime/one-shot-job.ts";
 import { observeSwarmHost } from "../runtime/swarm-host.ts";
 import { swarmService } from "../runtime/swarm-service.ts";
 import { describeCompose } from "../runtime/compose-description.ts";
@@ -134,6 +135,8 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       if (route.startsWith("/deployment/")) return deploymentControl({ index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
+        recovery: artifacts === undefined ? undefined : { actor: { kind: "operator-control", identity: "local-control:uid:" + String(process.getuid?.() ?? "unknown") },
+          ports: { read: artifacts.read, now: Date.now, native: oneShotJob(api) } },
       })(route, input);
       return registrationControl({ index: await opening, canRegister, builds, plans,
         runtimeEnabled: async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok),

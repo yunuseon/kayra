@@ -5,12 +5,23 @@ import { join } from 'node:path';
 import { parseApplicationPlan } from '../../../cli/src/contracts/application-plan.ts';
 import { parseRolloutPlan } from '../../../cli/src/contracts/rollout-plan.ts';
 import { createLifecycleAppIndex, openLifecycleAppIndex } from '../../../cli/src/server/deployment/lifecycle-app-index.ts';
+import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
+import { deploymentControl } from '../../../cli/src/server/deployment/deployment-control.ts';
 import { observeSwarmHost } from '../../../cli/src/server/runtime/swarm-host.ts';
 
 /** Fixture registration/build ports isolate the indexed owner; this is not the public deployer pipeline. */
 export const indexedMigrationOwner = async (path, source, ports, checkpoint, initialize, hostFault) => {
   const indexPath = join(path, 'index'); const app = source.scope.app; const request = source.scope.run; const commit = 'a'.repeat(40);
-  const index = initialize ? await createLifecycleAppIndex(indexPath, (identity) => Promise.resolve({ ...identity, status: 'applied' })) : await openLifecycleAppIndex(indexPath);
+  const journals = async (location, mode) => {
+    const journal = await openJournal(location, mode);
+    return { ...journal, write: async (value) => {
+      const audit = value?.rollout?.preparation?.sequence?.steps.some((step) => step.resolution !== undefined);
+      if (audit && checkpoint === 'before-audit') process.kill(process.pid, 'SIGKILL');
+      await journal.write(value);
+      if (audit && checkpoint === 'after-audit') process.kill(process.pid, 'SIGKILL');
+    } };
+  };
+  const index = initialize ? await createLifecycleAppIndex(indexPath, (identity) => Promise.resolve({ ...identity, status: 'applied' })) : await openLifecycleAppIndex(indexPath, undefined, journals);
   try {
     if (initialize) {
       await index.prepareApp(app); const generation = randomUUID(); const ticket = await index.reserveRegistration(app, generation, 'swarm');
@@ -57,6 +68,13 @@ export const indexedMigrationOwner = async (path, source, ports, checkpoint, ini
       return { ...preparation.sequence, phase: preparation.phase === 'ready' ? 'succeeded' : preparation.phase === 'held' ? 'held' : 'running',
         reason: preparation.sequence?.reason ?? preparation.reason, deadline: preparation.deadline, steps: preparation.sequence?.steps ?? [], preparation };
     };
-    return { journal: { close: index.close }, owner: { prepare: async () => operation.preparation, tick } };
+    const control = deploymentControl({ index, now: ports.now, enabled: async () => false, canAccess: async (name) => name === app,
+      recovery: { actor: { kind: 'operator-control', identity: 'native-lab-control' }, ports } });
+    return { journal: { close: index.close }, owner: { prepare: async () => operation.preparation, tick,
+      resolve: (outcome) => control('/deployment/migration-resolve', { app, run: request, step: 'schema', outcome, reason: 'Verified application-owned migration ledger' }),
+      audit: () => control('/deployment/migration-audit', { app, run: request, step: 'schema' }),
+      status: () => index.deploymentStatus(app), resources: () => index.resourceSnapshot(),
+    } };
+
   } catch (error) { await index.close(); throw error; }
 };

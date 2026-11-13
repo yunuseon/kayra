@@ -609,6 +609,54 @@ Preview: `POST /api/operations/app.purge/preview`. Returns a JSON plan with stat
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.migration.resolve`
+
+Record an audited operator decision for a held migration; never rerun an unsafe step.
+
+`POST /api/operations/app.migration.resolve`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]{0,47}$`. |
+| `run` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `step` | `string` | yes | — | Pattern: `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`. |
+| `outcome` | `"applied" or "not-applied"` | yes | — | — |
+| `reason` | `string` | yes | — | Minimum length: 8. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.migration.resolve/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.migration.audit`
+
+Read the recorded operator decision for a migration step.
+
+`POST /api/operations/app.migration.audit`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]{0,47}$`. |
+| `run` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `step` | `string` | yes | — | Pattern: `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.migration.audit/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.runs`
 
 What runs now, and the app's latest runs: state, commit, why, when, how long.

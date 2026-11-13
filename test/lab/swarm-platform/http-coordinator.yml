@@ -354,6 +354,32 @@
         dest: "{{ report_path }}.host.tar"
         flat: true
 
+    - name: Resolve held migrations across audited journal SIGKILL checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - resolution-run
+          - "{{ coordinator_source.path }}/resolution"
+      changed_when: true
+
+    - name: Retain migration resolution summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/resolution/result.json"
+        dest: "{{ report_path }}.resolution.json"
+        flat: true
+
+    - name: Archive migration resolution evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/resolution.tar", -C, "{{ coordinator_source.path }}/resolution", .]
+      changed_when: true
+
+    - name: Preserve migration resolution evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/resolution.tar"
+        dest: "{{ report_path }}.resolution.tar"
+        flat: true
+
     - name: Remove successful component source files
       ansible.builtin.file:
         path: "{{ coordinator_source.path }}"

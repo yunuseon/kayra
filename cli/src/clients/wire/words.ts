@@ -3,6 +3,10 @@ import type { Invocation } from "../../core/operations/catalog.ts";
 /** What follows the server and the app on the command line, by operation. */
 const extra = (call: Invocation) => {
   switch (call.name) {
+    case "app.migration.audit":
+      return [call.input.run, call.input.step];
+    case "app.migration.resolve":
+      return [call.input.run, call.input.step, call.input.outcome, "--reason", JSON.stringify(call.input.reason)];
     case "app.config.set":
       return [call.input.key, call.input.value, ...(call.input.dir === undefined ? [] : ["--dir", call.input.dir])];
     case "app.secret.import":

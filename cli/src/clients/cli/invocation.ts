@@ -49,6 +49,10 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "app.secret.generate", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }), key: command.key } });
     case "app purge":
       return plainly({ name: "app.purge", input: { server: command.server, app: command.app } });
+    case "app migration audit":
+      return plainly({ name: "app.migration.audit", input: { server: command.server, app: command.app, run: command.run, step: command.step } });
+    case "app migration resolve":
+      return plainly({ name: "app.migration.resolve", input: { server: command.server, app: command.app, run: command.run, step: command.step, outcome: command.outcome, reason: command.reason } });
     case "app runs":
       return plainly({ name: "app.runs", input: { server: command.server, app: command.app } });
     case "app logs":
@@ -103,6 +107,8 @@ export const reaches = {
   "app.secret.import": ["app", "secret", "import", "SERVER", "APP", "API_KEY", "/tmp/credential"],
   "app.secret.generate": ["app", "secret", "generate", "SERVER", "APP", "DATABASE_PASSWORD"],
   "app.purge": ["app", "purge", "SERVER", "APP"],
+  "app.migration.audit": ["app", "migration", "audit", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema"],
+  "app.migration.resolve": ["app", "migration", "resolve", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema", "applied", "--reason", "Verified database schema"],
   "app.runs": ["app", "runs", "SERVER", "APP"],
   "app.log": ["app", "logs", "SERVER", "APP"],
   "app.deploy": ["app", "deploy", "SERVER", "APP", "v1.2.0"],

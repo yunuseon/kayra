@@ -212,6 +212,15 @@ export const parser = (fleet: Fleet) => {
                     command("purge", object({ name: constant("app purge"), server, app }), {
                       brief: summary("app.purge"),
                     }),
+                    command("migration", or(
+                      command("audit", object({ name: constant("app migration audit"), server, app,
+                        run: argument(string({ metavar: "RUN" })), step: argument(string({ metavar: "STEP" })),
+                      }), { brief: summary("app.migration.audit") }),
+                      command("resolve", object({ name: constant("app migration resolve"), server, app,
+                        run: argument(string({ metavar: "RUN" })), step: argument(string({ metavar: "STEP" })),
+                        outcome: argument(choice(["applied", "not-applied"])), reason: option("--reason", string({ metavar: "REASON" })),
+                      }), { brief: summary("app.migration.resolve") }),
+                    )),
                     command("runs", object({ name: constant("app runs"), server, app }), {
                       brief: summary("app.runs"),
                     }),

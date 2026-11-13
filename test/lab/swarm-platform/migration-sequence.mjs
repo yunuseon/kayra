@@ -16,7 +16,7 @@ import { serverCode, migrationCommand, probeCommand } from './migration-fixture.
 import { indexedMigrationOwner } from './indexed-migration-owner.mjs';
 
 const [mode, directory, checkpoint] = process.argv.slice(2); assert.ok(directory);
-const indexed = mode === 'indexed-run' || mode === 'indexed-child' || mode === 'host-run' || mode === 'resolution-run' || mode === 'resolution-child';
+const indexed = mode === 'indexed-run' || mode === 'indexed-child' || mode === 'host-run' || mode === 'resolution-run' || mode === 'resolution-child' || mode === 'cleanup-run' || mode === 'cleanup-child';
 const api = dockerApi(); const native = oneShotJob(api); const run = promisify(execFile); const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const privateValue = 'synthetic-sequence-private-value';
 const ports = async (path, source, killAt) => ({ ...await openArtifactStore(join(path, 'artifacts')), now: Date.now,
@@ -34,13 +34,14 @@ const openOwner = async (path, source, killAt, initialize, hostFault) => {
   const view = { read: journal.read, write: async (value) => { await journal.write(value); if (killAt === 'after-advance' && value.position === 1) process.kill(process.pid, 'SIGKILL'); } };
   return { journal, owner: migrationSequence(view, phasePorts) };
 };
-if (mode === 'child' || mode === 'indexed-child' || mode === 'resolution-child') {
+if (mode === 'child' || mode === 'indexed-child' || mode === 'resolution-child' || mode === 'cleanup-child') {
   const source = JSON.parse(await readFile(join(directory, 'source.json'), 'utf8'));
   const { owner } = await openOwner(directory, source, checkpoint, false);
+  if (mode === 'cleanup-child') { await owner.tickCleanup(); throw new Error('cleanup writer missed kill checkpoint'); }
   if (mode === 'resolution-child') { await owner.resolve('applied'); throw new Error('resolution writer survived kill checkpoint'); }
   while (true) { const value = await owner.tick(); assert.equal(value.phase, 'running'); await pause(100); }
 }
-assert.ok(mode === 'run' || mode === 'indexed-run' || mode === 'host-run' || mode === 'resolution-run'); await mkdir(directory, { mode: 0o700 }); const app = 'migration-lab-' + randomUUID().slice(0, 8);
+assert.ok(mode === 'run' || mode === 'indexed-run' || mode === 'host-run' || mode === 'resolution-run' || mode === 'cleanup-run'); await mkdir(directory, { mode: 0o700 }); const app = 'migration-lab-' + randomUUID().slice(0, 8);
 const host = JSON.parse(await readFile('/var/lib/kayra/swarm/authority.json', 'utf8'));
 const deployer = (await run('docker', ['ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=deployer',
   '--filter', 'label=com.docker.compose.oneoff=False'])).stdout.trim(); assert.match(deployer, /^[0-9a-f]{12,64}$/);
@@ -64,7 +65,10 @@ try {
       if (inspect.value.State.Health?.Status === 'healthy') { stateContainer = task.Status.ContainerStatus.ContainerID; break; }
     } await pause(250);
   } assert.ok(stateContainer, 'application-owned state fixture never became healthy');
-  const scenarios = mode === 'resolution-run' ? [
+  const scenarios = mode === 'cleanup-run' ? [
+    { name: 'cleanup-then-operator-applied', safe: false, always: true, unknown: true, steps: ['schema'], held: 'runtime', effects: 1, calls: 1, hostFault: 'cleanup-fence', cleanup: true, resolve: 'applied' },
+    { name: 'kill-after-cleanup-ack', safe: false, always: true, unknown: true, steps: ['schema'], held: 'runtime', effects: 1, calls: 1, hostFault: 'cleanup-fence', cleanup: true, resolve: 'applied', cleanupKill: true },
+  ] : mode === 'resolution-run' ? [
     { name: 'operator-applied', safe: false, always: true, unknown: true, steps: ['schema'], held: 'probe-unknown', effects: 1, calls: 1, resolve: 'applied' },
     { name: 'operator-not-applied', safe: false, before: true, unknown: true, steps: ['schema'], held: 'probe-unknown', effects: 0, calls: 0, resolve: 'not-applied' },
     { name: 'kill-before-audit', safe: false, always: true, unknown: true, steps: ['schema'], held: 'probe-unknown', effects: 1, calls: 1, resolve: 'applied', auditKill: 'before-audit' },
@@ -113,6 +117,30 @@ try {
     const trace = []; let final;
     while (Date.now() < accepted.deadline + 30000) { const value = await owner.tick(); trace.push({ at: Date.now(), value }); if (value.phase !== 'running') { final = value; break; } await pause(100); }
     assert.ok(final); assert.equal(final.phase, item.held ? 'held' : 'succeeded'); assert.equal(final.reason, item.held ?? null); assert.equal(final.deadline, accepted.deadline);
+    let cleanupEvidence;
+    if (item.cleanup) {
+      const original = JSON.stringify(final.steps[0].attempts[0].execution);
+      const acceptedCleanup = await owner.requestCleanup(); assert.equal(acceptedCleanup.phase, 'fencing');
+      if (item.cleanupKill) {
+        await journal.close();
+        const killed = await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'cleanup-child', path, 'after-cleanup'], { stdio: ['ignore', 'ignore', 'pipe'] });
+          const errors = []; child.stderr.on('data', (chunk) => errors.push(chunk)); child.on('error', reject);
+          child.on('close', (code, signal) => resolve({ code, signal, stderr: Buffer.concat(errors).toString() }));
+        }); assert.equal(killed.signal, 'SIGKILL', JSON.stringify(killed));
+        ({ journal, owner } = await openOwner(path, source, undefined, false));
+      }
+      let complete;
+      for (let count = 0; count < 5; count++) { complete = await owner.tickCleanup(); if (complete.phase === 'complete') break; }
+      assert.equal(complete.phase, 'complete'); assert.equal(complete.deadline, acceptedCleanup.deadline);
+      let after;
+      for (let count = 0; count < 200; count++) { after = await owner.tick(); if (after.phase === 'held') break; await pause(100); }
+      assert.equal(after.phase, 'held'); assert.equal(after.reason, 'probe-unknown');
+      assert.equal(JSON.stringify(after.steps[0].attempts[0].execution), original);
+      cleanupEvidence = await owner.cleanupAudit(); assert.equal(cleanupEvidence.cleanups[0].records[0].state.phase, 'complete');
+      await writeFile(join(path, 'cleanup.json'), JSON.stringify(cleanupEvidence));
+      final = after;
+    }
     let resolution;
     if (item.resolve) {
       const original = final; const originalSteps = JSON.stringify(final.steps.map((step) => step.attempts));
@@ -151,9 +179,9 @@ try {
     if (item.kill === 'before-start') assert.ok(starts.every((event) => event.Actor.ID !== final.steps[0].attempts[0].execution.container));
     assert.ok(!JSON.stringify(final).includes(privateValue)); assert.ok(!JSON.stringify(trace).includes(privateValue));
     for (const step of final.steps) for (const attempt of step.attempts) {
-      if (item.hostFault && item.held) assert.equal(attempt.execution.phase, 'held'); else assert.equal(attempt.execution.phase, 'complete');
+      if ((item.hostFault && item.held && !item.cleanup) || item.cleanup && attempt.purpose === 'migration') assert.equal(attempt.execution.phase, 'held'); else assert.equal(attempt.execution.phase, 'complete');
       const job = parseJobPlan(JSON.parse(await (await openArtifactStore(join(path, 'artifacts'))).read(attempt.artifact))); assert.ok(job.ok);
-      if (item.hostFault && item.held) {
+      if (item.hostFault && item.held && !item.cleanup) {
         const before = await native.observe(job.value); assert.ok(before.status === 'absent' || before.status === 'owned' && before.state === 'created' && !before.barrier);
         if (item.hostFault === 'before-create') assert.equal(before.status, 'absent');
         if (item.hostFault === 'after-create') assert.equal(before.status, 'owned');
@@ -163,12 +191,12 @@ try {
       assert.equal((await api.request('DELETE', `/containers/${barrier.id}?force=true&v=true`)).status, 204);
     }
     await journal.close(); reports.push({ name: item.name, phase: final.phase, reason: final.reason, steps: final.steps.map((step) => ({ id: step.id, attempts: step.attempts.length })),
-      effects: item.effects, calls: item.calls, nativeStarts: starts.length, originalDeadline: true, privateValuesPersisted: false, checkpoint: item.kill ?? null, hostFault: item.hostFault ?? null, resolution: resolution ?? null, auditCheckpoint: item.auditKill ?? null }); console.log(JSON.stringify(reports.at(-1)));
+      effects: item.effects, calls: item.calls, nativeStarts: starts.length, originalDeadline: true, privateValuesPersisted: false, checkpoint: item.kill ?? null, hostFault: item.hostFault ?? null, resolution: resolution ?? null, auditCheckpoint: item.auditKill ?? null, cleanup: cleanupEvidence ?? null }); console.log(JSON.stringify(reports.at(-1)));
   }
   assert.equal((await api.request('DELETE', `/services/${serviceId}`)).status, 200); serviceId = undefined;
   const version = await api.request('GET', '/version'); await writeFile(join(directory, 'result.json'), JSON.stringify({ passed: true, reports, app, image, engine: version.value.Version,
     api: version.value.ApiVersion, node: process.version, fixtureServiceRemoved: true,
-    scope: mode === 'resolution-run' ? 'indexed operator resolution and real Docker jobs; SIGKILL around fsynced audit; fixture registration/build ports; no public-deployer or HTTP continuity claim' : mode === 'host-run' ? 'injected normalized-host failures with real jobs and indexed admission; no actual host reconfiguration or public-deployer claim' : indexed ? 'indexed lifecycle, durable admission and native migration effects with fixture registration/build ports; HTTP handoff only' : 'isolated phase owner with application-owned effect/dedup fixture; no real-deployer admission or migration rollout integration' }, null, 2));
+    scope: mode === 'cleanup-run' ? 'indexed operator cleanup and outcome resolution with native jobs; synchronized cleanup ACK SIGKILL; fixture registration/build ports; no public pipeline or continuity claim' : mode === 'resolution-run' ? 'indexed operator resolution and real Docker jobs; SIGKILL around fsynced audit; fixture registration/build ports; no public-deployer or HTTP continuity claim' : mode === 'host-run' ? 'injected normalized-host failures with real jobs and indexed admission; no actual host reconfiguration or public-deployer claim' : indexed ? 'indexed lifecycle, durable admission and native migration effects with fixture registration/build ports; HTTP handoff only' : 'isolated phase owner with application-owned effect/dedup fixture; no real-deployer admission or migration rollout integration' }, null, 2));
 } catch (error) {
   if (activeObserver) activeObserver.kill('SIGTERM');
   await writeFile(join(directory, 'failure.json'), JSON.stringify({ error: String(error), serviceId, app, image, reports }, null, 2));

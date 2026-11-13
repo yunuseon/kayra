@@ -984,6 +984,39 @@ They validate lifecycle/admission recovery with fixture build inputs; they do
 not validate image availability or app runtime readiness. Cancellation of
 started migration work and audited resolution remain subsequent delivery work.
 
+## Audited recovery of expired job cleanup
+
+`app.migration.cleanup` requests a separate audited action for a held migration
+or probe attempt. The operator supplies an action UUID and reason; the existing
+privileged control transport supplies the actor. The parent persists that
+identity and a thirty-second absolute cleanup deadline before effects.
+`app.migration.cleanup.audit` publishes its audit and normalized fencing proof.
+The CLI spells the read command `app migration cleanup-audit`. Cleanup receives
+no application Create/Start interface and cannot materialize an environment.
+
+Recovery checks the existing app lifecycle fence, pending resource charge and
+immutable job description, records each exact owned container ID before
+removal, and recreates only the inert name barrier. It never rewrites the
+original execution evidence, job deadline or deployment deadline. Interrupted
+cleanup reconstructs its original action and deadline from the same app
+journal. Expiry holds that action; another explicitly requested UUID can grant
+a new bounded cleanup action, retaining its predecessor. A maximum of eight
+cleanup actions per attempt and eight observed container identities per action
+bounds stored recovery history and retries.
+
+When fencing completes before the original migration deadline, the existing
+sequence reconciles its captured execution evidence and app-declared recovery
+policy. An unsafe ambiguous outcome runs its declared status probe before
+operator outcome resolution. Unknown results stay held; a confirmed applied
+result may proceed through normal convergence. Cleanup completed after that
+deadline stays held and cannot run a new probe. Data outcomes are never inferred
+from container deletion, and remote database work may outlive a stopped client.
+
+The composition root runs the existing HTTP and complete-rollout scheduling
+loops in the same privileged process with disjoint work lists. No new socket
+holder or RPC service is added, and public migration-bearing admission remains
+disabled pending cancellation and the remaining integration requirements.
+
 ## One-shot image health isolation
 
 Migration and status-probe containers explicitly disable inherited image health
@@ -1009,8 +1042,7 @@ Resolution requires completed cleanup for every attempt, hash-verified immutable
 job descriptions, and a fresh observation of every exact owned, never-started
 name barrier. Absent, foreign, running, substituted or unavailable objects block
 resolution. This operation does not repair an unfenced attempt or extend its
-expired cleanup authority. Such cleanup needs a separately bounded operator
-recovery operation before an outcome can be asserted.
+expired cleanup authority. Such cleanup uses the separately bounded operator recovery operation below before an outcome can be asserted.
 
 The exclusive app journal writer atomically records the immutable audit and
 parent transition before further effects. Timely `applied` assertions advance

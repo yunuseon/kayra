@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { migrationCleanupRequestSchema } from "../../contracts/migration-cleanup.ts";
 import { migrationResolutionRequestSchema } from "../../contracts/migration-resolution.ts";
 import { valueKeySchema } from "../app-values/model.ts";
 
@@ -153,6 +154,16 @@ export const operations = {
     scope: "app", effect: "changes", kind: "plan", input: appInput,
   },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
+  "app.migration.cleanup": {
+    summary: "Request an audited, bounded fence for a held migration attempt; never rerun its command.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: migrationCleanupRequestSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.migration.cleanup.audit": {
+    summary: "Read the audit and fencing evidence for migration cleanup actions.",
+    scope: "app", effect: "reads", kind: "plan", bare: true,
+    input: migrationResolutionRequestSchema.unwrap().pick({ app: true, run: true, step: true }).extend({ server }).strict().readonly(),
+  },
   "app.migration.resolve": {
     summary: "Record an audited operator decision for a held migration; never rerun an unsafe step.",
     scope: "app", effect: "changes", kind: "plan", bare: true,

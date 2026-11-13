@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { migrationAttemptBarrier } from "./migration-sequence.ts";
 import { parseRolloutPreparation } from "./rollout-preparation.ts";
 
 const schema = z.object({ ticket: z.string().max(80), action: z.string().max(80), commit: z.string().regex(/^[0-9a-f]{40}$/),
@@ -23,7 +24,7 @@ export const parseRolloutRequest = (input: unknown) => {
     if (!request.admitted || preparation.phase !== "held" || preparation.httpDeadline !== null || preparation.sequence?.phase !== "held" || preparation.sequence.steps[preparation.sequence.position]?.id !== completion.step ||
       resolution?.id !== completion.resolution || resolution.at !== completion.at ||
       (completion.reason === "migration" ? resolution.outcome !== "not-applied" : resolution.outcome !== "applied" || resolution.at < preparation.migrationDeadline) ||
-      preparation.sequence.steps.some((item) => item.attempts.some((attempt) => attempt.execution?.phase !== "complete"))) throw new Error("resolved rollout completion lacks fenced outcome proof");
+      preparation.sequence.steps.some((item) => item.attempts.some((attempt) => migrationAttemptBarrier(attempt) === null))) throw new Error("resolved rollout completion lacks fenced outcome proof");
   }
   return Object.freeze({ ...request, preparation, ...(completion === undefined ? {} : { completion }) });
 };

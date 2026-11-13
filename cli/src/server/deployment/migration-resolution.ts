@@ -4,7 +4,7 @@ import type { MigrationResolutionActor, MigrationResolutionAudit, MigrationResol
 import type { MigrationSequencePlan } from "../../contracts/migration-sequence.ts";
 import { jobPlanDigest, parseJobPlan } from "../../contracts/one-shot-job.ts";
 import type { JobPort } from "../../contracts/one-shot-job.ts";
-import { migrationDescriptionForState, migrationJobDescription, parseMigrationSequenceState } from "./migration-sequence.ts";
+import { migrationAttemptBarrier, migrationDescriptionForState, migrationJobDescription, parseMigrationSequenceState } from "./migration-sequence.ts";
 import type { MigrationSequenceState } from "./migration-sequence.ts";
 import { migrationResolutionAudit } from "./migration-resolution-audit.ts";
 
@@ -23,13 +23,13 @@ export const resolveMigrationSequence = async (input: MigrationSequenceState, so
   }
   const step = state.steps[state.position];
   if (state.phase !== "held" || step?.phase !== "held" || step.id !== request.value.step ||
-    step.attempts.some((attempt) => attempt.execution?.phase !== "complete")) throw new Error("migration resolution requires a held step with every attempt fenced");
+    step.attempts.some((attempt) => migrationAttemptBarrier(attempt) === null)) throw new Error("migration resolution requires a held step with every attempt fenced");
   for (const attempt of step.attempts) {
     const bytes = await ports.read(attempt.artifact); const value: unknown = JSON.parse(bytes); const parsed = parseJobPlan(value);
     if (!parsed.ok || createHash("sha256").update(bytes).digest("hex") !== attempt.artifact || jobPlanDigest(parsed.value) !== attempt.artifact ||
       jobPlanDigest(migrationJobDescription(state, plan, state.position, attempt.purpose, attempt.attempt, attempt.createdAt)) !== attempt.artifact) throw new Error("migration resolution job description changed");
     const observed = await ports.native.observe(parsed.value);
-    if (observed.status !== "owned" || !observed.barrier || observed.state !== "created" || observed.id !== attempt.execution?.barrier || observed.plan !== attempt.artifact) throw new Error("migration resolution has no current owned fence proof");
+    if (observed.status !== "owned" || !observed.barrier || observed.state !== "created" || observed.id !== migrationAttemptBarrier(attempt) || observed.plan !== attempt.artifact) throw new Error("migration resolution has no current owned fence proof");
   }
   const now = ports.now();
   if (!Number.isSafeInteger(now) || now < state.createdAt) throw new Error("migration resolution clock is unavailable");

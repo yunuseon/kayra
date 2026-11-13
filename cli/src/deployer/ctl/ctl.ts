@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { parseMigrationCleanupRequest } from "../../contracts/migration-cleanup.ts";
 import { parseMigrationResolutionQuery, parseMigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import { releasesAnswer, runAnswer, runsAnswer } from "./answers.ts";
 import { field } from "../app.ts";
@@ -130,11 +131,11 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
   },
   migration: async ([operation, encoded, extra]) => {
-    if ((operation !== "resolve" && operation !== "audit") || encoded === undefined || extra !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(encoded)) return fail("usage: ctl migration resolve|audit <base64url-request>");
+    if ((operation !== "resolve" && operation !== "audit" && operation !== "cleanup" && operation !== "cleanup-audit") || encoded === undefined || extra !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(encoded)) return fail("usage: ctl migration resolve|audit|cleanup|cleanup-audit <base64url-request>");
     const decoded: unknown = await Promise.resolve(Buffer.from(encoded, "base64url").toString("utf8")).then((text) => {
       try { const value: unknown = JSON.parse(text); return value; } catch { return undefined; }
     });
-    const request = operation === "resolve" ? parseMigrationResolutionRequest(decoded) : parseMigrationResolutionQuery(decoded);
+    const request = operation === "resolve" ? parseMigrationResolutionRequest(decoded) : operation === "cleanup" ? parseMigrationCleanupRequest(decoded) : parseMigrationResolutionQuery(decoded);
     if (!request.ok) return fail(request.error);
     const response = await fetch(`http://127.0.0.1:8091/deployment/migration-${operation}`, {
       method: "POST", body: JSON.stringify(request.value), signal: AbortSignal.timeout(30_000),

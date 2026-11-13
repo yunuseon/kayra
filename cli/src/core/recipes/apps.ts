@@ -67,7 +67,7 @@ export const appPurge = (engine: Engine, server: Server, app: AppName) =>
 /** What `kayra app …` and `kayra job …` ask of a server: its deployer's ctl, over SSH. */
 export type DeployerCommand =
   | { readonly kind: "runs" | "logs" | "deploy" | "rollback"; readonly app: AppName; readonly more: string | undefined }
-  | { readonly kind: "migration"; readonly app: AppName; readonly operation: "resolve" | "audit"; readonly payload: Readonly<Record<string, string>> }
+  | { readonly kind: "migration"; readonly app: AppName; readonly operation: "resolve" | "audit" | "cleanup" | "cleanup-audit"; readonly payload: Readonly<Record<string, string | number>> }
   | { readonly kind: "job"; readonly job: "gc" | "renovate"; readonly noPrs: boolean };
 
 /** What the deployer's ctl is asked, its title, and how its answer is shown: the lists as data kayra draws. */

@@ -4,17 +4,17 @@ import { err, ok } from "../lib/result.ts";
 const app = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
 const step = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/);
 const outcome = z.enum(["applied", "not-applied"]);
-const reason = z.string().trim().min(8).max(512).refine((value) => Array.from(value).every((character) => {
+export const migrationReasonSchema = z.string().trim().min(8).max(512).refine((value) => Array.from(value).every((character) => {
   const code = character.charCodeAt(0); return code >= 32 && (code < 127 || code > 159);
 }));
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-export const migrationResolutionRequestSchema = z.object({ app, run: z.uuid(), step, outcome, reason }).strict().readonly();
+export const migrationResolutionRequestSchema = z.object({ app, run: z.uuid(), step, outcome, reason: migrationReasonSchema }).strict().readonly();
 const query = migrationResolutionRequestSchema.unwrap().pick({ app: true, run: true, step: true }).strict().readonly();
 const actor = z.object({ kind: z.literal("operator-control"), identity: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:@/-]{0,127}$/) }).strict().readonly();
 const audit = z.object({ version: z.literal(1), id: digest, sequence: digest,
   scope: z.object({ app, incarnation: z.uuid(), run: z.uuid(), step }).strict().readonly(),
-  actor, outcome, reason, at: positive,
+  actor, outcome, reason: migrationReasonSchema, at: positive,
 }).strict().readonly();
 const receipt = query.unwrap().extend({ version: z.literal(1), resolution: digest, outcome, recordedAt: positive, disposition: z.enum(["continue", "failed"]) }).strict().readonly();
 const report = query.unwrap().extend({ version: z.literal(1), audit: audit.nullable() }).strict().readonly().refine((value) => value.audit === null ||

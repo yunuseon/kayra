@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { parseApplicationPlan } from '../../../cli/src/contracts/application-plan.ts';
 import { parseRolloutPlan } from '../../../cli/src/contracts/rollout-plan.ts';
 import { createLifecycleAppIndex, openLifecycleAppIndex } from '../../../cli/src/server/deployment/lifecycle-app-index.ts';
+import { oneShotCleanup } from '../../../cli/src/server/runtime/one-shot-job.ts';
 import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
 import { deploymentControl } from '../../../cli/src/server/deployment/deployment-control.ts';
 import { observeSwarmHost } from '../../../cli/src/server/runtime/swarm-host.ts';
@@ -46,6 +47,7 @@ export const indexedMigrationOwner = async (path, source, ports, checkpoint, ini
     const tick = async () => {
       const preparation = await index.tickRolloutPreparation(app, request, { ...ports, observeHost,
         materialize: async (...args) => { materializations++; return ports.materialize(...args); }, native: { ...ports.native,
+          fence: (...args) => hostFault === 'cleanup-fence' && args[0].scope.purpose === 'migration' ? Promise.resolve('uncertain') : ports.native.fence(...args),
           create: async (...args) => { const result = await ports.native.create(...args); if (hostFault === 'after-create') { assert.equal(result, 'acknowledged'); hostAvailable = false; } return result; },
           start: async (...args) => {
             if (checkpoint === 'before-start' && args[0].scope.purpose === 'migration') process.kill(process.pid, 'SIGKILL');
@@ -70,7 +72,24 @@ export const indexedMigrationOwner = async (path, source, ports, checkpoint, ini
     };
     const control = deploymentControl({ index, now: ports.now, enabled: async () => false, canAccess: async (name) => name === app,
       recovery: { actor: { kind: 'operator-control', identity: 'native-lab-control' }, ports } });
+    const cleanupRequest = async () => {
+      const filename = join(path, 'cleanup-request.json');
+      const saved = await readFile(filename, 'utf8').then(JSON.parse, () => undefined);
+      const request = saved ?? { app, run: operation.preparation.run, step: 'schema', purpose: 'migration', attempt: 1, action: randomUUID(), reason: 'Fence held native migration before inspecting application ledger' };
+      if (!saved) await writeFile(filename, JSON.stringify(request));
+      return request;
+    };
+    const tickCleanup = async () => {
+      const request = await cleanupRequest(); const native = oneShotCleanup();
+      return index.tickMigrationCleanup(app, request, { ...ports, native: { ...native, fence: async (...args) => {
+        const result = await native.fence(...args);
+        if (checkpoint === 'after-cleanup') { assert.equal(result, 'acknowledged'); process.kill(process.pid, 'SIGKILL'); }
+        return result;
+      } } });
+    };
     return { journal: { close: index.close }, owner: { prepare: async () => operation.preparation, tick,
+      requestCleanup: async () => control('/deployment/migration-cleanup', await cleanupRequest()), tickCleanup,
+      cleanupAudit: () => control('/deployment/migration-cleanup-audit', { app, run: request, step: 'schema' }),
       resolve: (outcome) => control('/deployment/migration-resolve', { app, run: request, step: 'schema', outcome, reason: 'Verified application-owned migration ledger' }),
       audit: () => control('/deployment/migration-audit', { app, run: request, step: 'schema' }),
       status: () => index.deploymentStatus(app), resources: () => index.resourceSnapshot(),

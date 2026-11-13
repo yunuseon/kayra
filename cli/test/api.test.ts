@@ -129,6 +129,8 @@ test("run records retain their history and session identity, and only live runs 
 });
 
 const samples = {
+  "app.migration.cleanup": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", purpose: "migration", attempt: 1, action: "23456789-1234-4234-8234-123456789abc", reason: "Fence failed migration before inspecting ledger" },
+  "app.migration.cleanup.audit": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema" },
   "app.migration.audit": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema" },
   "app.migration.resolve": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", outcome: "applied", reason: "Verified migration ledger" },
   up: { server: "lab" }, provision: { server: "lab" }, deploy: { server: "lab" }, setup: { server: "lab" }, plan: { server: "lab" }, verify: { server: "lab" }, apps: { server: "lab" }, hosts: { server: "lab" },

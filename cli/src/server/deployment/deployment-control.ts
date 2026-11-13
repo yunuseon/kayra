@@ -1,3 +1,4 @@
+import { parseMigrationCleanupRequest, parseMigrationCleanupReport } from "../../contracts/migration-cleanup.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { BuildPorts } from "../../contracts/build-artifact.ts";
 import { parseDeploymentCancellation, parseDeploymentQuery, parseDeploymentReceipt, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
@@ -6,7 +7,7 @@ import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { parseMigrationResolutionQuery, parseMigrationResolutionRequest, parseMigrationResolutionReport } from "../../contracts/migration-resolution.ts";
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareHttpRollout" | "deploymentStatus" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit">>;
+type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareHttpRollout" | "deploymentStatus" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit">>;
 type Ports = {
   readonly index: Index;
   readonly canAccess: (app: string) => Promise<boolean>;
@@ -25,6 +26,16 @@ const receipt = (app: string, operation: HttpOperation | undefined) => {
 
 /** Local lifecycle interface. Callers cannot supply native authority, private inputs or effect decisions. */
 export const deploymentControl = ({ index, canAccess, enabled, plans, now, recovery }: Ports) => async (path: string, input: unknown) => {
+  if (path === "/deployment/migration-cleanup-audit") {
+    const query = parseMigrationResolutionQuery(input); if (!query.ok) return undefined;
+    if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
+    return parseMigrationCleanupReport({ version: 1, ...query.value, cleanups: await index.migrationCleanupAudit(query.value.app, query.value.run, query.value.step) });
+  }
+  if (path === "/deployment/migration-cleanup") {
+    const requested = parseMigrationCleanupRequest(input); if (!requested.ok || recovery === undefined) return undefined;
+    if (!(await canAccess(requested.value.app))) throw new Error("app is outside deployment scope");
+    return index.requestMigrationCleanup(requested.value.app, requested.value, recovery.actor, recovery.ports);
+  }
   if (path === "/deployment/migration-audit") {
     const query = parseMigrationResolutionQuery(input);
     if (!query.ok) return undefined;

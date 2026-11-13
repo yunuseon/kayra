@@ -2,6 +2,8 @@
 /* eslint-disable functional/prefer-immutable-types */
 import { jobName, jobPlanDigest, parseJobPlan } from "../../contracts/one-shot-job.ts";
 import type { JobObservation, JobPlan, JobPort, JobWrite } from "../../contracts/one-shot-job.ts";
+import { parseJobCleanupPlan } from "../../contracts/job-cleanup.ts";
+import type { JobCleanupPort } from "../../contracts/job-cleanup.ts";
 import { typed } from "../../lib/typed.ts";
 import { dockerApi } from "./docker-api.ts";
 import { migrationProbeOutput } from "./migration-probe-output.ts";
@@ -36,7 +38,7 @@ const render = (plan: JobPlan, environment: Readonly<Record<string, string>>, ba
 };
 
 /** No start retry, automatic restart, raw logs, secret observation or coordinator policy. */
-export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
+const jobAdapter = (api: ReturnType<typeof dockerApi>, now: () => number) => {
   const get = async (plan: JobPlan, identity = jobName(plan.scope)) => {
     const response = await api.request("GET", `/containers/${encodeURIComponent(identity)}/json`);
     if (response.status === 404) return { status: "absent" as const };
@@ -69,12 +71,12 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
       return typed<JobObservation>({ status: "owned", id, barrier, plan: jobPlanDigest(plan), state, exitCode, probe: await probe(), finishedAt });
     } catch { return typed<JobObservation>({ status: "unavailable" }); }
   };
-  const remaining = (plan: JobPlan, deadline = plan.deadline) => {
-    if (!Number.isSafeInteger(deadline) || deadline <= 0 || deadline > plan.deadline + 30_000) return undefined;
+  const remaining = (plan: JobPlan, deadline = plan.deadline, ceiling = plan.deadline + 30_000) => {
+    if (!Number.isSafeInteger(deadline) || deadline <= 0 || deadline > ceiling) return undefined;
     const clock = now(); const left = deadline - clock;
     return Number.isSafeInteger(clock) && clock > 0 && left > 0 ? Math.min(left, 10_000) : undefined;
   };
-  const imageReady = async (plan: JobPlan, deadline: number) => {
+  const imageReady = async (plan: JobPlan, deadline: number, ceiling: number) => {
     const inspect = () => api.request("GET", `/images/${encodeURIComponent(plan.image)}/json`);
     const available = (value: unknown) => {
       const digests = field(value, "RepoDigests");
@@ -83,7 +85,7 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
     const current = await inspect();
     if (current.status === 200) return available(current.value);
     if (current.status !== 404) return false;
-    const timeoutMs = remaining(plan, deadline); if (timeoutMs === undefined) return false;
+    const timeoutMs = remaining(plan, deadline, ceiling); if (timeoutMs === undefined) return false;
     const [repository, digest] = plan.image.split("@");
     if (repository === undefined || digest === undefined) return false;
     // Progress is not success evidence. Independently inspect the immutable reference afterward.
@@ -91,20 +93,36 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
       { response: "bytes", timeoutMs, maximumBytes: 4 * 1024 * 1024 });
     const pulled = await inspect(); return pulled.status === 200 && available(pulled.value);
   };
-  const create = async (input: JobPlan, environment: Readonly<Record<string, string>>, barrier = false, deadline = input.startDeadline ?? input.deadline) => {
+  const create = async (input: JobPlan, environment: Readonly<Record<string, string>>, barrier = false, deadline = input.startDeadline ?? input.deadline, ceiling = input.deadline + 30_000) => {
     const parsed = parseJobPlan(input); if (!parsed.ok) return typed<JobWrite>("refused");
-    const plan = parsed.value; const timeoutMs = remaining(plan, deadline); if (timeoutMs === undefined) return typed<JobWrite>("refused");
+    const plan = parsed.value; const timeoutMs = remaining(plan, deadline, ceiling); if (timeoutMs === undefined) return typed<JobWrite>("refused");
     try {
       const body = render(plan, environment, barrier);
       const existing = await get(plan);
       if (existing.status !== "absent") return typed<JobWrite>(existing.status === "unavailable" ? "uncertain" : "conflict");
-      if (!(await imageReady(plan, deadline))) return typed<JobWrite>("uncertain");
-      const left = remaining(plan, deadline); if (left === undefined) return typed<JobWrite>("refused");
+      if (!(await imageReady(plan, deadline, ceiling))) return typed<JobWrite>("uncertain");
+      const left = remaining(plan, deadline, ceiling); if (left === undefined) return typed<JobWrite>("refused");
       const response = await api.request("POST", `/containers/create?name=${encodeURIComponent(jobName(plan.scope))}`, body, { timeoutMs: left });
       return typed<JobWrite>(response.status === 201 && containerId(field(response.value, "Id")) ? "acknowledged" : response.status === 409 ? "conflict" : "uncertain");
     } catch { return typed<JobWrite>("uncertain"); }
   };
-  return typed<JobPort>(Object.freeze({ observe, create: (plan, environment) => create(plan, environment),
+  const fence = async (input: JobPlan, id: string | null, deadline: number, ceiling = input.deadline + 30_000) => {
+    const parsed = parseJobPlan(input); if (!parsed.ok || (id !== null && !containerId(id))) return "refused";
+    const plan = parsed.value; const timeoutMs = remaining(plan, deadline, ceiling); if (timeoutMs === undefined) return "refused";
+    try {
+      const current = await get(plan);
+      if (current.status === "foreign" || current.status === "unavailable") return "refused";
+      if (current.status === "owned") {
+        if (field(field(field(current.value, "Config"), "Labels"), "com.kayra.barrier") === "true") return field(field(current.value, "State"), "Status") === "created" ? "acknowledged" : "refused";
+        if (id === null || field(current.value, "Id") !== id) return "conflict";
+        const left = remaining(plan, deadline, ceiling); if (left === undefined) return "refused";
+        const removed = await api.request("DELETE", `/containers/${id}?force=true&v=true`, undefined, { timeoutMs: left });
+        if (removed.status !== 204 && removed.status !== 404) return "uncertain";
+      }
+      return await create(plan, {}, true, deadline, ceiling);
+    } catch { return "uncertain"; }
+  };
+  const execution = typed<JobPort>(Object.freeze({ observe, create: (plan, environment) => create(plan, environment),
     start: async (input, id, executionDeadline = input.deadline) => {
       const parsed = parseJobPlan(input); if (!parsed.ok || !containerId(id)) return "refused";
       const plan = parsed.value;
@@ -120,24 +138,21 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
           JSON.stringify(field(field(config, "Healthcheck"), "Test")) !== JSON.stringify(["NONE"]) ||
           JSON.stringify(field(config, "Cmd")) !== JSON.stringify(plan.command) ||
           (plan.entrypoint !== null && JSON.stringify(field(config, "Entrypoint")) !== JSON.stringify(plan.entrypoint))) return "refused";
-        const response = await api.request("POST", `/containers/${id}/start`, undefined, { timeoutMs });
+        const left = remaining(plan, Math.min(executionDeadline, plan.startDeadline ?? plan.deadline)); if (left === undefined) return "refused";
+        const response = await api.request("POST", `/containers/${id}/start`, undefined, { timeoutMs: left });
         return response.status === 204 ? "acknowledged" : response.status === 404 || response.status === 304 ? "conflict" : "uncertain";
       } catch { return "uncertain"; }
     },
-    fence: async (input, id, deadline) => {
-      const parsed = parseJobPlan(input); if (!parsed.ok || (id !== null && !containerId(id))) return "refused";
-      const plan = parsed.value; const timeoutMs = remaining(plan, deadline); if (timeoutMs === undefined) return "refused";
-      try {
-        const current = await get(plan);
-        if (current.status === "foreign" || current.status === "unavailable") return "refused";
-        if (current.status === "owned") {
-          if (field(field(field(current.value, "Config"), "Labels"), "com.kayra.barrier") === "true") return field(field(current.value, "State"), "Status") === "created" ? "acknowledged" : "refused";
-          if (id === null || field(current.value, "Id") !== id) return "conflict";
-          const removed = await api.request("DELETE", `/containers/${id}?force=true&v=true`, undefined, { timeoutMs });
-          if (removed.status !== 204 && removed.status !== 404) return "uncertain";
-        }
-        return await create(plan, {}, true, deadline);
-      } catch { return "uncertain"; }
-    },
+    fence,
+
   }));
+  const cleanup = typed<JobCleanupPort>(Object.freeze({ observe, fence: async (job, input, container) => {
+    const authority = parseJobCleanupPlan(input); const plan = parseJobPlan(job); const clock = now();
+    if (!authority.ok || !plan.ok || authority.value.job !== jobPlanDigest(plan.value) || !Number.isSafeInteger(clock) || clock < authority.value.createdAt || clock >= authority.value.deadline) return "refused";
+    return fence(plan.value, container, authority.value.deadline, authority.value.deadline);
+  } }));
+  return Object.freeze({ execution, cleanup });
 };
+
+export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => jobAdapter(api, now).execution;
+export const oneShotCleanup = (api = dockerApi(), now: () => number = Date.now) => jobAdapter(api, now).cleanup;

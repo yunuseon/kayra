@@ -82,6 +82,12 @@ views {
     operator -> plannedDelivery.trusted.platform 'resolve a named blocked run and step'
     plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'validated run/step assertion with transport-derived actor'
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'atomically retain audit and parent transition under original deadline'
+    operator -> plannedDelivery.trusted.platform 'request separately bounded cleanup for an unfenced attempt'
+    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'transport-authenticated cleanup identity and reason'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'persist cleanup authority and exact target before effects'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'fence owned attempt; no application Start authority'
+    plannedDelivery.trusted.adapter -> plannedDelivery.workload 'remove exact container and reserve inert name'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'retain cleanup proof without altering original execution evidence'
   }
 
   dynamic view proposedMaintenance {

@@ -572,3 +572,66 @@ The job completed in 4,115 ms; context/result/native logs use the prefix
 checks passed on Linux and the Mac; the serial CLI suite passed 632 tests,
 with one skip. The successful standalone source was removed after export;
 the original failed VM remains preserved.
+
+The resolution combined run passed 54 tasks with reports under
+`/tmp/kayra-migration-resolution-component.json` (`.resolution.json` and `.resolution.tar`);
+the health-isolation combined run passed 58 tasks under
+`/tmp/kayra-job-health-component.json` (`.job-health.json` and `.job-health.tar`).
+Both successful combined sources were removed after export. The failed VM stays.
+
+### Explicit cleanup recovery
+
+`one-shot-cleanup.mjs run <new-results-directory>` lets the original job cleanup
+authority actually expire while two isolated jobs remain running. Each new
+cleanup action persists a separate thirty-second deadline; SIGKILL before
+fencing or after acknowledgement must reconstruct that authority, fence the
+exact owned job and observe a never-started barrier, with exactly one original
+application Start. This is the native primitive with fixture authorization.
+
+`migration-sequence.mjs cleanup-run <new-results-directory>` exercises indexed
+admission, normal cleanup/audit/resolve control, the app-declared status probe,
+and SIGKILL after native cleanup acknowledgement. Runtime execution evidence
+must stay unchanged. The native fixture deliberately makes only the original
+migration fence unavailable; probe fencing remains available. Registration/build
+ports remain fixtures, and HTTP continuity is not asserted by these cases.
+
+The first primitive attempt failed before application Create because its fixture
+hashed raw JSON rather than the normalized job plan. Failed source/evidence is
+preserved at `/var/lib/kayra/swarm/job-cleanup-source-r7zzkw2Y` on
+`kayra-builder-indexed-20261111080734`. No job containers were created by that
+attempt. After inspecting/exporting it, remove only that source with:
+
+```sh
+multipass exec kayra-builder-indexed-20261111080734 -- sudo rm -rf /var/lib/kayra/swarm/job-cleanup-source-r7zzkw2Y
+```
+
+The combined harness exports `.job-cleanup.json`/`.job-cleanup.tar` and
+`.migration-cleanup.json`/`.migration-cleanup.tar`. New public migration admission
+stays disabled; these recovery commands operate on already retained experiments.
+
+Two further fixture failures are preserved: the second attempt omitted the
+cleanup journal directory (`/var/lib/kayra/swarm/migration-cleanup-source-QTuwJulZ`);
+the third lost historical Docker Start events during its thirty-second wait
+(`/var/lib/kayra/swarm/migration-cleanup-source-NvDRcabz`). The successful rerun
+streams bounded events from before job creation. Context/log/container inventories
+for those attempts use `/tmp/kayra-migration-cleanup-attempt2-` and `attempt3-`.
+After inspecting and exporting those failed runs, their exact retained objects
+can be removed with the following commands; the lab never runs this cleanup:
+
+```sh
+multipass exec kayra-builder-indexed-20261111080734 -- sudo docker rm 81166d7ed8c8ec983d64f6b95b63afff8e2890fa0148be24e74546c4aaef0878 91502da4eb8d9b903f5ad76deb8b31cf54dabf1bdb3b29ae5720505ee0ac769d 917b028b35b92f77e218dd55e1723cdc23bb7971e9ed3a3284827aded1077bdc 46014028b1a280f93527b8e66fb62580d56e23fdb72d4cd39b3a81b0d1964af9
+multipass exec kayra-builder-indexed-20261111080734 -- sudo rm -rf /var/lib/kayra/swarm/migration-cleanup-source-QTuwJulZ /var/lib/kayra/swarm/migration-cleanup-source-NvDRcabz
+```
+
+All four final native cleanup cases passed: two primitive expiry/SIGKILL cases
+and two indexed cleanup/probe/operator-resolution cases, including a kill after
+Docker acknowledges cleanup. Exact execution evidence and deployment deadlines
+remain unchanged; the indexed cases each observed one migration Start and one
+probe Start, with one app-owned effect. Context is
+`/tmp/kayra-migration-cleanup-context.json`, raw evidence is
+`/tmp/kayra-migration-cleanup-evidence/` and its `.tar`, and native logs are
+`/tmp/kayra-migration-cleanup-primitive.log` and `...-indexed.log`.
+Clock offsets were 502 ms before and 183 ms after. Private-value scans passed.
+The serial CLI suite passed 643 tests with one skip, and 70 focused Linux checks
+passed using byte-identical CLI source/tests. The successful standalone source
+was removed after export; failed sources and the original VM remain preserved.

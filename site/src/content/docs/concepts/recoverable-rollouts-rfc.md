@@ -863,6 +863,26 @@ This phase library enables no app capability by itself. Real-deployer admission,
 parent lifecycle integration, maintenance and operator resolution remain
 subsequent delivery work.
 
+## Complete rollout plans and workload projections
+
+The private version-two rollout description retains full orchestration metadata
+separately from an independently validated version-one HTTP workload projection.
+The complete plan and projection have distinct immutable digests. Runtime
+effects consume the projection; the parent coordinator must bind its native
+proof to the complete plan and sequence migrations before workload mutation.
+Legacy HTTP compilation still rejects migration-bearing artifacts, so producing
+a projection does not activate a deployment path that silently skips migrations.
+
+The current normalizer accepts one compatible rolling HTTP service and ordered
+migrations referencing that service's app image. It rejects workers, retained
+dependencies, maintenance, checks, unsupported job grace settings and mismatched
+projections before admission. It preserves exact image/input references and
+operator policy without materializing secrets. Migration descriptions bind the
+logical run to the complete-plan digest. The operation's finite upper budget
+accounts for scheduling, shared retry windows, bounded cleanup and HTTP
+update/recovery. This format prepares parent lifecycle integration; it is not
+itself an admission grant or an enabled app capability.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

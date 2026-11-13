@@ -16,16 +16,17 @@ export const deploymentStatus = (app: string, incarnation: string, runtime: Runt
   const latest = state?.requests.at(-1);
   const preparing = rollout !== undefined && !state?.requests.some((item) => item.request === rollout.preparation.run) ? rollout : undefined;
   const preparation = preparing?.preparation;
+  const completion = preparing?.completion;
   const requested = preparing === undefined ? target(state?.requested) : Object.freeze({ plan: preparing.preparation.plan, commit: preparing.commit });
   const parsed = parseDeploymentStatus({ version: 1, app, incarnation, runtime, lifecycle,
     verification: runtime === "compose" ? "legacy-unverified" : state?.active === null || state?.active === undefined ? "unverified" : "verified",
-    requested, desired: preparing === undefined ? target(state?.desired) : requested, verifiedActive: verified(state?.active), lastKnownGood: verified(state?.lastKnownGood),
+    requested, desired: preparing === undefined ? target(state?.desired) : completion === undefined ? requested : target(completion.previous), verifiedActive: verified(state?.active), lastKnownGood: verified(state?.lastKnownGood),
     operation: latest === undefined || preparing !== undefined ? null : { request: latest.request, phase: latest.phase, reason: latest.reason, cancelRequestedAt: latest.cancelRequestedAt,
       updateDeadline: latest.deadline, recoveryDeadline: latest.recoveryDeadline, recovery: latest.recovery?.kind ?? null },
     preparation: preparation === undefined || preparing === undefined ? null : { request: preparation.run,
-      phase: preparation.phase === "ready" ? "ready-for-http" : preparation.phase === "prepared" && preparing.admitted ? "admitted" : preparation.phase,
-      reason: preparation.reason, admissionDeadline: preparing.admissionDeadline, deadline: preparation.deadline, migrationDeadline: preparation.migrationDeadline,
-      httpDeadline: preparation.httpDeadline, step: preparation.sequence?.steps[preparation.sequence.position]?.id ?? null },
+      phase: completion?.outcome ?? (preparation.phase === "ready" ? "ready-for-http" : preparation.phase === "prepared" && preparing.admitted ? "admitted" : preparation.phase),
+      reason: completion?.reason ?? preparation.reason, admissionDeadline: preparing.admissionDeadline, deadline: preparation.deadline, migrationDeadline: preparation.migrationDeadline,
+      httpDeadline: preparation.httpDeadline, completedAt: completion?.at ?? null, step: preparation.sequence?.steps[preparation.sequence.position]?.id ?? null },
     requiredAction: preparation?.phase === "held" || preparing === undefined && latest?.phase === "held" ? "inspect-and-resolve" : "none", runtimeObservation: "not-observed",
   });
   if (!parsed.ok) throw new Error(parsed.error);

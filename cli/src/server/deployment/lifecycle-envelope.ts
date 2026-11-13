@@ -126,7 +126,13 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     if (receipt?.runtime !== "swarm" || preparation.app !== tickets.value.app || preparation.incarnation !== tickets.value.incarnation ||
       request !== undefined && (!owner.admitted || preparation.phase !== "ready" || request.ticket !== owner.ticket || request.action !== owner.action || request.commit !== owner.commit ||
         request.plan !== preparation.workload || request.deployment !== preparation.plan || request.deadline !== preparation.httpDeadline)) return err("complete rollout HTTP handoff changed");
-    if (request !== undefined && terminalHttp(request.phase)) {
+    if (owner.completion !== undefined) {
+      const completion = owner.completion; const lookup = lookupTicket(tickets.value, owner.ticket);
+      const previous = completion.previous; const certificates = http?.ok ? http.value.requests.flatMap((item) => [item.verified, item.recovery?.verified ?? null]) : [];
+      if (request !== undefined || !lookup.ok || lookup.value.status !== "expired" && (!binding.ok || binding.value.status !== "terminal" ||
+        binding.value.outcome !== (completion.outcome === "cancelled" ? "cancelled" : "failure")) || previous !== null &&
+        !certificates.some((certificate) => certificate !== null && httpReleasePlan(certificate) === previous && Number(certificate.action.split(":")[1]) < Number(owner.action.split(":")[1]))) return err("unstarted complete rollout lacks terminal ownership proof");
+    } else if (request !== undefined && terminalHttp(request.phase)) {
       const lookup = lookupTicket(tickets.value, owner.ticket);
       if (!lookup.ok || lookup.value.status !== "expired" && (!binding.ok || binding.value.status !== "terminal")) return err("complete rollout lacks terminal receipt");
     } else if (owner !== rollout || !binding.ok || binding.value.status !== "accepted" ||
@@ -134,6 +140,8 @@ export const parseLifecycleEnvelope = (input: unknown) => {
       http?.ok && http.value.requests.some((item) => !terminalHttp(item.phase) && item !== request)) return err("complete rollout lacks exclusive lifecycle intent");
   }
   if (http?.ok && http.value.requests.some((request) => request.deployment !== undefined && !history.some((owner) => owner.preparation.run === request.request))) return err("HTTP projection lacks its complete rollout owner");
+  const first = history[0];
+  if (first !== undefined && http?.ok && http.value.requests.some((request) => request.deployment === undefined && Number(request.action.split(":")[1]) > Number(first.action.split(":")[1]))) return err("complete rollout ownership cannot resume ordinary HTTP requests");
   operations.forEach((operation) => { Object.freeze(operation.descriptor); Object.freeze(operation); });
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),

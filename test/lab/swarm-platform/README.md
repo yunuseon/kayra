@@ -461,3 +461,28 @@ complete rollouts, evidence export and successful-source cleanup. Results use
 the prefix `/tmp/kayra-rollout-handoff-component.json`, including `.rollout.json`
 and `.rollout.tar`; the log is `/tmp/kayra-rollout-handoff-component.log`. The VM
 and controller clocks still matched at completion.
+
+## Unstarted cancellation and admission recovery
+
+`rollout-unstarted.mjs run <new-results-directory>` kills the real filesystem
+writer before reservation, after reservation but before the app marker, and
+after cancellation proof but before resource settlement. It then waits beyond
+the original 90-second admission deadline. An unreserved request fails without
+gaining a new window; a previously accepted reservation reconstructs its
+original decision and can be cancelled safely. Restart settles a cancelled
+request's conservative reservation from its durable proof.
+
+All three native cases passed on 2026-11-13 against Engine 29.9.3/API 1.56 and
+Node 24.22.1. Application runtime ports are forbidden and recorded zero calls.
+Host observations use the real read-only adapter. Registration/build inputs and
+the deliberately unexecuted image references are fixtures; this test makes no
+image-availability, application-readiness or public-deployer claim. Context is
+`/tmp/kayra-rollout-unstarted-context.json`, raw evidence is
+`/tmp/kayra-rollout-unstarted-evidence/`, and the log is
+`/tmp/kayra-rollout-unstarted-native.log`. VM clock offsets were 379 ms before
+and 313 ms after the run. The playbook and upgrade lab retain `.unstarted.json`
+and `.unstarted.tar` before successful-source cleanup.
+
+Typecheck, lint and the serial CLI suite pass (611 tests, one skip). Started
+preparation still requires its own cancellation/recovery path; observing no
+container cannot justify an unstarted completion after intent was persisted.

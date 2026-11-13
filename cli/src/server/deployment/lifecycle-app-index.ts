@@ -79,9 +79,9 @@ const prepareBeforeDeadline = async (ports: BuildPorts, registration: Registrati
   finally { clearTimeout(timer); }
 };
 
-const openIndex = async (directory: string, mode: "initialize" | "existing", observer?: RegistrationObserver) => {
+const openIndex = async (directory: string, mode: "initialize" | "existing", observer?: RegistrationObserver, journals = openJournal) => {
   await requireDirectory(directory);
-  const journal = await openJournal(directory, mode);
+  const journal = await journals(directory, mode);
   const readIndex = async () => {
     const checked = schema.safeParse(await journal.read());
     if (!checked.success) throw new Error("lifecycle app index is invalid; intervention required");
@@ -122,7 +122,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   const appDirectory = (app: string) => join(directory, createHash("sha256").update(app, "utf8").digest("hex"));
   const withEnvelope = async <T>(path: string, ownership: IndexEntry, use: (store: EnvelopeStore) => T | Promise<T>) => {
     await requireDirectory(path);
-    const appJournal = await openJournal(path, ownership.phase === "ready" ? "existing" : "initialize");
+    const appJournal = await journals(path, ownership.phase === "ready" ? "existing" : "initialize");
     try {
       const store = openLifecycleEnvelopeStore(appJournal, observer);
       const envelope = await store.read();
@@ -158,6 +158,18 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const settled = settleResources(state.resources, app, charge.incarnation, charge.sequence, result);
       if (!settled.ok) throw new Error(settled.error);
       await journal.write({ ...state, resources: settled.value });
+    });
+  };
+  const reconcileUnstartedRolloutResources = async (app: string, store: EnvelopeStore, ticket: string) => {
+    const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.ticket === ticket);
+    const completion = operation?.completion;
+    if (operation === undefined || completion === undefined || envelope === undefined) throw new Error("unstarted rollout settlement requires durable completion proof");
+    await serialIndex(async () => {
+      const state = await readIndex(); const charge = state.resources?.charges.find((item) => item.app === app);
+      if (charge?.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1])) return;
+      if (charge.target.plan !== operation.preparation.plan || charge.deadline !== operation.admissionDeadline || (charge.previous?.plan ?? null) !== completion.previous) throw new Error("unstarted rollout resource settlement proof conflicts");
+      const settled = settleResources(state.resources, app, charge.incarnation, charge.sequence, completion.previous === null ? "absent" : "previous");
+      if (!settled.ok) throw new Error(settled.error); await journal.write({ ...state, resources: settled.value });
     });
   };
 
@@ -245,6 +257,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       }
       if (envelope.http?.requests.some((item) => item.request === request)) throw new Error("request identity already belongs to legacy HTTP work");
       if (envelope.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active !== null) throw new Error("complete rollout lifecycle is busy or fenced");
+      if (envelope.rollout?.completion !== undefined) await reconcileUnstartedRolloutResources(app, store, envelope.rollout.ticket);
       const previous = envelope.http?.requests.at(-1); if (previous !== undefined) await reconcileHttpResources(app, store, previous.ticket);
       const state = await readIndex(); const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
       const artifact = state.builds.find((build) => build.id === id)?.artifact;
@@ -262,6 +275,25 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     rolloutOperation: (app: string, request: string) => useReady(app, async (store) => {
       const state = await store.read(); return [...(state?.rollouts ?? []), ...(state?.rollout === undefined ? [] : [state.rollout])].find((item) => item.preparation.run === request);
     }),
+    cancelUnstartedRollout: (app: string, request: string, now: number) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request);
+      if (operation === undefined) throw new Error("complete rollout request is unavailable");
+      if (operation.completion !== undefined) { await reconcileUnstartedRolloutResources(app, store, operation.ticket); return operation; }
+      const completed = await store.completeUnstartedRollout(operation.ticket, "cancelled", now);
+      await reconcileUnstartedRolloutResources(app, store, operation.ticket); return completed;
+    }),
+    expireRolloutAdmission: (app: string, request: string, now: number) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = envelope?.rollout;
+      if (envelope === undefined || operation?.preparation.run !== request || operation.admitted || operation.completion !== undefined || !Number.isSafeInteger(now) || now < operation.admissionDeadline) throw new Error("complete rollout admission has not expired or is already settled");
+      const charge = (await serialIndex(readIndex)).resources?.charges.find((item) => item.app === app);
+      if (charge?.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1])) {
+        if (charge.result !== "pending" || charge.target.plan !== operation.preparation.plan || charge.deadline !== operation.admissionDeadline) throw new Error("expired admission resource evidence conflicts");
+        return "reserved";
+      }
+      await store.completeUnstartedRollout(operation.ticket, "deadline", now);
+      await reconcileUnstartedRolloutResources(app, store, operation.ticket); return "failed";
+    }),
+    reconcileUnstartedRolloutResources: (app: string, ticket: string) => useReady(app, (store) => reconcileUnstartedRolloutResources(app, store, ticket)),
     admitRollout: (app: string, ticket: string, ports: HostObserver & Pick<BuildPorts, "read" | "now">) => useReady(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope); const operation = envelope?.rollout;
       if (operation?.ticket !== ticket || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
@@ -457,7 +489,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         if (http?.phase === "held") return [];
         const charge = snapshot.resources?.charges.find((item) => item.app === app.app);
         const unsettled = charge?.result === "pending" && charge.incarnation === app.incarnation && charge.sequence === Number(operation.action.split(":")[1]);
-        return http !== undefined && terminalHttp(http.phase) && !unsettled ? [] : [Object.freeze({ app: app.app, request: operation.preparation.run })];
+        return (operation.completion !== undefined || http !== undefined && terminalHttp(http.phase)) && !unsettled ? [] : [Object.freeze({ app: app.app, request: operation.preparation.run })];
       })));
       return Object.freeze(work.flat());
     },
@@ -516,12 +548,12 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
 };
 
 /** Explicit provisioning only. An existing directory is never initialized or reset. */
-export const createLifecycleAppIndex = async (directory: string, observer?: RegistrationObserver) => {
+export const createLifecycleAppIndex = async (directory: string, observer?: RegistrationObserver, journals = openJournal) => {
   await mkdir(directory, { mode: 0o700 });
   await syncDirectory(dirname(directory));
-  return openIndex(directory, "initialize", observer);
+  return openIndex(directory, "initialize", observer, journals);
 };
 
 /** The trusted coordinator must control the directory and its ancestry. */
-export const openLifecycleAppIndex = (directory: string, observer?: RegistrationObserver) =>
-  openIndex(directory, "existing", observer);
+export const openLifecycleAppIndex = (directory: string, observer?: RegistrationObserver, journals = openJournal) =>
+  openIndex(directory, "existing", observer, journals);

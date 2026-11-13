@@ -981,8 +981,7 @@ certificate but before capacity settlement. These tests use the same locked,
 synchronized filesystem journals through a typed storage factory. They wait
 past the original admission deadline and forbid application runtime effects.
 They validate lifecycle/admission recovery with fixture build inputs; they do
-not validate image availability or app runtime readiness. Cancellation of
-started migration work and audited resolution remain subsequent delivery work.
+not validate image availability or app runtime readiness. Started migration cancellation and audited resolution use the separate paths below.
 
 ## Cancellation during preparation
 
@@ -1015,6 +1014,24 @@ remain version 1. Status exposes the cancellation timestamp and distinguishes
 cancelling, held and cancelled. A historical verified active certificate is
 never replaced merely because a cancellation request was acknowledged.
 
+## Expired HTTP handoff after preparation
+
+If preparation is ready but no HTTP child exists when its original handoff
+window expires, the coordinator records a terminal failure with the known
+migration prefix and previous release identity. It settles the lifecycle ticket
+and fence in that same synchronized journal replacement, then releases the
+candidate reservation. Restart reconstructs either side of that boundary.
+No HTTP child, replacement deadline, migration retry or down-migration is created.
+Applied data stays applied under the admitted rolling compatibility declaration.
+An existing HTTP child keeps ownership of its own convergence/recovery protocol;
+an already accepted cancellation keeps its cancelled outcome.
+
+The public preparation projection reports the preserved previous release (or
+absence of an active release) and normalized known step outcomes. It contains
+no private job descriptions, SQL, environment, or operator rationale. Historical
+release verification does not assert fresh runtime health. A stale completion
+cannot release a newer operation's reservation.
+
 ## Audited recovery of expired job cleanup
 
 `app.migration.cleanup` requests a separate audited action for a held migration
@@ -1046,7 +1063,7 @@ from container deletion, and remote database work may outlive a stopped client.
 The composition root runs the existing HTTP and complete-rollout scheduling
 loops in the same privileged process with disjoint work lists. No new socket
 holder or RPC service is added, and public migration-bearing admission remains
-disabled pending cancellation and the remaining integration requirements.
+disabled pending public pipeline integration and the remaining acceptance requirements.
 
 ## One-shot image health isolation
 
@@ -1087,9 +1104,7 @@ completed decision whose acknowledgement or resource-book update was lost.
 
 These commands can recover existing indexed experiment operations while new
 experimental admission is disabled. They do not enable migration-bearing apps
-through the public builder/deployer pipeline. Started-preparation cancellation,
-expired cleanup recovery, workers, maintenance and data-retention acceptance
-remain required work.
+through the public builder/deployer pipeline. Worker, maintenance, data-retention and public pipeline acceptance remain required work.
 
 ## Current host authority during recovery
 

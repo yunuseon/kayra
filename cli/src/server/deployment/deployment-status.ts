@@ -1,4 +1,4 @@
-import { migrationCancellationProof } from "./migration-cancellation.ts";
+import { settledMigrationPrefix } from "./migration-prefix.ts";
 import { parseDeploymentStatus } from "../../contracts/deployment-status.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
 import type { LifecycleFence } from "./lifecycle-fence.ts";
@@ -20,7 +20,7 @@ export const deploymentStatus = (app: string, incarnation: string, runtime: Runt
   const completion = preparing?.completion;
   const step = preparation?.sequence?.steps[preparation.sequence.position]; const resolution = step?.resolution;
   const cancellationPending = preparation?.cancelRequestedAt !== undefined && completion === undefined;
-  const cancellationProgress = cancellationPending && (preparation.phase !== "held" || migrationCancellationProof(preparation.sequence) !== undefined ||
+  const cancellationProgress = cancellationPending && (preparation.phase !== "held" || settledMigrationPrefix(preparation.sequence) !== undefined ||
     preparation.sequence?.steps.some((step) => step.attempts.some((attempt) => attempt.cleanups?.at(-1)?.state.phase === "fencing")));
   const requested = preparing === undefined ? target(state?.requested) : Object.freeze({ plan: preparing.preparation.plan, commit: preparing.commit });
   const parsed = parseDeploymentStatus({ version: 1, app, incarnation, runtime, lifecycle,
@@ -32,6 +32,8 @@ export const deploymentStatus = (app: string, incarnation: string, runtime: Runt
       phase: completion?.outcome ?? (cancellationProgress ? "cancelling" : preparation.phase === "ready" ? "ready-for-http" : preparation.phase === "prepared" && preparing.admitted ? "admitted" : preparation.phase),
       reason: completion?.reason ?? (cancellationProgress ? null : preparation.reason), admissionDeadline: preparing.admissionDeadline, deadline: preparation.deadline, migrationDeadline: preparation.migrationDeadline,
       httpDeadline: preparation.httpDeadline, completedAt: completion?.at ?? null, cancelRequestedAt: preparation.cancelRequestedAt ?? (completion?.outcome === "cancelled" ? completion.at : null), step: step?.id ?? null,
+      recovery: completion === undefined ? null : completion.previous === null ? "no-active-release" : "previous-preserved",
+      migrationOutcomes: completion === undefined ? [] : settledMigrationPrefix(preparation.sequence)?.outcomes ?? [],
       resolution: resolution === undefined ? null : { id: resolution.id, outcome: resolution.outcome, at: resolution.at } },
     requiredAction: completion === undefined && preparation?.phase === "held" && !cancellationProgress || preparing === undefined && latest?.phase === "held" ? "inspect-and-resolve" : "none", runtimeObservation: "not-observed",
   });

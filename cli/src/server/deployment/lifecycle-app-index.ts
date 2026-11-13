@@ -1,5 +1,5 @@
 import type { RolloutRequest } from "./rollout-request.ts";
-import { migrationCancellationProof } from "./migration-cancellation.ts";
+import { settledMigrationPrefix } from "./migration-prefix.ts";
 import { rolloutCleanupRecord } from "./rollout-cleanup.ts";
 import type { MigrationCleanupRequest, MigrationCleanupIdentity } from "../../contracts/migration-cleanup.ts";
 /* The index owns a live journal lock and serializes its filesystem operations. */
@@ -310,6 +310,12 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (operation === undefined || operation !== envelope?.rollout && operation.completion === undefined) throw new Error("preparation is unavailable or no longer current");
       return cancelPreparation(app, store, operation, clock);
     }),
+    expireRolloutHandoff: (app: string, request: string, now: number) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request);
+      if (operation === undefined || operation !== envelope?.rollout && operation.completion === undefined) throw new Error("expired handoff is unavailable or no longer current");
+      const completed = operation.completion === undefined ? await store.expireRolloutHandoff(request, now) : operation;
+      await reconcileRolloutResources(app, store, completed.ticket); return completed;
+    }),
     completeCancelledPreparation: (app: string, request: string, now: number) => useReady(app, async (store) => {
       const operation = await store.completeCancelledPreparation(request, now);
       if (operation.completion !== undefined) await reconcileRolloutResources(app, store, operation.ticket);
@@ -571,7 +577,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const state = await store.read(); const operation = state?.rollout;
         if (operation === undefined || operation.completion === undefined && operation.preparation.phase === "held" &&
           !operation.preparation.sequence?.steps.some((step) => step.attempts.some((attempt) => attempt.cleanups?.at(-1)?.state.phase === "fencing")) &&
-          !(operation.preparation.cancelRequestedAt !== undefined && migrationCancellationProof(operation.preparation.sequence) !== undefined)) return [];
+          !(operation.preparation.cancelRequestedAt !== undefined && settledMigrationPrefix(operation.preparation.sequence) !== undefined)) return [];
         const http = state?.http?.requests.find((item) => item.request === operation.preparation.run);
         if (http?.phase === "held") return [];
         const charge = snapshot.resources?.charges.find((item) => item.app === app.app);

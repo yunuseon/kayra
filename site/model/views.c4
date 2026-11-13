@@ -103,6 +103,15 @@ views {
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish cancelling, held or cancelled and unchanged active release'
   }
 
+  dynamic view proposedHandoffExpiry {
+    title 'Expired prepared release'
+    description 'A ready preparation without an HTTP child fails under its original deadline; applied data and the previous release remain.'
+    autoLayout TopBottom
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'read original HTTP deadline and settled migration prefix'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'persist failure and settle ticket before releasing candidate reservation'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish known migration outcomes and preserved active release'
+  }
+
   dynamic view proposedMaintenance {
     title 'Proposed maintenance deployment'
     description 'App declaration and fleet grant permit expected downtime; retained dependencies stay available for migrations.'

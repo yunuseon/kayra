@@ -3,7 +3,7 @@ import type { HttpExecutionPorts, HttpExecutionIndex } from "./http-execution-po
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { httpExecution } from "./http-execution.ts";
 
-type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileUnstartedRolloutResources">>;
+type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileRolloutResources">>;
 type Ports = HttpExecutionPorts & { readonly jobs: JobPort; readonly retain: (bytes: string) => Promise<string> };
 
 /** The composition root installs one application owner; phase adapters never create competing controllers. */
@@ -12,7 +12,7 @@ export const rolloutExecution = (index: Index, ports: Ports) => {
   const running = new Map<string, { readonly request: string; readonly result: Promise<string> }>();
   const execute = async (app: string, request: string) => {
     const operation = await index.rolloutOperation(app, request); if (operation === undefined) throw new Error("complete rollout operation is unavailable");
-    if (operation.completion !== undefined) { await index.reconcileUnstartedRolloutResources(app, operation.ticket); return operation.completion.outcome; }
+    if (operation.completion !== undefined) { await index.reconcileRolloutResources(app, operation.ticket); return operation.completion.outcome; }
     const workload = await index.httpOperation(app, request);
     if (workload !== undefined) return http.tick(app, request);
     if (!operation.admitted) {

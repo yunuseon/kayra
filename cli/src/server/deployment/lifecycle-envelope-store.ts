@@ -19,6 +19,8 @@ import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "
 import { initialRolloutPreparation, parseRolloutPreparation, rolloutPreparation } from "./rollout-preparation.ts";
 import { parseRolloutPlan } from "../../contracts/rollout-plan.ts";
 import type { RolloutPlan } from "../../contracts/rollout-plan.ts";
+import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
+import { resolveRolloutMigration } from "./rollout-resolution.ts";
 
 type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
 /** The composition root, never a client request, supplies this trusted read-only port. */
@@ -215,6 +217,25 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
           await persist({ ...state, rollout: { ...state.rollout, preparation: checked } });
         } };
       return rolloutPreparation(view, ports).tick();
+    }),
+    resolveMigration: (request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: Parameters<typeof resolveRolloutMigration>[4]) => serial(async () => {
+      const current = await required();
+      const operation = [...(current.rollouts ?? []), ...(current.rollout === undefined ? [] : [current.rollout])].find((item) => item.preparation.run === request.run);
+      if (operation === undefined) throw new Error("migration resolution rollout is unavailable");
+      const existing = operation.preparation.sequence?.steps.find((step) => step.id === request.step)?.resolution;
+      if (existing === undefined && (operation !== current.rollout || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null ||
+        lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action)) throw new Error("migration resolution no longer owns lifecycle");
+      const active = current.http?.active; const previous = active === null || active === undefined ? null : httpReleasePlan(active);
+      const resolved = await resolveRolloutMigration(operation, request, actor, previous, ports);
+      if (!resolved.changed) return resolved.receipt;
+      const completed = resolved.operation.completion !== undefined;
+      const fence = completed && current.fence !== null ? settleLifecycleWork(current.fence, operation.action) : undefined;
+      const tickets = completed ? completeTicket(current.tickets, operation.ticket, "failure") : undefined;
+      if (completed && (!fence?.ok || !tickets?.ok)) throw new Error("resolved migration cannot settle its lifecycle");
+      await persist({ ...current, ...(fence?.ok ? { fence: fence.value } : {}), ...(tickets?.ok ? { tickets: tickets.value } : {}),
+        operations: completed ? current.operations.filter((item) => item.ticket !== operation.ticket) : current.operations,
+        rollout: resolved.operation });
+      return resolved.receipt;
     }),
     /** The parent hands its existing action to HTTP; no new ticket, lease or deadline is minted. */
     handoffRollout: (ticket: string, service: string, now: number) => serial(async () => {

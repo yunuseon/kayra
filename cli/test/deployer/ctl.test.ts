@@ -195,3 +195,11 @@ test("ctl lifecycle forwards an explicit stable request and reads status through
     strictEqual((await ctlLater("lifecycle", "prepare", "shop", "a".repeat(40))).code, 1);
   } finally { control.close(); }
 });
+
+test("migration control refuses malformed and authority-bearing requests before contacting the daemon", () => {
+  for (const input of ["!!", Buffer.from("not json").toString("base64url"), Buffer.from(JSON.stringify({ app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", outcome: "applied", reason: "Verified ledger", actor: "forged" })).toString("base64url")]) {
+    const answer = ctl("migration", "resolve", input);
+    strictEqual(answer.code, 1); strictEqual(answer.stdout, ""); strictEqual(answer.stderr.includes("unavailable"), false);
+    strictEqual(answer.stderr.includes("SyntaxError"), false);
+  }
+});

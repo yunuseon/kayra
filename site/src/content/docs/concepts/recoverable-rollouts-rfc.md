@@ -984,6 +984,40 @@ They validate lifecycle/admission recovery with fixture build inputs; they do
 not validate image availability or app runtime readiness. Cancellation of
 started migration work and audited resolution remain subsequent delivery work.
 
+## Audited resolution of fenced migrations
+
+The indexed owner now accepts an explicit `applied` or `not-applied` assertion
+for a named held run and step. The normal operation catalog exposes
+`app.migration.resolve` and `app.migration.audit` across CLI, API, UI and MCP.
+The existing loopback operator control transport supplies the actor identity;
+request bodies cannot supply an actor, execution command or replacement deadline.
+The recorded actor identifies that privileged local control credential class,
+not a verified human identity. Audit reasons are bounded, single-line text and
+belong in the private audit report, not the general deployment projection.
+
+Resolution requires completed cleanup for every attempt, hash-verified immutable
+job descriptions, and a fresh observation of every exact owned, never-started
+name barrier. Absent, foreign, running, substituted or unavailable objects block
+resolution. This operation does not repair an unfenced attempt or extend its
+expired cleanup authority. Such cleanup needs a separately bounded operator
+recovery operation before an outcome can be asserted.
+
+The exclusive app journal writer atomically records the immutable audit and
+parent transition before further effects. Timely `applied` assertions advance
+preparation under its original deadline without changing earlier runtime or
+probe evidence. `not-applied`, or an `applied` assertion after that deadline,
+fails the candidate without retrying its unsafe migration or running a
+down-migration. The historical active release stays unchanged; capacity settles
+only after the persisted completion proof. Repeating the same decision returns
+the original receipt; a conflicting assertion fails. Restart can settle a
+completed decision whose acknowledgement or resource-book update was lost.
+
+These commands can recover existing indexed experiment operations while new
+experimental admission is disabled. They do not enable migration-bearing apps
+through the public builder/deployer pipeline. Started-preparation cancellation,
+expired cleanup recovery, workers, maintenance and data-retention acceptance
+remain required work.
+
 ## Current host authority during recovery
 
 A durable resource reservation records an accepted scheduling decision. It is

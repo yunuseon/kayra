@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { migrationResolutionRequestSchema } from "../../contracts/migration-resolution.ts";
 import { valueKeySchema } from "../app-values/model.ts";
 
 /**
@@ -152,6 +153,16 @@ export const operations = {
     scope: "app", effect: "changes", kind: "plan", input: appInput,
   },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
+  "app.migration.resolve": {
+    summary: "Record an audited operator decision for a held migration; never rerun an unsafe step.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: migrationResolutionRequestSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.migration.audit": {
+    summary: "Read the recorded operator decision for a migration step.",
+    scope: "app", effect: "reads", kind: "plan", bare: true,
+    input: migrationResolutionRequestSchema.unwrap().pick({ app: true, run: true, step: true }).extend({ server }).strict().readonly(),
+  },
   "app.runs": {
     summary: "What runs now, and the app's latest runs: state, commit, why, when, how long.",
     scope: "app",

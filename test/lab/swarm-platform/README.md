@@ -513,3 +513,44 @@ values. The playbook and upgrade lab retain `.host.json` and `.host.tar` before
 successful-source cleanup. Typecheck, lint and the serial CLI suite pass (617
 tests, one skip). These remain fault-injected authority checks, not host-loss or
 public-deployer integration evidence.
+
+The host-authority combined component run passed all 50 tasks on the same
+preserved VM. Reports use `/tmp/kayra-rollout-host-component.json`, including
+`.host.json` and `.host.tar`; its log is `/tmp/kayra-rollout-host-component.log`.
+
+### Audited migration resolution
+
+`migration-sequence.mjs resolution-run <new-results-directory>` uses real Docker
+jobs, app-owned effect counters, indexed admission and the local deployment
+control interface. It tests applied/not-applied operator assertions, then
+SIGKILL immediately before and after the synchronized audit journal write.
+Reopening must retain the original deadline and runtime evidence, and must
+never repeat the unsafe migration or its completed status probe. An applied
+assertion resumes preparation; a not-applied assertion fails the candidate and
+settles its reservation. This fixture stops before HTTP and uses fixture
+registration/build ports; it does not establish public pipeline integration.
+
+The normal operation catalog offers `app.migration.resolve` and
+`app.migration.audit`, through CLI/API/UI/MCP. For example:
+
+```sh
+kayra app migration audit SERVER APP RUN_UUID schema
+kayra app migration resolve SERVER APP RUN_UUID schema applied --reason 'Verified application migration ledger'
+```
+
+Resolution requires every attempt to have completed fencing and each exact
+owned inert barrier to remain observable. It cannot override a running or
+unfenced job. An assertion after the original deadline is retained as audit
+evidence and fails the candidate. The actor records the privileged local
+control identity, not an unauthenticated person name from request input.
+
+The four resolution cases passed on `kayra-builder-indexed-20261111080734`.
+Context is `/tmp/kayra-migration-resolution-context.json`, evidence is
+`/tmp/kayra-migration-resolution-evidence/` and its `.tar`, and the native log is
+`/tmp/kayra-migration-resolution-native.log`. Clock offsets were 557 ms before
+and 349 ms after. All cases observed exactly one migration Start and one probe
+Start, with no repeats after operator resolution or either SIGKILL checkpoint.
+App-owned effect counts were one for applied cases and zero for not-applied.
+Exported evidence contains no synthetic private values. Another 44 focused
+checks passed on Linux; the normal client parity and shell-transport checks
+passed on the Mac. The combined component rerun is recorded separately.

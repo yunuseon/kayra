@@ -3,14 +3,17 @@ import type { BuildPorts } from "../../contracts/build-artifact.ts";
 import { parseDeploymentCancellation, parseDeploymentQuery, parseDeploymentReceipt, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
 import type { HttpOperation } from "./http-state.ts";
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
+import { parseMigrationResolutionQuery, parseMigrationResolutionRequest, parseMigrationResolutionReport } from "../../contracts/migration-resolution.ts";
+import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareHttpRollout" | "deploymentStatus" | "cancelHttpRollout">>;
+type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareHttpRollout" | "deploymentStatus" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit">>;
 type Ports = {
   readonly index: Index;
   readonly canAccess: (app: string) => Promise<boolean>;
   readonly now: () => number;
   readonly enabled: () => Promise<boolean>;
   readonly plans?: (HttpPlanPort & Pick<BuildPorts, "now" | "retain">) | undefined;
+  readonly recovery?: Readonly<{ actor: MigrationResolutionActor; ports: Parameters<Index["resolveMigration"]>[3] }> | undefined;
 };
 
 const receipt = (app: string, operation: HttpOperation | undefined) => {
@@ -21,7 +24,21 @@ const receipt = (app: string, operation: HttpOperation | undefined) => {
 };
 
 /** Local lifecycle interface. Callers cannot supply native authority, private inputs or effect decisions. */
-export const deploymentControl = ({ index, canAccess, enabled, plans, now }: Ports) => async (path: string, input: unknown) => {
+export const deploymentControl = ({ index, canAccess, enabled, plans, now, recovery }: Ports) => async (path: string, input: unknown) => {
+  if (path === "/deployment/migration-audit") {
+    const query = parseMigrationResolutionQuery(input);
+    if (!query.ok) return undefined;
+    if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
+    const parsed = parseMigrationResolutionReport({ version: 1, ...query.value, audit: await index.migrationAudit(query.value.app, query.value.run, query.value.step) ?? null });
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.value;
+  }
+  if (path === "/deployment/migration-resolve") {
+    const requested = parseMigrationResolutionRequest(input);
+    if (!requested.ok || recovery === undefined) return undefined;
+    if (!(await canAccess(requested.value.app))) throw new Error("app is outside deployment scope");
+    return index.resolveMigration(requested.value.app, requested.value, recovery.actor, recovery.ports);
+  }
   if (path === "/deployment/status") {
     const query = parseDeploymentQuery(input);
     if (!query.ok) return undefined;

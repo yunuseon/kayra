@@ -80,8 +80,8 @@ views {
     plannedDelivery.trusted.adapter -> plannedDelivery.workload 'inspect migration and workload state'
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish outcome or intervention required'
     operator -> plannedDelivery.trusted.platform 'resolve a named blocked run and step'
-    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'audited recovery command'
-    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'record decision and reconcile'
+    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'validated run/step assertion with transport-derived actor'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'atomically retain audit and parent transition under original deadline'
   }
 
   dynamic view proposedMaintenance {

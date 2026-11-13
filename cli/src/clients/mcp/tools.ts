@@ -35,6 +35,8 @@ export const reaches = {
   "app.secret.import": { tool: "app_secret_import" },
   "app.secret.generate": { tool: "app_secret_generate" },
   "app.purge": { tool: "app_purge" },
+  "app.migration.resolve": { tool: "app_migration_resolve" },
+  "app.migration.audit": { tool: "app_migration_audit" },
   "app.runs": { tool: "app_runs" },
   "app.log": { tool: "app_log" },
   "app.deploy": { tool: "app_deploy" },

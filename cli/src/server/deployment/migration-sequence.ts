@@ -8,6 +8,8 @@ import { claimJournal } from "./journal-claim.ts";
 import { oneShotExecution, parseJobExecution } from "./one-shot-execution.ts";
 import type { JobExecution } from "./one-shot-execution.ts";
 import type { OperationJournal } from "./operation.ts";
+import { parseMigrationResolutionAudit } from "../../contracts/migration-resolution.ts";
+import { migrationResolutionId } from "./migration-resolution-audit.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
@@ -16,7 +18,7 @@ const schema = z.object({ version: z.literal(1), plan: digest,
   scope: z.object({ app: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/), incarnation: z.uuid(), run: z.uuid() }).strict().readonly(),
   createdAt: positive, deadline: positive, completedAt: positive.nullable(), phase: z.enum(["running", "held", "succeeded"]), position: z.number().int().min(0).max(128), reason: reason.nullable(),
   steps: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/),
-    phase: z.enum(["running", "applied", "held"]), reason: reason.nullable(), appliedAt: positive.nullable(), executionDeadline: positive.nullable(),
+    phase: z.enum(["running", "applied", "held"]), reason: reason.nullable(), appliedAt: positive.nullable(), executionDeadline: positive.nullable(), resolution: z.unknown().optional(),
     attempts: z.array(z.object({ purpose: z.enum(["migration", "probe"]), attempt: positive.max(8), createdAt: positive,
       artifact: digest, execution: z.unknown().nullable() }).strict()).min(1).max(9).readonly(),
   }).strict()).max(128).readonly(),
@@ -25,7 +27,15 @@ const schema = z.object({ version: z.literal(1), plan: digest,
 export const parseMigrationSequenceState = (input: unknown) => {
   const parsed = schema.safeParse(input); if (!parsed.success) throw new Error("invalid migration sequence state");
   const value = parsed.data;
-  const steps = Object.freeze(value.steps.map((step) => {
+  const steps = Object.freeze(value.steps.map((input) => {
+    const { resolution: rawResolution, ...step } = input;
+    const parsedResolution = rawResolution === undefined ? undefined : parseMigrationResolutionAudit(rawResolution);
+    if (parsedResolution !== undefined && !parsedResolution.ok) throw new Error(parsedResolution.error);
+    const resolution = parsedResolution?.value;
+    if (resolution !== undefined && (resolution.sequence !== value.plan || resolution.scope.app !== value.scope.app || resolution.scope.incarnation !== value.scope.incarnation ||
+      resolution.scope.run !== value.scope.run || resolution.scope.step !== step.id || resolution.at < value.createdAt || resolution.id !== migrationResolutionId(value.plan, resolution.scope) ||
+      step.phase === "running" || step.phase === "applied" && (resolution.outcome !== "applied" || resolution.at !== step.appliedAt || resolution.at >= value.deadline) ||
+      step.phase === "held" && (resolution.outcome === "not-applied" ? step.reason !== "not-applied" : resolution.at < value.deadline || step.reason !== "deadline"))) throw new Error("migration resolution conflicts with sequence progress");
     const attempts = Object.freeze(step.attempts.map((attempt) => {
       const execution = attempt.execution === null ? null : parseJobExecution(attempt.execution);
       if (attempt.createdAt < value.createdAt || attempt.createdAt >= value.deadline || execution !== null && execution.createdAt < attempt.createdAt) throw new Error("invalid migration attempt time");
@@ -40,12 +50,13 @@ export const parseMigrationSequenceState = (input: unknown) => {
       step.executionDeadline !== (migrations[0]?.execution?.executionDeadline ?? null) ||
       attempts.some((attempt, index) => index !== attempts.length - 1 && attempt.execution?.phase !== "complete") ||
       (probes.length > 0 && attempts.at(-1)?.purpose !== "probe") ||
-      (step.phase === "applied" && (completed?.phase !== "complete" || completed.expiry !== null || completed.evidence?.kind !== "succeeded" ||
+      (resolution !== undefined && attempts.some((attempt) => attempt.execution?.phase !== "complete")) ||
+      (step.phase === "applied" && resolution === undefined && (completed?.phase !== "complete" || completed.expiry !== null || completed.evidence?.kind !== "succeeded" ||
         (last?.purpose === "probe" && completed.evidence.probe !== "applied"))) ||
       (step.phase === "applied") !== (step.appliedAt !== null) ||
       (step.appliedAt !== null && (step.appliedAt < value.createdAt || step.appliedAt >= value.deadline)) ||
       ((step.phase === "held") !== (step.reason !== null))) throw new Error("inconsistent migration attempts or outcome");
-    return Object.freeze({ ...step, attempts });
+    return Object.freeze({ ...step, attempts, ...(resolution === undefined ? {} : { resolution }) });
   }));
   const completedAt = value.completedAt;
   if (value.createdAt >= value.deadline || new Set(steps.map((step) => step.id)).size !== steps.length ||
@@ -59,11 +70,33 @@ export const parseMigrationSequenceState = (input: unknown) => {
   return Object.freeze({ ...value, steps });
 };
 export type MigrationSequenceState = ReturnType<typeof parseMigrationSequenceState>;
+export const migrationDescriptionForState = (state: MigrationSequenceState, input: unknown) => {
+  const parsed = parseMigrationSequencePlan(input);
+  if (!parsed.ok || migrationSequenceDigest(parsed.value) !== state.plan || JSON.stringify(parsed.value.scope) !== JSON.stringify(state.scope) || state.position > parsed.value.steps.length ||
+    state.steps.some((step, index) => step.id !== parsed.value.steps[index]?.definition.id) ||
+    state.phase === "running" && state.position === parsed.value.steps.length || state.phase === "succeeded" && state.position !== parsed.value.steps.length) throw new Error("migration description or scope changed");
+  return parsed.value;
+};
 type Ports = { readonly native: JobPort; readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
   readonly authorize: (state: MigrationSequenceState, plan: MigrationSequencePlan, job: JobExecution, effect: "create" | "start" | "fence") => Promise<boolean>;
   readonly materialize: (job: JobPlan, plan: MigrationSequencePlan) => Promise<Readonly<Record<string, string>>>;
 };
 const hash = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
+
+export const migrationJobDescription = (state: MigrationSequenceState, plan: MigrationSequencePlan, position: number, purpose: "migration" | "probe", attempt: number, createdAt: number) => {
+  const source = plan.steps[position]; if (source === undefined) throw new Error("migration source step is missing");
+  const recovery = source.definition.recovery;
+  if (purpose === "probe" && recovery.kind !== "status-probe") throw new Error("migration has no status probe");
+  const seconds = purpose === "probe" && recovery.kind === "status-probe" ? recovery.timeout_seconds : source.definition.timeout_seconds;
+  const previous = state.steps[position]?.executionDeadline;
+  if (purpose === "migration" && attempt > 1 && (previous === undefined || previous === null)) throw new Error("migration retry has no original execution deadline");
+  const ceiling = purpose === "migration" && attempt > 1 && previous !== undefined && previous !== null ? Math.min(previous, state.deadline) : state.deadline;
+  const startDeadline = Math.min(ceiling, createdAt + plan.policy.schedulingSeconds * 1000);
+  const parsed = parseJobPlan({ ...source.template, scope: { ...state.scope, step: source.definition.id, purpose, attempt },
+    command: purpose === "probe" && recovery.kind === "status-probe" ? recovery.command : source.definition.command,
+    startDeadline, executionTimeoutSeconds: seconds, deadline: Math.min(ceiling, startDeadline + seconds * 1000) });
+  if (!parsed.ok) throw new Error(parsed.error); return parsed.value;
+};
 
 /** Serialized phase owner. Its parent must supply lifecycle fencing and durable resource admission. */
 export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
@@ -78,32 +111,13 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
   const time = (minimum = 1) => { const value = ports.now(); if (!Number.isSafeInteger(value) || value < minimum) throw new Error("migration sequence clock is unavailable"); return value; };
   const read = async (digest: string) => { const bytes = await ports.read(digest); if (hash(bytes) !== digest) throw new Error("migration artifact integrity failed"); const value: unknown = JSON.parse(bytes); return value; };
   const description = async (state: MigrationSequenceState) => {
-    const parsed = parseMigrationSequencePlan(await read(state.plan));
-    if (!parsed.ok || migrationSequenceDigest(parsed.value) !== state.plan || JSON.stringify(parsed.value.scope) !== JSON.stringify(state.scope) || state.position > parsed.value.steps.length ||
-      state.steps.some((step, index) => step.id !== parsed.value.steps[index]?.definition.id) ||
-      (state.phase === "running" && state.position === parsed.value.steps.length) ||
-      (state.phase === "succeeded" && state.position !== parsed.value.steps.length)) throw new Error("migration description or scope changed");
-    return parsed.value;
+    return migrationDescriptionForState(state, await read(state.plan));
   };
   const hold = (state: MigrationSequenceState, why: z.infer<typeof reason>) => write({ ...state, phase: "held", reason: why,
     steps: state.steps.map((step, index) => index === state.position ? { ...step, phase: "held", reason: why } : step) });
   const retainJob = async (plan: JobPlan) => {
     const parsed = parseJobPlan(plan); if (!parsed.ok) throw new Error(parsed.error);
     const artifact = await ports.retain(JSON.stringify(parsed.value)); if (artifact !== jobPlanDigest(parsed.value)) throw new Error("migration job retention failed"); return artifact;
-  };
-  const jobDescription = (state: MigrationSequenceState, plan: MigrationSequencePlan, position: number, purpose: "migration" | "probe", attempt: number, createdAt: number) => {
-    const source = plan.steps[position]; if (source === undefined) throw new Error("migration source step is missing");
-    const recovery = source.definition.recovery;
-    if (purpose === "probe" && recovery.kind !== "status-probe") throw new Error("migration has no status probe");
-    const seconds = purpose === "probe" && recovery.kind === "status-probe" ? recovery.timeout_seconds : source.definition.timeout_seconds;
-    const previous = state.steps[position]?.executionDeadline;
-    if (purpose === "migration" && attempt > 1 && (previous === undefined || previous === null)) throw new Error("migration retry has no original execution deadline");
-    const ceiling = purpose === "migration" && attempt > 1 && previous !== undefined && previous !== null ? Math.min(previous, state.deadline) : state.deadline;
-    const startDeadline = Math.min(ceiling, createdAt + plan.policy.schedulingSeconds * 1000);
-    const parsed = parseJobPlan({ ...source.template, scope: { ...state.scope, step: source.definition.id, purpose, attempt },
-      command: purpose === "probe" && recovery.kind === "status-probe" ? recovery.command : source.definition.command,
-      startDeadline, executionTimeoutSeconds: seconds, deadline: Math.min(ceiling, startDeadline + seconds * 1000) });
-    if (!parsed.ok) throw new Error(parsed.error); return parsed.value;
   };
   const child = (state: MigrationSequenceState, plan: MigrationSequencePlan, position: number, index: number) => {
     const attempt = state.steps[position]?.attempts[index]; if (attempt === undefined) throw new Error("migration attempt is missing");
@@ -137,7 +151,7 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
     const ceiling = purpose === "migration" && prior > 0 && current?.executionDeadline !== null && current?.executionDeadline !== undefined ? Math.min(current.executionDeadline, state.deadline) : state.deadline;
     if (now >= ceiling) return hold(state, "deadline");
     if (prior >= plan.policy.maximumAttempts) return hold(state, "attempts-exhausted");
-    const artifact = await retainJob(jobDescription(state, plan, state.position, purpose, prior + 1, now));
+    const artifact = await retainJob(migrationJobDescription(state, plan, state.position, purpose, prior + 1, now));
     const attempt = { purpose, attempt: prior + 1, createdAt: now, artifact, execution: null };
     return write({ ...state, steps: current === undefined ? [...state.steps, { id: source.definition.id, phase: "running", reason: null, appliedAt: null, executionDeadline: null, attempts: [attempt] }]
       : state.steps.map((step, index) => index === state.position ? { ...step, attempts: [...step.attempts, attempt] } : step) });
@@ -158,7 +172,7 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
       if (step === undefined) return now >= state.deadline ? hold(state, "deadline") : schedule(state, plan, "migration");
       const index = step.attempts.length - 1; const attempt = step.attempts[index]; if (attempt === undefined) throw new Error("migration attempt is missing");
       const raw = parseJobPlan(await read(attempt.artifact));
-      if (!raw.ok || jobPlanDigest(raw.value) !== attempt.artifact || jobPlanDigest(jobDescription(state, plan, state.position, attempt.purpose, attempt.attempt, attempt.createdAt)) !== attempt.artifact) throw new Error("migration job description changed");
+      if (!raw.ok || jobPlanDigest(raw.value) !== attempt.artifact || jobPlanDigest(migrationJobDescription(state, plan, state.position, attempt.purpose, attempt.attempt, attempt.createdAt)) !== attempt.artifact) throw new Error("migration job description changed");
       const owner = child(state, plan, state.position, index);
       if (attempt.execution === null) {
         if (now >= (raw.value.startDeadline ?? raw.value.deadline)) return hold(state, "deadline");

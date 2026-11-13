@@ -17,6 +17,7 @@ export const deploymentStatus = (app: string, incarnation: string, runtime: Runt
   const preparing = rollout !== undefined && !state?.requests.some((item) => item.request === rollout.preparation.run) ? rollout : undefined;
   const preparation = preparing?.preparation;
   const completion = preparing?.completion;
+  const step = preparation?.sequence?.steps[preparation.sequence.position]; const resolution = step?.resolution;
   const requested = preparing === undefined ? target(state?.requested) : Object.freeze({ plan: preparing.preparation.plan, commit: preparing.commit });
   const parsed = parseDeploymentStatus({ version: 1, app, incarnation, runtime, lifecycle,
     verification: runtime === "compose" ? "legacy-unverified" : state?.active === null || state?.active === undefined ? "unverified" : "verified",
@@ -26,8 +27,9 @@ export const deploymentStatus = (app: string, incarnation: string, runtime: Runt
     preparation: preparation === undefined || preparing === undefined ? null : { request: preparation.run,
       phase: completion?.outcome ?? (preparation.phase === "ready" ? "ready-for-http" : preparation.phase === "prepared" && preparing.admitted ? "admitted" : preparation.phase),
       reason: completion?.reason ?? preparation.reason, admissionDeadline: preparing.admissionDeadline, deadline: preparation.deadline, migrationDeadline: preparation.migrationDeadline,
-      httpDeadline: preparation.httpDeadline, completedAt: completion?.at ?? null, step: preparation.sequence?.steps[preparation.sequence.position]?.id ?? null },
-    requiredAction: preparation?.phase === "held" || preparing === undefined && latest?.phase === "held" ? "inspect-and-resolve" : "none", runtimeObservation: "not-observed",
+      httpDeadline: preparation.httpDeadline, completedAt: completion?.at ?? null, step: step?.id ?? null,
+      resolution: resolution === undefined ? null : { id: resolution.id, outcome: resolution.outcome, at: resolution.at } },
+    requiredAction: completion === undefined && preparation?.phase === "held" || preparing === undefined && latest?.phase === "held" ? "inspect-and-resolve" : "none", runtimeObservation: "not-observed",
   });
   if (!parsed.ok) throw new Error(parsed.error);
   return parsed.value;

@@ -4257,6 +4257,462 @@
         }
       }
     },
+    "/operations/app.migration.resolve": {
+      "post": {
+        "summary": "Record an audited operator decision for a held migration; never rerun an unsafe step.",
+        "operationId": "app.migration.resolve",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "app": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                      },
+                      "run": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "step": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "applied",
+                          "not-applied"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 512
+                      },
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      }
+                    },
+                    "required": [
+                      "app",
+                      "run",
+                      "step",
+                      "outcome",
+                      "reason",
+                      "server"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.migration.resolve/preview": {
+      "post": {
+        "summary": "Preview: Record an audited operator decision for a held migration; never rerun an unsafe step.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "app": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                      },
+                      "run": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "step": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "applied",
+                          "not-applied"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 512
+                      },
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      }
+                    },
+                    "required": [
+                      "app",
+                      "run",
+                      "step",
+                      "outcome",
+                      "reason",
+                      "server"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/operations/app.migration.audit": {
+      "post": {
+        "summary": "Read the recorded operator decision for a migration step.",
+        "operationId": "app.migration.audit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "app": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                      },
+                      "run": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "step": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                      },
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      }
+                    },
+                    "required": [
+                      "app",
+                      "run",
+                      "step",
+                      "server"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.migration.audit/preview": {
+      "post": {
+        "summary": "Preview: Read the recorded operator decision for a migration step.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "app": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                      },
+                      "run": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "step": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                      },
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      }
+                    },
+                    "required": [
+                      "app",
+                      "run",
+                      "step",
+                      "server"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/operations/app.runs": {
       "post": {
         "summary": "What runs now, and the app's latest runs: state, commit, why, when, how long.",
@@ -8128,6 +8584,8 @@
               "app.launch",
               "app.hook",
               "app.purge",
+              "app.migration.resolve",
+              "app.migration.audit",
               "app.runs",
               "app.log",
               "app.deploy",

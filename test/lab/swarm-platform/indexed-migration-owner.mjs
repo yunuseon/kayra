@@ -20,6 +20,7 @@ export const indexedMigrationOwner = async (path, source, ports, checkpoint, ini
       if (audit && checkpoint === 'before-audit') process.kill(process.pid, 'SIGKILL');
       await journal.write(value);
       if (audit && checkpoint === 'after-audit') process.kill(process.pid, 'SIGKILL');
+      if (checkpoint === 'after-cancel-intent' && value?.rollout?.preparation?.cancelRequestedAt !== undefined && value.rollout.completion === undefined) process.kill(process.pid, 'SIGKILL');
     } };
   };
   const index = initialize ? await createLifecycleAppIndex(indexPath, (identity) => Promise.resolve({ ...identity, status: 'applied' })) : await openLifecycleAppIndex(indexPath, undefined, journals);
@@ -88,6 +89,15 @@ export const indexedMigrationOwner = async (path, source, ports, checkpoint, ini
       } } });
     };
     return { journal: { close: index.close }, owner: { prepare: async () => operation.preparation, tick,
+      cancel: () => control('/deployment/cancel', { app, request }),
+      snapshot: () => index.rolloutOperation(app, request),
+      tickCancelled: async () => {
+        const current = await index.rolloutOperation(app, request); if (current.completion !== undefined) return current;
+        const completed = await index.completeCancelledPreparation(app, request, ports.now());
+        if (completed.completion === undefined) await tick();
+        return index.rolloutOperation(app, request);
+      },
+      httpCreated: async () => (await index.httpOperation(app, request)) !== undefined,
       requestCleanup: async () => control('/deployment/migration-cleanup', await cleanupRequest()), tickCleanup,
       cleanupAudit: () => control('/deployment/migration-cleanup-audit', { app, run: request, step: 'schema' }),
       resolve: (outcome) => control('/deployment/migration-resolve', { app, run: request, step: 'schema', outcome, reason: 'Verified application-owned migration ledger' }),

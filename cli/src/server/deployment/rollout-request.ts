@@ -1,3 +1,4 @@
+import { migrationCancellationProof } from "./migration-cancellation.ts";
 import { z } from "zod";
 import { migrationAttemptBarrier } from "./migration-sequence.ts";
 import { parseRolloutPreparation } from "./rollout-preparation.ts";
@@ -9,6 +10,11 @@ const schema = z.object({ ticket: z.string().max(80), action: z.string().max(80)
   }).strict().readonly(), z.object({ kind: z.literal("migration-resolved"), outcome: z.literal("failed"), reason: z.enum(["migration", "deadline"]),
     at: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), previous: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
     resolution: z.string().regex(/^[0-9a-f]{64}$/), step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/),
+  }).strict().readonly(), z.object({ kind: z.literal("cancelled-preparation"), outcome: z.literal("cancelled"), reason: z.literal("cancelled"),
+    at: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), previous: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+    proof: z.object({ version: z.literal(1), sequence: z.string().regex(/^[0-9a-f]{64}$/).nullable(), outcomes: z.array(z.object({
+      step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/), outcome: z.enum(["applied", "not-applied", "unstarted"]),
+    }).strict().readonly()).max(128).readonly() }).strict().readonly(),
   }).strict().readonly()]).optional(),
 }).strict().readonly();
 
@@ -26,5 +32,9 @@ export const parseRolloutRequest = (input: unknown) => {
       (completion.reason === "migration" ? resolution.outcome !== "not-applied" : resolution.outcome !== "applied" || resolution.at < preparation.migrationDeadline) ||
       preparation.sequence.steps.some((item) => item.attempts.some((attempt) => migrationAttemptBarrier(attempt) === null))) throw new Error("resolved rollout completion lacks fenced outcome proof");
   }
+  if (completion?.kind === "cancelled-preparation" && (preparation.cancelRequestedAt === undefined || completion.at < preparation.cancelRequestedAt ||
+    !request.admitted || JSON.stringify(migrationCancellationProof(preparation.sequence)) !== JSON.stringify(completion.proof))) throw new Error("cancelled preparation lacks settled migration evidence");
   return Object.freeze({ ...request, preparation, ...(completion === undefined ? {} : { completion }) });
 };
+
+export type RolloutRequest = ReturnType<typeof parseRolloutRequest>;

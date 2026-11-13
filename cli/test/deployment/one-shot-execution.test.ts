@@ -190,3 +190,36 @@ test("legacy unstarted cleanup does not invent an execution deadline merely beca
   const { executionDeadline, expiry, ...legacy } = expired; assert.equal(executionDeadline, null); assert.equal(expiry, "scheduling");
   const restored = parseJobExecution(legacy); assert.equal(restored.executionDeadline, null); assert.equal(restored.expiry, "scheduling");
 });
+
+test("cancelling a prepared job persists intent and fences its name without Create or Start", async (t) => {
+  const lab = await fixture(t); await lab.owner.prepare(lab.plan); lab.now(2000);
+  const requested = await lab.owner.cancel(); assert.equal(requested.cancelRequestedAt, 2000); assert.equal(lab.calls.length, 0);
+  const restarted = await lab.reopen(); const pending = await restarted.tick(); assert.equal(pending.phase, "fencing"); assert.equal(pending.evidence?.kind, "not-started");
+  await restarted.tick(); const complete = await restarted.tick(); assert.equal(complete.phase, "complete"); assert.equal(complete.cancelRequestedAt, 2000);
+  assert.equal(lab.executions(), 0); assert.equal(lab.calls.filter((call) => call.path.endsWith("/start")).length, 0);
+  assert.deepEqual(await restarted.cancel(), complete);
+});
+
+test("cancellation between Create and Start deletes the exact prepared ID and cannot execute its command", async (t) => {
+  const lab = await fixture(t); await lab.owner.prepare(lab.plan); await lab.owner.tick();
+  const before = await lab.native.observe(lab.plan); assert.equal(before.status, "owned");
+  await lab.owner.cancel(); const pending = await lab.owner.tick(); assert.equal(pending.container, before.id); assert.equal(pending.evidence?.kind, "not-started");
+  await lab.owner.tick(); assert.equal((await lab.owner.tick()).phase, "complete"); assert.equal(lab.executions(), 0);
+  assert.equal(lab.calls.filter((call) => call.path.endsWith("/start")).length, 0);
+});
+
+test("cancelling a running migration retains an unknown outcome and the original deadlines across restart", async (t) => {
+  const lab = await fixture(t); await lab.owner.prepare(lab.plan); await lab.owner.tick(); const started = await lab.owner.tick(); lab.state("running"); lab.now(2000);
+  const requested = await lab.owner.cancel(); assert.equal(requested.executionDeadline, started.executionDeadline);
+  const restarted = await lab.reopen(); const stopping = await restarted.tick(); assert.equal(stopping.evidence?.kind, "unknown"); assert.equal(stopping.deadline, lab.plan.deadline); assert.equal(stopping.fenceDeadline, 32000);
+  await restarted.tick(); const complete = await restarted.tick(); assert.equal(complete.phase, "complete"); assert.equal(complete.evidence?.kind, "unknown"); assert.equal(lab.executions(), 1);
+  assert.deepEqual(await restarted.cancel(), complete);
+});
+
+test("a cancelled uncertain Start is fenced before its delayed dispatch can arrive", async (t) => {
+  const lab = await fixture(t, (ports) => ({ ...ports, authorize: (_record, effect) => effect === "start" ? Promise.reject(new Error("interrupted before dispatch")) : Promise.resolve(true) }));
+  await lab.owner.prepare(lab.plan); await lab.owner.tick(); await assert.rejects(lab.owner.tick(), /interrupted/);
+  const restarted = await lab.reopen(); await restarted.cancel(); const uncertain = await restarted.tick(); assert.equal(uncertain.evidence?.kind, "unknown");
+  await restarted.tick(); const complete = await restarted.tick(); assert.equal(complete.phase, "complete"); assert.equal(lab.executions(), 0);
+  assert.ok(complete.container !== null); assert.equal(await lab.native.start(lab.plan, complete.container), "conflict");
+});

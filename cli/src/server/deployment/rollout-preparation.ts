@@ -11,8 +11,8 @@ import { migrationSequence, parseMigrationSequenceState } from "./migration-sequ
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const schema = z.object({ version: z.literal(1), run: z.uuid(), app: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/), incarnation: z.uuid(),
-  plan: digest, workload: digest, source: digest.nullable(), createdAt: positive, deadline: positive, migrationDeadline: positive,
-  phase: z.enum(["prepared", "migrating", "ready", "held"]), reason: z.enum(["deadline", "migration"]).nullable(),
+  cancelRequestedAt: positive.optional(), plan: digest, workload: digest, source: digest.nullable(), createdAt: positive, deadline: positive, migrationDeadline: positive,
+  phase: z.enum(["prepared", "migrating", "ready", "held"]), reason: z.enum(["deadline", "migration", "cancelled"]).nullable(),
   httpDeadline: positive.nullable(), sequence: z.unknown().nullable(),
 }).strict().readonly();
 
@@ -30,9 +30,16 @@ export const parseRolloutPreparation = (input: unknown) => {
     (state.phase === "migrating" && (state.source === null || sequence === null)) ||
     (state.phase === "ready" && state.source !== null && sequence?.phase !== "succeeded") ||
     (state.phase === "ready" && sequence?.completedAt !== null && sequence?.completedAt !== undefined && sequence.completedAt >= (state.httpDeadline ?? 0))) throw new Error("inconsistent rollout preparation");
-  return Object.freeze({ ...state, sequence });
+  const { cancelRequestedAt, ...record } = state;
+  if (cancelRequestedAt !== undefined && cancelRequestedAt < state.createdAt) throw new Error("invalid preparation cancellation time");
+  return Object.freeze({ ...record, sequence, ...(cancelRequestedAt === undefined ? {} : { cancelRequestedAt }) });
 };
 export type RolloutPreparation = ReturnType<typeof parseRolloutPreparation>;
+export const cancelledRolloutPreparation = (input: RolloutPreparation, now: number) => {
+  const state = parseRolloutPreparation(input); if (state.cancelRequestedAt !== undefined) return state;
+  if (!Number.isSafeInteger(now) || now < state.createdAt || state.sequence !== null && now < state.sequence.createdAt) throw new Error("preparation cancellation clock is unavailable");
+  return parseRolloutPreparation({ ...state, cancelRequestedAt: now, sequence: state.sequence === null ? null : { ...state.sequence, cancelRequestedAt: state.sequence.cancelRequestedAt ?? now } });
+};
 type SequencePorts = Parameters<typeof migrationSequence>[1];
 type Ports = Pick<SequencePorts, "native" | "now" | "read" | "retain"> & {
   /** The lifecycle owner checks its current fence and durable host reservation for each effect. */
@@ -96,7 +103,7 @@ export const rolloutPreparation = (journal: OperationJournal, ports: Ports) => {
     },
     materialize: async (job) => { const state = await required(); return ports.materialize(job, await description(state)); },
   });
-  const hold = (state: RolloutPreparation, reason: "deadline" | "migration") => write({ ...state, phase: "held", reason, httpDeadline: null });
+  const hold = (state: RolloutPreparation, reason: "deadline" | "migration" | "cancelled") => write({ ...state, phase: "held", reason, httpDeadline: null });
   return Object.freeze({
     prepare: (input: RolloutPlan, run: string) => serial(async () => {
       const parsed = parseRolloutPlan(input); if (!parsed.ok || !z.uuid().safeParse(run).success) throw new Error("invalid rollout preparation request");
@@ -111,18 +118,25 @@ export const rolloutPreparation = (journal: OperationJournal, ports: Ports) => {
       return write(intent);
     }),
     read: () => serial(load),
+    cancel: () => serial(async () => {
+      const state = await required(); if (state.cancelRequestedAt !== undefined) return state;
+      return write(cancelledRolloutPreparation(state, time(state.createdAt)));
+    }),
     tick: () => serial(async () => {
       const state = await required(); const plan = await description(state);
       if (state.phase === "held" || state.phase === "ready") return state;
       if (state.source !== null) {
         const source = rolloutMigrationDescription(plan, state.run); if (!source.ok) throw new Error(source.error);
         if (state.sequence === null) {
+          if (state.cancelRequestedAt !== undefined) return hold(state, "cancelled");
           if (time(state.createdAt) >= state.migrationDeadline) return hold(state, "deadline");
           await child.prepare(source.value, state.migrationDeadline); return required();
         }
-        if (state.sequence.phase === "held") return hold(state, "migration");
+        if (state.cancelRequestedAt !== undefined) await child.cancel();
+        if (state.sequence.phase === "held") return hold(await required(), "migration");
         if (state.sequence.phase !== "succeeded") { await child.tick(); return required(); }
       }
+      if (state.cancelRequestedAt !== undefined) return hold(await required(), "cancelled");
       const now = time(state.createdAt);
       if (now >= state.migrationDeadline) return hold(state, "deadline");
       return write({ ...state, phase: "ready", httpDeadline: now + 90_000 });

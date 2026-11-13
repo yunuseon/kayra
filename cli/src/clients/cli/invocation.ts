@@ -49,6 +49,10 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "app.secret.generate", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }), key: command.key } });
     case "app purge":
       return plainly({ name: "app.purge", input: { server: command.server, app: command.app } });
+    case "app deployment status":
+      return plainly({ name: "app.deployment.status", input: { server: command.server, app: command.app } });
+    case "app deployment cancel":
+      return plainly({ name: "app.deployment.cancel", input: { server: command.server, app: command.app, request: command.request } });
     case "app migration cleanup":
       return plainly({ name: "app.migration.cleanup", input: { server: command.server, app: command.app, run: command.run, step: command.step, purpose: command.purpose, attempt: command.attempt, action: command.action, reason: command.reason } });
     case "app migration cleanup-audit":
@@ -111,6 +115,8 @@ export const reaches = {
   "app.secret.import": ["app", "secret", "import", "SERVER", "APP", "API_KEY", "/tmp/credential"],
   "app.secret.generate": ["app", "secret", "generate", "SERVER", "APP", "DATABASE_PASSWORD"],
   "app.purge": ["app", "purge", "SERVER", "APP"],
+  "app.deployment.status": ["app", "deployment", "status", "SERVER", "APP"],
+  "app.deployment.cancel": ["app", "deployment", "cancel", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc"],
   "app.migration.cleanup": ["app", "migration", "cleanup", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema", "migration", "1", "23456789-1234-4234-8234-123456789abc", "--reason", "Fence failed migration before inspecting ledger"],
   "app.migration.cleanup.audit": ["app", "migration", "cleanup-audit", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema"],
   "app.migration.audit": ["app", "migration", "audit", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema"],

@@ -13,10 +13,11 @@ const operation = z.object({
   updateDeadline: z.number().int().positive(), recoveryDeadline: z.number().int().positive().nullable(),
   recovery: z.enum(["automatic-rollback", "previous-preserved", "compensated", "removed-unverified", "unstarted"]).nullable(),
 }).strict().readonly();
-const preparation = z.object({ request: z.uuid(), phase: z.enum(["prepared", "admitted", "migrating", "ready-for-http", "held", "cancelled", "failed"]),
+const preparation = z.object({ request: z.uuid(), phase: z.enum(["prepared", "admitted", "migrating", "ready-for-http", "held", "cancelling", "cancelled", "failed"]),
   reason: z.enum(["deadline", "migration", "cancelled"]).nullable(), admissionDeadline: z.number().int().positive(), deadline: z.number().int().positive(),
   migrationDeadline: z.number().int().positive(), httpDeadline: z.number().int().positive().nullable(),
   completedAt: z.number().int().positive().nullable().default(null),
+  cancelRequestedAt: z.number().int().positive().nullable().default(null),
   resolution: z.object({ id: digest, outcome: z.enum(["applied", "not-applied"]), at: z.number().int().positive() }).strict().readonly().nullable().default(null),
   step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/).nullable(),
 }).strict().readonly();
@@ -39,10 +40,11 @@ const schema = z.object({
       value.preparation.completedAt === null && JSON.stringify(value.requested) !== JSON.stringify(value.desired) ||
       (value.preparation.phase === "cancelled" || value.preparation.phase === "failed") !== (value.preparation.completedAt !== null) ||
       (value.preparation.phase === "held" || value.preparation.phase === "cancelled" || value.preparation.phase === "failed") !== (value.preparation.reason !== null) ||
-      (value.preparation.phase === "cancelled") !== (value.preparation.reason === "cancelled") ||
+      value.preparation.phase === "cancelled" && value.preparation.reason !== "cancelled" ||
       value.preparation.phase === "failed" && value.preparation.reason !== "deadline" && value.preparation.reason !== "migration" ||
-      value.preparation.completedAt !== null && (value.preparation.step !== null && value.preparation.resolution === null || value.desired?.plan !== value.verifiedActive?.plan || value.desired?.commit !== value.verifiedActive?.commit) ||
-      (value.preparation.phase === "ready-for-http") !== (value.preparation.httpDeadline !== null) ||
+      value.preparation.completedAt !== null && (value.preparation.step !== null && value.preparation.resolution === null && value.preparation.phase !== "cancelled" || value.desired?.plan !== value.verifiedActive?.plan || value.desired?.commit !== value.verifiedActive?.commit) ||
+      value.preparation.phase === "cancelling" && value.preparation.cancelRequestedAt === null ||
+      value.preparation.completedAt === null && value.preparation.phase !== "cancelling" && (value.preparation.phase === "ready-for-http") !== (value.preparation.httpDeadline !== null) ||
       value.preparation.admissionDeadline > value.preparation.migrationDeadline || value.preparation.migrationDeadline !== value.preparation.deadline - 180_000 ||
       value.preparation.httpDeadline !== null && value.preparation.httpDeadline > value.preparation.deadline - 90_000)) context.addIssue({ code: "custom", message: "inconsistent deployment projection" });
 });

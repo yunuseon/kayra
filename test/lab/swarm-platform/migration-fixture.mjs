@@ -24,7 +24,8 @@ function applyMigration() {
   if (process.env.FAIL_BEFORE === '1') return process.exit(1);
   fetch('http://' + process.env.DB_HOST + ':8080/apply?safe=' + process.env.REPLAY_SAFE, {
     method: 'POST', headers: { 'x-operation': process.env.KAYRA_OPERATION_ID },
-  }).then((response) => response.json()).then((value) => {
+  }).then((response) => response.json()).then(async (value) => {
+    const hold = Number(process.env.MIGRATION_HOLD_MS ?? '0'); if (hold > 0) await new Promise((resolve) => setTimeout(resolve, hold));
     process.exit(process.env.FAIL_ALWAYS === '1' || process.env.FAIL_FIRST === '1' && value.calls === 1 ? 1 : 0);
   }).catch(() => process.exit(1));
 }

@@ -1,3 +1,5 @@
+import type { RolloutRequest } from "./rollout-request.ts";
+import { migrationCancellationProof } from "./migration-cancellation.ts";
 import { rolloutCleanupRecord } from "./rollout-cleanup.ts";
 import type { MigrationCleanupRequest, MigrationCleanupIdentity } from "../../contracts/migration-cleanup.ts";
 /* The index owns a live journal lock and serializes its filesystem operations. */
@@ -177,6 +179,16 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     });
   };
 
+  const cancelPreparation = async (app: string, store: EnvelopeStore, operation: RolloutRequest, clock: Pick<BuildPorts, "now">) => {
+    if (operation.completion !== undefined) { await reconcileRolloutResources(app, store, operation.ticket); return operation; }
+    const now = clock.now();
+    const completed = operation.preparation.phase === "prepared" && operation.preparation.sequence === null
+      ? await store.completeUnstartedRollout(operation.ticket, "cancelled", now)
+      : await (async () => { await store.cancelRolloutPreparation(operation.preparation.run, now); return store.completeCancelledPreparation(operation.preparation.run, clock.now()); })();
+    if (completed.completion !== undefined) await reconcileRolloutResources(app, store, operation.ticket);
+    return completed;
+  };
+
   return {
     prepareApp: (app: string) => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
@@ -280,6 +292,29 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const state = await store.read(); return [...(state?.rollouts ?? []), ...(state?.rollout === undefined ? [] : [state.rollout])].find((item) => item.preparation.run === request);
     }),
     /** The control transport authenticates the operator; requests cannot choose that identity. */
+    cancelManagedRollout: (app: string, request: string, clock: Pick<BuildPorts, "now">) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request);
+      if (operation === undefined) throw new Error("complete rollout request is unavailable");
+      const http = envelope?.http?.requests.find((item) => item.request === request);
+      if (http !== undefined) {
+        const cancelled = terminalHttp(http.phase) ? http : await store.cancelHttp(http.ticket, clock.now());
+        const after = await store.read(); const root = [...(after?.rollouts ?? []), ...(after?.rollout === undefined ? [] : [after.rollout])].find((item) => item.preparation.run === request);
+        if (root === undefined || cancelled === undefined) throw new Error("complete rollout cancellation receipt disappeared");
+        return Object.freeze({ operation: root, http: cancelled });
+      }
+      if (operation !== envelope?.rollout && operation.completion === undefined) throw new Error("preparation is no longer current");
+      return Object.freeze({ operation: await cancelPreparation(app, store, operation, clock), http: null });
+    }),
+    cancelRolloutPreparation: (app: string, request: string, clock: Pick<BuildPorts, "now">) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request);
+      if (operation === undefined || operation !== envelope?.rollout && operation.completion === undefined) throw new Error("preparation is unavailable or no longer current");
+      return cancelPreparation(app, store, operation, clock);
+    }),
+    completeCancelledPreparation: (app: string, request: string, now: number) => useReady(app, async (store) => {
+      const operation = await store.completeCancelledPreparation(request, now);
+      if (operation.completion !== undefined) await reconcileRolloutResources(app, store, operation.ticket);
+      return operation;
+    }),
     requestMigrationCleanup: (app: string, request: MigrationCleanupRequest, actor: MigrationResolutionActor, ports: Parameters<EnvelopeStore["requestMigrationCleanup"]>[2]) => useReady(app, async (store) => {
       const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request.run);
       if (request.app !== app || operation === undefined || envelope === undefined) throw new Error("migration cleanup rollout scope is unavailable");
@@ -380,7 +415,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       };
       if (!await authorized()) throw new Error("complete rollout has no matching durable admission");
       return store.tickRolloutPreparation(operation.ticket, { ...ports, authorize: async (state, plan, _job, effect) => state.run === request && state.plan === operation.preparation.plan &&
-        state.workload === operation.preparation.workload && state.createdAt === operation.preparation.createdAt && state.deadline === operation.preparation.deadline && await authorized() &&
+        state.workload === operation.preparation.workload && state.createdAt === operation.preparation.createdAt && state.deadline === operation.preparation.deadline &&
+        (state.cancelRequestedAt === undefined || effect === "fence" || _job.scope.purpose === "probe") && await authorized() &&
         (effect === "fence" || resourceHostReady(plan.workload.host, await ports.observeHost(plan.workload.host))) });
     }),
     handoffRollout: (app: string, request: string, ports: Pick<BuildPorts, "read" | "now"> & HostObserver) => useReady(app, async (store) => {
@@ -389,7 +425,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (operation?.preparation.run !== request || !operation.admitted || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
         lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action) throw new Error("complete rollout lacks HTTP handoff ownership");
       const state = operation.preparation;
-      if (state.phase !== "ready" || state.httpDeadline === null) throw new Error("complete rollout migrations are not ready for HTTP");
+      if (state.phase !== "ready" || state.httpDeadline === null || state.cancelRequestedAt !== undefined) throw new Error("complete rollout migrations are not ready for HTTP");
       const bytes = await ports.read(state.plan); const input: unknown = JSON.parse(bytes); const checked = parseRolloutPlan(input);
       if (createHash("sha256").update(bytes).digest("hex") !== state.plan || !checked.ok || rolloutWorkloadDigest(checked.value) !== state.workload ||
         checked.value.workload.commit !== operation.commit || JSON.stringify(checked.value.workload.registration) !== JSON.stringify(verifiedRegistration(app, envelope))) throw new Error("complete rollout HTTP handoff plan integrity failed");
@@ -534,7 +570,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
         const state = await store.read(); const operation = state?.rollout;
         if (operation === undefined || operation.completion === undefined && operation.preparation.phase === "held" &&
-          !operation.preparation.sequence?.steps.some((step) => step.attempts.some((attempt) => attempt.cleanups?.at(-1)?.state.phase === "fencing"))) return [];
+          !operation.preparation.sequence?.steps.some((step) => step.attempts.some((attempt) => attempt.cleanups?.at(-1)?.state.phase === "fencing")) &&
+          !(operation.preparation.cancelRequestedAt !== undefined && migrationCancellationProof(operation.preparation.sequence) !== undefined)) return [];
         const http = state?.http?.requests.find((item) => item.request === operation.preparation.run);
         if (http?.phase === "held") return [];
         const charge = snapshot.resources?.charges.find((item) => item.app === app.app);

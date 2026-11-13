@@ -1,3 +1,4 @@
+import { migrationCancellationProof } from "./migration-cancellation.ts";
 import { createHash } from "node:crypto";
 import { parseRolloutPlan, rolloutMigrationDescription, rolloutWorkloadDigest } from "../../contracts/rollout-plan.ts";
 import { migrationSequenceDigest } from "../../contracts/migration-sequence.ts";
@@ -25,13 +26,17 @@ export const resolveRolloutMigration = async (input: ReturnType<typeof parseRoll
   const recorded = sequence.steps.find((step) => step.id === request.step)?.resolution;
   if (recorded === undefined && (operation.completion !== undefined || preparation.phase !== "held")) throw new Error("rollout preparation is not held for resolution");
   const resolved = await resolveMigrationSequence(sequence, source, request, actor, ports);
-  const next = recorded !== undefined ? operation : parseRolloutRequest({ ...operation,
+  const reconciled = recorded !== undefined ? operation : parseRolloutRequest({ ...operation,
     preparation: { ...preparation, sequence: resolved.state, phase: resolved.disposition === "continue" ? "migrating" : "held", reason: resolved.disposition === "continue" ? null : resolved.state.reason === "deadline" ? "deadline" : "migration" },
-    ...(resolved.disposition === "continue" ? {} : { completion: { kind: "migration-resolved", outcome: "failed", reason: resolved.audit.outcome === "not-applied" ? "migration" : "deadline",
+    ...(preparation.cancelRequestedAt !== undefined || resolved.disposition === "continue" ? {} : { completion: { kind: "migration-resolved", outcome: "failed", reason: resolved.audit.outcome === "not-applied" ? "migration" : "deadline",
       at: resolved.audit.at, previous, resolution: resolved.audit.id, step: request.step } }),
   });
+  const proof = preparation.cancelRequestedAt === undefined ? undefined : migrationCancellationProof(resolved.state);
+  const next = recorded !== undefined || preparation.cancelRequestedAt === undefined ? reconciled : parseRolloutRequest({ ...reconciled,
+    ...(proof === undefined ? {} : { completion: { kind: "cancelled-preparation", outcome: "cancelled", reason: "cancelled", at: resolved.audit.at, previous, proof } }),
+  });
   const receipt = parseMigrationResolutionReceipt({ version: 1, app: resolved.audit.scope.app, run: resolved.audit.scope.run, step: resolved.audit.scope.step,
-    resolution: resolved.audit.id, outcome: resolved.audit.outcome, recordedAt: resolved.audit.at, disposition: resolved.disposition });
+    resolution: resolved.audit.id, outcome: resolved.audit.outcome, recordedAt: resolved.audit.at, disposition: resolved.audit.cancelRequestedAt !== undefined && next.completion?.outcome === "cancelled" ? "cancelled" : resolved.disposition });
   if (!receipt.ok) throw new Error(receipt.error);
   return Object.freeze({ operation: next, receipt: receipt.value, changed: recorded === undefined, audit: resolved.audit });
 };

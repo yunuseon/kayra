@@ -117,3 +117,30 @@ test("slow artifact reads cannot certify step advancement after the original seq
   const held = await lab.owner().tick(); assert.equal(held.phase, "held"); assert.equal(held.reason, "deadline");
   assert.equal(held.steps[0]?.appliedAt, null); assert.equal(held.completedAt, null); assert.equal(lab.nodes.size, 1);
 });
+
+test("cancellation before any migration identity is allocated cannot schedule or execute a step", async (t) => {
+  const lab = await sequenceFixture(t); await lab.prepare(); const requested = await lab.owner().cancel();
+  const held = await lab.drive(); assert.equal(held.phase, "held"); assert.equal(held.reason, "cancelled");
+  assert.equal(held.steps.length, 0); assert.equal(lab.nodes.size, 0); assert.equal(held.cancelRequestedAt, requested.cancelRequestedAt);
+  assert.equal(held.deadline, requested.deadline);
+});
+
+test("cancellation fences the current replay-safe migration and cannot retry it or begin its successor", async (t) => {
+  const lab = await sequenceFixture(t, undefined, { afterStart: (_plan, runtime) => { runtime.state("running"); } });
+  await lab.prepare(); await lab.drive((state) => state.steps[0]?.attempts[0]?.execution?.phase === "observing");
+  const requested = await lab.owner().cancel(); const held = await lab.drive();
+  assert.equal(held.phase, "held"); assert.equal(held.reason, "unsafe-outcome"); assert.equal(held.steps.length, 1); assert.equal(held.steps[0]?.attempts.length, 1);
+  assert.equal(held.steps[0].attempts[0]?.execution?.phase, "complete"); assert.equal(held.steps[0].attempts[0].execution.evidence?.kind, "unknown");
+  assert.equal([...lab.nodes.values()].reduce((sum, runtime) => sum + runtime.executions(), 0), 1); assert.equal(held.deadline, requested.deadline);
+  const recovered = await lab.reopen(); assert.equal((await recovered.cancel()).cancelRequestedAt, requested.cancelRequestedAt); assert.deepEqual(await recovered.tick(), held);
+});
+
+test("a cancelled unsafe migration may run its declared status probe but never the next migration", async (t) => {
+  const original = sequencePlan(); const plan = { ...original, steps: original.steps.map((step, index) => index === 0 ? { ...step,
+    definition: { ...step.definition, recovery: { kind: "status-probe" as const, command: ["node", "status.mjs"], timeout_seconds: 10 } } } : step) };
+  const lab = await sequenceFixture(t, plan, { probe: "applied", afterStart: (job, runtime) => { if (job.scope.purpose === "migration") runtime.state("running"); } });
+  await lab.prepare(); await lab.drive((state) => state.steps[0]?.attempts[0]?.execution?.phase === "observing"); await lab.owner().cancel();
+  const held = await lab.drive(); assert.equal(held.phase, "held"); assert.equal(held.reason, "cancelled"); assert.equal(held.position, 1); assert.equal(held.steps.length, 1);
+  assert.equal(held.steps[0]?.phase, "applied"); assert.equal(held.steps[0].attempts.length, 2);
+  assert.equal([...lab.nodes.values()].reduce((sum, runtime) => sum + runtime.executions(), 0), 2);
+});

@@ -23,17 +23,21 @@ export const resolveMigrationSequence = async (input: MigrationSequenceState, so
   }
   const step = state.steps[state.position];
   if (state.phase !== "held" || step?.phase !== "held" || step.id !== request.value.step ||
-    step.attempts.some((attempt) => migrationAttemptBarrier(attempt) === null)) throw new Error("migration resolution requires a held step with every attempt fenced");
+    step.attempts.some((attempt) => migrationAttemptBarrier(attempt) === null && !(state.cancelRequestedAt !== undefined && attempt.execution === null))) throw new Error("migration resolution requires a held step with every attempt fenced");
   for (const attempt of step.attempts) {
     const bytes = await ports.read(attempt.artifact); const value: unknown = JSON.parse(bytes); const parsed = parseJobPlan(value);
     if (!parsed.ok || createHash("sha256").update(bytes).digest("hex") !== attempt.artifact || jobPlanDigest(parsed.value) !== attempt.artifact ||
       jobPlanDigest(migrationJobDescription(state, plan, state.position, attempt.purpose, attempt.attempt, attempt.createdAt)) !== attempt.artifact) throw new Error("migration resolution job description changed");
     const observed = await ports.native.observe(parsed.value);
+    if (state.cancelRequestedAt !== undefined && attempt.execution === null) {
+      if (observed.status !== "absent") throw new Error("cancelled uncreated migration attempt has unexpected runtime state");
+      continue;
+    }
     if (observed.status !== "owned" || !observed.barrier || observed.state !== "created" || observed.id !== migrationAttemptBarrier(attempt) || observed.plan !== attempt.artifact) throw new Error("migration resolution has no current owned fence proof");
   }
   const now = ports.now();
   if (!Number.isSafeInteger(now) || now < state.createdAt) throw new Error("migration resolution clock is unavailable");
-  const audit = migrationResolutionAudit(state.plan, state.scope.incarnation, request.value, operator.value, now);
+  const audit = migrationResolutionAudit(state.plan, state.scope.incarnation, request.value, operator.value, now, state.cancelRequestedAt);
   if (audit.outcome !== "applied" || now >= state.deadline) {
     const reason = audit.outcome === "not-applied" ? "not-applied" as const : "deadline" as const;
     return Object.freeze({ state: parseMigrationSequenceState({ ...state, phase: "held", reason,

@@ -15,10 +15,10 @@ import { migrationResolutionId } from "./migration-resolution-audit.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
-const reason = z.enum(["deadline", "runtime", "unsafe-outcome", "probe-unknown", "not-applied", "attempts-exhausted"]);
+const reason = z.enum(["deadline", "runtime", "unsafe-outcome", "probe-unknown", "not-applied", "attempts-exhausted", "cancelled"]);
 const schema = z.object({ version: z.literal(1), plan: digest,
   scope: z.object({ app: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/), incarnation: z.uuid(), run: z.uuid() }).strict().readonly(),
-  createdAt: positive, deadline: positive, completedAt: positive.nullable(), phase: z.enum(["running", "held", "succeeded"]), position: z.number().int().min(0).max(128), reason: reason.nullable(),
+  createdAt: positive, deadline: positive, cancelRequestedAt: positive.optional(), completedAt: positive.nullable(), phase: z.enum(["running", "held", "succeeded"]), position: z.number().int().min(0).max(128), reason: reason.nullable(),
   steps: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/),
     phase: z.enum(["running", "applied", "held"]), reason: reason.nullable(), appliedAt: positive.nullable(), executionDeadline: positive.nullable(), resolution: z.unknown().optional(),
     attempts: z.array(z.object({ purpose: z.enum(["migration", "probe"]), attempt: positive.max(8), createdAt: positive,
@@ -42,6 +42,7 @@ export const parseMigrationSequenceState = (input: unknown) => {
     const resolution = parsedResolution?.value;
     if (resolution !== undefined && (resolution.sequence !== value.plan || resolution.scope.app !== value.scope.app || resolution.scope.incarnation !== value.scope.incarnation ||
       resolution.scope.run !== value.scope.run || resolution.scope.step !== step.id || resolution.at < value.createdAt || resolution.id !== migrationResolutionId(value.plan, resolution.scope) ||
+      resolution.cancelRequestedAt !== undefined && (resolution.cancelRequestedAt !== value.cancelRequestedAt || resolution.cancelRequestedAt > resolution.at) ||
       step.phase === "running" || step.phase === "applied" && (resolution.outcome !== "applied" || resolution.at !== step.appliedAt || resolution.at >= value.deadline) ||
       step.phase === "held" && (resolution.outcome === "not-applied" ? step.reason !== "not-applied" : resolution.at < value.deadline || step.reason !== "deadline"))) throw new Error("migration resolution conflicts with sequence progress");
     const attempts = Object.freeze(step.attempts.map((attempt) => {
@@ -64,7 +65,7 @@ export const parseMigrationSequenceState = (input: unknown) => {
       step.executionDeadline !== (migrations[0]?.execution?.executionDeadline ?? null) ||
       attempts.some((attempt, index) => index !== attempts.length - 1 && migrationAttemptBarrier(attempt) === null) ||
       (probes.length > 0 && attempts.at(-1)?.purpose !== "probe") ||
-      (resolution !== undefined && attempts.some((attempt) => migrationAttemptBarrier(attempt) === null)) ||
+      (resolution !== undefined && attempts.some((attempt) => migrationAttemptBarrier(attempt) === null && !(value.cancelRequestedAt !== undefined && attempt.execution === null))) ||
       (step.phase === "applied" && resolution === undefined && (last === undefined || migrationAttemptBarrier(last) === null || completed?.expiry !== null || completed.evidence?.kind !== "succeeded" ||
         (last.purpose === "probe" && completed.evidence.probe !== "applied"))) ||
       (step.phase === "applied") !== (step.appliedAt !== null) ||
@@ -83,7 +84,9 @@ export const parseMigrationSequenceState = (input: unknown) => {
     (value.phase === "succeeded" && value.position !== steps.length) ||
     (value.phase === "held") !== (value.reason !== null) ||
     (value.phase === "held" && steps.length > value.position && steps[value.position]?.phase !== "held")) throw new Error("inconsistent migration sequence progress");
-  return Object.freeze({ ...value, steps });
+  const { cancelRequestedAt, ...record } = value;
+  if (cancelRequestedAt !== undefined && cancelRequestedAt < value.createdAt) throw new Error("invalid migration cancellation time");
+  return Object.freeze({ ...record, steps, ...(cancelRequestedAt === undefined ? {} : { cancelRequestedAt }) });
 };
 export type MigrationSequenceState = ReturnType<typeof parseMigrationSequenceState>;
 export const migrationDescriptionForState = (state: MigrationSequenceState, input: unknown) => {
@@ -156,6 +159,7 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
         const current = await required(); const selected = current.steps[position]; const recorded = selected?.attempts[index];
         if (current.phase !== "running" || current.position !== position || index !== (selected?.attempts.length ?? 0) - 1 ||
           recorded?.artifact !== job.plan || JSON.stringify(recorded.execution) !== JSON.stringify(job)) return false;
+        if (current.cancelRequestedAt !== undefined && job.scope.purpose === "migration" && effect !== "fence") return false;
         return ports.authorize(current, plan, job, effect);
       }, materialize: (job) => ports.materialize(job, plan) });
     // eslint-disable-next-line functional/immutable-data -- one private child owner per persisted identity
@@ -163,7 +167,9 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
   };
   const schedule = async (state: MigrationSequenceState, plan: MigrationSequencePlan, purpose: "migration" | "probe") => {
     const source = plan.steps[state.position]; if (source === undefined) throw new Error("migration source step is missing");
-    const now = time(state.createdAt); const current = state.steps[state.position]; const prior = current?.attempts.filter((item) => item.purpose === purpose).length ?? 0;
+    const now = time(state.createdAt); const current = state.steps[state.position];
+    if (purpose === "migration" && state.cancelRequestedAt !== undefined) return hold(state, current === undefined ? "cancelled" : "unsafe-outcome");
+    const prior = current?.attempts.filter((item) => item.purpose === purpose).length ?? 0;
     const ceiling = purpose === "migration" && prior > 0 && current?.executionDeadline !== null && current?.executionDeadline !== undefined ? Math.min(current.executionDeadline, state.deadline) : state.deadline;
     if (now >= ceiling) return hold(state, "deadline");
     if (prior >= plan.policy.maximumAttempts) return hold(state, "attempts-exhausted");
@@ -182,6 +188,10 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
       return write({ version: 1, plan: digest, scope: plan.scope, createdAt: now, deadline, completedAt: null, phase: "running", position: 0, reason: null, steps: [] });
     }),
     read: () => serial(load),
+    cancel: () => serial(async () => {
+      const state = await required(); if (state.cancelRequestedAt !== undefined || state.phase === "succeeded") return state;
+      return write({ ...state, cancelRequestedAt: time(state.createdAt) });
+    }),
     tick: () => serial(async () => {
       const state = await required(); if (state.phase !== "running") return state;
       const plan = await description(state); const now = time(state.createdAt); const step = state.steps[state.position];
@@ -191,11 +201,13 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
       if (!raw.ok || jobPlanDigest(raw.value) !== attempt.artifact || jobPlanDigest(migrationJobDescription(state, plan, state.position, attempt.purpose, attempt.attempt, attempt.createdAt)) !== attempt.artifact) throw new Error("migration job description changed");
       const owner = child(state, plan, state.position, index);
       if (attempt.execution === null) {
+        if (state.cancelRequestedAt !== undefined && attempt.purpose === "migration") return hold(state, "cancelled");
         if (now >= (raw.value.startDeadline ?? raw.value.deadline)) return hold(state, "deadline");
         await owner.prepare(raw.value); return required();
       }
       if (migrationAttemptBarrier(attempt) === null) {
         if (attempt.execution.phase === "held") return hold(state, "runtime");
+        if (state.cancelRequestedAt !== undefined && attempt.purpose === "migration") await owner.cancel();
         await owner.tick(); return required();
       }
       const outcome = attempt.execution.evidence;

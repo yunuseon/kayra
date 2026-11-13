@@ -14,7 +14,7 @@ const schema = z.object({ version: z.literal(1), plan: id, scope: z.unknown(), c
   phase: z.enum(["create-intent", "start-intent", "observing", "fencing", "complete", "held"]),
   container: id.nullable(), evidence: evidence.nullable(), fenceDeadline: positive.nullable(), barrier: id.nullable(),
   fenceTargets: z.array(id).max(8).readonly().default(Object.freeze([])),
-  executionDeadline: positive.nullable().optional(), expiry: z.enum(["scheduling", "execution"]).nullable().optional(),
+  cancelRequestedAt: positive.optional(), executionDeadline: positive.nullable().optional(), expiry: z.enum(["scheduling", "execution"]).nullable().optional(),
 }).strict().readonly();
 
 export const parseJobExecution = (input: unknown) => {
@@ -27,7 +27,7 @@ export const parseJobExecution = (input: unknown) => {
   const value = { ...raw, executionDeadline: raw.executionDeadline === undefined ? priorDeadline : raw.executionDeadline,
     expiry: raw.expiry === undefined ? priorExpiry : raw.expiry };
   const scope = parseJobScope(value.scope);
-  if (!scope.ok || value.createdAt >= value.deadline || new Set(value.fenceTargets).size !== value.fenceTargets.length || value.fenceTargets.includes(value.container ?? "") ||
+  if (!scope.ok || value.cancelRequestedAt !== undefined && (value.cancelRequestedAt < value.createdAt || value.evidence !== null && value.cancelRequestedAt > value.evidence.observedAt) || value.createdAt >= value.deadline || new Set(value.fenceTargets).size !== value.fenceTargets.length || value.fenceTargets.includes(value.container ?? "") ||
     (value.executionDeadline !== null && (value.executionDeadline <= value.createdAt || value.executionDeadline > value.deadline)) ||
     (value.expiry === "scheduling" && (value.executionDeadline !== null || value.evidence?.kind !== "not-started")) ||
     (value.expiry === "execution" && value.executionDeadline === null) ||
@@ -44,7 +44,8 @@ export const parseJobExecution = (input: unknown) => {
       (value.evidence.kind === "succeeded" && value.evidence.exitCode !== 0) ||
       (value.evidence.probe !== null && (scope.value.purpose !== "probe" || value.evidence.kind !== "succeeded")) ||
       ((value.evidence.kind === "unknown" || value.evidence.kind === "not-started") && value.evidence.exitCode !== null)))) throw new Error("inconsistent one-shot execution record");
-  return Object.freeze({ ...value, scope: scope.value });
+  const { cancelRequestedAt, ...record } = value;
+  return Object.freeze({ ...record, scope: scope.value, ...(cancelRequestedAt === undefined ? {} : { cancelRequestedAt }) });
 };
 export type JobExecution = ReturnType<typeof parseJobExecution>;
 type Ports = { readonly native: JobPort; readonly now: () => number; readonly read: (digest: string) => Promise<unknown>;
@@ -80,6 +81,11 @@ export const oneShotExecution = (journal: OperationJournal, ports: Ports) => {
       return write({ version: 1, plan: digest, scope: plan.scope, createdAt: now, deadline: plan.deadline, phase: "create-intent", container: null, evidence: null, fenceDeadline: null, barrier: null, fenceTargets: [], executionDeadline: null, expiry: null });
     }),
     read: () => serial(load),
+    cancel: () => serial(async () => {
+      const record = await load(); if (record === undefined) throw new Error("one-shot intent is missing");
+      if (record.cancelRequestedAt !== undefined || record.phase === "complete" || record.phase === "held" || record.phase === "fencing") return record;
+      return write({ ...record, cancelRequestedAt: clock(record.createdAt) });
+    }),
     tick: () => serial(async () => {
       const record = await load(); if (record === undefined) throw new Error("one-shot intent is missing");
       if (record.phase === "complete" || record.phase === "held") return record;
@@ -106,6 +112,18 @@ export const oneShotExecution = (journal: OperationJournal, ports: Ports) => {
         finishedAt: number | null = null, expiry: JobExecution["expiry"] = null) => write({ ...record,
         container, phase: "fencing", evidence: { kind, id: container, exitCode, observedAt: clock(record.createdAt), probe, finishedAt }, expiry, fenceDeadline: Math.min(now + 30_000, record.deadline + 30_000),
       });
+      if (record.cancelRequestedAt !== undefined) {
+        if (observed.status === "owned" && (observed.barrier || record.container !== null && observed.id !== record.container)) return hold(record);
+        if (observed.status === "owned" && record.phase !== "create-intent" && (observed.state === "succeeded" || observed.state === "failed")) {
+          const executionDeadline = record.executionDeadline ?? record.deadline;
+          return beginFence(observed.state, observed.id, observed.exitCode, observed.probe, observed.finishedAt,
+            now >= executionDeadline && (observed.finishedAt === null || observed.finishedAt > executionDeadline) ? "execution" : null);
+        }
+        const unstarted = record.phase === "create-intent" && (observed.status === "absent" || observed.status === "owned" && observed.state === "created");
+        const executionDeadline = record.executionDeadline ?? record.deadline;
+        return beginFence(unstarted ? "not-started" : "unknown", observed.status === "owned" ? observed.id : record.container, null, null, null,
+          now >= executionDeadline && record.executionDeadline !== null ? "execution" : null);
+      }
       if (observed.status === "unavailable") {
         const limit = record.phase === "create-intent" ? plan.startDeadline ?? plan.deadline : record.executionDeadline ?? record.deadline;
         return now >= limit ? beginFence(record.phase === "create-intent" ? "not-started" : "unknown", record.container, null, null, null,

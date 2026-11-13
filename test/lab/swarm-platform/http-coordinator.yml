@@ -58,6 +58,7 @@
         - test/lab/swarm-platform/migration-sequence.mjs
         - test/lab/swarm-platform/indexed-migration-owner.mjs
         - test/lab/swarm-platform/rollout-coordinator.mjs
+        - test/lab/swarm-platform/rollout-cancellation.mjs
         - test/lab/swarm-platform/rollout-unstarted.mjs
         - test/lab/swarm-platform/http-fixture/web/fixture.mjs
         - test/lab/swarm-platform/migration-fixture.mjs
@@ -457,6 +458,32 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/migration-cleanup.tar"
         dest: "{{ report_path }}.migration-cleanup.tar"
+        flat: true
+
+    - name: Cancel indexed preparations across native migration and journal checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/rollout-cancellation.mjs"
+          - run
+          - "{{ coordinator_source.path }}/cancellation"
+      changed_when: true
+
+    - name: Retain preparation cancellation summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cancellation/result.json"
+        dest: "{{ report_path }}.cancellation.json"
+        flat: true
+
+    - name: Archive preparation cancellation evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/cancellation.tar", -C, "{{ coordinator_source.path }}/cancellation", .]
+      changed_when: true
+
+    - name: Preserve preparation cancellation evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cancellation.tar"
+        dest: "{{ report_path }}.cancellation.tar"
         flat: true
 
     - name: Remove successful component source files

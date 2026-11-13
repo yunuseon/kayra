@@ -609,6 +609,49 @@ Preview: `POST /api/operations/app.purge/preview`. Returns a JSON plan with stat
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.deployment.status`
+
+Read deployment phase, verified active release and required recovery action.
+
+`POST /api/operations/app.deployment.status`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.status/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.deployment.cancel`
+
+Cancel a deployment; ambiguous migration outcomes stay blocked for recovery.
+
+`POST /api/operations/app.deployment.cancel`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]*$`. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.cancel/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.migration.cleanup`
 
 Request an audited, bounded fence for a held migration attempt; never rerun its command.

@@ -468,6 +468,8 @@ if [ "$swarm_host" = true ]; then
     cp "${work}/http-coordinator.json.migration-cleanup.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.migration-cleanup.tar"
     cp "${work}/http-coordinator.json.cancellation.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.cancellation.json"
     cp "${work}/http-coordinator.json.cancellation.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.cancellation.tar"
+    cp "${work}/http-coordinator.json.handoff-expiry.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.handoff-expiry.json"
+    cp "${work}/http-coordinator.json.handoff-expiry.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.handoff-expiry.tar"
     cp "${work}/swarm-platform.json" "/tmp/kayra-swarm-platform-${vm_name}.json"
     cp "${work}/swarm-platform.json.native.json" "/tmp/kayra-swarm-platform-${vm_name}.native.json"
     cp "${work}/swarm-platform.json.adapter.json" "/tmp/kayra-swarm-platform-${vm_name}.adapter.json"

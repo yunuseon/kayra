@@ -4,7 +4,7 @@ import type { HttpExecutionPorts, HttpExecutionIndex } from "./http-execution-po
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { httpExecution } from "./http-execution.ts";
 
-type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileRolloutResources" | "tickMigrationCleanup" | "completeCancelledPreparation">>;
+type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileRolloutResources" | "tickMigrationCleanup" | "completeCancelledPreparation" | "expireRolloutHandoff">>;
 type Ports = HttpExecutionPorts & { readonly jobs: JobPort; readonly retain: (bytes: string) => Promise<string>; readonly cleanup?: JobCleanupPort | undefined };
 
 /** The composition root installs one application owner; phase adapters never create competing controllers. */
@@ -38,6 +38,9 @@ export const rolloutExecution = (index: Index, ports: Ports) => {
       const state = await index.tickRolloutPreparation(app, request, { ...ports, native: ports.jobs,
         materialize: (_job, plan) => ports.materialize(plan.workload) });
       return state.phase;
+    }
+    if (operation.preparation.httpDeadline !== null && ports.now() >= operation.preparation.httpDeadline) {
+      const expired = await index.expireRolloutHandoff(app, request, ports.now()); return expired.completion?.outcome ?? "held";
     }
     await index.handoffRollout(app, request, ports); return "handoff";
   };

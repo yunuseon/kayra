@@ -679,3 +679,29 @@ checks passed, and the serial CLI suite passed 660 tests with one skip; 21 web
 tests and CLI/web typecheck/lint/build checks passed. Successful standalone
 source was removed after export; the original failed VM and failed prior labs
 remain preserved.
+
+### Expired ready handoff
+
+`rollout-handoff-expiry.mjs run <new-results-directory>` prepares two admitted
+ready releases using fixture build/image inputs, waits past their original HTTP
+deadlines, and SIGKILLs a writer immediately before and after its synchronized
+terminal failure record. Reopening settles each original request and reservation
+without creating an HTTP child, running an application job or refreshing any
+deadline. Real Swarm host observations are read-only. These are journal/admission
+component checks; they do not establish SQL or HTTP continuity. Unit tests also
+cover already-applied migrations, preservation of the previous active release,
+and stale completion against a newer reservation.
+
+The combined harness exports `.handoff-expiry.json` and `.handoff-expiry.tar`.
+Reproduce using the same immutable source staging and `http-coordinator.yml`
+command above. The raw archive includes original deadlines, public projections,
+private lifecycle state and host reads. Preserve failed sources and inspect their
+`failure.json` before removing only the printed source path; preserve failed VMs.
+
+Both native checkpoints passed on the preserved VM. Application runtime calls
+were zero; both original deadlines and absent active releases were retained.
+Fifteen focused Linux checks passed. Evidence is
+`/tmp/kayra-handoff-expiry-evidence/` and `.tar`; context and versions are in
+`/tmp/kayra-handoff-expiry-context.json`. The Engine and CLI were 29.9.3,
+API 1.56, Compose 5.7.0 and Node 24.22.1 on Ubuntu 24.04.5 ARM64.
+Clock offsets were 232 ms before and 250 ms after.

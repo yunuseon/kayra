@@ -12,8 +12,8 @@ const outcome = (step: MigrationSequenceState["steps"][number]) => {
   return undefined;
 };
 
-/** Known app outcomes only; cancellation never converts an unknown effect into success or failure. */
-export const migrationCancellationProof = (sequence: MigrationSequenceState | null) => {
+/** Known app outcomes only; settling a preparation never converts an unknown effect into success or failure. */
+export const settledMigrationPrefix = (sequence: MigrationSequenceState | null) => {
   const outcomes = sequence?.steps.map((step) => Object.freeze({ step: step.id, outcome: outcome(step) })) ?? [];
   if (outcomes.some((item) => item.outcome === undefined)) return undefined;
   return Object.freeze({ version: 1 as const, sequence: sequence?.plan ?? null,

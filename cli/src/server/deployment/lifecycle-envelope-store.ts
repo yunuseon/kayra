@@ -1,4 +1,4 @@
-import { migrationCancellationProof } from "./migration-cancellation.ts";
+import { settledMigrationPrefix } from "./migration-prefix.ts";
 /* Owns atomic app-envelope transitions and private phase journal views. The
  * indexed composition holds the exclusive writer, authenticates registration
  * and supplies runtime ports checking the matching durable admission. */
@@ -232,11 +232,27 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const next = await persist({ ...current, rollout: { ...operation, preparation: cancelledRolloutPreparation(operation.preparation, now) } });
       if (next.rollout === undefined) throw new Error("preparation cancellation intent disappeared"); return next.rollout;
     }),
+    expireRolloutHandoff: (run: string, now: number) => serial(async () => {
+      const current = await required(); const operation = current.rollout;
+      if (operation?.preparation.run !== run) throw new Error("expired handoff is unavailable");
+      if (operation.completion !== undefined) return operation;
+      const preparation = operation.preparation; const proof = settledMigrationPrefix(preparation.sequence);
+      if (!operation.admitted || preparation.phase !== "ready" || preparation.httpDeadline === null || preparation.cancelRequestedAt !== undefined || proof === undefined ||
+        current.http?.requests.some((item) => item.request === run) || !Number.isSafeInteger(now) || now < preparation.httpDeadline ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("HTTP handoff has not expired or lacks exclusive settled preparation");
+      const fence = settleLifecycleWork(current.fence, operation.action); const tickets = completeTicket(current.tickets, operation.ticket, "failure");
+      if (!fence.ok || !tickets.ok) throw new Error("expired HTTP handoff cannot settle lifecycle");
+      const active = current.http?.active;
+      const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== operation.ticket),
+        rollout: { ...operation, completion: { kind: "expired-handoff", outcome: "failed", reason: "deadline", at: now,
+          previous: active === null || active === undefined ? null : httpReleasePlan(active), proof } } });
+      if (next.rollout === undefined) throw new Error("expired handoff completion disappeared"); return next.rollout;
+    }),
     completeCancelledPreparation: (run: string, now: number) => serial(async () => {
       const current = await required(); const operation = current.rollout;
       if (operation?.preparation.run !== run) throw new Error("cancelled preparation is unavailable");
       if (operation.completion !== undefined) return operation;
-      const requested = operation.preparation.cancelRequestedAt; const proof = migrationCancellationProof(operation.preparation.sequence);
+      const requested = operation.preparation.cancelRequestedAt; const proof = settledMigrationPrefix(operation.preparation.sequence);
       if (requested === undefined || !operation.admitted || current.http?.requests.some((item) => item.request === run) ||
         current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("cancelled preparation lacks exclusive intent");
       if (proof === undefined) return operation;

@@ -1,4 +1,4 @@
-import { migrationCancellationProof } from "./migration-cancellation.ts";
+import { settledMigrationPrefix } from "./migration-prefix.ts";
 import { createHash } from "node:crypto";
 import { parseRolloutPlan, rolloutMigrationDescription, rolloutWorkloadDigest } from "../../contracts/rollout-plan.ts";
 import { migrationSequenceDigest } from "../../contracts/migration-sequence.ts";
@@ -31,7 +31,7 @@ export const resolveRolloutMigration = async (input: ReturnType<typeof parseRoll
     ...(preparation.cancelRequestedAt !== undefined || resolved.disposition === "continue" ? {} : { completion: { kind: "migration-resolved", outcome: "failed", reason: resolved.audit.outcome === "not-applied" ? "migration" : "deadline",
       at: resolved.audit.at, previous, resolution: resolved.audit.id, step: request.step } }),
   });
-  const proof = preparation.cancelRequestedAt === undefined ? undefined : migrationCancellationProof(resolved.state);
+  const proof = preparation.cancelRequestedAt === undefined ? undefined : settledMigrationPrefix(resolved.state);
   const next = recorded !== undefined || preparation.cancelRequestedAt === undefined ? reconciled : parseRolloutRequest({ ...reconciled,
     ...(proof === undefined ? {} : { completion: { kind: "cancelled-preparation", outcome: "cancelled", reason: "cancelled", at: resolved.audit.at, previous, proof } }),
   });

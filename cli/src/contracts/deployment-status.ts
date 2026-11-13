@@ -18,6 +18,8 @@ const preparation = z.object({ request: z.uuid(), phase: z.enum(["prepared", "ad
   migrationDeadline: z.number().int().positive(), httpDeadline: z.number().int().positive().nullable(),
   completedAt: z.number().int().positive().nullable().default(null),
   cancelRequestedAt: z.number().int().positive().nullable().default(null),
+  recovery: z.enum(["previous-preserved", "no-active-release"]).nullable().default(null),
+  migrationOutcomes: z.array(z.object({ step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/), outcome: z.enum(["applied", "not-applied", "unstarted"]) }).strict().readonly()).max(128).readonly().default(Object.freeze([])),
   resolution: z.object({ id: digest, outcome: z.enum(["applied", "not-applied"]), at: z.number().int().positive() }).strict().readonly().nullable().default(null),
   step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/).nullable(),
 }).strict().readonly();
@@ -45,6 +47,9 @@ const schema = z.object({
       value.preparation.completedAt !== null && (value.preparation.step !== null && value.preparation.resolution === null && value.preparation.phase !== "cancelled" || value.desired?.plan !== value.verifiedActive?.plan || value.desired?.commit !== value.verifiedActive?.commit) ||
       value.preparation.phase === "cancelling" && value.preparation.cancelRequestedAt === null ||
       value.preparation.completedAt === null && value.preparation.phase !== "cancelling" && (value.preparation.phase === "ready-for-http") !== (value.preparation.httpDeadline !== null) ||
+      value.preparation.recovery !== null && (value.preparation.completedAt === null || value.preparation.recovery !== (value.verifiedActive === null ? "no-active-release" : "previous-preserved")) ||
+      value.preparation.migrationOutcomes.length > 0 && value.preparation.completedAt === null ||
+      new Set(value.preparation.migrationOutcomes.map((item) => item.step)).size !== value.preparation.migrationOutcomes.length ||
       value.preparation.admissionDeadline > value.preparation.migrationDeadline || value.preparation.migrationDeadline !== value.preparation.deadline - 180_000 ||
       value.preparation.httpDeadline !== null && value.preparation.httpDeadline > value.preparation.deadline - 90_000)) context.addIssue({ code: "custom", message: "inconsistent deployment projection" });
 });

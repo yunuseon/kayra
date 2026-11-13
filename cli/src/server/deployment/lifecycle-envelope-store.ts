@@ -1,8 +1,6 @@
-/* Disconnected prototype. No operation here authorizes or executes an effect.
- * The composition root must exclusively own this journal (including across
- * other journal consumers), bind its identity to a durable app index, and
- * authenticate registration references. This is not a live endpoint or a
- * complete lifecycle owner. */
+/* Owns atomic app-envelope transitions and private phase journal views. The
+ * indexed composition holds the exclusive writer, authenticates registration
+ * and supplies runtime ports checking the matching durable admission. */
 /* eslint-disable functional/prefer-immutable-types */
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
 import { serviceEffectAction } from "../../contracts/swarm-service.ts";
@@ -18,6 +16,9 @@ import { parseHttpNativeStep } from "./http-state.ts";
 import type { HttpNativeStep, HttpRecovery } from "./http-state.ts";
 import { beginLifecycleWork, beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
+import { initialRolloutPreparation, parseRolloutPreparation, rolloutPreparation } from "./rollout-preparation.ts";
+import { parseRolloutPlan } from "../../contracts/rollout-plan.ts";
+import type { RolloutPlan } from "../../contracts/rollout-plan.ts";
 
 type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
 /** The composition root, never a client request, supplies this trusted read-only port. */
@@ -150,6 +151,51 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         return Object.freeze({ status: "new" as const, actionId });
       });
     },
+    /** Complete plans own the same fence as legacy HTTP work, with their own immutable identity. */
+    prepareRollout: (input: RolloutPlan, request: string, now: number) => serial(async () => {
+      const checked = parseRolloutPlan(input); if (!checked.ok) throw new Error(checked.error);
+      const preparation = initialRolloutPreparation(checked.value, request, now);
+      const current = await required(); const existing = current.rollout;
+      if (existing !== undefined) {
+        if (existing.preparation.run !== request || existing.preparation.plan !== preparation.plan) throw new Error("rollout request identity conflicts or lifecycle is busy");
+        return existing;
+      }
+      if (current.registrationReceipt?.runtime !== "swarm" || current.fence?.lifecycle.phase !== "registered" ||
+        JSON.stringify(current.registrationReceipt.metadata) !== JSON.stringify(checked.value.workload.registration)) throw new Error("complete rollout requires matching verified Swarm registration");
+      const fence = beginLifecycleWork(current.fence, "deploy"); const reserved = reserveTicket(current.tickets);
+      if (!fence.ok || !reserved.ok) throw new Error("rollout lifecycle is busy or exhausted");
+      const descriptor = Object.freeze({ kind: "deploy" as const, planDigest: preparation.plan });
+      const accepted = admitTicket(reserved.value.state, reserved.value.ticket, descriptor);
+      if (!accepted.ok || accepted.value.status !== "new") throw new Error("invalid complete rollout ticket allocation");
+      const action = lifecycleActionId(fence.value, fence.value.nextAction - 1);
+      const next = await persist({ ...current, fence: fence.value, tickets: accepted.value.state,
+        operations: [...current.operations, { ticket: reserved.value.ticket, action, descriptor }],
+        rollout: { ticket: reserved.value.ticket, action, commit: checked.value.workload.commit, admissionDeadline: now + 90_000, admitted: false, preparation } });
+      if (next.rollout === undefined) throw new Error("complete rollout intent was not retained"); return next.rollout;
+    }),
+    /** Called only after the index has durably reserved the complete operation's peak. */
+    admitRollout: (ticket: string) => serial(async () => {
+      const current = await required(); const rollout = current.rollout;
+      if (rollout?.ticket !== ticket) throw new Error("complete rollout request is unavailable");
+      const next = await persist({ ...current, rollout: { ...rollout, admitted: true } });
+      return next.rollout;
+    }),
+    tickRolloutPreparation: (ticket: string, ports: Parameters<typeof rolloutPreparation>[1]) => serial(async () => {
+      const current = await required();
+      if (current.rollout?.ticket !== ticket || !current.rollout.admitted) throw new Error("complete rollout lacks admission");
+      // Every child write returns through persist(), including its uncertain-write poisoning.
+      const view = { read: async () => (await required()).rollout?.preparation,
+        write: async (preparation: unknown) => {
+          const state = await required();
+          if (state.rollout?.ticket !== ticket || !state.rollout.admitted) throw new Error("rollout preparation lost lifecycle ownership");
+          const checked = parseRolloutPreparation(preparation); const before = state.rollout.preparation;
+          if (checked.run !== before.run || checked.plan !== before.plan || checked.workload !== before.workload || checked.source !== before.source ||
+            checked.createdAt !== before.createdAt || checked.deadline !== before.deadline || checked.migrationDeadline !== before.migrationDeadline ||
+            before.phase === "ready" || before.phase === "held") throw new Error("rollout preparation changed immutable intent or settled phase");
+          await persist({ ...state, rollout: { ...state.rollout, preparation: checked } });
+        } };
+      return rolloutPreparation(view, ports).tick();
+    }),
     /** Internal lifecycle owner only. A prepared request cannot dispatch effects. */
     prepareHttp: (input: { readonly request: string; readonly plan: string; readonly commit: string; readonly service: string }, now: number) => {
       const parsed = z.object({ request: z.uuid(), plan: z.string().regex(/^[0-9a-f]{64}$/), commit: z.string().regex(/^[0-9a-f]{40}$/), service: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/) }).strict().safeParse(input);

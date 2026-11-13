@@ -5,6 +5,9 @@ import { lstat, mkdir, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { parseApplicationPlan } from "../../contracts/application-plan.ts";
+import { parseRolloutPlan, rolloutMigrationDescription, rolloutWorkloadDigest } from "../../contracts/rollout-plan.ts";
+import type { RolloutPlanPort } from "../../contracts/rollout-plan.ts";
+import type { rolloutPreparation } from "./rollout-preparation.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
@@ -230,6 +233,74 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const artifact = state.builds.find((build) => build.id === id)?.artifact;
       if (artifact === undefined || artifact === null) throw new Error("no retained build for this commit; prepare its artifact first");
       return ports.preview(registration, runtime, commit, artifact);
+    }),
+    prepareRollout: (app: string, request: string, commit: string, ports: RolloutPlanPort & Pick<BuildPorts, "now" | "retain">) => useReady(app, async (store) => {
+      if (!z.uuid().safeParse(request).success || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("complete rollout requires a request identity and full commit");
+      const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
+      if (envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("complete rollout requires the persisted Swarm runtime");
+      if (envelope.rollout !== undefined) {
+        if (envelope.rollout.preparation.run !== request || envelope.rollout.commit !== commit) throw new Error("complete rollout request conflicts or lifecycle is busy");
+        return envelope.rollout;
+      }
+      if (envelope.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active !== null) throw new Error("complete rollout lifecycle is busy or fenced");
+      const previous = envelope.http?.requests.at(-1); if (previous !== undefined) await reconcileHttpResources(app, store, previous.ticket);
+      const state = await readIndex(); const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
+      const artifact = state.builds.find((build) => build.id === id)?.artifact;
+      if (artifact === undefined || artifact === null) throw new Error("complete rollout requires a retained build");
+      const checked = parseRolloutPlan(await ports.preview(registration, "swarm", commit, artifact)); if (!checked.ok) throw new Error(checked.error);
+      const plan = checked.value;
+      if (JSON.stringify(plan.workload.registration) !== JSON.stringify(registration) || plan.workload.commit !== commit || plan.workload.artifact !== artifact) throw new Error("complete rollout plan ownership mismatch");
+      const source = plan.rollout.migrations.length === 0 ? [] : (() => {
+        const sequence = rolloutMigrationDescription(plan, request); if (!sequence.ok) throw new Error(sequence.error); return [JSON.stringify(sequence.value)];
+      })();
+      const contents = [JSON.stringify(plan), JSON.stringify(plan.workload), ...source];
+      for (const content of contents) if (await ports.retain(content) !== createHash("sha256").update(content).digest("hex")) throw new Error("complete rollout artifact retention mismatch");
+      return store.prepareRollout(plan, request, ports.now());
+    }),
+    rolloutOperation: (app: string, request: string) => useReady(app, async (store) => {
+      const operation = (await store.read())?.rollout; return operation?.preparation.run === request ? operation : undefined;
+    }),
+    admitRollout: (app: string, ticket: string, ports: HostObserver & Pick<BuildPorts, "read" | "now">) => useReady(app, async (store) => {
+      const envelope = await store.read(); const registration = verifiedRegistration(app, envelope); const operation = envelope?.rollout;
+      if (operation?.ticket !== ticket || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
+        lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action) throw new Error("complete rollout no longer owns lifecycle");
+      const content = await ports.read(operation.preparation.plan); const input: unknown = JSON.parse(content); const checked = parseRolloutPlan(input);
+      if (createHash("sha256").update(content).digest("hex") !== operation.preparation.plan || !checked.ok ||
+        JSON.stringify(checked.value.workload.registration) !== JSON.stringify(registration) || checked.value.workload.commit !== operation.commit ||
+        rolloutWorkloadDigest(checked.value) !== operation.preparation.workload) throw new Error("complete rollout admission plan integrity failed");
+      const plan = checked.value.workload;
+      const amount = Object.values(plan.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
+      const previous = envelope.http?.active ?? null;
+      const previousAmount = previous === null ? null : await (async () => {
+        const bytes = await ports.read(previous.plan); const input: unknown = JSON.parse(bytes); const checked = parseApplicationPlan(input);
+        if (createHash("sha256").update(bytes).digest("hex") !== previous.plan || !checked.ok || JSON.stringify(checked.value.registration) !== JSON.stringify(registration) ||
+          checked.value.commit !== previous.commit || JSON.stringify(checked.value.routes) !== JSON.stringify(plan.routes) ||
+          JSON.stringify(Object.keys(checked.value.services)) !== JSON.stringify(Object.keys(plan.services))) throw new Error("complete rollout previous release or routing policy changed");
+        return Object.values(checked.value.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
+      })();
+      const observation = await ports.observeHost(plan.host);
+      await serialIndex(async () => {
+        const state = await readIndex();
+        const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence: Number(operation.action.split(":")[1]),
+          previous: previous === null || previousAmount === null ? null : { plan: previous.plan, budget: previousAmount },
+          target: { plan: operation.preparation.plan, budget: amount }, peak: httpRecoveryPeak(amount, previousAmount), deadline: operation.admissionDeadline, result: "pending" };
+        const reserved = reserveResources(state.resources, plan.host, observation, intent, ports.now()); if (!reserved.ok) throw new Error(reserved.error);
+        await journal.write({ ...state, resources: reserved.value });
+      });
+      return store.admitRollout(ticket);
+    }),
+    tickRolloutPreparation: (app: string, request: string, ports: Omit<Parameters<typeof rolloutPreparation>[1], "authorize">) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = envelope?.rollout;
+      if (operation?.preparation.run !== request || !operation.admitted || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
+        lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action) throw new Error("complete rollout lacks admitted lifecycle ownership");
+      const authorized = async () => {
+        const charge = (await serialIndex(readIndex)).resources?.charges.find((item) => item.app === app);
+        return charge?.result === "pending" && charge.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1]) &&
+          charge.target.plan === operation.preparation.plan && charge.deadline === operation.admissionDeadline && hasHttpRecoveryPeak(charge);
+      };
+      if (!await authorized()) throw new Error("complete rollout has no matching durable admission");
+      return store.tickRolloutPreparation(operation.ticket, { ...ports, authorize: async (state) => state.run === request && state.plan === operation.preparation.plan &&
+        state.workload === operation.preparation.workload && state.createdAt === operation.preparation.createdAt && state.deadline === operation.preparation.deadline && await authorized() });
     }),
     prepareHttpRollout: (app: string, request: string, commit: string, ports: HttpPlanPort & Pick<BuildPorts, "now" | "retain">) => useReady(app, async (store) => {
       if (!z.uuid().safeParse(request).success || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("HTTP rollout requires a request identity and full commit");

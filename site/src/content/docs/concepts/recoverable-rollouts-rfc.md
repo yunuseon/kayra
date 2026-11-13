@@ -883,6 +883,36 @@ accounts for scheduling, shared retry windows, bounded cleanup and HTTP
 update/recovery. This format prepares parent lifecycle integration; it is not
 itself an admission grant or an enabled app capability.
 
+## Indexed rollout preparation
+
+The application lifecycle writer can now accept a complete rollout plan under
+the same exclusive app fence and ticket sequence used by HTTP deployment.
+It retains the complete plan, workload projection and migration description
+before accepting intent. The ticket and host resource charge identify the
+complete plan, while the native workload projection remains separately pinned.
+Ordinary HTTP requests cannot enter while this operation owns the app fence.
+
+Acceptance records the original scheduling and total operation deadlines.
+Admission reserves a conservative peak covering the previous application,
+candidate, migration job and HTTP recovery overlap. A crash between reservation
+and the app's admission marker retains the reservation; replay checks the
+original identity and deadline. Admission expiry never frees capacity by itself.
+
+Migration state and individual execution records occupy private views inside
+the same app envelope. Every runtime effect rechecks the matching host-wide
+charge. Step advancement retains fenced evidence. An unresolved step keeps
+the lifecycle action and reservation held. Neither job completion nor an
+`applied` status probe certifies a new active application release.
+
+Only completed migration preparation can persist the HTTP handoff deadline.
+It is bounded by the original operation budget and is not refreshed on restart.
+HTTP-only complete plans receive a finite preparation window too. These owner
+methods remain internal: the public deployer still accepts only the legacy
+HTTP path and rejects migration-bearing artifacts. HTTP handoff execution,
+audited resolution, cancellation and terminal settlement of complete rollouts
+must be connected before enabling that capability. Maintenance, retained
+dependencies, worker behavior and normal fleet opt-in remain subsequent work.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

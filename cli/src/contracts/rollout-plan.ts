@@ -8,6 +8,8 @@ import { parseMigrationSequencePlan } from "./migration-sequence.ts";
 import type { MigrationSequencePlan } from "./migration-sequence.ts";
 import { typed } from "../lib/typed.ts";
 import { err, ok } from "../lib/result.ts";
+import type { RegistrationGeneration } from "./registration-generation.ts";
+import type { Runtime } from "./rollout.ts";
 
 const policySchema = z.object({ version: z.literal(1), migrationTimeoutCeilingSeconds: z.number().int().min(1).max(86400),
   schedulingSeconds: z.literal(90), cleanupSeconds: z.literal(30), maximumAttempts: z.literal(8),
@@ -16,6 +18,9 @@ const schema = z.object({ version: z.literal(2), runtime: z.literal("swarm"), wo
 export type RolloutPlan = {
   readonly version: 2; readonly runtime: "swarm"; readonly workload: ApplicationPlan; readonly rollout: Rollout;
   readonly policy: z.infer<typeof policySchema>;
+};
+export type RolloutPlanPort = {
+  readonly preview: (registration: RegistrationGeneration, runtime: Runtime, commit: string, artifact: string) => Promise<RolloutPlan>;
 };
 const same = (first: unknown, second: unknown) => JSON.stringify(first) === JSON.stringify(second);
 const migrationDescription = (projection: ApplicationPlan, rollout: Rollout, policy: RolloutPlan["policy"], deployment: string, run: string) => {
@@ -70,5 +75,5 @@ export const rolloutOperationSeconds = (input: RolloutPlan) => {
   const plan = parsed.value;
   const migrations = plan.rollout.migrations.reduce((total, step) => total + plan.policy.schedulingSeconds + step.timeout_seconds +
     plan.policy.cleanupSeconds * plan.policy.maximumAttempts + (step.recovery.kind === "status-probe" ? plan.policy.schedulingSeconds + step.recovery.timeout_seconds + plan.policy.cleanupSeconds : 0), 0);
-  return migrations + plan.workload.policy.updateTimeoutSeconds + plan.workload.policy.rollbackTimeoutSeconds;
+  return Math.max(plan.policy.schedulingSeconds, migrations) + plan.workload.policy.updateTimeoutSeconds + plan.workload.policy.rollbackTimeoutSeconds;
 };

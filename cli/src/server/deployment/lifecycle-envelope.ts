@@ -1,7 +1,6 @@
-/* Disconnected parser only: it neither owns a journal nor authorizes effects.
- * Accepted queued requests are deliberately unsupported, so this cannot replace
- * the live queue. An owner must atomically persist all participating transitions
- * and separately establish trusted authority, completeness and runtime evidence. */
+/* Private state validation grants no workload authority. The indexed writer
+ * authenticates registration, fences lifecycle work and reserves resources;
+ * runtime observations separately establish effect and release outcomes. */
 /* eslint-disable functional/prefer-immutable-types */
 import { z } from "zod";
 import { err, ok } from "../../lib/result.ts";
@@ -9,6 +8,7 @@ import { parseRegistrationGeneration } from "../../contracts/registration-genera
 import { parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
+import { parseRolloutRequest } from "./rollout-request.ts";
 
 // Snapshot only narrowly defined references; the ticket module independently
 // validates and hashes them, so a mismatch between the schemas fails closed.
@@ -34,6 +34,7 @@ const shape = z.object({
   registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]).default("compose") }).strict().optional(),
   registrationReceipt: z.object({ ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]), metadata: z.unknown() }).strict().optional(),
   http: z.unknown().optional(),
+  rollout: z.unknown().optional(),
   operations: z.array(z.object({ ticket: z.string().max(80), action: z.string().max(80), descriptor }).strict()).max(2),
 }).strict();
 
@@ -105,9 +106,23 @@ export const parseLifecycleEnvelope = (input: unknown) => {
       } else if (!binding.ok || binding.value.status !== "accepted" || !operations.some((operation) => operation.ticket === request.ticket && operation.action === request.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === request.plan)) return err("HTTP request lacks lifecycle intent");
     }
   }
+  const rollout = (() => {
+    if (parsed.data.rollout === undefined) return undefined;
+    try { return parseRolloutRequest(parsed.data.rollout); } catch { return null; }
+  })();
+  if (rollout === null) return err("invalid complete rollout envelope");
+  if (rollout !== undefined) {
+    const preparation = rollout.preparation;
+    const binding = admitTicket(tickets.value, rollout.ticket, { kind: "deploy", planDigest: preparation.plan });
+    if (receipt?.runtime !== "swarm" || preparation.app !== tickets.value.app || preparation.incarnation !== tickets.value.incarnation ||
+      !binding.ok || binding.value.status !== "accepted" ||
+      !operations.some((operation) => operation.ticket === rollout.ticket && operation.action === rollout.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === preparation.plan) ||
+      http?.ok && http.value.requests.some((request) => !terminalHttp(request.phase))) return err("complete rollout lacks exclusive lifecycle intent");
+  }
   operations.forEach((operation) => { Object.freeze(operation.descriptor); Object.freeze(operation); });
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
-    ...(http?.ok ? { http: http.value } : {}) }));
+    ...(http?.ok ? { http: http.value } : {}),
+    ...(rollout === undefined ? {} : { rollout }) }));
 };

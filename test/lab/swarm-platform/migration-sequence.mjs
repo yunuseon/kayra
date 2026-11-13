@@ -13,8 +13,10 @@ import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
 import { dockerApi } from '../../../cli/src/server/runtime/docker-api.ts';
 import { oneShotJob } from '../../../cli/src/server/runtime/one-shot-job.ts';
 import { serverCode, migrationCommand, probeCommand } from './migration-fixture.mjs';
+import { indexedMigrationOwner } from './indexed-migration-owner.mjs';
 
 const [mode, directory, checkpoint] = process.argv.slice(2); assert.ok(directory);
+const indexed = mode === 'indexed-run' || mode === 'indexed-child';
 const api = dockerApi(); const native = oneShotJob(api); const run = promisify(execFile); const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const privateValue = 'synthetic-sequence-private-value';
 const ports = async (path, source, killAt) => ({ ...await openArtifactStore(join(path, 'artifacts')), now: Date.now,
@@ -25,15 +27,22 @@ const ports = async (path, source, killAt) => ({ ...await openArtifactStore(join
   materialize: async (job) => Object.fromEntries(Object.entries(job.environment).map(([key, binding]) => [key, binding.kind === 'literal' ? binding.value : privateValue])),
   native: { ...native, start: async (...args) => { const result = await native.start(...args); if (killAt === 'after-start') { assert.equal(result, 'acknowledged'); process.kill(process.pid, 'SIGKILL'); } return result; } },
 });
-if (mode === 'child') {
-  const source = JSON.parse(await readFile(join(directory, 'source.json'), 'utf8')); const journal = await openJournal(directory, 'existing');
-  const view = { read: journal.read, write: async (value) => { await journal.write(value); if (checkpoint === 'after-advance' && value.position === 1) process.kill(process.pid, 'SIGKILL'); } };
-  const owner = migrationSequence(view, await ports(directory, source, checkpoint));
+const openOwner = async (path, source, killAt, initialize) => {
+  const phasePorts = await ports(path, source, killAt);
+  if (indexed) return indexedMigrationOwner(path, source, phasePorts, killAt, initialize);
+  const journal = await openJournal(path, initialize ? 'initialize' : 'existing');
+  const view = { read: journal.read, write: async (value) => { await journal.write(value); if (killAt === 'after-advance' && value.position === 1) process.kill(process.pid, 'SIGKILL'); } };
+  return { journal, owner: migrationSequence(view, phasePorts) };
+};
+if (mode === 'child' || mode === 'indexed-child') {
+  const source = JSON.parse(await readFile(join(directory, 'source.json'), 'utf8'));
+  const { owner } = await openOwner(directory, source, checkpoint, false);
   while (true) { const value = await owner.tick(); assert.equal(value.phase, 'running'); await pause(100); }
 }
-assert.equal(mode, 'run'); await mkdir(directory, { mode: 0o700 }); const app = 'migration-lab-' + randomUUID().slice(0, 8);
+assert.ok(mode === 'run' || mode === 'indexed-run'); await mkdir(directory, { mode: 0o700 }); const app = 'migration-lab-' + randomUUID().slice(0, 8);
 const host = JSON.parse(await readFile('/var/lib/kayra/swarm/authority.json', 'utf8'));
-const deployer = (await run('docker', ['ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=deployer'])).stdout.trim(); assert.ok(deployer);
+const deployer = (await run('docker', ['ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=deployer',
+  '--filter', 'label=com.docker.compose.oneoff=False'])).stdout.trim(); assert.match(deployer, /^[0-9a-f]{12,64}$/);
 const sourceImage = JSON.parse((await run('docker', ['inspect', deployer])).stdout)[0].Image; const tag = `localhost:5000/${app}/web:fixture`;
 await run('docker', ['image', 'tag', sourceImage, tag]); await run('docker', ['image', 'push', tag], { timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
 const image = JSON.parse((await run('docker', ['image', 'inspect', tag])).stdout)[0].RepoDigests.find((value) => value.startsWith(`localhost:5000/${app}/web@sha256:`)); assert.ok(image);
@@ -83,13 +92,13 @@ try {
           FAIL_BEFORE: { kind: 'literal', value: item.before ? '1' : '0' }, PROBE_MODE: { kind: 'literal', value: item.unknown ? 'unknown' : 'truth' },
           TOKEN: { kind: 'secret', key: 'TOKEN' } }, resources: { memoryBytes: 128 * 1024 * 1024, nanoCpus: 250_000_000 }, networks: [host.network.id], stopGraceSeconds: 30 } })) });
     assert.ok(parsed.ok, parsed.error); const source = parsed.value; await writeFile(join(path, 'source.json'), JSON.stringify(source));
-    let journal = await openJournal(path); let owner = migrationSequence(journal, await ports(path, source)); const accepted = await owner.prepare(source, startedAt + 180000);
+    let { journal, owner } = await openOwner(path, source, undefined, true); const accepted = await owner.prepare(source, startedAt + 180000);
     if (item.kill) {
       await journal.close(); const killed = await new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'child', path, item.kill], { stdio: ['ignore', 'ignore', 'pipe'] });
+        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), indexed ? 'indexed-child' : 'child', path, item.kill], { stdio: ['ignore', 'ignore', 'pipe'] });
         const errors = []; child.stderr.on('data', (chunk) => errors.push(chunk)); child.on('error', reject);
         child.on('close', (code, signal) => resolve({ code, signal, stderr: Buffer.concat(errors).toString() }));
-      }); assert.equal(killed.signal, 'SIGKILL', JSON.stringify(killed)); journal = await openJournal(path, 'existing'); owner = migrationSequence(journal, await ports(path, source));
+      }); assert.equal(killed.signal, 'SIGKILL', JSON.stringify(killed)); ({ journal, owner } = await openOwner(path, source, undefined, false));
     }
     const trace = []; let final;
     while (Date.now() < accepted.deadline + 30000) { const value = await owner.tick(); trace.push({ at: Date.now(), value }); if (value.phase !== 'running') { final = value; break; } await pause(100); }
@@ -116,7 +125,7 @@ try {
   assert.equal((await api.request('DELETE', `/services/${serviceId}`)).status, 200); serviceId = undefined;
   const version = await api.request('GET', '/version'); await writeFile(join(directory, 'result.json'), JSON.stringify({ passed: true, reports, app, image, engine: version.value.Version,
     api: version.value.ApiVersion, node: process.version, fixtureServiceRemoved: true,
-    scope: 'isolated phase owner with application-owned effect/dedup fixture; no real-deployer admission or migration rollout integration' }, null, 2));
+    scope: indexed ? 'indexed lifecycle, durable admission and native migration effects with fixture registration/build ports; HTTP handoff only' : 'isolated phase owner with application-owned effect/dedup fixture; no real-deployer admission or migration rollout integration' }, null, 2));
 } catch (error) {
   if (activeObserver) activeObserver.kill('SIGTERM');
   await writeFile(join(directory, 'failure.json'), JSON.stringify({ error: String(error), serviceId, app, image, reports }, null, 2));

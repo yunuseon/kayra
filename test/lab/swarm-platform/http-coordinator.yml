@@ -54,6 +54,7 @@
         - test/lab/swarm-platform/one-shot-cold.mjs
         - test/lab/swarm-platform/one-shot-deadlines.mjs
         - test/lab/swarm-platform/migration-sequence.mjs
+        - test/lab/swarm-platform/indexed-migration-owner.mjs
         - test/lab/swarm-platform/migration-fixture.mjs
 
     - name: Find the existing deployer container
@@ -244,6 +245,32 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/sequence.tar"
         dest: "{{ report_path }}.sequence.tar"
+        flat: true
+
+    - name: Reconcile migrations through indexed lifecycle ownership and durable admission
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - indexed-run
+          - "{{ coordinator_source.path }}/indexed-sequence"
+      changed_when: true
+
+    - name: Retain indexed migration preparation summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/indexed-sequence/result.json"
+        dest: "{{ report_path }}.indexed-sequence.json"
+        flat: true
+
+    - name: Archive indexed migration preparation evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/indexed-sequence.tar", -C, "{{ coordinator_source.path }}/indexed-sequence", .]
+      changed_when: true
+
+    - name: Preserve indexed migration preparation evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/indexed-sequence.tar"
+        dest: "{{ report_path }}.indexed-sequence.tar"
         flat: true
 
     - name: Remove successful component source files

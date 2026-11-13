@@ -1014,6 +1014,24 @@ remain version 1. Status exposes the cancellation timestamp and distinguishes
 cancelling, held and cancelled. A historical verified active certificate is
 never replaced merely because a cancellation request was acknowledged.
 
+## Host migration timeout policy
+
+`swarm_migration_timeout_seconds` is a fleet host setting, bounded from one to
+86,400 seconds, defaulting to ninety. Explicit experimental Swarm setup publishes
+`/var/lib/kayra/swarm/policy/migration.json` as a root-owned read-only document
+under the existing exclusive platform setup lock. Check mode reports pending
+publication without creating directories or changing Docker. Invalid or untrusted
+existing policy requires intervention rather than silent replacement.
+
+The deployer receives only the public policy directory through a read-only mount;
+atomic replacement is visible without retaining an old file inode. The platform
+reader validates file ownership, mode, link count and content. Admission must copy
+the validated ceiling into the immutable full plan before issuing any job.
+Changing host policy affects future plans and never extends an existing run's
+execution, handoff or recovery deadline. The setting does not enable migrations
+or supply app commands. Public migration-bearing admission remains disabled until
+the pipeline and remaining acceptance requirements are implemented.
+
 ## Expired HTTP handoff after preparation
 
 If preparation is ready but no HTTP child exists when its original handoff

@@ -58,6 +58,7 @@ export const settings: readonly Setting[] = [
     platform_cpu_millicores: z.number().int().positive(),
   }).strict().refine((profile) => profile.platform_memory_bytes < profile.memory_bytes && profile.platform_cpu_millicores < profile.cpu_millicores,
     "platform overhead must leave workload capacity"), "Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications."),
+  setting("swarm_migration_timeout_seconds", platform, z.number().int().min(1).max(86400), "Host ceiling for experimental Swarm migration and status-probe execution (default 90 seconds). Captured in each admitted plan; changing it does not extend existing deadlines or enable migration admission."),
   setting("authelia_policy", platform, z.enum(["one_factor", "two_factor"]), "What Authelia asks of staff: two_factor (default) or one_factor."),
   setting("authelia_smtp_address", platform, text, "SMTP server for Authelia's mails (passkey enrolment); empty: mails go to a file."),
   setting("authelia_smtp_username", platform, text, "SMTP user for Authelia."),

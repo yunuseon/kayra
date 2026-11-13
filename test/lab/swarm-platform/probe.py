@@ -52,6 +52,13 @@ def main():
     assert authority["cluster"] == info["Swarm"]["Cluster"]["ID"]
     network = json.loads(command("network", "inspect", "platform-swarm"))[0]
     assert authority["network"]["id"] == network["Id"] and network["Attachable"]
+    policy = json.loads(Path("/var/lib/kayra/swarm/policy/migration.json").read_text())
+    deployers = command("ps", "-q", "--filter", "label=com.docker.compose.project=platform", "--filter", "label=com.docker.compose.service=deployer", "--filter", "label=com.docker.compose.oneoff=False").splitlines()
+    assert len(deployers) == 1
+    deployer = json.loads(command("inspect", deployers[0]))[0]
+    assert any(item["Destination"] == "/run/kayra-platform/policy" and not item["RW"] for item in deployer["Mounts"])
+    reader = "import {existsSync} from 'node:fs'; const base='/opt/kayra/server/platform/migration-policy'; const {readMigrationPolicy}=await import(base+(existsSync(base+'.ts')?'.ts':'.js')); const result=await readMigrationPolicy(process.env.KAYRA_MIGRATION_POLICY); if(!result.ok) throw new Error(result.error); console.log(JSON.stringify(result.value));"
+    assert json.loads(command("exec", deployers[0], "node", "--input-type=module", "--eval", reader)) == policy
     proxy_id = command("ps", "-q", "--filter", "label=com.docker.compose.project=platform", "--filter", "label=com.docker.compose.service=socket-proxy")
     proxy = json.loads(command("inspect", proxy_id))[0]
     assert "POST=0" in proxy["Config"]["Env"]
@@ -101,7 +108,7 @@ def main():
     command("service", "rm", service)
     print(json.dumps({"engine": info["ServerVersion"], "cli": json.loads(command("version", "--format", "{{json .Client}}"))["Version"],
         "compose": command("compose", "version", "--short"), "os": info["OperatingSystem"], "traefik": traefik_image,
-        "socketProxy": proxy["Config"]["Image"], "fixtureImage": image, "authority": authority,
+        "migrationPolicy": policy, "socketProxy": proxy["Config"]["Image"], "fixtureImage": image, "authority": authority,
         "readEndpoints": reads, "writeEndpoints": writes, "swarmRequests": 10, "composeRequests": 10, "tlsVerified": True}, sort_keys=True))
 
 

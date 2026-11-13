@@ -163,3 +163,10 @@ test("experimental Swarm host setup requires explicit capacity and platform over
     strictEqual(refused(descriptor, { vars: JSON.stringify({ experimental_swarm: invalid }) }) === "accepted", false);
   }
 });
+
+test("host migration ceiling is a platform setting with bounded seconds", () => {
+  const descriptor = "target: multipass\ndomain: a.test\n";
+  for (const value of [1, 90, 86400]) strictEqual(refused(descriptor, { vars: JSON.stringify({ swarm_migration_timeout_seconds: value }) }), "accepted");
+  for (const value of [0, -1, 1.5, 86401, "90", true]) strictEqual(refused(descriptor, { vars: JSON.stringify({ swarm_migration_timeout_seconds: value }) }) === "accepted", false);
+  strictEqual(refused("kind: edge\ntarget: multipass\ndomain: a.test", { vars: "swarm_migration_timeout_seconds: 90\n" }) === "accepted", false);
+});

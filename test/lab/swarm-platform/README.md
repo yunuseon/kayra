@@ -705,3 +705,17 @@ Fifteen focused Linux checks passed. Evidence is
 `/tmp/kayra-handoff-expiry-context.json`. The Engine and CLI were 29.9.3,
 API 1.56, Compose 5.7.0 and Node 24.22.1 on Ubuntu 24.04.5 ARM64.
 Clock offsets were 232 ms before and 250 ms after.
+
+### Host migration policy publication
+
+The platform setup module publishes the host-only timeout ceiling under its
+existing lock. `python3 -B ci/tests/swarm-host/test_host.py` includes check-mode,
+policy update, lost-publication acknowledgement and untrusted-file cases; these
+require Linux root and stub Docker effects. The real filesystem reader check is
+`node --test cli/test/deployment/migration-policy.test.ts`; it verifies root-owned
+0444 files, atomic replacement, hard-link/symlink refusal and bounded content.
+On the preserved VM all fifteen Python host checks and both focused policy checks
+passed. Context is `/tmp/kayra-migration-policy-context.json` and raw output is
+`/tmp/kayra-migration-policy-linux.log`. This does not exercise a platform upgrade
+or enable public migration-bearing admission. Successful isolated test sources
+were removed; the previously failed VM remains preserved.

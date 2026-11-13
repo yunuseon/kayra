@@ -9,6 +9,7 @@ platform_dir: /opt/platform
 apps_dir: /opt/apps
 # Omitted by default; enabling requires explicit host and overhead budgets.
 experimental_swarm: {}
+swarm_migration_timeout_seconds: 90
 domain: localhost
 # The engine's files (compose files, scripts) lie above the playbooks, wherever
 # the fleet it serves is; the fleet's (servers/, .cache/) above the server's

@@ -984,6 +984,16 @@ They validate lifecycle/admission recovery with fixture build inputs; they do
 not validate image availability or app runtime readiness. Cancellation of
 started migration work and audited resolution remain subsequent delivery work.
 
+## One-shot image health isolation
+
+Migration and status-probe containers explicitly disable inherited image health
+checks. The adapter checks `Healthcheck.Test = ["NONE"]` before Start, alongside
+restart, volume and command checks; earlier prepared containers missing that
+setting cannot be started by the updated adapter. Inert name barriers also
+carry the disabled setting. Long-running service readiness checks remain part
+of the admitted Compose description. This prevents an undeclared concurrent
+image command from executing alongside an admitted one-shot operation.
+
 ## Audited resolution of fenced migrations
 
 The indexed owner now accepts an explicit `applied` or `not-applied` assertion

@@ -72,6 +72,8 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("app.secret.import"), input: operations["app.secret.import"].input }),
   z.strictObject({ name: z.literal("app.secret.generate"), input: operations["app.secret.generate"].input }),
   z.strictObject({ name: z.literal("app.purge"), input: operations["app.purge"].input }),
+  z.strictObject({ name: z.literal("app.migration.cleanup"), input: operations["app.migration.cleanup"].input }),
+  z.strictObject({ name: z.literal("app.migration.cleanup.audit"), input: operations["app.migration.cleanup.audit"].input }),
   z.strictObject({ name: z.literal("app.migration.resolve"), input: operations["app.migration.resolve"].input }),
   z.strictObject({ name: z.literal("app.migration.audit"), input: operations["app.migration.audit"].input }),
   z.strictObject({ name: z.literal("app.runs"), input: operations["app.runs"].input }),
@@ -119,7 +121,7 @@ const withServer =
   (ctx: Context, input: { readonly server: string }) =>
     flatMap(onServer(ctx, input.server), (target) => make(ctx.engine, target));
 
-type DeployerName = "app.migration.resolve" | "app.migration.audit" | "app.runs" | "app.log" | "app.deploy" | "app.releases" | "app.rollback";
+type DeployerName = "app.migration.cleanup" | "app.migration.cleanup.audit" | "app.migration.resolve" | "app.migration.audit" | "app.runs" | "app.log" | "app.deploy" | "app.releases" | "app.rollback";
 
 const onDeployer =
   <N extends DeployerName>(command: (app: AppName, input: InputOf<N>) => DeployerCommand) =>
@@ -154,6 +156,8 @@ const plans: Plans = {
     flatMap(appDir(ctx, input.dir), (dir) => launch(ctx.engine, ctx.fleet.root, server, { app, repo: input.repo, ref: input.ref, path: input.path, dir }))),
   "app.hook": (ctx, input) => flatMap(onApp(ctx, input), ([server, app]) => appHook(ctx.engine, ctx.fleet.root, server, app)),
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),
+  "app.migration.cleanup": onDeployer<"app.migration.cleanup">((app, input) => ({ kind: "migration", app, operation: "cleanup", payload: { app, run: input.run, step: input.step, purpose: input.purpose, attempt: input.attempt, action: input.action, reason: input.reason } } as const)),
+  "app.migration.cleanup.audit": onDeployer<"app.migration.cleanup.audit">((app, input) => ({ kind: "migration", app, operation: "cleanup-audit", payload: { app, run: input.run, step: input.step } } as const)),
   "app.migration.resolve": onDeployer<"app.migration.resolve">((app, input) => ({ kind: "migration", app, operation: "resolve", payload: { app, run: input.run, step: input.step, outcome: input.outcome, reason: input.reason } } as const)),
   "app.migration.audit": onDeployer<"app.migration.audit">((app, input) => ({ kind: "migration", app, operation: "audit", payload: { app, run: input.run, step: input.step } } as const)),
   "app.runs": onDeployer<"app.runs">((app) => ({ kind: "runs", app, more: undefined } as const)),

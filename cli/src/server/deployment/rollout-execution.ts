@@ -1,10 +1,11 @@
+import type { JobCleanupPort } from "../../contracts/job-cleanup.ts";
 import type { JobPort } from "../../contracts/one-shot-job.ts";
 import type { HttpExecutionPorts, HttpExecutionIndex } from "./http-execution-ports.ts";
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { httpExecution } from "./http-execution.ts";
 
-type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileRolloutResources">>;
-type Ports = HttpExecutionPorts & { readonly jobs: JobPort; readonly retain: (bytes: string) => Promise<string> };
+type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileRolloutResources" | "tickMigrationCleanup">>;
+type Ports = HttpExecutionPorts & { readonly jobs: JobPort; readonly retain: (bytes: string) => Promise<string>; readonly cleanup?: JobCleanupPort | undefined };
 
 /** The composition root installs one application owner; phase adapters never create competing controllers. */
 export const rolloutExecution = (index: Index, ports: Ports) => {
@@ -19,7 +20,16 @@ export const rolloutExecution = (index: Index, ports: Ports) => {
       if (ports.now() >= operation.admissionDeadline && await index.expireRolloutAdmission(app, request, ports.now()) === "failed") return "failed";
       await index.admitRollout(app, operation.ticket, ports); return "admitted";
     }
-    if (operation.preparation.phase === "held") return "held";
+    if (operation.preparation.phase === "held") {
+      for (const step of operation.preparation.sequence?.steps ?? []) for (const attempt of step.attempts) {
+        const record = attempt.cleanups?.at(-1); if (record?.state.phase !== "fencing") continue;
+        if (ports.cleanup === undefined) throw new Error("migration cleanup runtime port is unavailable");
+        const result = await index.tickMigrationCleanup(app, { app, run: request, step: step.id, purpose: attempt.purpose, attempt: attempt.attempt, action: record.state.authority.action },
+          { read: ports.read, now: ports.now, native: ports.cleanup });
+        return result.phase === "fencing" ? "cleaning-up" : result.phase === "complete" ? (await index.rolloutOperation(app, request))?.preparation.phase ?? "held" : "held";
+      }
+      return "held";
+    }
     if (operation.preparation.phase !== "ready") {
       const state = await index.tickRolloutPreparation(app, request, { ...ports, native: ports.jobs,
         materialize: (_job, plan) => ports.materialize(plan.workload) });

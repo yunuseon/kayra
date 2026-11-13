@@ -51,6 +51,7 @@
         - test/lab/swarm-platform/recovery-overlap.mjs
         - test/lab/swarm-platform/one-shot.mjs
         - test/lab/swarm-platform/one-shot-health.mjs
+        - test/lab/swarm-platform/one-shot-cleanup.mjs
         - test/lab/swarm-platform/migration-probe.mjs
         - test/lab/swarm-platform/one-shot-cold.mjs
         - test/lab/swarm-platform/one-shot-deadlines.mjs
@@ -404,6 +405,58 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/job-health.tar"
         dest: "{{ report_path }}.job-health.tar"
+        flat: true
+
+    - name: Recover expired job cleanup across synchronized SIGKILL checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot-cleanup.mjs"
+          - run
+          - "{{ coordinator_source.path }}/job-cleanup"
+      changed_when: true
+
+    - name: Retain bounded job cleanup recovery summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-cleanup/result.json"
+        dest: "{{ report_path }}.job-cleanup.json"
+        flat: true
+
+    - name: Archive bounded job cleanup recovery evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/job-cleanup.tar", -C, "{{ coordinator_source.path }}/job-cleanup", .]
+      changed_when: true
+
+    - name: Preserve bounded job cleanup recovery evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-cleanup.tar"
+        dest: "{{ report_path }}.job-cleanup.tar"
+        flat: true
+
+    - name: Recover held migrations through audited cleanup and outcome resolution
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - cleanup-run
+          - "{{ coordinator_source.path }}/migration-cleanup"
+      changed_when: true
+
+    - name: Retain indexed migration cleanup summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/migration-cleanup/result.json"
+        dest: "{{ report_path }}.migration-cleanup.json"
+        flat: true
+
+    - name: Archive indexed migration cleanup evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/migration-cleanup.tar", -C, "{{ coordinator_source.path }}/migration-cleanup", .]
+      changed_when: true
+
+    - name: Preserve indexed migration cleanup evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/migration-cleanup.tar"
+        dest: "{{ report_path }}.migration-cleanup.tar"
         flat: true
 
     - name: Remove successful component source files

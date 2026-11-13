@@ -6,20 +6,25 @@ import type { MigrationResolutionActor, MigrationResolutionRequest } from "../..
 import { parseRolloutRequest } from "./rollout-request.ts";
 import { resolveMigrationSequence } from "./migration-resolution.ts";
 
-type Ports = Parameters<typeof resolveMigrationSequence>[4];
-
-/** The app lifecycle writer authenticates the operator and persists this transition atomically. */
-export const resolveRolloutMigration = async (input: ReturnType<typeof parseRolloutRequest>, request: MigrationResolutionRequest, actor: MigrationResolutionActor, previous: string | null, ports: Ports) => {
+export const rolloutMigrationEvidence = async (input: ReturnType<typeof parseRolloutRequest>, read: (digest: string) => Promise<string>) => {
   const operation = parseRolloutRequest(input); const preparation = operation.preparation; const sequence = preparation.sequence;
   if (sequence === null) throw new Error("rollout has no migration evidence to resolve");
-  const bytes = await ports.read(preparation.plan); const raw: unknown = JSON.parse(bytes); const parsed = parseRolloutPlan(raw);
+  const bytes = await read(preparation.plan); const raw: unknown = JSON.parse(bytes); const parsed = parseRolloutPlan(raw);
   if (!parsed.ok || createHash("sha256").update(bytes).digest("hex") !== preparation.plan || rolloutWorkloadDigest(parsed.value) !== preparation.workload ||
     parsed.value.workload.app !== preparation.app || parsed.value.workload.registration.incarnation !== preparation.incarnation || parsed.value.workload.commit !== operation.commit) throw new Error("migration resolution rollout plan integrity failed");
   const source = rolloutMigrationDescription(parsed.value, preparation.run);
   if (!source.ok || migrationSequenceDigest(source.value) !== preparation.source || sequence.plan !== preparation.source) throw new Error("migration resolution source changed");
+  return Object.freeze({ operation, sequence, source: source.value });
+};
+
+type Ports = Parameters<typeof resolveMigrationSequence>[4];
+
+/** The app lifecycle writer authenticates the operator and persists this transition atomically. */
+export const resolveRolloutMigration = async (input: ReturnType<typeof parseRolloutRequest>, request: MigrationResolutionRequest, actor: MigrationResolutionActor, previous: string | null, ports: Ports) => {
+  const { operation, sequence, source } = await rolloutMigrationEvidence(input, ports.read); const preparation = operation.preparation;
   const recorded = sequence.steps.find((step) => step.id === request.step)?.resolution;
   if (recorded === undefined && (operation.completion !== undefined || preparation.phase !== "held")) throw new Error("rollout preparation is not held for resolution");
-  const resolved = await resolveMigrationSequence(sequence, source.value, request, actor, ports);
+  const resolved = await resolveMigrationSequence(sequence, source, request, actor, ports);
   const next = recorded !== undefined ? operation : parseRolloutRequest({ ...operation,
     preparation: { ...preparation, sequence: resolved.state, phase: resolved.disposition === "continue" ? "migrating" : "held", reason: resolved.disposition === "continue" ? null : resolved.state.reason === "deadline" ? "deadline" : "migration" },
     ...(resolved.disposition === "continue" ? {} : { completion: { kind: "migration-resolved", outcome: "failed", reason: resolved.audit.outcome === "not-applied" ? "migration" : "deadline",

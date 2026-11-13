@@ -21,6 +21,11 @@ import { parseRolloutPlan } from "../../contracts/rollout-plan.ts";
 import type { RolloutPlan } from "../../contracts/rollout-plan.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import { resolveRolloutMigration } from "./rollout-resolution.ts";
+import { requestRolloutCleanup, rolloutCleanupRecord, migrationCleanupReceipt } from "./rollout-cleanup.ts";
+import type { MigrationCleanupRequest, MigrationCleanupIdentity } from "../../contracts/migration-cleanup.ts";
+import { parseJobCleanupState } from "../../contracts/job-cleanup.ts";
+import { jobCleanup } from "./job-cleanup.ts";
+
 
 type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
 /** The composition root, never a client request, supplies this trusted read-only port. */
@@ -217,6 +222,43 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
           await persist({ ...state, rollout: { ...state.rollout, preparation: checked } });
         } };
       return rolloutPreparation(view, ports).tick();
+    }),
+    requestMigrationCleanup: (request: MigrationCleanupRequest, actor: MigrationResolutionActor, ports: Parameters<typeof requestRolloutCleanup>[3]) => serial(async () => {
+      const current = await required(); const operation = [...(current.rollouts ?? []), ...(current.rollout === undefined ? [] : [current.rollout])].find((item) => item.preparation.run === request.run);
+      if (operation === undefined) throw new Error("migration cleanup rollout is unavailable");
+      const existing = rolloutCleanupRecord(operation, request);
+      if (existing === undefined && (operation !== current.rollout || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null ||
+        lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action)) throw new Error("migration cleanup no longer owns lifecycle");
+      const next = await requestRolloutCleanup(operation, request, actor, ports);
+      if (next.changed) await persist({ ...current, rollout: next.operation });
+      return next.receipt;
+    }),
+    tickMigrationCleanup: (identity: MigrationCleanupIdentity, ports: Omit<Parameters<typeof jobCleanup>[1], "authorize">) => serial(async () => {
+      const current = await required(); const operation = current.rollout; const record = operation === undefined ? undefined : rolloutCleanupRecord(operation, identity);
+      if (operation?.preparation.run !== identity.run || identity.app !== current.tickets.app || record === undefined || operation.completion !== undefined ||
+        operation.preparation.phase !== "held" || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null ||
+        lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("migration cleanup lost lifecycle ownership");
+      const view = { read: async () => rolloutCleanupRecord((await required()).rollout ?? operation, identity)?.state,
+        write: async (input: unknown) => {
+          const state = parseJobCleanupState(input); const current = await required(); const owner = current.rollout;
+          const previous = owner === undefined ? undefined : rolloutCleanupRecord(owner, identity);
+          if (owner?.preparation.run !== identity.run || owner.completion !== undefined || owner.preparation.phase !== "held" || previous === undefined ||
+            JSON.stringify(previous.state.authority) !== JSON.stringify(state.authority)) throw new Error("migration cleanup immutable authority changed");
+          const sequence = owner.preparation.sequence; if (sequence === null) throw new Error("migration cleanup sequence disappeared");
+          const resume = state.phase === "complete" && state.completedAt !== null && state.completedAt < owner.preparation.migrationDeadline;
+          await persist({ ...current, rollout: { ...owner, preparation: { ...owner.preparation, phase: resume ? "migrating" : "held", reason: resume ? null : owner.preparation.reason,
+            sequence: { ...sequence, phase: resume ? "running" : "held", reason: resume ? null : sequence.reason,
+              steps: sequence.steps.map((step) => step.id !== identity.step ? step : { ...step, phase: resume ? "running" : "held", reason: resume ? null : step.reason,
+                attempts: step.attempts.map((attempt) => attempt.purpose !== identity.purpose || attempt.attempt !== identity.attempt ? attempt : {
+                  ...attempt, cleanups: attempt.cleanups?.map((item) => item.state.authority.action === identity.action ? { ...item, state } : item),
+                }) }) } } } });
+        } };
+      const state = await jobCleanup(view, { ...ports, authorize: () => Promise.resolve(true) }).tick();
+      return migrationCleanupReceipt(identity, { ...record, state });
+    }),
+    migrationCleanupAudit: (run: string, step: string) => serial(async () => {
+      const current = await required(); const operation = [...(current.rollouts ?? []), ...(current.rollout === undefined ? [] : [current.rollout])].find((item) => item.preparation.run === run);
+      return Object.freeze(operation?.preparation.sequence?.steps.find((item) => item.id === step)?.attempts.flatMap((attempt) => attempt.cleanups === undefined ? [] : [Object.freeze({ purpose: attempt.purpose, attempt: attempt.attempt, records: attempt.cleanups })]) ?? []);
     }),
     resolveMigration: (request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: Parameters<typeof resolveRolloutMigration>[4]) => serial(async () => {
       const current = await required();

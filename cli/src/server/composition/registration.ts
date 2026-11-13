@@ -4,7 +4,8 @@ import { httpEnvironment } from "../platform/http-environment.ts";
 import { routedReadiness } from "../platform/routed-readiness.ts";
 import { swarmRouting } from "../platform/swarm-routing.ts";
 import { dockerApi } from "../runtime/docker-api.ts";
-import { oneShotJob } from "../runtime/one-shot-job.ts";
+import { startRolloutController } from "./rollout-controller.ts";
+import { oneShotJob, oneShotCleanup } from "../runtime/one-shot-job.ts";
 import { observeSwarmHost } from "../runtime/swarm-host.ts";
 import { swarmService } from "../runtime/swarm-service.ts";
 import { describeCompose } from "../runtime/compose-description.ts";
@@ -103,9 +104,13 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     native: swarmService(api), routing: swarmRouting, readiness: routedReadiness(),
   });
   let controller: ReturnType<typeof startHttpController> | undefined;
+  let rolloutController: ReturnType<typeof startRolloutController> | undefined;
   let lastReport = "";
-  const startController = (index: Parameters<typeof startHttpController>[0]) => {
+  const startController = (index: Parameters<typeof startHttpController>[0] & Parameters<typeof startRolloutController>[0]) => {
     if (controller !== undefined || executionPorts === undefined) return;
+    rolloutController = startRolloutController(index, { ...executionPorts, jobs: oneShotJob(api), cleanup: oneShotCleanup(api) }, (result) => {
+      if (result.status !== "ready" || result.work.length > 0) console.log("rollout-coordinator: " + JSON.stringify(result));
+    });
     controller = startHttpController(index, executionPorts, (result) => {
       const content = JSON.stringify(result);
       if (content !== lastReport && (result.status !== "ready" || result.work.length > 0)) console.log("http-coordinator: " + content);
@@ -144,6 +149,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     },
     close: async () => {
       await controller?.close();
+      await rolloutController?.close();
       const index = await opening;
       await index?.close();
     },

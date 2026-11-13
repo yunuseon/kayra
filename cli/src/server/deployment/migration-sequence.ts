@@ -9,6 +9,8 @@ import { oneShotExecution, parseJobExecution } from "./one-shot-execution.ts";
 import type { JobExecution } from "./one-shot-execution.ts";
 import type { OperationJournal } from "./operation.ts";
 import { parseMigrationResolutionAudit } from "../../contracts/migration-resolution.ts";
+import { parseMigrationCleanupRecord } from "../../contracts/migration-cleanup.ts";
+import type { MigrationCleanupRecord } from "../../contracts/migration-cleanup.ts";
 import { migrationResolutionId } from "./migration-resolution-audit.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -20,9 +22,15 @@ const schema = z.object({ version: z.literal(1), plan: digest,
   steps: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/),
     phase: z.enum(["running", "applied", "held"]), reason: reason.nullable(), appliedAt: positive.nullable(), executionDeadline: positive.nullable(), resolution: z.unknown().optional(),
     attempts: z.array(z.object({ purpose: z.enum(["migration", "probe"]), attempt: positive.max(8), createdAt: positive,
-      artifact: digest, execution: z.unknown().nullable() }).strict()).min(1).max(9).readonly(),
+      artifact: digest, execution: z.unknown().nullable(), cleanups: z.array(z.unknown()).max(8).readonly().optional() }).strict()).min(1).max(9).readonly(),
   }).strict()).max(128).readonly(),
 }).strict().readonly();
+
+export const migrationAttemptBarrier = (attempt: { readonly execution: JobExecution | null; readonly cleanups?: readonly MigrationCleanupRecord[] | undefined }) => {
+  if (attempt.execution?.phase === "complete") return attempt.execution.barrier;
+  const latest = attempt.cleanups?.at(-1)?.state;
+  return latest?.phase === "complete" ? latest.barrier : null;
+};
 
 export const parseMigrationSequenceState = (input: unknown) => {
   const parsed = schema.safeParse(input); if (!parsed.success) throw new Error("invalid migration sequence state");
@@ -37,27 +45,35 @@ export const parseMigrationSequenceState = (input: unknown) => {
       step.phase === "running" || step.phase === "applied" && (resolution.outcome !== "applied" || resolution.at !== step.appliedAt || resolution.at >= value.deadline) ||
       step.phase === "held" && (resolution.outcome === "not-applied" ? step.reason !== "not-applied" : resolution.at < value.deadline || step.reason !== "deadline"))) throw new Error("migration resolution conflicts with sequence progress");
     const attempts = Object.freeze(step.attempts.map((attempt) => {
+      const { cleanups: rawCleanups, ...original } = attempt;
       const execution = attempt.execution === null ? null : parseJobExecution(attempt.execution);
+      const cleanups = rawCleanups === undefined ? undefined : Object.freeze(rawCleanups.map(parseMigrationCleanupRecord));
+      if (cleanups !== undefined && (cleanups.length === 0 || execution?.phase !== "held" ||
+        new Set(cleanups.map((item) => item.state.authority.action)).size !== cleanups.length || cleanups.some((item, index) =>
+          item.state.authority.job !== attempt.artifact || item.state.authority.createdAt < execution.createdAt ||
+          index > 0 && (cleanups[index - 1]?.state.phase !== "held" || item.state.authority.createdAt < (cleanups[index - 1]?.state.authority.createdAt ?? 0))))) throw new Error("invalid migration cleanup history");
       if (attempt.createdAt < value.createdAt || attempt.createdAt >= value.deadline || execution !== null && execution.createdAt < attempt.createdAt) throw new Error("invalid migration attempt time");
       if (execution !== null && (execution.plan !== attempt.artifact || execution.scope.app !== value.scope.app || execution.scope.incarnation !== value.scope.incarnation ||
         execution.scope.run !== value.scope.run || execution.scope.step !== step.id || execution.scope.purpose !== attempt.purpose || execution.scope.attempt !== attempt.attempt || execution.deadline > value.deadline ||
         (attempt.purpose === "migration" && execution.executionDeadline !== null && (step.executionDeadline === null || execution.executionDeadline > step.executionDeadline)))) throw new Error("migration job does not match its owner");
-      return Object.freeze({ ...attempt, execution });
+      return Object.freeze({ ...original, execution, ...(cleanups === undefined ? {} : { cleanups }) });
     }));
     const migrations = attempts.filter((attempt) => attempt.purpose === "migration"); const probes = attempts.filter((attempt) => attempt.purpose === "probe");
     const last = attempts.at(-1); const completed = last?.execution;
     if (migrations.length === 0 || migrations.some((attempt, index) => attempt.attempt !== index + 1) || probes.length > 1 || probes.some((attempt) => attempt.attempt !== 1) ||
       step.executionDeadline !== (migrations[0]?.execution?.executionDeadline ?? null) ||
-      attempts.some((attempt, index) => index !== attempts.length - 1 && attempt.execution?.phase !== "complete") ||
+      attempts.some((attempt, index) => index !== attempts.length - 1 && migrationAttemptBarrier(attempt) === null) ||
       (probes.length > 0 && attempts.at(-1)?.purpose !== "probe") ||
-      (resolution !== undefined && attempts.some((attempt) => attempt.execution?.phase !== "complete")) ||
-      (step.phase === "applied" && resolution === undefined && (completed?.phase !== "complete" || completed.expiry !== null || completed.evidence?.kind !== "succeeded" ||
-        (last?.purpose === "probe" && completed.evidence.probe !== "applied"))) ||
+      (resolution !== undefined && attempts.some((attempt) => migrationAttemptBarrier(attempt) === null)) ||
+      (step.phase === "applied" && resolution === undefined && (last === undefined || migrationAttemptBarrier(last) === null || completed?.expiry !== null || completed.evidence?.kind !== "succeeded" ||
+        (last.purpose === "probe" && completed.evidence.probe !== "applied"))) ||
       (step.phase === "applied") !== (step.appliedAt !== null) ||
       (step.appliedAt !== null && (step.appliedAt < value.createdAt || step.appliedAt >= value.deadline)) ||
       ((step.phase === "held") !== (step.reason !== null))) throw new Error("inconsistent migration attempts or outcome");
     return Object.freeze({ ...step, attempts, ...(resolution === undefined ? {} : { resolution }) });
   }));
+  const cleanupActions = steps.flatMap((step) => Object.freeze(step.attempts.flatMap((attempt) => Object.freeze(attempt.cleanups?.map((item) => item.state.authority.action) ?? []))));
+  if (new Set(cleanupActions).size !== cleanupActions.length) throw new Error("migration cleanup action identity is reused");
   const completedAt = value.completedAt;
   if (value.createdAt >= value.deadline || new Set(steps.map((step) => step.id)).size !== steps.length ||
     (value.phase === "succeeded") !== (completedAt !== null) ||
@@ -152,9 +168,9 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
     if (now >= ceiling) return hold(state, "deadline");
     if (prior >= plan.policy.maximumAttempts) return hold(state, "attempts-exhausted");
     const artifact = await retainJob(migrationJobDescription(state, plan, state.position, purpose, prior + 1, now));
-    const attempt = { purpose, attempt: prior + 1, createdAt: now, artifact, execution: null };
+    const attempt = Object.freeze({ purpose, attempt: prior + 1, createdAt: now, artifact, execution: null });
     return write({ ...state, steps: current === undefined ? [...state.steps, { id: source.definition.id, phase: "running", reason: null, appliedAt: null, executionDeadline: null, attempts: [attempt] }]
-      : state.steps.map((step, index) => index === state.position ? { ...step, attempts: [...step.attempts, attempt] } : step) });
+      : state.steps.map((step, index) => index === state.position ? Object.freeze({ ...step, attempts: Object.freeze([...step.attempts, attempt]) }) : step) });
   };
   return Object.freeze({
     prepare: (input: MigrationSequencePlan, deadline: number) => serial(async () => {
@@ -178,7 +194,7 @@ export const migrationSequence = (journal: OperationJournal, ports: Ports) => {
         if (now >= (raw.value.startDeadline ?? raw.value.deadline)) return hold(state, "deadline");
         await owner.prepare(raw.value); return required();
       }
-      if (attempt.execution.phase !== "complete") {
+      if (migrationAttemptBarrier(attempt) === null) {
         if (attempt.execution.phase === "held") return hold(state, "runtime");
         await owner.tick(); return required();
       }

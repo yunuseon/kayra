@@ -3,6 +3,9 @@ import type { Invocation } from "../../core/operations/catalog.ts";
 /** What follows the server and the app on the command line, by operation. */
 const extra = (call: Invocation) => {
   switch (call.name) {
+    case "app.migration.cleanup":
+      return [call.input.run, call.input.step, call.input.purpose, String(call.input.attempt), call.input.action, "--reason", JSON.stringify(call.input.reason)];
+    case "app.migration.cleanup.audit":
     case "app.migration.audit":
       return [call.input.run, call.input.step];
     case "app.migration.resolve":
@@ -59,7 +62,7 @@ const extra = (call: Invocation) => {
 };
 
 /** How the command line spells an operation where its words are not its name's. */
-const spelled: Partial<Readonly<Record<Invocation["name"], string>>> = { "ssh.exec": "ssh", "app.releases": "app rollback", "app.log": "app logs" };
+const spelled: Partial<Readonly<Record<Invocation["name"], string>>> = { "app.migration.cleanup.audit": "app migration cleanup-audit", "ssh.exec": "ssh", "app.releases": "app rollback", "app.log": "app logs" };
 
 /** The command's words, as typed on the command line. */
 export const words = (call: Invocation) => {

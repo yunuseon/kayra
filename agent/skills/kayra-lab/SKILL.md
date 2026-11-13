@@ -80,3 +80,10 @@ The VM and the temp fleet are destroyed unless `--keep`. Report the five
 phases and the final `kayra verify`, and what the run covered. A bug found on
 a real server, which the lab did not catch, gets a step here: the lab is
 only as good as the history it encodes.
+
+For native experiments that wait for deadlines, stream Docker events from before
+workload creation. The daemon's finite historical event buffer can evict the
+original Start while unrelated health checks continue. A late `docker events
+--since ... --until ...` query returning zero is not proof that Start never
+happened. Bound and save the live event stream, match exact container identities,
+and preserve/rerun any case whose observer lost evidence.

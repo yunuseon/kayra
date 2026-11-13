@@ -125,6 +125,10 @@ const FieldInput = ({
             id={id}
             value={text}
             required={field.required}
+            type={field.type === "integer" ? "number" : "text"}
+            min={field.minimum}
+            max={field.maximum}
+            step={field.type === "integer" ? 1 : undefined}
             minLength={field.minLength}
             pattern={field.pattern}
             list={field.name === "app" ? "operation-apps" : undefined}

@@ -1,3 +1,5 @@
+import { rolloutCleanupRecord } from "./rollout-cleanup.ts";
+import type { MigrationCleanupRequest, MigrationCleanupIdentity } from "../../contracts/migration-cleanup.ts";
 /* The index owns a live journal lock and serializes its filesystem operations. */
 /* eslint-disable functional/no-let, functional/prefer-immutable-types, functional/type-declaration-immutability */
 import { createHash, randomUUID } from "node:crypto";
@@ -278,6 +280,26 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const state = await store.read(); return [...(state?.rollouts ?? []), ...(state?.rollout === undefined ? [] : [state.rollout])].find((item) => item.preparation.run === request);
     }),
     /** The control transport authenticates the operator; requests cannot choose that identity. */
+    requestMigrationCleanup: (app: string, request: MigrationCleanupRequest, actor: MigrationResolutionActor, ports: Parameters<EnvelopeStore["requestMigrationCleanup"]>[2]) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request.run);
+      if (request.app !== app || operation === undefined || envelope === undefined) throw new Error("migration cleanup rollout scope is unavailable");
+      if (rolloutCleanupRecord(operation, request) === undefined) {
+        const charge = (await serialIndex(readIndex)).resources?.charges.find((item) => item.app === app);
+        if (operation !== envelope.rollout || !operation.admitted || charge?.result !== "pending" || charge.incarnation !== envelope.tickets.incarnation ||
+          charge.sequence !== Number(operation.action.split(":")[1]) || charge.target.plan !== operation.preparation.plan || charge.deadline !== operation.admissionDeadline ||
+          !hasHttpRecoveryPeak(charge)) throw new Error("migration cleanup has no matching durable admission");
+      }
+      return store.requestMigrationCleanup(request, actor, ports);
+    }),
+    tickMigrationCleanup: (app: string, identity: MigrationCleanupIdentity, ports: Parameters<EnvelopeStore["tickMigrationCleanup"]>[1]) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = envelope?.rollout;
+      const charge = (await serialIndex(readIndex)).resources?.charges.find((item) => item.app === app);
+      if (identity.app !== app || operation?.preparation.run !== identity.run || !operation.admitted || charge?.result !== "pending" || charge.incarnation !== envelope?.tickets.incarnation ||
+        charge.sequence !== Number(operation.action.split(":")[1]) || charge.target.plan !== operation.preparation.plan || charge.deadline !== operation.admissionDeadline ||
+        !hasHttpRecoveryPeak(charge)) throw new Error("migration cleanup lacks durable admission");
+      return store.tickMigrationCleanup(identity, ports);
+    }),
+    migrationCleanupAudit: (app: string, run: string, step: string) => useReady(app, (store) => store.migrationCleanupAudit(run, step)),
     resolveMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: Parameters<typeof resolveRolloutMigration>[4]) => useReady(app, async (store) => {
       const envelope = await store.read();
       const operation = [...(envelope?.rollouts ?? []), ...(envelope?.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request.run);
@@ -511,7 +533,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const snapshot = await serialIndex(readIndex);
       const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
         const state = await store.read(); const operation = state?.rollout;
-        if (operation === undefined || operation.completion === undefined && operation.preparation.phase === "held") return [];
+        if (operation === undefined || operation.completion === undefined && operation.preparation.phase === "held" &&
+          !operation.preparation.sequence?.steps.some((step) => step.attempts.some((attempt) => attempt.cleanups?.at(-1)?.state.phase === "fencing"))) return [];
         const http = state?.http?.requests.find((item) => item.request === operation.preparation.run);
         if (http?.phase === "held") return [];
         const charge = snapshot.resources?.charges.find((item) => item.app === app.app);

@@ -23,6 +23,7 @@ the first line of a platform server's `vars.yml`:
 | `acme_email` | platform, edge | The Let's Encrypt account contact: expiry warnings land here. |
 | `docker_version` | platform, edge | The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*). |
 | `experimental_swarm` | platform | Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications. |
+| `swarm_migration_timeout_seconds` | platform | Host ceiling for experimental Swarm migration and status-probe execution (default 90 seconds). Captured in each admitted plan; changing it does not extend existing deadlines or enable migration admission. |
 | `authelia_policy` | platform | What Authelia asks of staff: two_factor (default) or one_factor. |
 | `authelia_smtp_address` | platform | SMTP server for Authelia's mails (passkey enrolment); empty: mails go to a file. |
 | `authelia_smtp_username` | platform | SMTP user for Authelia. |

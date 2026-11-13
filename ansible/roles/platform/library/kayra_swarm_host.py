@@ -102,18 +102,21 @@ def validate_network(network, state):
         require(state["network"] == network["Id"], "platform Swarm network identity changed; intervention required")
 
 
-def ensure(directory, requested, check=False, run=docker):
+def ensure(directory, requested, check=False, run=docker, migration_timeout_seconds=90):
     require(os.geteuid() == 0, "Swarm host setup requires root")
     if not requested:
         if directory.exists() or directory.is_symlink():
             trusted_directory(directory)
-            require(not any((directory / name).exists() or (directory / name).is_symlink() for name in ("state.json", "authority.json")), "experimental Swarm is already provisioned; keep its profile until an explicit retirement operation")
+            require(not any((directory / name).exists() or (directory / name).is_symlink() for name in ("state.json", "authority.json", "policy")), "experimental Swarm is already provisioned; keep its profile until an explicit retirement operation")
         return {"changed": False, "enabled": False}
     desired = profile(requested)
+    require(type(migration_timeout_seconds) is int and 1 <= migration_timeout_seconds <= 86400, "invalid host migration timeout ceiling")
     if check:
         if directory.exists() or directory.is_symlink():
             trusted_directory(directory)
-        return reconcile(directory, desired, True, run)
+        policy_changed = migration_policy(directory, migration_timeout_seconds, True)
+        result = reconcile(directory, desired, True, run)
+        return {**result, "changed": result["changed"] or policy_changed}
     trusted_directory(directory, create=True)
     fd = os.open(directory / "writer.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
@@ -123,9 +126,26 @@ def ensure(directory, requested, check=False, run=docker):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise HostError("another platform setup owns the Swarm host lock") from None
-        return reconcile(directory, desired, False, run)
+        migration_policy(directory, migration_timeout_seconds, True)
+        result = reconcile(directory, desired, False, run)
+        policy_changed = migration_policy(directory, migration_timeout_seconds, False)
+        return {**result, "changed": result["changed"] or policy_changed}
     finally:
         os.close(fd)
+
+
+def migration_policy(directory, seconds, check):
+    public = directory / "policy"
+    if public.exists() or public.is_symlink() or not check:
+        trusted_directory(public, create=not check)
+    path = public / "migration.json"
+    previous = read(path, 0o444) if path.exists() or path.is_symlink() else None
+    require(previous is None or type(previous) is dict and set(previous) == {"version", "migrationTimeoutCeilingSeconds"} and type(previous["version"]) is int and previous["version"] == 1 and type(previous["migrationTimeoutCeilingSeconds"]) is int and 1 <= previous["migrationTimeoutCeilingSeconds"] <= 86400, "invalid published migration policy; intervention required")
+    desired = {"version": 1, "migrationTimeoutCeilingSeconds": seconds}
+    changed = previous != desired
+    if changed and not check:
+        write(path, desired, 0o444)
+    return changed
 
 
 def reconcile(directory, desired, check, run):
@@ -196,9 +216,9 @@ def authority_for(state, desired):
 
 def main():
     from ansible.module_utils.basic import AnsibleModule
-    module = AnsibleModule(argument_spec={"directory": {"type": "path", "default": "/var/lib/kayra/swarm"}, "profile": {"type": "dict", "default": {}}}, supports_check_mode=True)
+    module = AnsibleModule(argument_spec={"directory": {"type": "path", "default": "/var/lib/kayra/swarm"}, "profile": {"type": "dict", "default": {}}, "migration_timeout_seconds": {"type": "int", "default": 90}}, supports_check_mode=True)
     try:
-        module.exit_json(**ensure(Path(module.params["directory"]), module.params["profile"], module.check_mode))
+        module.exit_json(**ensure(Path(module.params["directory"]), module.params["profile"], module.check_mode, migration_timeout_seconds=module.params["migration_timeout_seconds"]))
     except HostError as error:
         module.fail_json(msg=str(error))
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):

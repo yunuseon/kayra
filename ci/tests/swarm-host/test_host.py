@@ -77,6 +77,56 @@ class HostTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((self.directory / "state.json").stat().st_mode), 0o600)
         self.assertEqual(set(first["authority"]), {"version", "profile", "node", "cluster", "network"})
 
+    def test_policy_is_bounded_published_and_independent_of_host_membership(self):
+        for value in (0, -1, True, 1.5, "90", 86401):
+            with self.subTest(value=value), self.assertRaisesRegex(host.HostError, "migration timeout"):
+                host.ensure(self.directory, PROFILE, run=self.docker, migration_timeout_seconds=value)
+        self.assertFalse(self.directory.exists())
+        self.ensure()
+        authority = (self.directory / "authority.json").read_bytes()
+        policy = self.directory / "policy" / "migration.json"
+        self.assertEqual(json.loads(policy.read_text()), {"version": 1, "migrationTimeoutCeilingSeconds": 90})
+        self.assertEqual(stat.S_IMODE(policy.stat().st_mode), 0o444)
+        preview = host.ensure(self.directory, PROFILE, True, self.docker, 300)
+        self.assertTrue(preview["changed"])
+        self.assertEqual(json.loads(policy.read_text())["migrationTimeoutCeilingSeconds"], 90)
+        self.assertTrue(host.ensure(self.directory, PROFILE, False, self.docker, 300)["changed"])
+        self.assertFalse(host.ensure(self.directory, PROFILE, False, self.docker, 300)["changed"])
+        self.assertEqual((self.directory / "authority.json").read_bytes(), authority)
+        self.assertEqual(self.docker.effects, ["init", "network"])
+
+    def test_policy_loss_or_lost_publication_acknowledgement_is_recoverable(self):
+        self.ensure()
+        path = self.directory / "policy" / "migration.json"
+        path.unlink()
+        self.assertTrue(self.ensure(check=True)["changed"])
+        self.assertFalse(path.exists())
+        original = host.write
+        def write(target, value, mode):
+            original(target, value, mode)
+            if target == path:
+                raise OSError("lost policy publication reply")
+        with mock.patch.object(host, "write", side_effect=write), self.assertRaises(OSError):
+            self.ensure()
+        self.assertFalse(self.ensure()["changed"])
+        self.assertEqual(self.docker.effects, ["init", "network"])
+
+    def test_untrusted_published_policy_is_not_silently_repaired(self):
+        self.ensure()
+        path = self.directory / "policy" / "migration.json"
+        path.chmod(0o644)
+        with self.assertRaisesRegex(host.HostError, "authority file"):
+            self.ensure()
+        path.chmod(0o444)
+        host.write(path, {"version": 1, "migrationTimeoutCeilingSeconds": 0}, 0o444)
+        with self.assertRaisesRegex(host.HostError, "published migration policy"):
+            self.ensure()
+        path.unlink()
+        path.symlink_to(self.directory / "authority.json")
+        with self.assertRaises(OSError):
+            self.ensure()
+        self.assertEqual(self.docker.effects, ["init", "network"])
+
     def test_unmanaged_membership_or_network_is_not_adopted(self):
         self.docker(["swarm", "init"])
         self.docker.effects.clear()

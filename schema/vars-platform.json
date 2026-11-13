@@ -54,6 +54,12 @@
       "additionalProperties": false,
       "description": "Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications."
     },
+    "swarm_migration_timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400,
+      "description": "Host ceiling for experimental Swarm migration and status-probe execution (default 90 seconds). Captured in each admitted plan; changing it does not extend existing deadlines or enable migration admission."
+    },
     "authelia_policy": {
       "type": "string",
       "enum": [

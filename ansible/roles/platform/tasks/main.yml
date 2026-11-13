@@ -11,6 +11,7 @@
 - name: Reconcile explicitly enabled experimental Swarm host setup
   kayra_swarm_host:
     profile: "{{ experimental_swarm }}"
+    migration_timeout_seconds: "{{ swarm_migration_timeout_seconds }}"
   become: true
 
 - name: Check Renovate has a token

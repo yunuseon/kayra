@@ -448,6 +448,8 @@ if [ "$swarm_host" = true ]; then
     cp "${work}/http-coordinator.json.cold.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.cold.tar"
     cp "${work}/http-coordinator.json.deadlines.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.deadlines.json"
     cp "${work}/http-coordinator.json.deadlines.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.deadlines.tar"
+    cp "${work}/http-coordinator.json.sequence.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.sequence.json"
+    cp "${work}/http-coordinator.json.sequence.tar" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.sequence.tar"
     cp "${work}/swarm-platform.json" "/tmp/kayra-swarm-platform-${vm_name}.json"
     cp "${work}/swarm-platform.json.native.json" "/tmp/kayra-swarm-platform-${vm_name}.native.json"
     cp "${work}/swarm-platform.json.adapter.json" "/tmp/kayra-swarm-platform-${vm_name}.adapter.json"

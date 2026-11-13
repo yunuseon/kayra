@@ -339,3 +339,42 @@ source cleanup. Its result is `/tmp/kayra-deadlines-component.json` with
 `.json.deadlines.json` and `.json.deadlines.tar`; the log is
 `/tmp/kayra-deadlines-component.log`. Full CLI validation passed 568 tests with
 one skip; all 42 focused Linux checks passed, including legacy record recovery.
+
+## Ordered migration phase
+
+`migration-sequence.mjs run <new-results-directory>` mirrors the existing
+Node-capable deployer image into an isolated app namespace. The fixture app
+receives neither platform mounts nor a Docker socket. Its private HTTP service
+owns effect counting and deduplication; the coordinator only executes declared
+commands and interprets the normalized status-probe enum. No ports are
+published and the fixture service is not routed.
+
+Eight scenarios cover ordered steps, replay-safe effect-before-failure, unsafe
+effect-before-failure with applied probe, unknown/not-applied holds, and SIGKILL
+before Start, after Start acknowledgement and after durable step advancement.
+Every job Start is counted from continuously collected Docker events. The safe
+case makes two calls but one effect because the app deduplicates; this is not a
+Kayra exactly-once claim. Unknown and not-applied unsafe work is held. Successful
+runs remove only their own job barriers and synthetic state service; failures
+preserve them with cleanup instructions.
+
+All eight cases passed on 2026-11-13 against Engine 29.9.3/API 1.56 and Node
+24.22.1. The synchronized run's clock offset was 171 ms; its context is
+`/tmp/kayra-sequence-run2-context.json`, log `/tmp/kayra-sequence-run2-native.log`
+and raw evidence `/tmp/kayra-sequence-run2-evidence/`. An earlier seven-case run
+used a VM clock lagging after overnight suspension; its raw evidence remains at
+`/tmp/kayra-sequence-initial-evidence/` and supplies no current UTC timing claim.
+
+The component playbook checks the VM clock against its controller before any
+effects and retains `.sequence.json` and `.sequence.tar` before successful
+source cleanup. These remain phase-owner tests with trusted lab admission, not
+real-deployer migration admission or retained-volume safety evidence.
+
+The combined component passed all 34 tasks, including clock validation,
+application-effect assertions, native Start counts, evidence export and source
+cleanup. Results are `/tmp/kayra-sequence-component.json` with
+`.json.sequence.json` and `.json.sequence.tar`; the log is
+`/tmp/kayra-sequence-component.log`. All 55 focused Linux checks passed. The
+serial CLI suite passed 581 tests with one skip. A parallel macOS run hit an
+existing API terminal-session process-group `kill EPERM`; that focused test
+passed immediately on recheck. No API/process implementation was changed.

@@ -836,6 +836,33 @@ private output, oversized output and an unsuccessful process that prints an
 otherwise valid applied response. This implements evidence collection, not
 ordered migration admission, automatic unsafe retries or operator resolution.
 
+## Ordered migration phase ownership
+
+The migration-sequence owner retains a private normalized description binding
+the deployment identity, app/run scope, ordered app declarations and job
+templates. Scope, commands and deadlines cannot be supplied through a template.
+Each scheduled job is revalidated against that retained description before
+effects. The parent must provide lifecycle fencing, durable resource admission
+and materialization from its immutable input generation; the phase owner does
+not interpret fleet configuration or grant itself authority.
+
+Child job records occupy private views inside the same exclusively owned
+journal, with no extra writer, socket holder or RPC service. Step advancement
+requires fenced execution evidence. Applied/completed timestamps are persisted
+and must precede the original sequence deadline, including after slow artifact
+reads. A retry uses a new attempt identity under the same logical run and step,
+only for explicitly replay-safe work, bounded by its original execution window
+and eight attempts. Status probes have their own persisted deadlines and can
+resolve an interrupted or expired migration. Unsafe work is never automatically
+rerun; not-applied and unknown probes hold the sequence for audited recovery.
+
+The application fixture owns its data effects and deduplication. Native tests
+exercise effect-before-failure, unsafe probe recovery, explicit holds and
+SIGKILL before Start, after Start acknowledgement and after step advancement.
+This phase library enables no app capability by itself. Real-deployer admission,
+parent lifecycle integration, maintenance and operator resolution remain
+subsequent delivery work.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

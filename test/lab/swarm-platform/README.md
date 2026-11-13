@@ -635,3 +635,47 @@ Clock offsets were 502 ms before and 183 ms after. Private-value scans passed.
 The serial CLI suite passed 643 tests with one skip, and 70 focused Linux checks
 passed using byte-identical CLI source/tests. The successful standalone source
 was removed after export; failed sources and the original VM remain preserved.
+
+The combined audited-cleanup run passed all 66 tasks. Reports use
+`/tmp/kayra-migration-cleanup-component.json`, including `.job-cleanup.json/.tar`
+and `.migration-cleanup.json/.tar`; its log has the same prefix. The ending VM
+clock offset was 152 ms. Successful component source was removed after export.
+
+### Preparation cancellation
+
+`rollout-cancellation.mjs run <new-results-directory>` exercises cancellation
+between native Create and Start, after an app-owned effect with SIGKILL after
+the synchronized cancellation intent, after an unknown status probe with audited
+resolution, and after migration readiness before HTTP handoff. The interrupted
+case verifies the original migration is still running after writer death, then
+reconstructs cancellation under the same identity and deadline. App-owned counters
+and bounded live Docker events detect unsafe replay and successor execution.
+
+These are indexed/native preparation cases with fixture registration/build ports;
+they do not establish public migration pipeline integration or HTTP continuity.
+The combined harness exports `.cancellation.json` and `.cancellation.tar`.
+Normal operator commands share the same catalog across clients:
+
+```sh
+kayra app deployment status SERVER APP
+kayra app deployment cancel SERVER APP REQUEST_UUID
+```
+
+A cancellation may stay held for app-provided probe or audited operator recovery.
+It preserves applied data and existing verified-release history; an acknowledgement
+is not evidence that the app was rolled back or that a running SQL query stopped.
+
+All four native cancellation cases passed on the preserved VM, with zero
+migration Starts between Create and cancellation, one migration plus one probe
+Start in each after-effect case, and no HTTP child or successor migration in
+cancelled prefixes. The interrupted case observed the original migration still
+running after writer death and reused the persisted cancellation timestamp.
+The ready case retained its previously issued HTTP deadline. Context is
+`/tmp/kayra-preparation-cancel-context.json`, raw evidence is
+`/tmp/kayra-preparation-cancel-evidence/` and its `.tar`, and the native log is
+`/tmp/kayra-preparation-cancel-native.log`. Clock offsets were -265 ms before
+and 250 ms after. The synthetic private-value scan passed. Ninety focused Linux
+checks passed, and the serial CLI suite passed 660 tests with one skip; 21 web
+tests and CLI/web typecheck/lint/build checks passed. Successful standalone
+source was removed after export; the original failed VM and failed prior labs
+remain preserved.

@@ -984,6 +984,37 @@ They validate lifecycle/admission recovery with fixture build inputs; they do
 not validate image availability or app runtime readiness. Cancellation of
 started migration work and audited resolution remain subsequent delivery work.
 
+## Cancellation during preparation
+
+The application owner persists cancellation intent before further effects.
+Before HTTP handoff, it stops migration Create/Start and retries, fences the
+current job under its original bounded authority, and may run its already
+declared status probe. It never begins a successor migration or creates an
+HTTP candidate after cancellation. Unknown outcomes retain admission and
+require cleanup and/or audited resolution. Termination alone proves no data
+outcome and does not undo database writes.
+
+A cancelled operation completes only with a recorded proof of the known
+migration prefix and quiesced attempts. A never-authorized tail is distinguishable
+from a dispatched command: the journal contains no execution intent, and an
+operator assertion checks current runtime absence before resolving an earlier
+ambiguous effect. A running/foreign object blocks that assertion. Applied data
+stays applied; Kayra keeps the previous compatible release without down-migrations.
+Original execution evidence, image/configuration identities and deadlines stay
+available. Completion and ticket/fence settlement commit atomically before
+releasing the resource charge. Restart can reconstruct either side of a lost
+acknowledgement without replaying an unsafe job.
+
+After HTTP handoff the same request uses the existing bounded HTTP cancellation
+and restoration protocol. Its parent intent is recorded with that transition.
+Cancellation of already terminal HTTP work returns its existing outcome.
+`app.deployment.status` and `app.deployment.cancel` are catalog operations across
+CLI/API/UI/MCP; the command line spells them `app deployment status|cancel`.
+Complete-plan cancellation receipts use version 2 while existing HTTP receipts
+remain version 1. Status exposes the cancellation timestamp and distinguishes
+cancelling, held and cancelled. A historical verified active certificate is
+never replaced merely because a cancellation request was acknowledged.
+
 ## Audited recovery of expired job cleanup
 
 `app.migration.cleanup` requests a separate audited action for a held migration

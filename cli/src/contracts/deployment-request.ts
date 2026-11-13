@@ -6,7 +6,7 @@ const app = z.string().regex(names.app.pattern);
 const commit = z.string().regex(/^[0-9a-f]{40}$/);
 const request = z.object({ app: app.max(48), request: z.uuid(), commit }).strict().readonly();
 const query = z.object({ app }).strict().readonly();
-const cancellation = z.object({ app, request: z.uuid() }).strict().readonly();
+export const deploymentCancellationSchema = z.object({ app, request: z.uuid() }).strict().readonly();
 const receipt = request.unwrap().extend({ version: z.literal(1), plan: z.string().regex(/^[0-9a-f]{64}$/), deadline: z.number().int().positive(),
   cancelRequestedAt: z.number().int().positive().nullable().default(null),
   phase: z.enum(["prepared", "admitted", "applying", "verifying", "recovering", "held", "succeeded", "failed", "cancelled"]),
@@ -26,6 +26,15 @@ export const parseDeploymentReceipt = (input: unknown) => {
 };
 
 export const parseDeploymentCancellation = (input: unknown) => {
-  const parsed = cancellation.safeParse(input);
+  const parsed = deploymentCancellationSchema.safeParse(input);
   return parsed.success ? ok(parsed.data) : err("invalid deployment cancellation");
+};
+
+const completeReceipt = request.unwrap().extend({ version: z.literal(2), plan: z.string().regex(/^[0-9a-f]{64}$/), deadline: z.number().int().positive(),
+  cancelRequestedAt: z.number().int().positive().nullable(),
+  phase: z.enum(["prepared", "admitted", "migrating", "ready-for-http", "held", "cancelling", "applying", "verifying", "recovering", "succeeded", "failed", "cancelled"]),
+}).strict().readonly();
+export const parseCompleteDeploymentReceipt = (input: unknown) => {
+  const parsed = completeReceipt.safeParse(input);
+  return parsed.success ? ok(parsed.data) : err("invalid complete deployment receipt");
 };

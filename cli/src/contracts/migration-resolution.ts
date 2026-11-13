@@ -14,9 +14,9 @@ const query = migrationResolutionRequestSchema.unwrap().pick({ app: true, run: t
 const actor = z.object({ kind: z.literal("operator-control"), identity: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:@/-]{0,127}$/) }).strict().readonly();
 const audit = z.object({ version: z.literal(1), id: digest, sequence: digest,
   scope: z.object({ app, incarnation: z.uuid(), run: z.uuid(), step }).strict().readonly(),
-  actor, outcome, reason: migrationReasonSchema, at: positive,
-}).strict().readonly();
-const receipt = query.unwrap().extend({ version: z.literal(1), resolution: digest, outcome, recordedAt: positive, disposition: z.enum(["continue", "failed"]) }).strict().readonly();
+  actor, outcome, reason: migrationReasonSchema, at: positive, cancelRequestedAt: positive.optional(),
+}).strict().transform(({ cancelRequestedAt, ...value }) => Object.freeze({ ...value, ...(cancelRequestedAt === undefined ? {} : { cancelRequestedAt }) })).readonly();
+const receipt = query.unwrap().extend({ version: z.literal(1), resolution: digest, outcome, recordedAt: positive, disposition: z.enum(["continue", "failed", "cancelled"]) }).strict().readonly();
 const report = query.unwrap().extend({ version: z.literal(1), audit: audit.nullable() }).strict().readonly().refine((value) => value.audit === null ||
   value.audit.scope.app === value.app && value.audit.scope.run === value.run && value.audit.scope.step === value.step);
 export type MigrationResolutionRequest = z.infer<typeof migrationResolutionRequestSchema>;

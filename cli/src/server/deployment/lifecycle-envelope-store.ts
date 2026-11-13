@@ -1,3 +1,4 @@
+import { migrationCancellationProof } from "./migration-cancellation.ts";
 /* Owns atomic app-envelope transitions and private phase journal views. The
  * indexed composition holds the exclusive writer, authenticates registration
  * and supplies runtime ports checking the matching durable admission. */
@@ -16,7 +17,7 @@ import { httpReleasePlan, parseHttpNativeStep, terminalHttp } from "./http-state
 import type { HttpNativeStep, HttpRecovery } from "./http-state.ts";
 import { beginLifecycleWork, beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
 import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
-import { initialRolloutPreparation, parseRolloutPreparation, rolloutPreparation } from "./rollout-preparation.ts";
+import { cancelledRolloutPreparation, initialRolloutPreparation, parseRolloutPreparation, rolloutPreparation } from "./rollout-preparation.ts";
 import { parseRolloutPlan } from "../../contracts/rollout-plan.ts";
 import type { RolloutPlan } from "../../contracts/rollout-plan.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
@@ -223,6 +224,31 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         } };
       return rolloutPreparation(view, ports).tick();
     }),
+    cancelRolloutPreparation: (run: string, now: number) => serial(async () => {
+      const current = await required(); const operation = current.rollout;
+      if (operation?.preparation.run !== run || !operation.admitted || operation.completion !== undefined || current.http?.requests.some((item) => item.request === run) ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("preparation cancellation lacks lifecycle ownership");
+      if (operation.preparation.cancelRequestedAt !== undefined) return operation;
+      const next = await persist({ ...current, rollout: { ...operation, preparation: cancelledRolloutPreparation(operation.preparation, now) } });
+      if (next.rollout === undefined) throw new Error("preparation cancellation intent disappeared"); return next.rollout;
+    }),
+    completeCancelledPreparation: (run: string, now: number) => serial(async () => {
+      const current = await required(); const operation = current.rollout;
+      if (operation?.preparation.run !== run) throw new Error("cancelled preparation is unavailable");
+      if (operation.completion !== undefined) return operation;
+      const requested = operation.preparation.cancelRequestedAt; const proof = migrationCancellationProof(operation.preparation.sequence);
+      if (requested === undefined || !operation.admitted || current.http?.requests.some((item) => item.request === run) ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("cancelled preparation lacks exclusive intent");
+      if (proof === undefined) return operation;
+      if (!Number.isSafeInteger(now) || now < requested) throw new Error("cancelled preparation clock is unavailable");
+      const fence = settleLifecycleWork(current.fence, operation.action); const tickets = completeTicket(current.tickets, operation.ticket, "cancelled");
+      if (!fence.ok || !tickets.ok) throw new Error("cancelled preparation cannot settle lifecycle");
+      const active = current.http?.active;
+      const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== operation.ticket),
+        rollout: { ...operation, completion: { kind: "cancelled-preparation", outcome: "cancelled", reason: "cancelled", at: now,
+          previous: active === null || active === undefined ? null : httpReleasePlan(active), proof } } });
+      if (next.rollout === undefined) throw new Error("cancelled preparation completion disappeared"); return next.rollout;
+    }),
     requestMigrationCleanup: (request: MigrationCleanupRequest, actor: MigrationResolutionActor, ports: Parameters<typeof requestRolloutCleanup>[3]) => serial(async () => {
       const current = await required(); const operation = [...(current.rollouts ?? []), ...(current.rollout === undefined ? [] : [current.rollout])].find((item) => item.preparation.run === request.run);
       if (operation === undefined) throw new Error("migration cleanup rollout is unavailable");
@@ -272,7 +298,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       if (!resolved.changed) return resolved.receipt;
       const completed = resolved.operation.completion !== undefined;
       const fence = completed && current.fence !== null ? settleLifecycleWork(current.fence, operation.action) : undefined;
-      const tickets = completed ? completeTicket(current.tickets, operation.ticket, "failure") : undefined;
+      const tickets = completed ? completeTicket(current.tickets, operation.ticket, resolved.operation.completion.outcome === "cancelled" ? "cancelled" : "failure") : undefined;
       if (completed && (!fence?.ok || !tickets?.ok)) throw new Error("resolved migration cannot settle its lifecycle");
       await persist({ ...current, ...(fence?.ok ? { fence: fence.value } : {}), ...(tickets?.ok ? { tickets: tickets.value } : {}),
         operations: completed ? current.operations.filter((item) => item.ticket !== operation.ticket) : current.operations,
@@ -282,7 +308,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
     /** The parent hands its existing action to HTTP; no new ticket, lease or deadline is minted. */
     handoffRollout: (ticket: string, service: string, now: number) => serial(async () => {
       const current = await required(); const owner = current.rollout; const preparation = owner?.preparation;
-      if (owner?.ticket !== ticket || !owner.admitted || preparation?.phase !== "ready" || preparation.httpDeadline === null ||
+      if (owner?.ticket !== ticket || !owner.admitted || preparation?.phase !== "ready" || preparation.httpDeadline === null || preparation.cancelRequestedAt !== undefined ||
         current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== owner.action) throw new Error("rollout is not ready for HTTP handoff");
       const existing = current.http?.requests.find((item) => item.request === preparation.run);
       if (existing !== undefined) return existing;
@@ -359,8 +385,13 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       });
     },
     cancelHttp: (ticket: string, now: number) => serial(async () => {
-      const current = await required(); const { request, http, fence: ownership } = ownedHttp(current, ticket);
-      if (request.phase === "held" || request.cancelRequestedAt !== null) return request;
+      const original = await required(); const { request, http, fence: ownership } = ownedHttp(original, ticket);
+      const root = original.rollout;
+      const current = root?.preparation.run === request.request && root.preparation.cancelRequestedAt === undefined
+        ? { ...original, rollout: { ...root, preparation: cancelledRolloutPreparation(root.preparation, now) } } : original;
+      if (request.phase === "held" || request.cancelRequestedAt !== null) {
+        if (current !== original) await persist(current); return request;
+      }
       if (!Number.isSafeInteger(now) || now <= 0 || now < request.deadline - 90_000) throw new Error("HTTP cancellation clock is unavailable");
       if (request.steps.length === 0) {
         const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "cancelled");

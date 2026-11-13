@@ -1,13 +1,13 @@
 import { parseMigrationCleanupRequest, parseMigrationCleanupReport } from "../../contracts/migration-cleanup.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { BuildPorts } from "../../contracts/build-artifact.ts";
-import { parseDeploymentCancellation, parseDeploymentQuery, parseDeploymentReceipt, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
+import { parseCompleteDeploymentReceipt, parseDeploymentCancellation, parseDeploymentQuery, parseDeploymentReceipt, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
 import type { HttpOperation } from "./http-state.ts";
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { parseMigrationResolutionQuery, parseMigrationResolutionRequest, parseMigrationResolutionReport } from "../../contracts/migration-resolution.ts";
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareHttpRollout" | "deploymentStatus" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit">>;
+type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareHttpRollout" | "deploymentStatus" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit" | "rolloutOperation" | "cancelManagedRollout">>;
 type Ports = {
   readonly index: Index;
   readonly canAccess: (app: string) => Promise<boolean>;
@@ -60,6 +60,14 @@ export const deploymentControl = ({ index, canAccess, enabled, plans, now, recov
     const requested = parseDeploymentCancellation(input);
     if (!requested.ok) return undefined;
     if (!(await canAccess(requested.value.app))) throw new Error("app is outside deployment scope");
+    if (await index.rolloutOperation(requested.value.app, requested.value.request) !== undefined) {
+      const answer = await index.cancelManagedRollout(requested.value.app, requested.value.request, { now }); const root = answer.operation; const preparation = root.preparation;
+      const parsed = parseCompleteDeploymentReceipt({ version: 2, app: requested.value.app, request: preparation.run, commit: root.commit, plan: preparation.plan, deadline: preparation.deadline,
+        cancelRequestedAt: answer.http?.cancelRequestedAt ?? preparation.cancelRequestedAt ?? (root.completion?.outcome === "cancelled" ? root.completion.at : null),
+        phase: answer.http?.phase ?? root.completion?.outcome ?? (preparation.cancelRequestedAt !== undefined ? preparation.phase === "held" ? "held" : "cancelling" : preparation.phase === "ready" ? "ready-for-http" : preparation.phase),
+      });
+      if (!parsed.ok) throw new Error(parsed.error); return parsed.value;
+    }
     return receipt(requested.value.app, await index.cancelHttpRollout(requested.value.app, requested.value.request, now()));
   }
   if (path !== "/deployment/prepare") return undefined;

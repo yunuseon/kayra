@@ -4,7 +4,7 @@ import type { HttpExecutionPorts, HttpExecutionIndex } from "./http-execution-po
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { httpExecution } from "./http-execution.ts";
 
-type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileRolloutResources" | "tickMigrationCleanup">>;
+type Index = HttpExecutionIndex & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "rolloutOperation" | "admitRollout" | "tickRolloutPreparation" | "handoffRollout" | "expireRolloutAdmission" | "reconcileRolloutResources" | "tickMigrationCleanup" | "completeCancelledPreparation">>;
 type Ports = HttpExecutionPorts & { readonly jobs: JobPort; readonly retain: (bytes: string) => Promise<string>; readonly cleanup?: JobCleanupPort | undefined };
 
 /** The composition root installs one application owner; phase adapters never create competing controllers. */
@@ -16,6 +16,10 @@ export const rolloutExecution = (index: Index, ports: Ports) => {
     if (operation.completion !== undefined) { await index.reconcileRolloutResources(app, operation.ticket); return operation.completion.outcome; }
     const workload = await index.httpOperation(app, request);
     if (workload !== undefined) return http.tick(app, request);
+    if (operation.preparation.cancelRequestedAt !== undefined) {
+      const completed = await index.completeCancelledPreparation(app, request, ports.now());
+      if (completed.completion !== undefined) return completed.completion.outcome;
+    }
     if (!operation.admitted) {
       if (ports.now() >= operation.admissionDeadline && await index.expireRolloutAdmission(app, request, ports.now()) === "failed") return "failed";
       await index.admitRollout(app, operation.ticket, ports); return "admitted";

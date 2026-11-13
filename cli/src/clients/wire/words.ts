@@ -3,6 +3,8 @@ import type { Invocation } from "../../core/operations/catalog.ts";
 /** What follows the server and the app on the command line, by operation. */
 const extra = (call: Invocation) => {
   switch (call.name) {
+    case "app.deployment.cancel":
+      return [call.input.request];
     case "app.migration.cleanup":
       return [call.input.run, call.input.step, call.input.purpose, String(call.input.attempt), call.input.action, "--reason", JSON.stringify(call.input.reason)];
     case "app.migration.cleanup.audit":
@@ -51,6 +53,7 @@ const extra = (call: Invocation) => {
     case "adopt":
     case "backup.test":
     case "app.purge":
+    case "app.deployment.status":
     case "app.runs":
     case "app.releases":
     case "status":

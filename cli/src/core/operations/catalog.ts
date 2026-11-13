@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { deploymentCancellationSchema } from "../../contracts/deployment-request.ts";
 import { migrationCleanupRequestSchema } from "../../contracts/migration-cleanup.ts";
 import { migrationResolutionRequestSchema } from "../../contracts/migration-resolution.ts";
 import { valueKeySchema } from "../app-values/model.ts";
@@ -154,6 +155,15 @@ export const operations = {
     scope: "app", effect: "changes", kind: "plan", input: appInput,
   },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
+  "app.deployment.status": {
+    summary: "Read deployment phase, verified active release and required recovery action.",
+    scope: "app", effect: "reads", kind: "plan", bare: true, input: appInput,
+  },
+  "app.deployment.cancel": {
+    summary: "Cancel a deployment; ambiguous migration outcomes stay blocked for recovery.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: deploymentCancellationSchema.unwrap().extend({ server }).strict().readonly(),
+  },
   "app.migration.cleanup": {
     summary: "Request an audited, bounded fence for a held migration attempt; never rerun its command.",
     scope: "app", effect: "changes", kind: "plan", bare: true,

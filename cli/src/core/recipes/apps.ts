@@ -67,6 +67,7 @@ export const appPurge = (engine: Engine, server: Server, app: AppName) =>
 /** What `kayra app …` and `kayra job …` ask of a server: its deployer's ctl, over SSH. */
 export type DeployerCommand =
   | { readonly kind: "runs" | "logs" | "deploy" | "rollback"; readonly app: AppName; readonly more: string | undefined }
+  | { readonly kind: "lifecycle"; readonly app: AppName; readonly operation: "status" | "cancel"; readonly request: string | undefined }
   | { readonly kind: "migration"; readonly app: AppName; readonly operation: "resolve" | "audit" | "cleanup" | "cleanup-audit"; readonly payload: Readonly<Record<string, string | number>> }
   | { readonly kind: "job"; readonly job: "gc" | "renovate"; readonly noPrs: boolean };
 
@@ -75,6 +76,8 @@ type CtlCall = { readonly title: string; readonly args: readonly string[]; reado
 
 const ctlCall = (server: Server, command: DeployerCommand) => {
   switch (command.kind) {
+    case "lifecycle":
+      return typed<CtlCall>({ title: `Deployment ${command.operation} for ${command.app}`, args: ["lifecycle", command.operation, command.app, ...(command.request === undefined ? [] : [command.request])], stdout: "show" });
     case "migration":
       // SSH joins remote argv through a shell; an encoded JSON word cannot execute audit prose.
       return typed<CtlCall>({ title: `Migration ${command.operation} for ${command.app}`, args: ["migration", command.operation, Buffer.from(JSON.stringify(command.payload)).toString("base64url")], stdout: "show" });

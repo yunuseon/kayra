@@ -131,7 +131,7 @@ export const parseLifecycleEnvelope = (input: unknown) => {
       const previous = completion.previous; const certificates = http?.ok ? http.value.requests.flatMap((item) => [item.verified, item.recovery?.verified ?? null]) : [];
       if (request !== undefined || !lookup.ok || lookup.value.status !== "expired" && (!binding.ok || binding.value.status !== "terminal" ||
         binding.value.outcome !== (completion.outcome === "cancelled" ? "cancelled" : "failure")) || previous !== null &&
-        !certificates.some((certificate) => certificate !== null && httpReleasePlan(certificate) === previous && Number(certificate.action.split(":")[1]) < Number(owner.action.split(":")[1]))) return err("unstarted complete rollout lacks terminal ownership proof");
+        !certificates.some((certificate) => certificate !== null && httpReleasePlan(certificate) === previous && Number(certificate.action.split(":")[1]) < Number(owner.action.split(":")[1]))) return err("complete rollout lacks terminal ownership proof");
     } else if (request !== undefined && terminalHttp(request.phase)) {
       const lookup = lookupTicket(tickets.value, owner.ticket);
       if (!lookup.ok || lookup.value.status !== "expired" && (!binding.ok || binding.value.status !== "terminal")) return err("complete rollout lacks terminal receipt");

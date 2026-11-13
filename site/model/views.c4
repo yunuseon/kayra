@@ -90,6 +90,19 @@ views {
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'retain cleanup proof without altering original execution evidence'
   }
 
+  dynamic view proposedCancellation {
+    title 'Preparation cancellation'
+    description 'Known prefix outcomes and fenced jobs permit cancellation; ambiguity stays held without release promotion.'
+    autoLayout TopBottom
+    operator -> plannedDelivery.trusted.platform 'cancel a named deployment request'
+    plannedDelivery.trusted.platform -> plannedDelivery.trusted.coordinator 'validated cancellation command'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'persist intent before stopping future migration starts'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'fence current job under original authority'
+    plannedDelivery.trusted.adapter -> plannedDelivery.workload 'stop exact owned job; run only declared recovery probe'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'record known prefix proof or hold ambiguous outcome'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish cancelling, held or cancelled and unchanged active release'
+  }
+
   dynamic view proposedMaintenance {
     title 'Proposed maintenance deployment'
     description 'App declaration and fleet grant permit expected downtime; retained dependencies stay available for migrations.'

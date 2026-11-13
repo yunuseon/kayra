@@ -554,3 +554,21 @@ App-owned effect counts were one for applied cases and zero for not-applied.
 Exported evidence contains no synthetic private values. Another 44 focused
 checks passed on Linux; the normal client parity and shell-transport checks
 passed on the Mac. The combined component rerun is recorded separately.
+
+### One-shot image health isolation
+
+`one-shot-health.mjs <new-results-directory>` derives a uniquely named fixture
+image from the pinned deployer image and adds a failing one-second inherited
+health check. A real migration container explicitly overrides it with
+`Healthcheck.Test = ["NONE"]`, completes its declared command, and has no
+Docker health state. Its never-started name barrier also disables the check.
+The updated adapter refuses to Start a prepared container whose check is not
+explicitly disabled. Long-running HTTP health checks are unchanged.
+
+This passed on the preserved VM with Docker 29.9.3/API 1.56 and Node 24.22.1.
+The job completed in 4,115 ms; context/result/native logs use the prefix
+`/tmp/kayra-job-health-`, including `context.json`, `result.json` and
+`native.log`. Clock offsets were 567 ms before and -14 ms after. All 28 focused
+checks passed on Linux and the Mac; the serial CLI suite passed 632 tests,
+with one skip. The successful standalone source was removed after export;
+the original failed VM remains preserved.

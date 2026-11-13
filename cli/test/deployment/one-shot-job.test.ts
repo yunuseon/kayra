@@ -20,7 +20,8 @@ test("a job runs by recorded ID with restart disabled, bounded resources and sta
   const lab = jobRuntime(); assert.equal(await lab.native.create(lab.plan, { TOKEN: "secret-value" }), "acknowledged");
   const created = await lab.native.observe(lab.plan); assert.equal(created.status, "owned"); assert.equal(created.state, "created");
   const config = lab.calls.find((call) => call.path.startsWith("/containers/create"))?.body;
-  assert.ok(config !== null && typeof config === "object" && "HostConfig" in config && "Env" in config);
+  assert.ok(config !== null && typeof config === "object" && "HostConfig" in config && "Env" in config && "Healthcheck" in config);
+  assert.deepEqual(config.Healthcheck, { Test: ["NONE"] });
   assert.ok(JSON.stringify(config.HostConfig).includes('"RestartPolicy":{"Name":"no"'));
   assert.ok(JSON.stringify(config.Env).includes("KAYRA_OPERATION_ID=" + lab.plan.scope.run + ":schema"));
   assert.equal(await lab.native.start(lab.plan, created.id), "acknowledged");
@@ -41,6 +42,7 @@ test("fencing an uncertain start removes its exact ID and blocks its delayed dis
   assert.equal(await lab.native.fence(lab.plan, created.id, 15_000), "acknowledged");
   release.resolve(undefined); assert.equal(await pending, "conflict"); assert.equal(lab.executions(), 0);
   const barrier = await lab.native.observe(lab.plan); assert.equal(barrier.status, "owned"); assert.equal(barrier.barrier, true); assert.equal(barrier.state, "created");
+  assert.equal(JSON.stringify(lab.raw()).includes('"Healthcheck":{"Test":["NONE"]}'), true);
   assert.notEqual(barrier.id, created.id); assert.equal(await lab.native.start(lab.plan, barrier.id), "conflict");
   assert.equal(await lab.native.create(lab.plan, { TOKEN: "secret-value" }), "conflict");
   assert.ok(!JSON.stringify(lab.raw()).includes("secret-value"));
@@ -67,17 +69,17 @@ test("foreign identities, expired dispatches and excessive cleanup deadlines can
   assert.equal(lab.executions(), 0);
 });
 
-test("a changed restart policy or image-declared volume refuses start before executing application code", async () => {
+test("changed restart policy, image-declared volumes or inherited health checks refuse start before application code", async () => {
   const lab = jobRuntime(); await lab.native.create(lab.plan, { TOKEN: "secret-value" });
   const created = await lab.native.observe(lab.plan); assert.equal(created.status, "owned");
-  for (const change of ["restart", "volume"]) {
+  for (const change of ["restart", "volume", "healthcheck", "missing-healthcheck"]) {
     const altered = oneShotJob({ request: async (method, path, body) => {
       const reply = await lab.api.request(method, path, body);
       if (method !== "GET" || reply.status !== 200) return reply;
       const value = reply.value; assert.ok(value !== null && typeof value === "object" && "Config" in value && "HostConfig" in value);
       assert.ok(value["Config"] !== null && typeof value["Config"] === "object" && value["HostConfig"] !== null && typeof value["HostConfig"] === "object");
       return { ...reply, value: { ...value,
-        Config: change === "volume" ? { ...value["Config"], Volumes: { "/data": {} } } : value["Config"],
+        Config: change === "volume" ? { ...value["Config"], Volumes: { "/data": {} } } : change === "healthcheck" ? { ...value["Config"], Healthcheck: { Test: ["CMD", "undeclared-command"] } } : change === "missing-healthcheck" ? { ...value["Config"], Healthcheck: null } : value["Config"],
         HostConfig: change === "restart" ? { ...value["HostConfig"], RestartPolicy: { Name: "always" } } : value["HostConfig"],
       } };
     } }, lab.clock);

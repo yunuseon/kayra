@@ -50,6 +50,7 @@
         - test/lab/swarm-platform/http-coordinator.mjs
         - test/lab/swarm-platform/recovery-overlap.mjs
         - test/lab/swarm-platform/one-shot.mjs
+        - test/lab/swarm-platform/one-shot-health.mjs
         - test/lab/swarm-platform/migration-probe.mjs
         - test/lab/swarm-platform/one-shot-cold.mjs
         - test/lab/swarm-platform/one-shot-deadlines.mjs
@@ -378,6 +379,31 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/resolution.tar"
         dest: "{{ report_path }}.resolution.tar"
+        flat: true
+
+    - name: Disable inherited image health checks in one-shot jobs
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot-health.mjs"
+          - "{{ coordinator_source.path }}/job-health"
+      changed_when: true
+
+    - name: Retain one-shot health isolation summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-health/result.json"
+        dest: "{{ report_path }}.job-health.json"
+        flat: true
+
+    - name: Archive one-shot health isolation evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/job-health.tar", -C, "{{ coordinator_source.path }}/job-health", .]
+      changed_when: true
+
+    - name: Preserve one-shot health isolation evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-health.tar"
+        dest: "{{ report_path }}.job-health.tar"
         flat: true
 
     - name: Remove successful component source files

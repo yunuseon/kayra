@@ -28,7 +28,7 @@ const render = (plan: JobPlan, environment: Readonly<Record<string, string>>, ba
     Cmd: barrier ? ["/kayra-never-start"] : plan.command,
     ...(barrier ? { Entrypoint: ["/kayra-never-start"] } : plan.entrypoint === null ? {} : { Entrypoint: plan.entrypoint }),
     Env: barrier ? [] : [...names.toSorted().map((key) => `${key}=${environment[key] ?? ""}`), `KAYRA_OPERATION_ID=${plan.scope.run}:${plan.scope.step}`],
-    StopTimeout: plan.stopGraceSeconds, Tty: false,
+    StopTimeout: plan.stopGraceSeconds, Tty: false, Healthcheck: { Test: ["NONE"] },
     HostConfig: { AutoRemove: false, RestartPolicy: { Name: "no", MaximumRetryCount: 0 }, Memory: plan.resources.memoryBytes, NanoCpus: plan.resources.nanoCpus,
       NetworkMode: barrier || plan.networks.length === 0 ? "none" : plan.networks[0], Privileged: false, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges:true"] },
     NetworkingConfig: { EndpointsConfig: barrier ? {} : Object.fromEntries(plan.networks.map((network) => [network, {}])) },
@@ -117,6 +117,7 @@ export const oneShotJob = (api = dockerApi(), now: () => number = Date.now) => {
         const host = field(current.value, "HostConfig"); const config = field(current.value, "Config");
         if (field(field(host, "RestartPolicy"), "Name") !== "no" || field(host, "Memory") !== plan.resources.memoryBytes || field(host, "NanoCpus") !== plan.resources.nanoCpus ||
           !empty(field(host, "Binds")) || !empty(field(current.value, "Mounts")) || !empty(field(config, "Volumes")) || field(config, "Tty") === true ||
+          JSON.stringify(field(field(config, "Healthcheck"), "Test")) !== JSON.stringify(["NONE"]) ||
           JSON.stringify(field(config, "Cmd")) !== JSON.stringify(plan.command) ||
           (plan.entrypoint !== null && JSON.stringify(field(config, "Entrypoint")) !== JSON.stringify(plan.entrypoint))) return "refused";
         const response = await api.request("POST", `/containers/${id}/start`, undefined, { timeoutMs });

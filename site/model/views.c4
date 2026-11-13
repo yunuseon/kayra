@@ -76,7 +76,7 @@ views {
     description 'A new exclusive writer uses persisted intent and runtime observations; ambiguity blocks for an audited decision.'
     autoLayout TopBottom
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'load intent, action identity and original deadline'
-    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'observe existing operation and owned objects'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'observe existing operation, owned objects and current host authority'
     plannedDelivery.trusted.adapter -> plannedDelivery.workload 'inspect migration and workload state'
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish outcome or intervention required'
     operator -> plannedDelivery.trusted.platform 'resolve a named blocked run and step'

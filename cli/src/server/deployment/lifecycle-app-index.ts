@@ -9,7 +9,7 @@ import { parseRolloutPlan, rolloutMigrationDescription, rolloutWorkloadDigest } 
 import type { RolloutPlanPort } from "../../contracts/rollout-plan.ts";
 import type { rolloutPreparation } from "./rollout-preparation.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
-import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
+import { parseResourceBook, reserveResources, resourceHostReady, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
 import { httpReleasePlan, terminalHttp } from "./http-state.ts";
 import { httpAdmissionDeadline } from "./http-resource-binding.ts";
@@ -313,6 +313,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return Object.values(checked.value.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
       })();
       const observation = await ports.observeHost(plan.host);
+      if (!resourceHostReady(plan.host, observation)) throw new Error("current resource host observation required before complete rollout admission");
       await serialIndex(async () => {
         const state = await readIndex();
         const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence: Number(operation.action.split(":")[1]),
@@ -323,7 +324,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       });
       return store.admitRollout(ticket);
     }),
-    tickRolloutPreparation: (app: string, request: string, ports: Omit<Parameters<typeof rolloutPreparation>[1], "authorize">) => useReady(app, async (store) => {
+    tickRolloutPreparation: (app: string, request: string, ports: Omit<Parameters<typeof rolloutPreparation>[1], "authorize"> & HostObserver) => useReady(app, async (store) => {
       const envelope = await store.read(); const operation = envelope?.rollout;
       if (operation?.preparation.run !== request || !operation.admitted || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
         lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action) throw new Error("complete rollout lacks admitted lifecycle ownership");
@@ -333,10 +334,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           charge.target.plan === operation.preparation.plan && charge.deadline === operation.admissionDeadline && hasHttpRecoveryPeak(charge);
       };
       if (!await authorized()) throw new Error("complete rollout has no matching durable admission");
-      return store.tickRolloutPreparation(operation.ticket, { ...ports, authorize: async (state) => state.run === request && state.plan === operation.preparation.plan &&
-        state.workload === operation.preparation.workload && state.createdAt === operation.preparation.createdAt && state.deadline === operation.preparation.deadline && await authorized() });
+      return store.tickRolloutPreparation(operation.ticket, { ...ports, authorize: async (state, plan, _job, effect) => state.run === request && state.plan === operation.preparation.plan &&
+        state.workload === operation.preparation.workload && state.createdAt === operation.preparation.createdAt && state.deadline === operation.preparation.deadline && await authorized() &&
+        (effect === "fence" || resourceHostReady(plan.workload.host, await ports.observeHost(plan.workload.host))) });
     }),
-    handoffRollout: (app: string, request: string, ports: Pick<BuildPorts, "read" | "now">) => useReady(app, async (store) => {
+    handoffRollout: (app: string, request: string, ports: Pick<BuildPorts, "read" | "now"> & HostObserver) => useReady(app, async (store) => {
       const envelope = await store.read(); const operation = envelope?.rollout;
       const existing = envelope?.http?.requests.find((item) => item.request === request && item.deployment !== undefined); if (existing !== undefined) return existing;
       if (operation?.preparation.run !== request || !operation.admitted || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
@@ -349,6 +351,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
       if (charge?.result !== "pending" || charge.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1]) ||
         charge.target.plan !== state.plan || charge.deadline !== operation.admissionDeadline || !hasHttpRecoveryPeak(charge)) throw new Error("HTTP handoff has no matching durable admission");
+      if (!resourceHostReady(checked.value.workload.host, await ports.observeHost(checked.value.workload.host))) throw new Error("current resource host observation required before HTTP handoff");
       const service = Object.keys(checked.value.workload.services)[0]; if (service === undefined) throw new Error("complete rollout has no HTTP workload");
       return store.handoffRollout(operation.ticket, service, ports.now());
     }),
@@ -405,6 +408,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (previousPlan !== null && (JSON.stringify(previousPlan.routes) !== JSON.stringify(plan.routes) || JSON.stringify(Object.keys(previousPlan.services)) !== JSON.stringify(Object.keys(plan.services)))) throw new Error("rolling HTTP requires unchanged service and routing policy");
       const previousAmount = previousPlan === null ? null : Object.values(previousPlan.services).reduce((sum, service) => ({ cpu: sum.cpu + Math.ceil(service.resources.nanoCpus / 1_000_000), memory: sum.memory + service.resources.memoryBytes }), { cpu: 0, memory: 0 });
       const observation = await ports.observeHost(plan.host);
+      if (!resourceHostReady(plan.host, observation)) throw new Error("current resource host observation required before HTTP admission");
       await serialIndex(async () => {
         const current = await readIndex();
         const previous = operation.previous === null || previousAmount === null ? null : { plan: httpReleasePlan(operation.previous), budget: previousAmount };

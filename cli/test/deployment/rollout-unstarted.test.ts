@@ -39,7 +39,7 @@ test("cancellation after reservation requires no runtime observation and release
   await lab.index.cancelUnstartedRollout("shop", parent.preparation.run, 2000);
   assert.equal((await lab.index.resourceSnapshot())?.charges[0]?.result, "absent");
   await assert.rejects(lab.index.admitRollout("shop", parent.ticket, ports), /no longer owns lifecycle/);
-  await assert.rejects(lab.index.tickRolloutPreparation("shop", parent.preparation.run, { ...lab.artifacts, now: ports.now,
+  await assert.rejects(lab.index.tickRolloutPreparation("shop", parent.preparation.run, { ...lab.artifacts, observeHost: ports.observeHost, now: ports.now,
     native: { observe: () => { throw new Error("runtime must not be read"); }, create: () => { throw new Error("runtime must not be mutated"); },
       start: () => { throw new Error("runtime must not be mutated"); }, fence: () => { throw new Error("runtime must not be mutated"); } },
     materialize: () => { throw new Error("secrets must not be materialized"); } }), /admitted lifecycle/);
@@ -100,7 +100,7 @@ test("a new request reconciles a previous cancelled reservation before archiving
 
 test("unstarted cancellation cannot infer safety from runtime absence after migration intent exists", async (t) => {
   const lab = await fixture(t); const jobs = await sequenceFixture(t); const { parent, ports } = await start(lab); await lab.index.admitRollout("shop", parent.ticket, ports);
-  await lab.index.tickRolloutPreparation("shop", parent.preparation.run, { ...lab.artifacts, native: jobs.ports.native, now: ports.now, materialize: () => Promise.resolve({ RELEASE: "A", TOKEN: "private-value" }) });
+  await lab.index.tickRolloutPreparation("shop", parent.preparation.run, { ...lab.artifacts, observeHost: ports.observeHost, native: jobs.ports.native, now: ports.now, materialize: () => Promise.resolve({ RELEASE: "A", TOKEN: "private-value" }) });
   assert.equal(jobs.nodes.size, 0);
   await assert.rejects(lab.index.cancelUnstartedRollout("shop", parent.preparation.run, 2000), /may have effects/);
   assert.equal((await lab.index.rolloutOperation("shop", parent.preparation.run))?.completion, undefined);

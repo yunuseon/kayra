@@ -8,7 +8,7 @@ import { createLifecycleAppIndex, openLifecycleAppIndex } from '../../../cli/src
 import { observeSwarmHost } from '../../../cli/src/server/runtime/swarm-host.ts';
 
 /** Fixture registration/build ports isolate the indexed owner; this is not the public deployer pipeline. */
-export const indexedMigrationOwner = async (path, source, ports, checkpoint, initialize) => {
+export const indexedMigrationOwner = async (path, source, ports, checkpoint, initialize, hostFault) => {
   const indexPath = join(path, 'index'); const app = source.scope.app; const request = source.scope.run; const commit = 'a'.repeat(40);
   const index = initialize ? await createLifecycleAppIndex(indexPath, (identity) => Promise.resolve({ ...identity, status: 'applied' })) : await openLifecycleAppIndex(indexPath);
   try {
@@ -30,15 +30,28 @@ export const indexedMigrationOwner = async (path, source, ports, checkpoint, ini
       await index.admitRollout(app, operation.ticket, { ...ports, observeHost: observeSwarmHost });
     }
     const operation = await index.rolloutOperation(app, request); assert.ok(operation?.admitted);
+    let hostAvailable = hostFault !== 'before-create'; let materializations = 0;
+    const observeHost = (authority) => hostAvailable ? observeSwarmHost(authority) : Promise.resolve({ status: 'unavailable' });
     const tick = async () => {
-      const preparation = await index.tickRolloutPreparation(app, request, { ...ports, native: { ...ports.native,
-        start: async (...args) => { if (checkpoint === 'before-start' && args[0].scope.purpose === 'migration') process.kill(process.pid, 'SIGKILL'); return ports.native.start(...args); } } });
+      const preparation = await index.tickRolloutPreparation(app, request, { ...ports, observeHost,
+        materialize: async (...args) => { materializations++; return ports.materialize(...args); }, native: { ...ports.native,
+          create: async (...args) => { const result = await ports.native.create(...args); if (hostFault === 'after-create') { assert.equal(result, 'acknowledged'); hostAvailable = false; } return result; },
+          start: async (...args) => {
+            if (checkpoint === 'before-start' && args[0].scope.purpose === 'migration') process.kill(process.pid, 'SIGKILL');
+            const result = await ports.native.start(...args); if (hostFault === 'after-start') { assert.equal(result, 'acknowledged'); hostAvailable = false; } return result;
+          } } });
       if (checkpoint === 'after-advance' && preparation.sequence?.position === 1) process.kill(process.pid, 'SIGKILL');
       if (preparation.phase === 'ready' || preparation.phase === 'held') {
         const resources = await index.resourceSnapshot(); const status = await index.deploymentStatus(app);
         assert.equal(resources.charges[0].target.plan, preparation.plan); assert.equal(resources.charges[0].result, 'pending');
         assert.equal(status.verifiedActive, null);
+        if (hostFault === 'before-create') assert.equal(materializations, 0);
+        if (hostFault === 'after-start' && preparation.phase === 'ready') {
+          await assert.rejects(index.handoffRollout(app, request, { ...ports, observeHost }), /current resource host/);
+          assert.equal(await index.httpOperation(app, request), undefined);
+        }
         await writeFile(join(path, 'indexed.json'), JSON.stringify({ operation: await index.rolloutOperation(app, request), resources, status,
+          hostFault: hostFault ?? null, materializations,
           scope: 'indexed lifecycle and native migration effects; fixture registration/build ports; HTTP handoff only' }));
       }
       return { ...preparation.sequence, phase: preparation.phase === 'ready' ? 'succeeded' : preparation.phase === 'held' ? 'held' : 'running',

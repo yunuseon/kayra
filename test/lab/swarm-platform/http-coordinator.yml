@@ -328,6 +328,32 @@
         dest: "{{ report_path }}.unstarted.tar"
         flat: true
 
+    - name: Enforce current host authority before migration effects and HTTP handoff
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - host-run
+          - "{{ coordinator_source.path }}/host"
+      changed_when: true
+
+    - name: Retain host authority summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/host/result.json"
+        dest: "{{ report_path }}.host.json"
+        flat: true
+
+    - name: Archive host authority evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/host.tar", -C, "{{ coordinator_source.path }}/host", .]
+      changed_when: true
+
+    - name: Preserve host authority evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/host.tar"
+        dest: "{{ report_path }}.host.tar"
+        flat: true
+
     - name: Remove successful component source files
       ansible.builtin.file:
         path: "{{ coordinator_source.path }}"

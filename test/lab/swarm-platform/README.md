@@ -486,3 +486,30 @@ and `.unstarted.tar` before successful-source cleanup.
 Typecheck, lint and the serial CLI suite pass (611 tests, one skip). Started
 preparation still requires its own cancellation/recovery path; observing no
 container cannot justify an unstarted completion after intent was persisted.
+
+The combined unstarted-settlement component passed all 46 tasks, including
+evidence export and successful-source cleanup. Its prefix is
+`/tmp/kayra-rollout-unstarted-component.json`, including `.unstarted.json` and
+`.unstarted.tar`; the log is `/tmp/kayra-rollout-unstarted-component.log`. The VM
+and controller clocks still matched after completion.
+
+## Current host authority
+
+`migration-sequence.mjs host-run <new-results-directory>` injects unavailable
+normalized host observations into the indexed owner while using real Docker
+jobs. It changes no Swarm role or host configuration. Three native cases passed
+on 2026-11-13: unavailable before Create (zero app calls/Starts), unavailable
+after Create (zero app calls/Starts), and unavailable after Start (one completed
+app effect, fenced successfully, with HTTP handoff refused). Docker events count
+Starts, and the app-owned fixture checks its effects independently. Expected
+held cases are inspected and cleaned only as lab teardown; the coordinator does
+not label them resolved or release their reservations.
+
+Engine was 29.9.3/API 1.56 and Node 24.22.1. Clock offsets were 734 ms before and
+464 ms after the run. Context is `/tmp/kayra-rollout-host-context.json`, evidence
+`/tmp/kayra-rollout-host-evidence/`, and the log
+`/tmp/kayra-rollout-host-native.log`. Exported traces contain no synthetic private
+values. The playbook and upgrade lab retain `.host.json` and `.host.tar` before
+successful-source cleanup. Typecheck, lint and the serial CLI suite pass (617
+tests, one skip). These remain fault-injected authority checks, not host-loss or
+public-deployer integration evidence.

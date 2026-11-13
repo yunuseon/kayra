@@ -6,6 +6,7 @@ import { convergedHttp } from "./http-convergence.ts";
 import type { HttpExecutionIndex, HttpExecutionPorts } from "./http-execution-ports.ts";
 import { recoverHttp } from "./http-recovery.ts";
 import { terminalHttp } from "./http-state.ts";
+import { resourceHostReady } from "./resource-book.ts";
 
 /** Internal single-tick integration; public control is not enabled here. */
 export const httpExecution = (index: HttpExecutionIndex, ports: HttpExecutionPorts) => {
@@ -49,6 +50,7 @@ export const httpExecution = (index: HttpExecutionIndex, ports: HttpExecutionPor
       return "recovering";
     }
     if (recorded !== undefined && convergedHttp(action, observed)) {
+      if (!resourceHostReady(plan.host, await ports.observeHost(plan.host))) return "runtime-unavailable";
       const routed = await ports.readiness.check(action, plan);
       if (routed.status === "ready" && ports.now() <= operation.deadline) {
         await index.promoteHttpRollout(app, operation.ticket, observed, routed, ports.now());
@@ -81,6 +83,7 @@ export const httpExecution = (index: HttpExecutionIndex, ports: HttpExecutionPor
     if (observed.status === "owned" && observed.specMatches === true) { await index.markHttpDispatched(app, operation.ticket); return "verifying"; }
     const replayable = recorded.expected === null ? observed.status === "absent" : observed.status === "owned" && observed.id === recorded.expected.id && observed.version === recorded.expected.version;
     if (!replayable) return "runtime-conflict";
+    if (!resourceHostReady(plan.host, await ports.observeHost(plan.host))) return "runtime-unavailable";
     const result = await ports.native.apply(action, recorded.expected, plan, environment, routing);
     await index.markHttpDispatched(app, operation.ticket);
     return result === "acknowledged" ? "verifying" : "write-uncertain";

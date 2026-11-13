@@ -26,6 +26,10 @@ const active = (item: ResourceCharge) => item.result === "target" ? item.target 
 const charged = (item: ResourceCharge) => item.result === "pending" ? item.peak : active(item)?.budget;
 const sameBudget = (a: z.infer<typeof budget>, b: z.infer<typeof budget>) => a.cpu === b.cpu && a.memory === b.memory;
 const sameRelease = (a: z.infer<typeof release> | null, b: z.infer<typeof release> | null) => a === null || b === null ? a === b : a.plan === b.plan && sameBudget(a.budget, b.budget);
+export const resourceHostReady = (host: SwarmAuthority, observation: SwarmHostObservation) => observation.status === "ready" &&
+  observation.node === host.node && observation.cluster === host.cluster && observation.network === host.network.id &&
+  observation.capacity.cpu === host.profile.cpu_millicores && observation.capacity.memory === host.profile.memory_bytes &&
+  observation.standing.cpu === host.profile.platform_cpu_millicores && observation.standing.memory === host.profile.platform_memory_bytes;
 const totalFits = (host: SwarmAuthority, charges: readonly ResourceCharge[]) => {
   const total = charges.reduce((sum, item) => ({ cpu: sum.cpu + (charged(item)?.cpu ?? 0), memory: sum.memory + (charged(item)?.memory ?? 0) }),
     { cpu: host.profile.platform_cpu_millicores, memory: host.profile.platform_memory_bytes });
@@ -66,9 +70,7 @@ export const reserveResources = (input: unknown, authority: SwarmAuthority, obse
   if (previous !== undefined && (previous.result === "pending" || (previous.incarnation === intent.incarnation ? previous.sequence >= intent.sequence : active(previous) !== null))) return err("app resource action is pending or stale");
   if (!sameRelease(previous === undefined ? null : active(previous), intent.previous)) return err("previous active resource charge changed");
   if (intent.deadline <= now || intent.deadline - now > 90_000) return err("resource deadline expired or exceeds scheduling ceiling");
-  if (observation.status !== "ready" || observation.node !== host.value.node || observation.cluster !== host.value.cluster || observation.network !== host.value.network.id ||
-    observation.capacity.cpu !== host.value.profile.cpu_millicores || observation.capacity.memory !== host.value.profile.memory_bytes ||
-    observation.standing.cpu !== host.value.profile.platform_cpu_millicores || observation.standing.memory !== host.value.profile.platform_memory_bytes) return err("current resource host observation required");
+  if (!resourceHostReady(host.value, observation)) return err("current resource host observation required");
   const next = parseResourceBook({ version: 1, host: host.value, charges: [...current.value.charges.filter((item) => item.app !== intent.app), intent] });
   return next.ok ? next : err("insufficient declared host capacity or invalid peak charge");
 };

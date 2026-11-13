@@ -984,6 +984,23 @@ They validate lifecycle/admission recovery with fixture build inputs; they do
 not validate image availability or app runtime readiness. Cancellation of
 started migration work and audited resolution remain subsequent delivery work.
 
+## Current host authority during recovery
+
+A durable resource reservation records an accepted scheduling decision. It is
+not a substitute for current runtime authority. Admission markers, migration
+Create/Start, HTTP handoff, replacement, promotion and restoration require a
+fresh normalized observation matching the pinned node, cluster, overlay and
+declared host budgets. Replaying an old reservation preserves its deadlines and
+accounting but cannot bypass this check.
+
+Owned fencing and cleanup remain available when host readiness is unavailable.
+They use exact owned identities and their existing bounded deadlines; they do
+not authorize another workload. Native component tests inject unavailable host
+observations before Create, between Create and Start, and after an acknowledged
+Start. The first two execute no app command. The last retains fenced completion
+evidence while HTTP handoff stays blocked. These tests change no actual Swarm
+role or host configuration and establish no host-loss availability guarantee.
+
 ## Delivery and acceptance
 
 Each stage preserves the existing Compose compatibility path until its

@@ -5,6 +5,7 @@ import type { ServiceAction, ServiceEffect, ServiceObservation } from "../../con
 import type { HttpExecutionIndex, HttpExecutionPorts } from "./http-execution-ports.ts";
 import type { HttpOperation } from "./http-state.ts";
 import { clearedHttp, convergedHttp, fencedHttpEffects } from "./http-convergence.ts";
+import { resourceHostReady } from "./resource-book.ts";
 
 export const recoverHttp = async (index: HttpExecutionIndex, ports: HttpExecutionPorts, app: string, operation: HttpOperation) => {
   const clock = ports.now();
@@ -41,6 +42,7 @@ export const recoverHttp = async (index: HttpExecutionIndex, ports: HttpExecutio
     if (effect === "fence") return expected === null ? "runtime-unavailable" : ports.native.fence(action, expected);
     if (effect === "restore" && operation.previous !== null) {
       const plan = await load(digest, operation.previous.commit);
+      if (!resourceHostReady(plan.host, await ports.observeHost(plan.host))) return "runtime-unavailable";
       return ports.native.apply(action, expected, plan, await ports.materialize(plan), ports.routing(plan));
     }
     const plan = await load(operation.plan, operation.commit);

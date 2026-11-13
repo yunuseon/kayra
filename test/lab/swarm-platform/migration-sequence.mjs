@@ -16,7 +16,7 @@ import { serverCode, migrationCommand, probeCommand } from './migration-fixture.
 import { indexedMigrationOwner } from './indexed-migration-owner.mjs';
 
 const [mode, directory, checkpoint] = process.argv.slice(2); assert.ok(directory);
-const indexed = mode === 'indexed-run' || mode === 'indexed-child';
+const indexed = mode === 'indexed-run' || mode === 'indexed-child' || mode === 'host-run';
 const api = dockerApi(); const native = oneShotJob(api); const run = promisify(execFile); const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const privateValue = 'synthetic-sequence-private-value';
 const ports = async (path, source, killAt) => ({ ...await openArtifactStore(join(path, 'artifacts')), now: Date.now,
@@ -27,9 +27,9 @@ const ports = async (path, source, killAt) => ({ ...await openArtifactStore(join
   materialize: async (job) => Object.fromEntries(Object.entries(job.environment).map(([key, binding]) => [key, binding.kind === 'literal' ? binding.value : privateValue])),
   native: { ...native, start: async (...args) => { const result = await native.start(...args); if (killAt === 'after-start') { assert.equal(result, 'acknowledged'); process.kill(process.pid, 'SIGKILL'); } return result; } },
 });
-const openOwner = async (path, source, killAt, initialize) => {
+const openOwner = async (path, source, killAt, initialize, hostFault) => {
   const phasePorts = await ports(path, source, killAt);
-  if (indexed) return indexedMigrationOwner(path, source, phasePorts, killAt, initialize);
+  if (indexed) return indexedMigrationOwner(path, source, phasePorts, killAt, initialize, hostFault);
   const journal = await openJournal(path, initialize ? 'initialize' : 'existing');
   const view = { read: journal.read, write: async (value) => { await journal.write(value); if (killAt === 'after-advance' && value.position === 1) process.kill(process.pid, 'SIGKILL'); } };
   return { journal, owner: migrationSequence(view, phasePorts) };
@@ -39,7 +39,7 @@ if (mode === 'child' || mode === 'indexed-child') {
   const { owner } = await openOwner(directory, source, checkpoint, false);
   while (true) { const value = await owner.tick(); assert.equal(value.phase, 'running'); await pause(100); }
 }
-assert.ok(mode === 'run' || mode === 'indexed-run'); await mkdir(directory, { mode: 0o700 }); const app = 'migration-lab-' + randomUUID().slice(0, 8);
+assert.ok(mode === 'run' || mode === 'indexed-run' || mode === 'host-run'); await mkdir(directory, { mode: 0o700 }); const app = 'migration-lab-' + randomUUID().slice(0, 8);
 const host = JSON.parse(await readFile('/var/lib/kayra/swarm/authority.json', 'utf8'));
 const deployer = (await run('docker', ['ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=deployer',
   '--filter', 'label=com.docker.compose.oneoff=False'])).stdout.trim(); assert.match(deployer, /^[0-9a-f]{12,64}$/);
@@ -63,7 +63,11 @@ try {
       if (inspect.value.State.Health?.Status === 'healthy') { stateContainer = task.Status.ContainerStatus.ContainerID; break; }
     } await pause(250);
   } assert.ok(stateContainer, 'application-owned state fixture never became healthy');
-  const scenarios = [
+  const scenarios = mode === 'host-run' ? [
+    { name: 'host-unavailable-before-create', safe: true, steps: ['schema'], hostFault: 'before-create', held: 'runtime', effects: 0, calls: 0, nativeStarts: 0 },
+    { name: 'host-unavailable-before-start', safe: true, steps: ['schema'], hostFault: 'after-create', held: 'runtime', effects: 0, calls: 0, nativeStarts: 0 },
+    { name: 'owned-fencing-with-host-unavailable', safe: true, steps: ['schema'], hostFault: 'after-start', effects: 1, calls: 1, nativeStarts: 1 },
+  ] : [
     { name: 'ordered', safe: true, steps: ['schema', 'seed'], effects: 2, calls: 2 },
     { name: 'safe-effect-before-failure', safe: true, first: true, steps: ['schema'], effects: 1, calls: 2 },
     { name: 'unsafe-effect-before-failure', safe: false, always: true, steps: ['schema'], effects: 1, calls: 1 },
@@ -92,7 +96,7 @@ try {
           FAIL_BEFORE: { kind: 'literal', value: item.before ? '1' : '0' }, PROBE_MODE: { kind: 'literal', value: item.unknown ? 'unknown' : 'truth' },
           TOKEN: { kind: 'secret', key: 'TOKEN' } }, resources: { memoryBytes: 128 * 1024 * 1024, nanoCpus: 250_000_000 }, networks: [host.network.id], stopGraceSeconds: 30 } })) });
     assert.ok(parsed.ok, parsed.error); const source = parsed.value; await writeFile(join(path, 'source.json'), JSON.stringify(source));
-    let { journal, owner } = await openOwner(path, source, undefined, true); const accepted = await owner.prepare(source, startedAt + 180000);
+    let { journal, owner } = await openOwner(path, source, undefined, true, item.hostFault); const accepted = await owner.prepare(source, startedAt + 180000);
     if (item.kill) {
       await journal.close(); const killed = await new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [fileURLToPath(import.meta.url), indexed ? 'indexed-child' : 'child', path, item.kill], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -115,17 +119,24 @@ try {
     if (item.kill === 'before-start') assert.ok(starts.every((event) => event.Actor.ID !== final.steps[0].attempts[0].execution.container));
     assert.ok(!JSON.stringify(final).includes(privateValue)); assert.ok(!JSON.stringify(trace).includes(privateValue));
     for (const step of final.steps) for (const attempt of step.attempts) {
-      assert.equal(attempt.execution.phase, 'complete'); const job = parseJobPlan(JSON.parse(await (await openArtifactStore(join(path, 'artifacts'))).read(attempt.artifact))); assert.ok(job.ok);
+      if (item.hostFault && item.held) assert.equal(attempt.execution.phase, 'held'); else assert.equal(attempt.execution.phase, 'complete');
+      const job = parseJobPlan(JSON.parse(await (await openArtifactStore(join(path, 'artifacts'))).read(attempt.artifact))); assert.ok(job.ok);
+      if (item.hostFault && item.held) {
+        const before = await native.observe(job.value); assert.ok(before.status === 'absent' || before.status === 'owned' && before.state === 'created' && !before.barrier);
+        if (item.hostFault === 'before-create') assert.equal(before.status, 'absent');
+        if (item.hostFault === 'after-create') assert.equal(before.status, 'owned');
+        assert.equal(await native.fence(job.value, before.status === 'owned' ? before.id : null, Date.now() + 30000), 'acknowledged');
+      }
       const barrier = await native.observe(job.value); assert.equal(barrier.status, 'owned'); assert.equal(barrier.barrier, true);
       assert.equal((await api.request('DELETE', `/containers/${barrier.id}?force=true&v=true`)).status, 204);
     }
     await journal.close(); reports.push({ name: item.name, phase: final.phase, reason: final.reason, steps: final.steps.map((step) => ({ id: step.id, attempts: step.attempts.length })),
-      effects: item.effects, calls: item.calls, nativeStarts: starts.length, originalDeadline: true, privateValuesPersisted: false, checkpoint: item.kill ?? null }); console.log(JSON.stringify(reports.at(-1)));
+      effects: item.effects, calls: item.calls, nativeStarts: starts.length, originalDeadline: true, privateValuesPersisted: false, checkpoint: item.kill ?? null, hostFault: item.hostFault ?? null }); console.log(JSON.stringify(reports.at(-1)));
   }
   assert.equal((await api.request('DELETE', `/services/${serviceId}`)).status, 200); serviceId = undefined;
   const version = await api.request('GET', '/version'); await writeFile(join(directory, 'result.json'), JSON.stringify({ passed: true, reports, app, image, engine: version.value.Version,
     api: version.value.ApiVersion, node: process.version, fixtureServiceRemoved: true,
-    scope: indexed ? 'indexed lifecycle, durable admission and native migration effects with fixture registration/build ports; HTTP handoff only' : 'isolated phase owner with application-owned effect/dedup fixture; no real-deployer admission or migration rollout integration' }, null, 2));
+    scope: mode === 'host-run' ? 'injected normalized-host failures with real jobs and indexed admission; no actual host reconfiguration or public-deployer claim' : indexed ? 'indexed lifecycle, durable admission and native migration effects with fixture registration/build ports; HTTP handoff only' : 'isolated phase owner with application-owned effect/dedup fixture; no real-deployer admission or migration rollout integration' }, null, 2));
 } catch (error) {
   if (activeObserver) activeObserver.kill('SIGTERM');
   await writeFile(join(directory, 'failure.json'), JSON.stringify({ error: String(error), serviceId, app, image, reports }, null, 2));

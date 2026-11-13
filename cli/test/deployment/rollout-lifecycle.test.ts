@@ -9,7 +9,7 @@ import { completePorts } from "./rollout-plan-fixture.ts";
 
 test("complete rollout admission owns one lifecycle action and reserves the whole plan before any migration", async (t) => {
   const lab = await fixture(t); const jobs = await sequenceFixture(t); const ports = completePorts(lab.ports); const request = randomUUID();
-  const execution = { ...lab.artifacts, now: ports.now, native: jobs.ports.native, materialize: () => Promise.resolve({ RELEASE: "A", TOKEN: "secret-value" }) };
+  const execution = { ...lab.artifacts, observeHost: ports.observeHost, now: ports.now, native: jobs.ports.native, materialize: () => Promise.resolve({ RELEASE: "A", TOKEN: "secret-value" }) };
   await assert.rejects(lab.index.prepareRollout("shop", request, commit, ports), /retained build/);
   await lab.index.prepareBuild("shop", commit, lab.builds);
   const prepared = await lab.index.prepareRollout("shop", request, commit, ports);
@@ -36,7 +36,7 @@ test("indexed preparation recovers a lost migration Start acknowledgement under 
   let lose = true;
   const jobs = await sequenceFixture(t, undefined, { afterStart: () => { if (lose) { lose = false; throw new Error("lost migration acknowledgement"); } } });
   const lab = await fixture(t); const ports = completePorts(lab.ports); const request = randomUUID(); let index = lab.index;
-  const execution = { ...lab.artifacts, now: ports.now, native: jobs.ports.native, materialize: () => Promise.resolve({ RELEASE: "A", TOKEN: "secret-value" }) };
+  const execution = { ...lab.artifacts, observeHost: ports.observeHost, now: ports.now, native: jobs.ports.native, materialize: () => Promise.resolve({ RELEASE: "A", TOKEN: "secret-value" }) };
   await index.prepareBuild("shop", commit, lab.builds); const prepared = await index.prepareRollout("shop", request, commit, ports);
   await index.admitRollout("shop", prepared.ticket, ports);
   await assert.rejects(async () => { for (let number = 0; number < 50; number++) await index.tickRolloutPreparation("shop", request, execution); }, /lost migration acknowledgement/);
@@ -54,7 +54,7 @@ test("unresolved indexed migration retains lifecycle ownership and capacity with
   await lab.index.prepareBuild("shop", commit, lab.builds); const prepared = await lab.index.prepareRollout("shop", request, commit, ports);
   await lab.index.admitRollout("shop", prepared.ticket, ports);
   for (let number = 0; number < 70; number++) {
-    const state = await lab.index.tickRolloutPreparation("shop", request, { ...lab.artifacts, now: ports.now, native: jobs.ports.native,
+    const state = await lab.index.tickRolloutPreparation("shop", request, { ...lab.artifacts, observeHost: ports.observeHost, now: ports.now, native: jobs.ports.native,
       materialize: () => Promise.resolve({ RELEASE: "A", TOKEN: "secret-value" }) });
     if (state.phase === "held") break;
   }

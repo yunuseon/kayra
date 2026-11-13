@@ -11,7 +11,7 @@ import { openLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app
 test("migrations hand their existing action and reservation to HTTP, with complete release identity", async (t) => {
   const lab = await recoveryFixture(t); const jobs = await sequenceFixture(t); let index = lab.index; let clock = 3000;
   const ports = { ...completePorts(lab.ports), now: () => clock };
-  const preparation = { ...lab.artifacts, native: jobs.ports.native, now: ports.now, materialize: () => Promise.resolve({ TOKEN: "secret-value", RELEASE: "A" }) };
+  const preparation = { ...lab.artifacts, observeHost: ports.observeHost, native: jobs.ports.native, now: ports.now, materialize: () => Promise.resolve({ TOKEN: "secret-value", RELEASE: "A" }) };
   const request = randomUUID(); const commit = "b".repeat(40);
   await index.prepareBuild("shop", commit, { ...lab.builds, now: ports.now }); const parent = await index.prepareRollout("shop", request, commit, ports);
   await index.admitRollout("shop", parent.ticket, ports);
@@ -41,7 +41,7 @@ test("migrations hand their existing action and reservation to HTTP, with comple
 test("complete release history survives another rollout and compensation restores its whole-plan certificate", async (t) => {
   const lab = await recoveryFixture(t); const jobs = await sequenceFixture(t); const ports = completePorts(lab.ports);
   jobs.now(ports.now());
-  const preparation = { ...lab.artifacts, native: jobs.ports.native, now: ports.now, materialize: () => Promise.resolve({ TOKEN: "secret-value", RELEASE: "A" }) };
+  const preparation = { ...lab.artifacts, observeHost: ports.observeHost, native: jobs.ports.native, now: ports.now, materialize: () => Promise.resolve({ TOKEN: "secret-value", RELEASE: "A" }) };
   const start = async (commit: string) => {
     await lab.index.prepareBuild("shop", commit, lab.builds); const parent = await lab.index.prepareRollout("shop", randomUUID(), commit, ports);
     await lab.index.admitRollout("shop", parent.ticket, ports);
@@ -72,7 +72,7 @@ test("a persisted but expired HTTP handoff cannot mint another deadline or consu
   await lab.index.prepareBuild("shop", "b".repeat(40), lab.builds); const parent = await lab.index.prepareRollout("shop", randomUUID(), "b".repeat(40), ports);
   await lab.index.admitRollout("shop", parent.ticket, ports);
   for (let count = 0; count < 50; count++) {
-    if ((await lab.index.tickRolloutPreparation("shop", parent.preparation.run, { ...lab.artifacts, native: jobs.ports.native, now: ports.now,
+    if ((await lab.index.tickRolloutPreparation("shop", parent.preparation.run, { ...lab.artifacts, observeHost: ports.observeHost, native: jobs.ports.native, now: ports.now,
       materialize: () => Promise.resolve({ TOKEN: "secret-value", RELEASE: "A" }) })).phase === "ready") break;
   }
   const ready = await lab.index.rolloutOperation("shop", parent.preparation.run); assert.ok(ready?.preparation.httpDeadline);

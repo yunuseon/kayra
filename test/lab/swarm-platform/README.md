@@ -378,3 +378,35 @@ cleanup. Results are `/tmp/kayra-sequence-component.json` with
 serial CLI suite passed 581 tests with one skip. A parallel macOS run hit an
 existing API terminal-session process-group `kill EPERM`; that focused test
 passed immediately on recheck. No API/process implementation was changed.
+
+## Indexed migration preparation
+
+`migration-sequence.mjs indexed-run <new-results-directory>` runs the same
+eight scenarios through the app index, lifecycle fence, ticket and durable
+host resource book. Registration observation and build preparation are lab
+fixtures; the Docker host observation and job effects use the real adapters.
+This tests internal indexed preparation, not the public deployer pipeline.
+
+The complete-plan digest owns the resource charge; the HTTP projection has a
+separate digest. Admission records a 90-second scheduling deadline, and the
+total preparation budget is fixed at acceptance. Child job records live inside
+the same app envelope. Unresolved work retains the action and reservation.
+Successful preparation persists a bounded HTTP handoff deadline without
+promoting a release or settling capacity. HTTP execution, cancellation and
+audited resolution remain prerequisites for enabling complete rollouts.
+
+All eight native cases passed on 2026-11-13 against Engine 29.9.3/API 1.56 and
+Node 24.22.1. Docker events verify at most one Start per execution container.
+Before this run, the lab VM's NTP service was restarted to correct suspension
+drift; measured clock offsets were 232 ms before and 499 ms after the run.
+Context is `/tmp/kayra-indexed-preparation-context.json`, raw evidence is
+`/tmp/kayra-indexed-preparation-evidence/`, and the log is
+`/tmp/kayra-indexed-preparation-native.log`. The initial source staging attempt
+failed during module import because its dependency symlink named a path inside
+the deployer image rather than the VM. It created no fixture workloads; that
+source remains preserved at
+`/var/lib/kayra/swarm/indexed-preparation-source-qKFSeYEr`.
+
+The component playbook and upgrade lab retain `.indexed-sequence.json` and
+`.indexed-sequence.tar` before successful source cleanup. All 59 focused Linux
+checks pass. Typecheck, lint and the serial CLI suite pass (596 tests, one skip).

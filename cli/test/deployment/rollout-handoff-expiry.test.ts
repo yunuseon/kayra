@@ -52,14 +52,14 @@ test("replaying an expired parent cannot release a newer admitted candidate", as
   const lab = await completeRolloutFixture(t, false); const ready = await lab.drive((state) => state.preparation.phase === "ready"); assert.ok(ready.preparation.httpDeadline); lab.now(ready.preparation.httpDeadline + 1);
   await lab.owner.tick("shop", lab.parent.preparation.run); await lab.index.prepareBuild("shop", "c".repeat(40), lab.builds);
   const next = await lab.index.prepareRollout("shop", randomUUID(), "c".repeat(40), lab.plans); await lab.owner.tick("shop", next.preparation.run);
-  const before = await lab.index.resourceSnapshot(); assert.equal(before?.charges[0]?.result, "pending"); assert.equal(before.charges[0]?.target.plan, next.preparation.plan);
+  const before = await lab.index.resourceSnapshot(); assert.equal(before?.charges[0]?.result, "pending"); assert.equal(before.charges[0].target.plan, next.preparation.plan);
   await lab.index.expireRolloutHandoff("shop", lab.parent.preparation.run, lab.ports.now() + 300000);
   assert.deepEqual(await lab.index.resourceSnapshot(), before); assert.equal(lab.writes(), 1);
 });
 
 test("an accepted cancellation remains cancelled when a stale observer later reports handoff expiry", async (t) => {
   const lab = await completeRolloutFixture(t, false); const ready = await lab.drive((state) => state.preparation.phase === "ready"); assert.ok(ready.preparation.httpDeadline); lab.now(ready.preparation.httpDeadline + 1);
-  const cancelled = await lab.index.cancelManagedRollout("shop", lab.parent.preparation.run, lab.ports); assert.equal(cancelled.operation.completion.outcome, "cancelled");
+  const cancelled = await lab.index.cancelManagedRollout("shop", lab.parent.preparation.run, lab.ports); assert.ok(cancelled.operation.completion); assert.equal(cancelled.operation.completion.outcome, "cancelled");
   const stale = await lab.index.expireRolloutHandoff("shop", lab.parent.preparation.run, lab.ports.now()); assert.deepEqual(stale, cancelled.operation);
   assert.equal((await lab.index.resourceSnapshot())?.charges[0]?.result, "previous");
 });

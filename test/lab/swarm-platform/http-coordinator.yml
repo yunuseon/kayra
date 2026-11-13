@@ -3,6 +3,14 @@
   hosts: servers
   become: true
   tasks:
+    - name: Check the experiment clock against the controller before effects
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: coordinator_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((coordinator_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
     - name: Create an isolated component source directory
       ansible.builtin.tempfile:
         state: directory
@@ -45,6 +53,8 @@
         - test/lab/swarm-platform/migration-probe.mjs
         - test/lab/swarm-platform/one-shot-cold.mjs
         - test/lab/swarm-platform/one-shot-deadlines.mjs
+        - test/lab/swarm-platform/migration-sequence.mjs
+        - test/lab/swarm-platform/migration-fixture.mjs
 
     - name: Find the existing deployer container
       ansible.builtin.command:
@@ -208,6 +218,32 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/deadlines.tar"
         dest: "{{ report_path }}.deadlines.tar"
+        flat: true
+
+    - name: Reconcile ordered migrations against application-owned state after interruption
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - run
+          - "{{ coordinator_source.path }}/sequence"
+      changed_when: true
+
+    - name: Retain ordered migration sequence summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/sequence/result.json"
+        dest: "{{ report_path }}.sequence.json"
+        flat: true
+
+    - name: Archive migration sequence journals and application evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/sequence.tar", -C, "{{ coordinator_source.path }}/sequence", .]
+      changed_when: true
+
+    - name: Preserve migration sequence journals and application evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/sequence.tar"
+        dest: "{{ report_path }}.sequence.tar"
         flat: true
 
     - name: Remove successful component source files

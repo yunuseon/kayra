@@ -1,10 +1,12 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types, @typescript-eslint/require-await -- models native objects, not coordinator state */
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
+import { typed } from "../../src/lib/typed.ts";
 import type { JobPlan } from "../../src/contracts/one-shot-job.ts";
 import { jobName } from "../../src/contracts/one-shot-job.ts";
 import { oneShotJob } from "../../src/server/runtime/one-shot-job.ts";
 
-export const jobPlan = (): JobPlan => ({ version: 1,
+export const jobPlan = () => typed<JobPlan>({ version: 1,
   scope: { app: "shop", incarnation: "02970402-9c43-4ec0-b025-d92786ff6902", run: "fef226f4-8ca4-4b07-8fb9-50fc0423129d", step: "schema", purpose: "migration", attempt: 1 },
   image: "localhost:5000/shop/web@sha256:" + "a".repeat(64), command: ["node", "migrate.mjs"], entrypoint: null,
   environment: { TOKEN: { kind: "secret", key: "TOKEN" } }, resources: { memoryBytes: 128 * 1024 * 1024, nanoCpus: 250_000_000 },
@@ -22,7 +24,7 @@ export const jobRuntime = (plan = jobPlan()) => {
     if (method === "POST" && path.startsWith("/containers/create?")) {
       if (value !== undefined) return { status: 409, value: {} };
       assert.ok(object(body));
-      const id = (++serial).toString(16).padStart(64, "0");
+      const id = createHash("sha256").update(jobName(plan.scope) + ":" + String(++serial)).digest("hex");
       value = { Id: id, Name: "/" + jobName(plan.scope), Config: body, HostConfig: body["HostConfig"], State: { Status: "created", ExitCode: 0 } };
       return { status: 201, value: { Id: id } };
     }

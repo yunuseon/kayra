@@ -10,7 +10,7 @@ const word = text.max(4096);
 const scope = z.object({ app: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/), incarnation: z.uuid(), run: z.uuid(),
   step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/), purpose: z.enum(["migration", "probe"]), attempt: positive.max(8),
 }).strict().readonly();
-const schema = z.object({ version: z.literal(1), scope,
+const shape = z.object({ version: z.literal(1), scope,
   image: z.string(), command: z.array(word).min(1).max(128).refine((value) => value[0] !== "").readonly(),
   entrypoint: z.array(word).min(1).max(128).refine((value) => value[0] !== "").readonly().nullable(),
   environment: z.record(key, z.discriminatedUnion("kind", [
@@ -22,9 +22,12 @@ const schema = z.object({ version: z.literal(1), scope,
   networks: z.array(z.string().regex(/^[a-z0-9]{25}$/)).max(2).readonly(),
   deadline: positive, stopGraceSeconds: positive.max(30),
   startDeadline: positive.optional(), executionTimeoutSeconds: positive.max(86400).optional(),
-}).strict().readonly();
+}).strict();
+const schema = shape.readonly();
+const template = shape.omit({ scope: true, command: true, deadline: true, startDeadline: true, executionTimeoutSeconds: true }).readonly();
 export type JobScope = z.infer<typeof scope>;
 export type JobPlan = z.infer<typeof schema>;
+export type JobTemplate = z.infer<typeof template>;
 export type JobWrite = "acknowledged" | "uncertain" | "conflict" | "refused";
 export type JobObservation =
   | { readonly status: "absent" | "foreign" | "unavailable" }
@@ -53,6 +56,14 @@ export const parseJobPlan = (input: unknown) => {
     (plan.startDeadline !== undefined && plan.startDeadline > plan.deadline) ||
     new Set(plan.networks).size !== plan.networks.length || Object.keys(plan.environment).includes("KAYRA_OPERATION_ID")) return err("invalid one-shot image, networks or reserved environment");
   return ok<JobPlan>(plan);
+};
+
+/** Description only. Scope, command and deadlines are supplied by the owning operation. */
+export const parseJobTemplate = (input: unknown, app: string) => {
+  const parsed = template.safeParse(input); if (!parsed.success) return err("invalid one-shot template");
+  const checked = parseJobPlan({ ...parsed.data, command: ["/validation-only"], deadline: 1,
+    scope: { app, incarnation: "00000000-0000-4000-8000-000000000000", run: "00000000-0000-4000-8000-000000000001", step: "template", purpose: "migration", attempt: 1 } });
+  return checked.ok ? ok<JobTemplate>(parsed.data) : err("invalid one-shot template");
 };
 
 /** Runtime names bind the entire stable identity, including purpose and attempt. */

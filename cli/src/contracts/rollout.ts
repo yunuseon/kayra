@@ -100,6 +100,15 @@ const migration = (value: unknown, index: number) => {
   return err(`${label}: recovery must be replay-safe or status-probe`);
 };
 
+const immutableMigration = (item: Migration) => Object.freeze({ ...item, command: Object.freeze([...item.command]),
+  recovery: Object.freeze(item.recovery.kind === "status-probe" ? { ...item.recovery, command: Object.freeze([...item.recovery.command]) } : { ...item.recovery }) });
+
+/** Reuse the app contract when validating a retained coordinator description. */
+export const parseMigrationStep = (input: unknown) => {
+  const parsed = migration(input, 0);
+  return parsed.ok ? ok<Migration>(immutableMigration(parsed.value)) : parsed;
+};
+
 const check = (value: unknown, index: number) => {
   const label = `check ${String(index)}`;
   if (!record(value) || !name(value["id"])) return err(`${label}: invalid mapping or id`);
@@ -138,7 +147,7 @@ export const parseRollout = (value: unknown) => {
   if (parsedChecks.value.some((item) => !Object.hasOwn(roles, item.service) || roles[item.service]?.role === "retained-dependency")) return err("rollout: checks must reference an app-image service");
   if (parsedServices.value.some(([key, spec]) => spec.handoff_check !== undefined && !parsedChecks.value.some((item) => item.id === spec.handoff_check && item.service === key))) return err("rollout: singleton handoff check must run in its service");
   const immutableServices = Object.freeze(Object.fromEntries(parsedServices.value.map(([key, spec]) => [key, Object.freeze({ ...spec })] as const)));
-  const immutableMigrations = Object.freeze(parsedMigrations.value.map((item) => Object.freeze({ ...item, command: Object.freeze([...item.command]), recovery: Object.freeze(item.recovery.kind === "status-probe" ? { ...item.recovery, command: Object.freeze([...item.recovery.command]) } : { ...item.recovery }) })));
+  const immutableMigrations = Object.freeze(parsedMigrations.value.map(immutableMigration));
   const immutableChecks = Object.freeze(parsedChecks.value.map((item) => Object.freeze({ ...item, command: Object.freeze([...item.command]) })));
   return ok<Rollout>(Object.freeze({ strategy, mixed_version_compatible: mixed, rollback_compatible: rollback, services: immutableServices, migrations: immutableMigrations, checks: immutableChecks }));
 };

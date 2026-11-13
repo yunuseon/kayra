@@ -948,8 +948,41 @@ initial complete deployment, SIGKILL after HTTP acknowledgement, automatic
 rollback to the previous complete release and a migration probe that remains
 unknown. They establish neither public deployer integration nor database-volume
 safety, and carry no HTTP continuity claim. Public acceptance remains disabled
-pending audited resolution, cancellation before handoff and integration through
-the normal platform/builder/coordinator composition.
+pending audited resolution, cancellation of started preparation and integration
+through the normal platform/builder/coordinator composition.
+
+## Unstarted rollout settlement
+
+A complete request can now be cancelled before migration or HTTP intent exists.
+The private completion certificate records that unstarted state, the outcome,
+timestamp and previous verified deployment identity. The lifecycle fence and
+ticket settle atomically with this proof, before releasing resource capacity.
+Runtime absence is never used to infer that an application command did not run.
+Once preparation intent exists, this narrow cancellation path refuses to claim
+an unstarted outcome, even when no runtime container is visible yet.
+
+If the coordinator dies after recording completion but before settling the
+resource book, restart retains a conservative reservation and reconciles from
+the sealed proof. A subsequent request performs the same reconciliation before
+archiving that parent. Repeating an old cancellation cannot release a newer
+request's reservation. Published status keeps the cancelled/failed candidate
+requested and restores the previous release as desired, without inventing an
+active certificate or an HTTP update deadline.
+
+Admission expiry distinguishes an absent reservation from an accepted decision
+whose app marker was interrupted. The former records an unstarted failure at
+the original scheduling deadline. The latter reconstructs the original admitted
+decision without refreshing its deadline or total preparation budget. Neither
+path authorizes a new application effect beyond its original phase deadlines.
+
+Native tests kill the writer immediately before a synchronized reservation,
+after that reservation but before its app marker, and after a cancellation
+certificate but before capacity settlement. These tests use the same locked,
+synchronized filesystem journals through a typed storage factory. They wait
+past the original admission deadline and forbid application runtime effects.
+They validate lifecycle/admission recovery with fixture build inputs; they do
+not validate image availability or app runtime readiness. Cancellation of
+started migration work and audited resolution remain subsequent delivery work.
 
 ## Delivery and acceptance
 

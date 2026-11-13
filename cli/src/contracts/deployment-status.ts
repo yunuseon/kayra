@@ -13,9 +13,10 @@ const operation = z.object({
   updateDeadline: z.number().int().positive(), recoveryDeadline: z.number().int().positive().nullable(),
   recovery: z.enum(["automatic-rollback", "previous-preserved", "compensated", "removed-unverified", "unstarted"]).nullable(),
 }).strict().readonly();
-const preparation = z.object({ request: z.uuid(), phase: z.enum(["prepared", "admitted", "migrating", "ready-for-http", "held"]),
-  reason: z.enum(["deadline", "migration"]).nullable(), admissionDeadline: z.number().int().positive(), deadline: z.number().int().positive(),
+const preparation = z.object({ request: z.uuid(), phase: z.enum(["prepared", "admitted", "migrating", "ready-for-http", "held", "cancelled", "failed"]),
+  reason: z.enum(["deadline", "migration", "cancelled"]).nullable(), admissionDeadline: z.number().int().positive(), deadline: z.number().int().positive(),
   migrationDeadline: z.number().int().positive(), httpDeadline: z.number().int().positive().nullable(),
+  completedAt: z.number().int().positive().nullable().default(null),
   step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/).nullable(),
 }).strict().readonly();
 const schema = z.object({
@@ -33,8 +34,13 @@ const schema = z.object({
     (value.operation?.phase === "cancelled" && value.operation.cancelRequestedAt === null) ||
     (value.operation?.cancelRequestedAt !== undefined && value.operation.cancelRequestedAt !== null && !["recovering", "held", "cancelled"].includes(value.operation.phase)) ||
     value.requiredAction !== (value.operation?.phase === "held" || value.preparation?.phase === "held" ? "inspect-and-resolve" : "none") ||
-    value.preparation !== null && (value.operation !== null || value.requested === null || JSON.stringify(value.requested) !== JSON.stringify(value.desired) ||
-      (value.preparation.phase === "held") !== (value.preparation.reason !== null) ||
+    value.preparation !== null && (value.operation !== null || value.requested === null ||
+      value.preparation.completedAt === null && JSON.stringify(value.requested) !== JSON.stringify(value.desired) ||
+      (value.preparation.phase === "cancelled" || value.preparation.phase === "failed") !== (value.preparation.completedAt !== null) ||
+      (value.preparation.phase === "held" || value.preparation.phase === "cancelled" || value.preparation.phase === "failed") !== (value.preparation.reason !== null) ||
+      (value.preparation.phase === "cancelled") !== (value.preparation.reason === "cancelled") ||
+      value.preparation.phase === "failed" && value.preparation.reason !== "deadline" ||
+      value.preparation.completedAt !== null && (value.preparation.step !== null || value.desired?.plan !== value.verifiedActive?.plan || value.desired?.commit !== value.verifiedActive?.commit) ||
       (value.preparation.phase === "ready-for-http") !== (value.preparation.httpDeadline !== null) ||
       value.preparation.admissionDeadline > value.preparation.migrationDeadline || value.preparation.migrationDeadline !== value.preparation.deadline - 180_000 ||
       value.preparation.httpDeadline !== null && value.preparation.httpDeadline > value.preparation.deadline - 90_000)) context.addIssue({ code: "custom", message: "inconsistent deployment projection" });

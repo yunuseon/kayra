@@ -161,7 +161,7 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
           if (existing.preparation.plan !== preparation.plan) throw new Error("rollout request identity conflicts"); return existing;
         }
         const previous = current.http?.requests.find((item) => item.request === existing.preparation.run);
-        if (previous === undefined || !terminalHttp(previous.phase)) throw new Error("complete rollout lifecycle is busy");
+        if (existing.completion === undefined && (previous === undefined || !terminalHttp(previous.phase))) throw new Error("complete rollout lifecycle is busy");
         if ((current.rollouts?.length ?? 0) >= 1024) throw new Error("complete rollout history exhausted; intervention required");
       }
       if (current.registrationReceipt?.runtime !== "swarm" || current.fence?.lifecycle.phase !== "registered" ||
@@ -181,13 +181,28 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
     /** Called only after the index has durably reserved the complete operation's peak. */
     admitRollout: (ticket: string) => serial(async () => {
       const current = await required(); const rollout = current.rollout;
-      if (rollout?.ticket !== ticket) throw new Error("complete rollout request is unavailable");
+      if (rollout?.ticket !== ticket || rollout.completion !== undefined) throw new Error("complete rollout request is unavailable or settled");
       const next = await persist({ ...current, rollout: { ...rollout, admitted: true } });
       return next.rollout;
     }),
+    /** No migration or HTTP intent has ever existed; runtime absence is not used as evidence. */
+    completeUnstartedRollout: (ticket: string, reason: "cancelled" | "deadline", now: number) => serial(async () => {
+      const current = await required(); const rollout = current.rollout;
+      if (rollout?.ticket !== ticket) throw new Error("complete rollout request is unavailable");
+      if (rollout.completion !== undefined) return rollout;
+      if (current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== rollout.action ||
+        rollout.preparation.phase !== "prepared" || rollout.preparation.sequence !== null || current.http?.requests.some((item) => item.request === rollout.preparation.run) ||
+        !Number.isSafeInteger(now) || now < rollout.preparation.createdAt || reason === "deadline" && (rollout.admitted || now < rollout.admissionDeadline)) throw new Error("complete rollout may have effects or lacks an unstarted settlement clock");
+      const outcome = reason === "cancelled" ? "cancelled" : "failure"; const fence = settleLifecycleWork(current.fence, rollout.action); const tickets = completeTicket(current.tickets, ticket, outcome);
+      if (!fence.ok || !tickets.ok) throw new Error("invalid unstarted complete rollout settlement");
+      const active = current.http?.active;
+      const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+        rollout: { ...rollout, completion: { kind: "unstarted", outcome: reason === "cancelled" ? "cancelled" : "failed", reason, at: now, previous: active === null || active === undefined ? null : httpReleasePlan(active) } } });
+      if (next.rollout === undefined) throw new Error("unstarted rollout outcome was not retained"); return next.rollout;
+    }),
     tickRolloutPreparation: (ticket: string, ports: Parameters<typeof rolloutPreparation>[1]) => serial(async () => {
       const current = await required();
-      if (current.rollout?.ticket !== ticket || !current.rollout.admitted) throw new Error("complete rollout lacks admission");
+      if (current.rollout?.ticket !== ticket || !current.rollout.admitted || current.rollout.completion !== undefined) throw new Error("complete rollout lacks active admission");
       // Every child write returns through persist(), including its uncertain-write poisoning.
       const view = { read: async () => (await required()).rollout?.preparation,
         write: async (preparation: unknown) => {

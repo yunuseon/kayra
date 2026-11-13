@@ -25,7 +25,7 @@
         owner: root
         group: root
         mode: "0755"
-      loop: [cli/src, ci/tests/swarm-http, test/lab/swarm-platform]
+      loop: [cli/src, ci/tests/swarm-http, test/lab/swarm-platform, test/lab/swarm-platform/http-fixture/web]
 
     - name: Copy server code into the isolated source tree
       ansible.builtin.copy:
@@ -55,6 +55,8 @@
         - test/lab/swarm-platform/one-shot-deadlines.mjs
         - test/lab/swarm-platform/migration-sequence.mjs
         - test/lab/swarm-platform/indexed-migration-owner.mjs
+        - test/lab/swarm-platform/rollout-coordinator.mjs
+        - test/lab/swarm-platform/http-fixture/web/fixture.mjs
         - test/lab/swarm-platform/migration-fixture.mjs
 
     - name: Find the existing deployer container
@@ -271,6 +273,32 @@
       ansible.builtin.fetch:
         src: "{{ coordinator_source.path }}/indexed-sequence.tar"
         dest: "{{ report_path }}.indexed-sequence.tar"
+        flat: true
+
+    - name: Reconcile complete rollouts through migrations and native routed HTTP replacement
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/rollout-coordinator.mjs"
+          - run
+          - "{{ coordinator_source.path }}/rollout"
+      changed_when: true
+
+    - name: Retain complete rollout component summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/rollout/result.json"
+        dest: "{{ report_path }}.rollout.json"
+        flat: true
+
+    - name: Archive complete rollout component evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/rollout.tar", -C, "{{ coordinator_source.path }}/rollout", .]
+      changed_when: true
+
+    - name: Preserve complete rollout component evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/rollout.tar"
+        dest: "{{ report_path }}.rollout.tar"
         flat: true
 
     - name: Remove successful component source files

@@ -11,7 +11,8 @@ import type { rolloutPreparation } from "./rollout-preparation.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { parseResourceBook, reserveResources, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
-import { terminalHttp } from "./http-state.ts";
+import { httpReleasePlan, terminalHttp } from "./http-state.ts";
+import { httpAdmissionDeadline } from "./http-resource-binding.ts";
 import { hasHttpRecoveryPeak, httpRecoveryPeak } from "./http-admission.ts";
 import { deploymentStatus } from "./deployment-status.ts";
 import { lifecycleActionId } from "./lifecycle-fence.ts";
@@ -153,7 +154,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const state = await readIndex();
       const charge = state.resources?.charges.find((item) => item.app === app);
       if (charge?.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1])) return;
-      if (charge.target.plan !== operation.plan) throw new Error("HTTP resource settlement plan mismatch");
+      if (charge.target.plan !== httpReleasePlan(operation)) throw new Error("HTTP resource settlement plan mismatch");
       const settled = settleResources(state.resources, app, charge.incarnation, charge.sequence, result);
       if (!settled.ok) throw new Error(settled.error);
       await journal.write({ ...state, resources: settled.value });
@@ -238,10 +239,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (!z.uuid().safeParse(request).success || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("complete rollout requires a request identity and full commit");
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       if (envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("complete rollout requires the persisted Swarm runtime");
-      if (envelope.rollout !== undefined) {
-        if (envelope.rollout.preparation.run !== request || envelope.rollout.commit !== commit) throw new Error("complete rollout request conflicts or lifecycle is busy");
-        return envelope.rollout;
+      const existing = [...(envelope.rollouts ?? []), ...(envelope.rollout === undefined ? [] : [envelope.rollout])].find((item) => item.preparation.run === request);
+      if (existing !== undefined) {
+        if (existing.commit !== commit) throw new Error("complete rollout request identity has conflicting commit"); return existing;
       }
+      if (envelope.http?.requests.some((item) => item.request === request)) throw new Error("request identity already belongs to legacy HTTP work");
       if (envelope.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active !== null) throw new Error("complete rollout lifecycle is busy or fenced");
       const previous = envelope.http?.requests.at(-1); if (previous !== undefined) await reconcileHttpResources(app, store, previous.ticket);
       const state = await readIndex(); const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
@@ -258,7 +260,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return store.prepareRollout(plan, request, ports.now());
     }),
     rolloutOperation: (app: string, request: string) => useReady(app, async (store) => {
-      const operation = (await store.read())?.rollout; return operation?.preparation.run === request ? operation : undefined;
+      const state = await store.read(); return [...(state?.rollouts ?? []), ...(state?.rollout === undefined ? [] : [state.rollout])].find((item) => item.preparation.run === request);
     }),
     admitRollout: (app: string, ticket: string, ports: HostObserver & Pick<BuildPorts, "read" | "now">) => useReady(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope); const operation = envelope?.rollout;
@@ -282,7 +284,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await serialIndex(async () => {
         const state = await readIndex();
         const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence: Number(operation.action.split(":")[1]),
-          previous: previous === null || previousAmount === null ? null : { plan: previous.plan, budget: previousAmount },
+          previous: previous === null || previousAmount === null ? null : { plan: httpReleasePlan(previous), budget: previousAmount },
           target: { plan: operation.preparation.plan, budget: amount }, peak: httpRecoveryPeak(amount, previousAmount), deadline: operation.admissionDeadline, result: "pending" };
         const reserved = reserveResources(state.resources, plan.host, observation, intent, ports.now()); if (!reserved.ok) throw new Error(reserved.error);
         await journal.write({ ...state, resources: reserved.value });
@@ -302,6 +304,22 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return store.tickRolloutPreparation(operation.ticket, { ...ports, authorize: async (state) => state.run === request && state.plan === operation.preparation.plan &&
         state.workload === operation.preparation.workload && state.createdAt === operation.preparation.createdAt && state.deadline === operation.preparation.deadline && await authorized() });
     }),
+    handoffRollout: (app: string, request: string, ports: Pick<BuildPorts, "read" | "now">) => useReady(app, async (store) => {
+      const envelope = await store.read(); const operation = envelope?.rollout;
+      const existing = envelope?.http?.requests.find((item) => item.request === request && item.deployment !== undefined); if (existing !== undefined) return existing;
+      if (operation?.preparation.run !== request || !operation.admitted || envelope?.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active === null ||
+        lifecycleActionId(envelope.fence, envelope.fence.lifecycle.active.sequence) !== operation.action) throw new Error("complete rollout lacks HTTP handoff ownership");
+      const state = operation.preparation;
+      if (state.phase !== "ready" || state.httpDeadline === null) throw new Error("complete rollout migrations are not ready for HTTP");
+      const bytes = await ports.read(state.plan); const input: unknown = JSON.parse(bytes); const checked = parseRolloutPlan(input);
+      if (createHash("sha256").update(bytes).digest("hex") !== state.plan || !checked.ok || rolloutWorkloadDigest(checked.value) !== state.workload ||
+        checked.value.workload.commit !== operation.commit || JSON.stringify(checked.value.workload.registration) !== JSON.stringify(verifiedRegistration(app, envelope))) throw new Error("complete rollout HTTP handoff plan integrity failed");
+      const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
+      if (charge?.result !== "pending" || charge.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1]) ||
+        charge.target.plan !== state.plan || charge.deadline !== operation.admissionDeadline || !hasHttpRecoveryPeak(charge)) throw new Error("HTTP handoff has no matching durable admission");
+      const service = Object.keys(checked.value.workload.services)[0]; if (service === undefined) throw new Error("complete rollout has no HTTP workload");
+      return store.handoffRollout(operation.ticket, service, ports.now());
+    }),
     prepareHttpRollout: (app: string, request: string, commit: string, ports: HttpPlanPort & Pick<BuildPorts, "now" | "retain">) => useReady(app, async (store) => {
       if (!z.uuid().safeParse(request).success || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("HTTP rollout requires a request identity and full commit");
       const envelope = await store.read();
@@ -313,6 +331,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return existing;
       }
       if (envelope.fence?.lifecycle.phase !== "registered" || envelope.fence.lifecycle.active !== null) throw new Error("HTTP lifecycle is busy or fenced");
+      if (envelope.rollout !== undefined || (envelope.rollouts?.length ?? 0) > 0) throw new Error("application requires complete rollout admission");
       const previous = envelope.http?.requests.at(-1);
       if (previous !== undefined) await reconcileHttpResources(app, store, previous.ticket);
       const state = await readIndex();
@@ -356,7 +375,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const observation = await ports.observeHost(plan.host);
       await serialIndex(async () => {
         const current = await readIndex();
-        const previous = operation.previous === null || previousAmount === null ? null : { plan: operation.previous.plan, budget: previousAmount };
+        const previous = operation.previous === null || previousAmount === null ? null : { plan: httpReleasePlan(operation.previous), budget: previousAmount };
         const intent: ResourceCharge = { app, incarnation: registration.incarnation, sequence: Number(operation.action.split(":")[1]), previous,
           target: { plan: operation.plan, budget: amount }, peak: httpRecoveryPeak(amount, previous?.budget ?? null), deadline: operation.deadline, result: "pending" };
         const decision = reserveResources(current.resources, plan.host, observation, intent, ports.now());
@@ -369,7 +388,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const envelope = await store.read();
       const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
       const resources = (await readIndex()).resources?.charges.find((item) => item.app === app);
-      if (operation === undefined || resources?.result !== "pending" || resources.incarnation !== envelope?.tickets.incarnation || resources.sequence !== Number(operation.action.split(":")[1]) || resources.target.plan !== operation.plan || resources.deadline !== operation.deadline) throw new Error("HTTP native effect has no matching durable admission");
+      if (operation === undefined || envelope === undefined || resources?.result !== "pending" || resources.incarnation !== envelope.tickets.incarnation || resources.sequence !== Number(operation.action.split(":")[1]) || resources.target.plan !== httpReleasePlan(operation) || resources.deadline !== httpAdmissionDeadline(operation, envelope)) throw new Error("HTTP native effect has no matching durable admission");
       if (!hasHttpRecoveryPeak(resources)) throw new Error("HTTP native effect lacks reserved recovery overlap");
       return store.recordHttpStep(ticket, step);
     }),
@@ -382,7 +401,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         JSON.stringify(operation.steps.filter((item) => item.effect === parsed.value.effect).at(-1)) !== JSON.stringify(parsed.value) ||
         (operation.phase === "recovering" ? parsed.value.effect === "apply" : parsed.value.effect !== "apply" || (operation.phase !== "applying" && operation.phase !== "verifying"))) return false;
       const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
-      return charge?.result === "pending" && charge.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1]) && charge.target.plan === operation.plan && charge.deadline === operation.deadline &&
+      return charge?.result === "pending" && charge.incarnation === envelope.tickets.incarnation && charge.sequence === Number(operation.action.split(":")[1]) && charge.target.plan === httpReleasePlan(operation) && charge.deadline === httpAdmissionDeadline(operation, envelope) &&
         (parsed.value.effect !== "apply" && parsed.value.effect !== "restore" || hasHttpRecoveryPeak(charge));
     }),
     cancelHttpRollout: (app: string, request: string, now: number) => useReady(app, async (store) => {
@@ -398,7 +417,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const envelope = await store.read();
       const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
       const charge = (await readIndex()).resources?.charges.find((item) => item.app === app);
-      if (operation === undefined || charge?.result !== "pending" || charge.incarnation !== envelope?.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1]) || charge.target.plan !== operation.plan || charge.deadline !== operation.deadline) throw new Error("HTTP recovery effect has no matching durable admission");
+      if (operation === undefined || envelope === undefined || charge?.result !== "pending" || charge.incarnation !== envelope.tickets.incarnation || charge.sequence !== Number(operation.action.split(":")[1]) || charge.target.plan !== httpReleasePlan(operation) || charge.deadline !== httpAdmissionDeadline(operation, envelope)) throw new Error("HTTP recovery effect has no matching durable admission");
       if (step.effect === "restore" && !hasHttpRecoveryPeak(charge)) throw new Error("HTTP restoration lacks reserved recovery overlap");
       return store.recordHttpRecoveryStep(ticket, step, native, now);
     }),
@@ -409,7 +428,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const envelope = await store.read();
       const operation = envelope?.http?.requests.find((item) => item.ticket === ticket);
       const resources = (await readIndex()).resources?.charges.find((item) => item.app === app);
-      if (operation === undefined || resources?.result !== "pending" || resources.incarnation !== envelope?.tickets.incarnation || resources.sequence !== Number(operation.action.split(":")[1]) || resources.target.plan !== operation.plan || resources.deadline !== operation.deadline) throw new Error("HTTP promotion has no matching durable admission");
+      if (operation === undefined || envelope === undefined || resources?.result !== "pending" || resources.incarnation !== envelope.tickets.incarnation || resources.sequence !== Number(operation.action.split(":")[1]) || resources.target.plan !== httpReleasePlan(operation) || resources.deadline !== httpAdmissionDeadline(operation, envelope)) throw new Error("HTTP promotion has no matching durable admission");
       const verified = await store.promoteHttp(ticket, native, routed, now);
       // A crash here preserves a conservative overlap charge. Recovery settles from the sealed proof.
       await serialIndex(async () => {
@@ -425,16 +444,30 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const envelope = await store.read();
       const registration = verifiedRegistration(app, envelope);
       if (envelope?.fence === null || envelope?.fence === undefined || envelope.registrationAllocation === undefined) throw new Error("deployment status lacks lifecycle authority");
-      return deploymentStatus(app, registration.incarnation, envelope.registrationAllocation.runtime, envelope.fence.lifecycle.phase, envelope.http);
+      return deploymentStatus(app, registration.incarnation, envelope.registrationAllocation.runtime, envelope.fence.lifecycle.phase, envelope.http, envelope.rollout);
     }),
     /** Owner-only restart work list; consumers get identities, never journal paths or mutable intent. */
+    pendingRolloutOperations: async () => {
+      if (closed) throw new Error("lifecycle app index is closed");
+      const snapshot = await serialIndex(readIndex);
+      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
+        const state = await store.read(); const operation = state?.rollout;
+        if (operation === undefined || operation.preparation.phase === "held") return [];
+        const http = state?.http?.requests.find((item) => item.request === operation.preparation.run);
+        if (http?.phase === "held") return [];
+        const charge = snapshot.resources?.charges.find((item) => item.app === app.app);
+        const unsettled = charge?.result === "pending" && charge.incarnation === app.incarnation && charge.sequence === Number(operation.action.split(":")[1]);
+        return http !== undefined && terminalHttp(http.phase) && !unsettled ? [] : [Object.freeze({ app: app.app, request: operation.preparation.run })];
+      })));
+      return Object.freeze(work.flat());
+    },
     pendingHttpOperations: async () => {
       if (closed) throw new Error("lifecycle app index is closed");
       const snapshot = await serialIndex(readIndex);
       const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
         const envelope = await store.read();
         const latest = envelope?.http?.requests.at(-1);
-        if (latest === undefined || latest.phase === "held") return [];
+        if (latest === undefined || latest.phase === "held" || latest.deployment !== undefined) return [];
         const charge = snapshot.resources?.charges.find((item) => item.app === app.app);
         const unsettled = charge?.result === "pending" && charge.incarnation === app.incarnation && charge.sequence === Number(latest.action.split(":")[1]);
         return terminalHttp(latest.phase) && !unsettled ? [] : [Object.freeze({ app: app.app, request: latest.request })];

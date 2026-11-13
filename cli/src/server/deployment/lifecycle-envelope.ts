@@ -5,7 +5,7 @@
 import { z } from "zod";
 import { err, ok } from "../../lib/result.ts";
 import { parseRegistrationGeneration } from "../../contracts/registration-generation.ts";
-import { parseHttpState, terminalHttp } from "./http-state.ts";
+import { httpReleasePlan, parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
 import { parseRolloutRequest } from "./rollout-request.ts";
@@ -35,6 +35,7 @@ const shape = z.object({
   registrationReceipt: z.object({ ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]), metadata: z.unknown() }).strict().optional(),
   http: z.unknown().optional(),
   rollout: z.unknown().optional(),
+  rollouts: z.array(z.unknown()).max(1024).optional(),
   operations: z.array(z.object({ ticket: z.string().max(80), action: z.string().max(80), descriptor }).strict()).max(2),
 }).strict();
 
@@ -98,12 +99,12 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   if (http?.ok) {
     for (const request of http.value.requests) {
       const lookup = lookupTicket(tickets.value, request.ticket);
-      const binding = admitTicket(tickets.value, request.ticket, { kind: "deploy", planDigest: request.plan });
+      const binding = admitTicket(tickets.value, request.ticket, { kind: "deploy", planDigest: httpReleasePlan(request) });
       if (!lookup.ok) return err("HTTP request has an unissued ticket");
       if (terminalHttp(request.phase)) {
         const outcome = request.phase === "succeeded" ? "success" : request.phase === "cancelled" ? "cancelled" : "failure";
         if (lookup.value.status !== "expired" && (!binding.ok || binding.value.status !== "terminal" || binding.value.outcome !== outcome)) return err("HTTP receipt conflicts with ticket history");
-      } else if (!binding.ok || binding.value.status !== "accepted" || !operations.some((operation) => operation.ticket === request.ticket && operation.action === request.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === request.plan)) return err("HTTP request lacks lifecycle intent");
+      } else if (!binding.ok || binding.value.status !== "accepted" || !operations.some((operation) => operation.ticket === request.ticket && operation.action === request.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === httpReleasePlan(request))) return err("HTTP request lacks lifecycle intent");
     }
   }
   const rollout = (() => {
@@ -111,18 +112,33 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     try { return parseRolloutRequest(parsed.data.rollout); } catch { return null; }
   })();
   if (rollout === null) return err("invalid complete rollout envelope");
-  if (rollout !== undefined) {
-    const preparation = rollout.preparation;
-    const binding = admitTicket(tickets.value, rollout.ticket, { kind: "deploy", planDigest: preparation.plan });
+  const rollouts = (() => {
+    try { return parsed.data.rollouts?.map(parseRolloutRequest); } catch { return null; }
+  })();
+  if (rollouts === null) return err("invalid complete rollout history");
+  const history = [...(rollouts ?? []), ...(rollout === undefined ? [] : [rollout])];
+  if (["ticket", "action", "run"].some((key) => new Set(history.map((item) => key === "ticket" ? item.ticket : key === "action" ? item.action : item.preparation.run)).size !== history.length)) return err("duplicate complete rollout identity");
+  if (history.some((item, index) => index > 0 && Number(item.action.split(":")[1]) <= Number(history[index - 1]?.action.split(":")[1]))) return err("complete rollout history changed order");
+  for (const owner of history) {
+    const preparation = owner.preparation;
+    const binding = admitTicket(tickets.value, owner.ticket, { kind: "deploy", planDigest: preparation.plan });
+    const request = http?.ok ? http.value.requests.find((item) => item.request === preparation.run) : undefined;
     if (receipt?.runtime !== "swarm" || preparation.app !== tickets.value.app || preparation.incarnation !== tickets.value.incarnation ||
-      !binding.ok || binding.value.status !== "accepted" ||
-      !operations.some((operation) => operation.ticket === rollout.ticket && operation.action === rollout.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === preparation.plan) ||
-      http?.ok && http.value.requests.some((request) => !terminalHttp(request.phase))) return err("complete rollout lacks exclusive lifecycle intent");
+      request !== undefined && (!owner.admitted || preparation.phase !== "ready" || request.ticket !== owner.ticket || request.action !== owner.action || request.commit !== owner.commit ||
+        request.plan !== preparation.workload || request.deployment !== preparation.plan || request.deadline !== preparation.httpDeadline)) return err("complete rollout HTTP handoff changed");
+    if (request !== undefined && terminalHttp(request.phase)) {
+      const lookup = lookupTicket(tickets.value, owner.ticket);
+      if (!lookup.ok || lookup.value.status !== "expired" && (!binding.ok || binding.value.status !== "terminal")) return err("complete rollout lacks terminal receipt");
+    } else if (owner !== rollout || !binding.ok || binding.value.status !== "accepted" ||
+      !operations.some((operation) => operation.ticket === owner.ticket && operation.action === owner.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === preparation.plan) ||
+      http?.ok && http.value.requests.some((item) => !terminalHttp(item.phase) && item !== request)) return err("complete rollout lacks exclusive lifecycle intent");
   }
+  if (http?.ok && http.value.requests.some((request) => request.deployment !== undefined && !history.some((owner) => owner.preparation.run === request.request))) return err("HTTP projection lacks its complete rollout owner");
   operations.forEach((operation) => { Object.freeze(operation.descriptor); Object.freeze(operation); });
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
     ...(http?.ok ? { http: http.value } : {}),
-    ...(rollout === undefined ? {} : { rollout }) }));
+    ...(rollout === undefined ? {} : { rollout }),
+    ...(rollouts === undefined ? {} : { rollouts: Object.freeze(rollouts) }) }));
 };

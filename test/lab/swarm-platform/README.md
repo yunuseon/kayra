@@ -410,3 +410,54 @@ source remains preserved at
 The component playbook and upgrade lab retain `.indexed-sequence.json` and
 `.indexed-sequence.tar` before successful source cleanup. All 59 focused Linux
 checks pass. Typecheck, lint and the serial CLI suite pass (596 tests, one skip).
+
+The combined indexed-preparation rerun passed all 38 tasks. Its result prefix is
+`/tmp/kayra-indexed-preparation-component-run2.json`, including
+`.indexed-sequence.json` and `.indexed-sequence.tar`; the log is
+`/tmp/kayra-indexed-preparation-component-run2.log`. The first combined run
+matched a temporary Compose command container when locating the deployer. Its
+source remains at `/var/lib/kayra/swarm/coordinator-source-tn2ahevp`; the passing
+fixture filters one-off containers and requires one persistent deployer ID.
+
+## Complete rollout HTTP handoff
+
+`rollout-coordinator.mjs run <new-results-directory>` drives the indexed parent
+through migrations, Swarm service operations and trusted TLS readiness. Its app
+image is a disposable Node-capable image mirrored into the fixture's own registry
+namespace. The same app-image service supplies migration/probe commands and the
+HTTP fixture. The app's separate effect-counting service is synthetic, unrouted
+and mount-free; this is not retained-database or public-deployer integration.
+
+Four native scenarios passed on 2026-11-13: initial complete deployment, SIGKILL
+after HTTP acknowledgement, automatic rollback preserving the previous complete
+release certificate, and an unknown migration that never creates an HTTP
+candidate. Recovery dispatched zero additional job Starts or HTTP writes after
+the acknowledged update. Docker events verified exactly five job Starts, one
+per execution container across all four scenarios. The rollback case recovered
+in 45,679 ms; this is not an uninterrupted rollback or continuity measurement.
+
+Engine was 29.9.3/API 1.56, Node 24.22.1, and the fixture image digest is recorded
+in the machine-readable result. VM clock offsets were 138 ms before and 135 ms
+after the run. Context is `/tmp/kayra-rollout-handoff-run2-context.json`, raw
+evidence `/tmp/kayra-rollout-handoff-evidence/`, and the log is
+`/tmp/kayra-rollout-handoff-run2-native.log`. Exported journals and traces contain
+no synthetic private values. An initial fixture embedded dollar-bearing JS
+directly in a Compose command and was correctly refused before HTTP intent.
+The corrected fixture imports encoded app code through a literal command; the
+application-plan validator was not relaxed. Failed source and its synthetic
+state service remain preserved at
+`/var/lib/kayra/swarm/rollout-handoff-source-vIhsu5We`; cleanup is
+`sudo docker service rm 2uv0nyzvjoud1nphtvph7ys8m` after inspecting the evidence.
+
+The component playbook and upgrade lab retain `.rollout.json` and `.rollout.tar`
+before successful source cleanup. All 67 focused Linux checks pass. Typecheck,
+lint and the serial CLI suite pass (604 tests, one skip). Public complete-rollout
+acceptance remains disabled pending audited resolution, cancellation before
+handoff and normal pipeline integration.
+
+The combined component passed all 42 tasks, including legacy HTTP recovery,
+native overlap, jobs, probes, cold images, deadlines, ordered/indexed migrations,
+complete rollouts, evidence export and successful-source cleanup. Results use
+the prefix `/tmp/kayra-rollout-handoff-component.json`, including `.rollout.json`
+and `.rollout.tar`; the log is `/tmp/kayra-rollout-handoff-component.log`. The VM
+and controller clocks still matched at completion.

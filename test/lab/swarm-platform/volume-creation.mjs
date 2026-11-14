@@ -18,6 +18,8 @@ const native = ownedVolumes({ request: async (...args) => {
 const forever = () => new Promise(() => {});
 if (mode === '--child') {
   assert.ok(['before-create', 'after-create', 'after-receipt'].includes(cut));
+  // An unsettled promise alone does not keep Node alive at the receipt-write checkpoint.
+  setInterval(() => {}, 1000);
   const request = JSON.parse(await readFile(join(output, cut, 'request.json'), 'utf8')); const journal = await openJournal(join(output, cut, 'journal'));
   const checkpoint = (phase) => { process.stdout.write(JSON.stringify({ checkpoint: phase, pid: process.pid, at: Date.now() }) + '\n'); };
   const wrapped = { read: journal.read, write: async (value) => { await journal.write(value); if (cut === 'after-receipt' && parseDataVolumeCreation(value).phase === 'ready') { checkpoint(cut); await forever(); } } };
@@ -67,6 +69,7 @@ if (mode === '--child') {
       let timer;
       try {
         const checkpoint = await Promise.race([reached.promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('native kill checkpoint deadline')), 20000); })]);
+        assert.equal(child.exitCode, null); assert.equal(child.signalCode, null);
         await assert.rejects(openJournal(join(output, phase, 'journal'), 'existing'), /locked|busy/);
         const before = parseDataVolumeCreation(JSON.parse(await readFile(join(output, phase, 'journal/state.json'), 'utf8'))); assert.equal(before.action.deadline, input.action.deadline);
         child.kill('SIGKILL'); const [, signal] = await exited; assert.equal(signal, 'SIGKILL');

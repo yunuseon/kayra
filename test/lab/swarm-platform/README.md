@@ -1257,7 +1257,7 @@ clock observations, native events and request identities are retained in a
 private `.cache/lab-evidence/kayra-volume-lab-<timestamp>/` directory by default.
 Successful VMs and temporary keys/sources are removed unless `--keep`; failed
 VMs and sources remain with explicit cleanup instructions. Ten mocked-runtime
-checks pass. Native validation is pending. This is an adapter lab, not proof of
+checks pass. The native pass is recorded below. This is an adapter lab, not proof of
 coordinator removal/purge, retained dependencies, SQL safety or application data
 retention across rollout/rollback/removal.
 
@@ -1274,3 +1274,8 @@ clock gates, requests/events and results are retained at
 This pass does not enable app volumes or establish coordinator lifecycle/SQL
 safety. The fresh full resource-upgrade run uses independent frozen source
 `9e6daef`, so it does not include these later volume primitives.
+
+The fresh full resource-upgrade run passed at that frozen source. See
+[RESOURCE-RESULTS.md](RESOURCE-RESULTS.md) and
+[RESOURCE-RESULTS.json](RESOURCE-RESULTS.json) for measured results, reproduction
+and remaining limitations.

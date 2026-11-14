@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "date": "2026-11-14",
+  "source": "9e6daefe53128e87e74003af6bc7562ab2eb8a39",
+  "vm": "kayra-resource-acceptance-20261114200226",
+  "vmDestroyed": true,
+  "upgradeFrom": "0.23.0",
+  "passed": true,
+  "versions": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "engine": "29.9.3",
+    "cli": "29.9.3",
+    "compose": "5.7.1",
+    "traefik": "traefik:v3.7.16@sha256:c8a121e4bb1347e8fd52657fab12f2cb70b68f8a018895e2068f92c9e519b9c2",
+    "socketProxy": "tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459"
+  },
+  "cases": {
+    "complete": {
+      "passed": true,
+      "requests": 2969,
+      "failedRequests": 0,
+      "prematureExposure": 0,
+      "achievedRequestsPerSecond": 19.99878713555108,
+      "maxRequestStartGapMs": 190.320928000001
+    },
+    "candidate-oom": {
+      "passed": true,
+      "requests": 2457,
+      "failedRequests": 102,
+      "prematureExposure": 0,
+      "recoveryMs": 37657.926513671875,
+      "failureWindowMs": 7049,
+      "achievedRequestsPerSecond": 19.9970688335586,
+      "maxRequestStartGapMs": 196.36232100000052
+    },
+    "admission-race": {
+      "passed": true,
+      "requests": 3026,
+      "failedRequests": 0,
+      "achievedRequestsPerSecond": 20.00013223227922,
+      "maxRequestStartGapMs": 236.9514879999915,
+      "winner": "admission-left",
+      "loser": "admission-right",
+      "winnerStarts": 1,
+      "loserWorkloadObjects": 0
+    },
+    "lifecycle-enospc": {
+      "passed": true,
+      "requests": 2372,
+      "failedRequests": 0,
+      "prematureExposure": 0,
+      "achievedRequestsPerSecond": 20.00016870661077,
+      "maxRequestStartGapMs": 190.54298300000664,
+      "candidateStarts": 1
+    },
+    "runtime-health": {
+      "passed": true
+    }
+  },
+  "evidenceDirectory": ".cache/lab-evidence/kayra-resource-acceptance-20261114200226",
+  "limitations": [
+    "Post-readiness candidate OOM recovery is disruptive",
+    "Bounded metadata ENOSPC only; not Docker-root or inode exhaustion",
+    "No global OOM, host loss or multi-node guarantee",
+    "No integrated retained dependencies, workers, singletons, maintenance or removal/purge acceptance",
+    "Does not validate later owned-volume primitives or data-owner metadata"
+  ]
+}

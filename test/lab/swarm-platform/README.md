@@ -1019,4 +1019,31 @@ Ten lab checks pass, including ready/not-ready status, exactly one request per
 probe and refusal of an invalid port. This fixture change follows measured
 Node-probe timeouts and the same-container timings above; it does not turn the
 failed 233-request run into a pass or establish universal readiness guarantees.
-A new full upgrade must pass with this source before full acceptance is claimed.
+The fresh upgrade from published `0.23.0` to clean commit `ce6f443` passed on
+2026-11-14 in `kayra-health-budget-20261114125938` and destroyed its successful
+VM. Normal Compose deploy/cache/policy refusal/rollback/GC, restart restoration,
+TLS/Authelia verification, all 79 component tasks, indexed Swarm registration
+and real builder promotion passed. The migration/restart integration recorded
+2,986 short requests at 20.0005/s, zero failed requests and zero premature B
+responses (largest request-start gap 192.2 ms). There were exactly two migration
+starts, one status-probe start and one effect per migration operation. Replaying
+the interrupted request retained its original plan and absolute deadline.
+
+The same run refused the inherited-volume image at preview and both prepare
+attempts with zero app workload writes or anonymous volumes, then reported the
+current healthy task while ignoring one historical shutdown task. Final
+`kayra verify lab` passed. Versions: Ubuntu 24.04.5 ARM64/kernel
+6.8.0-147-generic, Docker Engine/CLI 29.9.3/API 1.56, Compose 5.7.1 and Node
+24.22.1; exact shared-image digests and source manifests are in the results.
+
+Reproduction: `bash test/lab/upgrade.sh --from 0.23.0 --vm-name
+kayra-health-budget-<timestamp> --indexed-registration --swarm-host` from the
+recorded source. Raw log: `/tmp/kayra-health-budget-20261114125938.log`.
+All machine-readable results and archives share the prefix
+`/tmp/kayra-swarm-platform-kayra-health-budget-20261114125938`, including
+`.complete.json`, `.complete.tar`, `.complete.source.json`, `.complete.clock.json`,
+`.image-admission.json`/`.tar` and `.runtime-health.json`.
+The subsequent ShellCheck correction renames only the unused response-drain
+variable; it is not part of the frozen lab source. Earlier failed runs remain
+failures and are preserved. This pass does not complete worker, maintenance,
+retained-data, lifecycle-removal or integrated resource-failure acceptance.

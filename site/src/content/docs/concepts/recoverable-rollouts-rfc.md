@@ -1400,3 +1400,26 @@ creating containers or volumes and does not certify physical ownership or data.
 One-shot migration/probe usages still require images with no inherited volumes,
 even when the same digest is permitted for a mounted long-running service.
 The existing HTTP-only image-admission method keeps its no-volumes restriction.
+
+### Volume creation evidence
+
+A private volume-creation state machine records the owning app/data generation,
+admitted deployment identity, exact allocation, stable action identity and
+original absolute deadline before issuing an adapter call. Creation retries are
+bounded and idempotent within that never-reused allocation. Unknown observations
+cannot justify a create, and every attempt rechecks the parent's current fence,
+allocation and admission authority through a typed port. The parent must provide
+those checks; parsing or a lab's fixture authorization does not grant admission.
+
+The controller synchronizes an observed creation receipt before reporting its
+creation phase ready. A rejected journal acknowledgement poisons that writer
+until reopen. A known volume that disappears or whose receipt conflicts is held;
+the controller never repairs that condition by creating empty replacement data.
+It never deletes volumes or starts workloads. A recorded creation receipt is
+historical metadata, not current routed readiness or workload permission.
+
+A separately bounded diagnostic inspection can observe the exact object after
+creation authority expires. It cannot update the journal, unhold an operation,
+refresh the original deadline or issue a native effect. Group reconciliation,
+current volume checks, lifecycle fencing and indexed admission remain required
+before this primitive can enable retained application workloads.

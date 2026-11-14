@@ -95,6 +95,19 @@
         flat: true
       when: declared_image_probe | default(false) | bool
 
+    - name: Verify native volume creation recovery across coordinator process kills
+      ansible.builtin.command:
+        argv: ["{{ volume_source.path }}/node", "{{ volume_source.path }}/test/lab/swarm-platform/volume-creation.mjs", --run, "{{ volume_source.path }}/results/volume-state"]
+      changed_when: true
+      when: volume_state_probe | default(false) | bool
+
+    - name: Retain native volume creation recovery evidence
+      ansible.builtin.fetch:
+        src: "{{ volume_source.path }}/results/volume-state/volume-state.json"
+        dest: "{{ report_path }}.volume-state.json"
+        flat: true
+      when: volume_state_probe | default(false) | bool
+
     - name: Require synchronized clocks after native writes
       ansible.builtin.command:
         argv: [date, "+%s"]

@@ -7,6 +7,13 @@ const identity = z.object({ version: z.literal(1), app: z.string().max(48).regex
 }).strict().readonly().superRefine((value, context) => {
   if (value.name !== `kayra-data-${value.allocation}`) context.addIssue({ code: "custom", message: "volume name must identify its durable allocation" });
 });
+const dataOwnershipSchema = z.object({ version: z.literal(1), app: z.string().regex(names.app.pattern), incarnation: z.uuid(), dataOwner: z.uuid() }).strict().readonly()
+  .refine((value) => value.incarnation !== value.dataOwner, "data ownership is distinct from app incarnation");
+export type DataOwnership = z.infer<typeof dataOwnershipSchema>;
+export const parseDataOwnership = (input: unknown) => {
+  const checked = dataOwnershipSchema.safeParse(input);
+  return checked.success ? ok<DataOwnership>(checked.data) : err("invalid application data ownership");
+};
 export type OwnedVolume = z.infer<typeof identity>;
 export type VolumeAction = { readonly volume: OwnedVolume; readonly operation: string; readonly deadline: number };
 export type VolumeReceipt = { readonly volume: OwnedVolume; readonly createdAt: string };

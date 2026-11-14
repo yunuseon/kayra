@@ -1,3 +1,4 @@
+import { parseDataOwnership } from "../../contracts/owned-volume.ts";
 import { deploymentHealth } from "./deployment-health.ts";
 import { deploymentImagePins } from "./deployment-image-pins.ts";
 import type { RolloutRequest } from "./rollout-request.ts";
@@ -42,6 +43,7 @@ const appName = z.string().regex(names.app.pattern);
 const entry = z.object({
   app: appName,
   incarnation: z.uuid(),
+  dataOwner: z.uuid().exactOptional(),
   phase: z.enum(["initializing", "ready"]),
 }).strict();
 const build = z.object({
@@ -54,6 +56,8 @@ const build = z.object({
 const schema = z.object({ version: z.literal(1), resources: z.unknown().default(null), builds: z.array(build).default([]), apps: z.array(entry) }).strict().refine(({ apps, builds }) =>
   new Set(apps.map((app) => app.app)).size === apps.length &&
   new Set(apps.map((app) => app.incarnation)).size === apps.length &&
+  new Set(apps.flatMap((app) => app.dataOwner === undefined ? [] : [app.dataOwner])).size === apps.filter((app) => app.dataOwner !== undefined).length &&
+  apps.every((app) => app.dataOwner === undefined || app.dataOwner !== app.incarnation) &&
   new Set(builds.map((item) => item.id)).size === builds.length &&
   builds.every((item) => parseRegistrationGeneration(item.registration).ok &&
     apps.some((app) => app.app === item.registration.app && app.incarnation === item.registration.incarnation) &&
@@ -200,10 +204,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         await withEnvelope(path, existing, () => undefined);
         return existing.incarnation;
       }
-      const ownership = existing ?? entry.parse({ app, incarnation: randomUUID(), phase: "initializing" });
+      const ownership = existing ?? entry.parse({ app, incarnation: randomUUID(), dataOwner: randomUUID(), phase: "initializing" });
       if (existing === undefined) {
         if (await stat(path)) throw new Error("unindexed lifecycle directory exists; intervention required");
         if (index.apps.some((item) => item.incarnation === ownership.incarnation)) throw new Error("lifecycle incarnation collision");
+        if (ownership.dataOwner === ownership.incarnation || index.apps.some((item) => item.dataOwner === ownership.dataOwner)) throw new Error("application data ownership collision");
         await journal.write({ ...index, apps: [...index.apps, ownership] });
       }
       if (await stat(path) === undefined) await mkdir(path, { mode: 0o700 });
@@ -212,6 +217,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
+    dataOwnership: (app: string) => useReady(app, async (store) => {
+      const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
+      const owner = (await serialIndex(readIndex)).apps.find((item) => item.app === app);
+      if (owner?.dataOwner === undefined) throw new Error("managed data ownership is unavailable for this older application; existing volumes are never inferred");
+      const checked = parseDataOwnership({ version: 1, app, incarnation: registration.incarnation, dataOwner: owner.dataOwner });
+      if (!checked.ok || owner.incarnation !== registration.incarnation) throw new Error("managed data ownership disagrees with the registered application");
+      return checked.value;
+    }),
     verifiedRegistration: (app: string) => useReady(app, async (store) => {
       return verifiedRegistration(app, await store.read());
     }),

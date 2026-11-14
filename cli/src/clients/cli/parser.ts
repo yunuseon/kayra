@@ -212,7 +212,13 @@ export const parser = (fleet: Fleet) => {
                     command("purge", object({ name: constant("app purge"), server, app }), {
                       brief: summary("app.purge"),
                     }),
+                    command("build", object({ name: constant("app build"), server, app,
+                      commit: argument(string({ metavar: "FULL_COMMIT" })),
+                    }), { brief: summary("app.build") }),
                     command("deployment", or(
+                      command("prepare", object({ name: constant("app deployment prepare"), server, app,
+                        commit: argument(string({ metavar: "FULL_COMMIT" })), request: argument(string({ metavar: "REQUEST_UUID" })),
+                      }), { brief: summary("app.deployment.prepare") }),
                       command("status", object({ name: constant("app deployment status"), server, app }), { brief: summary("app.deployment.status") }),
                       command("cancel", object({ name: constant("app deployment cancel"), server, app,
                         request: argument(string({ metavar: "REQUEST_UUID" })),

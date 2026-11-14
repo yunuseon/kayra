@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deploymentCancellationSchema } from "../../contracts/deployment-request.ts";
+import { deploymentCancellationSchema, deploymentRequestSchema } from "../../contracts/deployment-request.ts";
 import { migrationCleanupRequestSchema } from "../../contracts/migration-cleanup.ts";
 import { migrationResolutionRequestSchema } from "../../contracts/migration-resolution.ts";
 import { valueKeySchema } from "../app-values/model.ts";
@@ -155,6 +155,16 @@ export const operations = {
     scope: "app", effect: "changes", kind: "plan", input: appInput,
   },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
+  "app.build": {
+    summary: "Build and retain an exact commit through the experimental indexed builder.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: appInput.extend({ commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().readonly(),
+  },
+  "app.deployment.prepare": {
+    summary: "Request an experimental rollout of a retained build under a stable request identity.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: deploymentRequestSchema.unwrap().extend({ server }).strict().readonly(),
+  },
   "app.deployment.status": {
     summary: "Read deployment phase, verified active release and required recovery action.",
     scope: "app", effect: "reads", kind: "plan", bare: true, input: appInput,

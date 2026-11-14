@@ -122,3 +122,27 @@ test("migration recovery transports audit prose as an inert word through the rem
   deepStrictEqual(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")), payload);
   strictEqual(JSON.stringify(step.argv).includes("touch"), false);
 });
+
+test("retained builds and deployment requests accept exact identities without runtime or authority inputs", () => {
+  const commit = "a".repeat(40); const request = "12345678-1234-4234-8234-123456789abc";
+  const build = { server: "shop", app: "shop", commit }; const prepare = { ...build, request };
+  strictEqual(invocation("app.build", build).ok, true); strictEqual(invocation("app.deployment.prepare", prepare).ok, true);
+  for (const invalid of ["main", "a".repeat(7), "$(id)", "a".repeat(39) + ";"]) {
+    strictEqual(invocation("app.build", { ...build, commit: invalid }).ok, false);
+    strictEqual(invocation("app.deployment.prepare", { ...prepare, commit: invalid }).ok, false);
+  }
+  for (const extra of [{ runtime: "swarm" }, { deadline: 9999 }, { migrationTimeoutCeilingSeconds: 9999 }, { environment: { TOKEN: "private" } }]) {
+    strictEqual(invocation("app.build", { ...build, ...extra }).ok, false);
+    strictEqual(invocation("app.deployment.prepare", { ...prepare, ...extra }).ok, false);
+  }
+  strictEqual(invocation("app.deployment.prepare", { ...prepare, request: "new" }).ok, false);
+});
+
+test("build and prepare clients call the owning lifecycle interface with immutable identities", () => {
+  const name = appName("shop"); strictEqual(name.ok, true); const commit = "a".repeat(40); const request = "12345678-1234-4234-8234-123456789abc";
+  const build = deployer(shop, { kind: "build", app: name.value, commit }); strictEqual(build.ok, true);
+  const buildStep = build.value[0]; strictEqual(buildStep?.kind, "run"); deepStrictEqual(buildStep.argv.slice(-4), ["ctl", "build", "shop", commit]);
+  const prepare = deployer(shop, { kind: "lifecycle-prepare", app: name.value, commit, request }); strictEqual(prepare.ok, true);
+  const step = prepare.value[0]; strictEqual(step?.kind, "run"); deepStrictEqual(step.argv.slice(-5), ["lifecycle", "prepare", "shop", commit, request]);
+  strictEqual(build.value.length, 1); strictEqual(prepare.value.length, 1);
+});

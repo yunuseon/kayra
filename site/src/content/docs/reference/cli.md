@@ -358,6 +358,31 @@ one only in a release that says so.
 `result` is `problem`, `unchecked` or `passed`: a finding's own, a server's and
 the whole run's the worst of what is under it. `hint` is what to do, or `null`.
 
+## Experimental indexed rollouts
+
+For an explicitly registered indexed application on an experimental host:
+
+```bash
+kayra app build SERVER APP FULL_COMMIT
+kayra app deployment prepare SERVER APP FULL_COMMIT REQUEST_UUID
+kayra app deployment status SERVER APP
+kayra app deployment cancel SERVER APP REQUEST_UUID
+```
+
+`FULL_COMMIT` is the exact forty-character commit id. Build retains the verified
+artifact; prepare requests its rollout and returns a receipt. It does not wait
+for readiness or imply promotion. Keep the same request UUID when retrying an
+uncertain request, then read status. Version-two receipts identify the complete
+plan and its original total deadline; older HTTP requests retain version one.
+The host selects the runtime and grants. These commands accept no runtime,
+resource override, migration command, secret value or deadline.
+
+The API and UI expose `app.build` and `app.deployment.prepare`; MCP tools are
+`app_build` and `app_deployment_prepare`. All use the same validated input and
+server lifecycle interface. Existing ordinary Compose applications keep their
+current deployment commands. These experimental commands do not register apps,
+convert backends or enable workers, maintenance or data-retention guarantees.
+
 ## When to run what
 
 | Changed | Run |

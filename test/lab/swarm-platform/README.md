@@ -1260,3 +1260,17 @@ VMs and sources remain with explicit cleanup instructions. Ten mocked-runtime
 checks pass. Native validation is pending. This is an adapter lab, not proof of
 coordinator removal/purge, retained dependencies, SQL safety or application data
 retention across rollout/rollback/removal.
+
+The isolated volume adapter lab passed at `e296993` in fresh
+`kayra-volume-lab-20261114201749570660`; its successful VM and temporary key were
+removed. Native Docker confirmed retained fixture writes across workload
+recreation, stopped-container and zero-replica service attachment refusals,
+`PreviousSpec` refusal after the first scrub, successful removal only after both
+specifications were cleared, and preservation of the unrelated fixture data.
+Versions: Engine/CLI 29.9.3, API 1.56, Compose 5.7.1, Node 24.22.1 and the exact
+pinned Node digest above. Private source archives, file hashes, source manifest,
+clock gates, requests/events and results are retained at
+`.cache/lab-evidence/kayra-volume-lab-20261114201749570660/`.
+This pass does not enable app volumes or establish coordinator lifecycle/SQL
+safety. The fresh full resource-upgrade run uses independent frozen source
+`9e6daef`, so it does not include these later volume primitives.

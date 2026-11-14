@@ -5,15 +5,13 @@
   vars:
     platform_dir: /opt/platform
   tasks:
-    - name: Copy the checkout's server modules
-      ansible.builtin.copy:
-        src: "{{ kayra_root }}/cli/src/{{ item }}/"
-        dest: "{{ platform_dir }}/deployer/app/{{ item }}/"
-        owner: root
-        group: root
-        mode: "0644"
-        directory_mode: "0755"
-      loop: [deployer, server, contracts, lib]
+    - name: Stage the checkout's server modules in one transfer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}/cli/src"
+        stage_source_destination: "{{ platform_dir }}/deployer/app"
+        stage_source_paths: [deployer, server, contracts, lib]
+        stage_source_manifest: "/tmp/kayra-build-source-{{ inventory_hostname }}-{{ fixture_app | default('indexed-build') }}.json"
 
     - name: Copy the deployer build definition
       ansible.builtin.copy:
@@ -55,8 +53,7 @@
     request:
       app: "{{ build_registration.name }}"
       registration: "{{ build_registration }}"
-      configuration:
-        MODE: lab
+      configuration: "{{ fixture_configuration | default({'MODE': 'lab'}) }}"
       secrets:
         GREETING: synthetic-build-fixture
   tasks:
@@ -125,7 +122,7 @@
             const checked = parseBundle(app.value.name, commit.value, built.value, registration.value, "artifact");
             if (!checked.ok) throw new Error(checked.error);
             console.log(JSON.stringify({images: checked.value.images, registration: checked.value.registration, ...(checked.value.rollout === undefined ? {} : {rollout: checked.value.rollout})}));
-        stdin: "{{ {'app':build_registration, 'registration':(pointer.content | b64decode | from_json), 'commit':fixture_commit} | to_json }}"
+        stdin: "{{ {'app': build_registration, 'registration': (pointer.content | b64decode | from_json), 'commit': fixture_commit} | to_json }}"
         chdir: "{{ platform_dir }}"
       environment: "{{ compose_env }}"
       register: bundle

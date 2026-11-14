@@ -18,51 +18,13 @@
         prefix: coordinator-source-
       register: coordinator_source
 
-    - name: Create fixture source parents
-      ansible.builtin.file:
-        path: "{{ coordinator_source.path }}/{{ item }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-      loop: [cli/src, ci/tests/swarm-http, test/lab/swarm-platform, test/lab/swarm-platform/http-fixture/web]
-
-    - name: Copy server code into the isolated source tree
-      ansible.builtin.copy:
-        src: "{{ kayra_root }}/cli/src/"
-        dest: "{{ coordinator_source.path }}/cli/src/"
-        owner: root
-        group: root
-        mode: "0644"
-        directory_mode: "0755"
-
-    - name: Copy component fixture inputs
-      ansible.builtin.copy:
-        src: "{{ kayra_root }}/{{ item }}"
-        dest: "{{ coordinator_source.path }}/{{ item }}"
-        owner: root
-        group: root
-        mode: "0644"
-        directory_mode: "0755"
-      loop:
-        - package.json
-        - ci/tests/swarm-http/native-plan.json
-        - test/lab/swarm-platform/http-coordinator.mjs
-        - test/lab/swarm-platform/recovery-overlap.mjs
-        - test/lab/swarm-platform/one-shot.mjs
-        - test/lab/swarm-platform/one-shot-health.mjs
-        - test/lab/swarm-platform/one-shot-cleanup.mjs
-        - test/lab/swarm-platform/migration-probe.mjs
-        - test/lab/swarm-platform/one-shot-cold.mjs
-        - test/lab/swarm-platform/one-shot-deadlines.mjs
-        - test/lab/swarm-platform/migration-sequence.mjs
-        - test/lab/swarm-platform/indexed-migration-owner.mjs
-        - test/lab/swarm-platform/rollout-coordinator.mjs
-        - test/lab/swarm-platform/rollout-cancellation.mjs
-        - test/lab/swarm-platform/rollout-unstarted.mjs
-        - test/lab/swarm-platform/rollout-handoff-expiry.mjs
-        - test/lab/swarm-platform/http-fixture/web/fixture.mjs
-        - test/lab/swarm-platform/migration-fixture.mjs
+    - name: Stage immutable component sources in one transfer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ coordinator_source.path }}"
+        stage_source_paths: [cli/src, package.json, ci/tests/swarm-http, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
 
     - name: Find the existing deployer container
       ansible.builtin.command:
@@ -82,6 +44,14 @@
         - {source: /usr/local/bin/node, target: node}
         - {source: /opt/kayra/node_modules, target: node_modules}
       changed_when: true
+
+    - name: Recheck the experiment clock after staging and before runtime effects
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: coordinator_staged_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((coordinator_staged_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
 
     - name: Reconcile and promote with a SIGKILL after native acknowledgement
       ansible.builtin.command:
@@ -512,6 +482,14 @@
         src: "{{ coordinator_source.path }}/handoff-expiry.tar"
         dest: "{{ report_path }}.handoff-expiry.tar"
         flat: true
+
+    - name: Require synchronized clocks after the native experiments
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: coordinator_completed_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((coordinator_completed_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
 
     - name: Remove successful component source files
       ansible.builtin.file:

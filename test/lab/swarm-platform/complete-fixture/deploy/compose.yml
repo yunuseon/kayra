@@ -1,0 +1,24 @@
+services:
+  web:
+    image: ${WEB_IMAGE:?}
+    environment:
+      RELEASE: A
+      READY_DELAY_MS: "0"
+      NEVER_READY: "false"
+      FAIL_AFTER_READY_MS: "0"
+      GREETING: ${GREETING:?required}
+      MODE: ${MODE:?required}
+      DB_HOST: ${DB_HOST:?required}
+      FAIL_AFTER_EFFECT: "false"
+      MIGRATION_HOLD_MS: "0"
+    deploy:
+      resources:
+        limits: {memory: 128m, cpus: "0.25"}
+        reservations: {memory: 64m, cpus: "0.125"}
+    healthcheck:
+      test: [CMD, node, /fixture.mjs, health]
+      interval: 2s
+      timeout: 1s
+      start_period: 20s
+      retries: 2
+    stop_grace_period: 30s

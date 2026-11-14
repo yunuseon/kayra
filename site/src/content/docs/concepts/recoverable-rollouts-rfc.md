@@ -1244,6 +1244,20 @@ coordination, and resource exhaustion. These are feasibility evidence, not
 proof that Kayra's actual deployer, persistence, platform security or upgrade
 path implements the proposed guarantees.
 
+The indexed complete-plan control has also passed a targeted real-builder
+integration with TLS routing: 3,029 short requests at 20 requests/second, zero
+failures and zero premature candidate exposure. During an unsafe migration,
+the deployer was killed; the existing job continued, failed after its effect,
+and its declared status probe established `applied` before HTTP replacement.
+Live Docker events showed two migration Starts and one probe Start, with one
+app-owned effect per release. Replay preserved plan identity and deadlines.
+The app fixture uses an external HTTP ledger, not a SQL engine or retained
+volume. Exact versions, reproduction and raw evidence locations are documented
+in `test/lab/swarm-platform/README.md`. This targeted pass does not complete
+normal fleet integration, worker/maintenance/data acceptance or the full
+upgrade lab. An earlier run exposed health-probe CPU overhead and failed with
+116 HTTP errors; that evidence remains recorded alongside the corrected fixture.
+
 Global OOM, Docker-root or inode exhaustion, backup restoration, host loss and
 multi-node behavior are outside this first single-node integration. Even a
 passing integration is experimental and is not a universal zero-downtime or

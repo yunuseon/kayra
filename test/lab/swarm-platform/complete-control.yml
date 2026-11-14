@@ -26,11 +26,22 @@
       changed_when: false
       failed_when: complete_existing_ledger.stdout | trim | length > 0
 
-    - name: Select the existing image's pinned Node runtime for the external fixture
+    - name: Select exactly the persistent coordinator container
       ansible.builtin.command:
-        argv: [docker, compose, images, -q, deployer]
-        chdir: /opt/platform
-      environment: "{{ compose_env }}"
+        argv: [docker, ps, -q, --filter, label=com.docker.compose.project=platform, --filter, label=com.docker.compose.service=deployer, --filter, label=com.docker.compose.oneoff=False]
+      register: complete_ledger_coordinator
+      changed_when: false
+      failed_when: complete_ledger_coordinator.stdout_lines | length != 1
+
+    - name: Read its trusted platform image reference
+      ansible.builtin.command:
+        argv: [docker, inspect, "{{ complete_ledger_coordinator.stdout | trim }}", --format, "{% raw %}{{.Config.Image}}{% endraw %}"]
+      register: complete_ledger_reference
+      changed_when: false
+
+    - name: Resolve an available immutable image identity rather than a container config digest
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ complete_ledger_reference.stdout | trim }}", --format, "{% raw %}{{.Id}}{% endraw %}"]
       register: complete_ledger_image
       changed_when: false
 

@@ -1,3 +1,4 @@
+import { prematureCandidateRequests } from './http-observations.mjs';
 import { nativeHttpIntent } from './http-intent.mjs';
 // Run on the isolated VM. Workload writes go only through the real deployer's ctl.
 import { strict as assert } from 'node:assert';
@@ -173,7 +174,7 @@ if (mode === 'prepare') {
       await pause(30000); await stopTraffic(); stopTraffic = undefined;
       const longResult = long === undefined ? null : await long;
       const failures = values.filter((value) => value.error !== undefined || value.status !== 200);
-      const premature = values.filter((value) => value.release === item.release && value.ready !== true);
+      const premature = prematureCandidateRequests(values, item.release);
       const gaps = values.map((value) => value.gapMs ?? 0); const duration = Math.max(...values.map((value) => value.at)) - Math.min(...values.map((value) => value.at));
       const stable = values.filter((value) => value.at >= convergedAt);
       const backend = caseAccess.filter((record) => typeof record.ServiceAddr === 'string' && record.ServiceAddr !== '');

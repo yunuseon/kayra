@@ -872,3 +872,32 @@ without its development dependency. Its source and failure log are preserved at
 `/tmp/kayra-deployment-pins-linux-context.json` and
 `/tmp/kayra-deployment-pins-linux.log`; architecture checks pass locally with
 the full development dependencies installed. No failed VM was deleted.
+
+### Observer corrections found in the fresh full upgrade
+
+`kayra-complete-acceptance-20261114041014` passed the normal Compose upgrade,
+restart/cache/policy/rollback/GC/poll paths, mixed TLS routing, all 79 component
+playbook tasks and real indexed Swarm HTTP promotion. Its complete migration
+fixture then failed before ledger creation: `docker compose images -q` returned
+a container image config digest which this Engine could not resolve for
+`docker run`; the named platform image resolved to a different available image
+identity. The fixture now resolves the existing persistent coordinator's trusted
+image reference with `docker image inspect`, then runs the resolved immutable
+identity. Both the container config digest and selected image reference are
+recorded. No replacement Node image is pulled for this fixture.
+
+The VM, failed source and fleet remain preserved. Context:
+`/tmp/kayra-complete-acceptance-context.json`; full/inner logs:
+`/tmp/kayra-complete-acceptance-20261114041014.log` and the `lab.log` under
+`/var/folders/pm/02mk70kx247bbsttcvzkqtw00000gn/T/tmp.RcUvI1mUdm`.
+This run is not reported as a complete upgrade pass.
+
+A separate run preserved in `/tmp/kayra-complete-live3-failed.tar` returned
+**3,149 HTTP 200 responses with zero request failures** and completed migration
+recovery and B promotion. Its observer rejected two successful old-A responses
+whose readiness had turned false while A drained after SIGTERM. Candidate B
+had no such responses. The premature-exposure assertion now scopes readiness to
+the candidate release, consistently with the existing HTTP matrix, while all
+request errors and non-200 responses still fail the experiment. Raw old-release
+draining responses remain recorded separately. The original failed observation
+is retained; a corrected observer must pass a fresh run before acceptance.

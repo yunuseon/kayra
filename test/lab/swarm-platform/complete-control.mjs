@@ -10,6 +10,7 @@ import { performance } from 'node:perf_hooks';
 import { jobName } from '../../../cli/src/contracts/one-shot-job.ts';
 import { nativeHttpIntent } from './http-intent.mjs';
 import { request, traffic } from './http-probe.mjs';
+import { prematureCandidateRequests } from './http-observations.mjs';
 
 const [manifestPath, output] = process.argv.slice(2); assert.ok(manifestPath && output);
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8')); assert.equal(manifest.version, 1); assert.equal(manifest.app, 'rollout-complete');
@@ -83,7 +84,7 @@ try {
   const probeName = jobName({ app: manifest.app, incarnation, run: b.receipt.request, step: 'schema', purpose: 'probe', attempt: 1 });
   const expectedJobs = [jobName({ app: manifest.app, incarnation, run: a.receipt.request, step: 'schema', purpose: 'migration', attempt: 1 }), migration, probeName];
   assert.deepEqual(starts.map((value) => value.Actor.Attributes['com.kayra.job']).sort(), expectedJobs.sort()); assert.ok(starts.every((value) => value.Actor.Attributes['com.kayra.barrier'] === 'false'));
-  const failures = requests.filter((value) => value.error !== undefined || value.status !== 200); const premature = requests.filter((value) => !value.ready); assert.equal(failures.length, 0); assert.equal(premature.length, 0);
+  const failures = requests.filter((value) => value.error !== undefined || value.status !== 200); const premature = prematureCandidateRequests(requests, 'B'); assert.equal(failures.length, 0); assert.equal(premature.length, 0);
   assert.ok(requests.some((value) => value.release === 'A') && requests.filter((value) => value.phase === 'stable').every((value) => value.release === 'B'));
   assert.ok(requests.filter((value) => value.phase === 'stable').length >= 570); assert.ok(requests.some((value) => value.connection === 'fresh') && requests.some((value) => value.connection === 'persistent'));
   assert.equal(eventError, undefined);
@@ -102,9 +103,10 @@ try {
     sharedImages[service] = await docker('inspect', ids[0], '--format', '{{.Config.Image}}');
   }
   const ledgerImage = await docker('inspect', manifest.ledger, '--format', '{{.Image}}');
+  const ledgerImageReference = await docker('inspect', manifest.ledger, '--format', '{{.Config.Image}}');
   const result = { passed: true, scope: 'real registered builder artifacts, app-owned HTTP ledger, migration/probe containers, coordinator restart and routed TLS HTTP; no SQL engine or retained-volume acceptance',
     a, b, initial: activeA, interrupted, final: activeB, replay, ledger: snapshot, migrationContinuedWithoutCoordinator: true, migrationStarts: 2, probeStarts: 1,
-    requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, appProbeRecoveredFailure: true, versions, sharedImages, ledgerImage, compose: await docker('compose', 'version', '--short'), node: process.version, os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
+    requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, appProbeRecoveredFailure: true, previousReleaseDrainingResponses: requests.filter((value) => value.release === 'A' && value.ready === false).length, versions, sharedImages, ledgerImage, ledgerImageReference, compose: await docker('compose', 'version', '--short'), node: process.version, os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); event('passed', result);
 } catch (error) {
   await writeFile(join(output, 'failure.json'), JSON.stringify({ error: String(error), phase, manifest }, null, 2)); console.error(JSON.stringify({ error: String(error), output })); process.exitCode = 1;

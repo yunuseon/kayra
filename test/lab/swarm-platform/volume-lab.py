@@ -18,6 +18,7 @@ parser.add_argument('--keep', action='store_true')
 parser.add_argument('--platform-inputs', action='store_true', help='also verify exact platform input generations and permissions as deployer UID 1000')
 parser.add_argument('--image-admission', action='store_true', help='also verify real registry metadata against declared service and one-shot mounts')
 parser.add_argument('--volume-state', action='store_true', help='also kill and recover the volume-creation coordinator against native volumes')
+parser.add_argument('--app-overlay', action='store_true', help='also verify platform-owned private app overlay provisioning')
 args = parser.parse_args()
 source = args.source.resolve()
 vm = 'kayra-volume-lab-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S%f')
@@ -38,6 +39,8 @@ if args.image_admission:
     paths += ['cli/src/server/runtime/registry-images.ts', 'cli/src/server/runtime/image-json.ts', 'test/lab/swarm-platform/declared-images.mjs']
 if args.volume_state:
     paths += ['cli/src/server/deployment/data-volume-creation.ts', 'cli/src/server/deployment/journal.ts', 'cli/src/server/deployment/journal-claim.ts', 'test/lab/swarm-platform/volume-creation.mjs']
+if args.app_overlay:
+    paths += ['cli/src/server/runtime/app-overlay.ts', 'cli/src/server/platform/app-overlay.ts', 'test/lab/swarm-platform/app-overlay.mjs']
 for relative in paths:
     origin, target = source / relative, frozen / relative
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -52,7 +55,7 @@ with tarfile.open(report / 'source.tar', 'w') as archive:
     archive.add(frozen, arcname='source')
 image = 'node:24.22.1-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea'
 commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-context = {'sourceCommit': commit, 'sourceManifest': 'source-files.json', 'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'runtime adapter and optional platform input readers only; no managed application or coordinator', 'platformInputs': args.platform_inputs, 'declaredImages': args.image_admission, 'volumeState': args.volume_state}
+context = {'sourceCommit': commit, 'sourceManifest': 'source-files.json', 'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'runtime adapter and optional platform input readers only; no managed application or coordinator', 'platformInputs': args.platform_inputs, 'declaredImages': args.image_admission, 'volumeState': args.volume_state, 'appOverlay': args.app_overlay}
 (report / 'context.json').write_text(json.dumps(context, indent=2))
 log = (report / 'lab.log').open('w')
 awake = subprocess.Popen(['caffeinate', '-i', '-s'])
@@ -75,7 +78,7 @@ try:
     inventory = work / 'inventory.ini'
     inventory.write_text('[servers]\nvolume-lab ansible_host=' + address + ' ansible_user=deploy ansible_ssh_private_key_file=' + str(key) + ' ansible_ssh_common_args="-o IdentitiesOnly=yes"\n')
     env = {**os.environ, 'ANSIBLE_CONFIG': str(frozen / 'ansible/ansible.cfg'), 'PYTHONDONTWRITEBYTECODE': '1'}
-    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json'), '-e', 'platform_input_probe=' + ('true' if args.platform_inputs else 'false'), '-e', 'declared_image_probe=' + ('true' if args.image_admission else 'false'), '-e', 'volume_state_probe=' + ('true' if args.volume_state else 'false')], env=env)
+    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json'), '-e', 'platform_input_probe=' + ('true' if args.platform_inputs else 'false'), '-e', 'declared_image_probe=' + ('true' if args.image_admission else 'false'), '-e', 'volume_state_probe=' + ('true' if args.volume_state else 'false'), '-e', 'app_overlay_probe=' + ('true' if args.app_overlay else 'false')], env=env)
     if not args.keep:
         run(['multipass', 'delete', '--purge', vm])
         shutil.rmtree(work)

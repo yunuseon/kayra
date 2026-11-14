@@ -25,7 +25,7 @@ const shape = z.object({ version: z.literal(1), runtime: z.literal("swarm"), own
   role: z.enum(["http", "worker", "singleton", "retained-dependency"]), overlap: z.enum(["allowed", "forbidden", "coordinated"]),
   handoffCheck: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/).nullable(), image: z.string().max(512), inputs: z.unknown(),
   command: words.nullable(), entrypoint: words.nullable(), resources, health, stopGraceSeconds: seconds,
-  host: z.object({ node: nativeId, cluster: nativeId, routingNetwork: nativeId }).strict().readonly(),
+  host: z.object({ node: nativeId, cluster: nativeId, routingNetwork: nativeId.nullable() }).strict().readonly(),
   privateNetwork: z.object({ id: nativeId, name: z.string() }).strict().readonly(),
   mounts: z.array(mount).max(32).readonly(), dependencies: z.array(z.object({ service: serviceName, condition: z.enum(["started", "healthy"]) }).strict().readonly()).max(128).readonly(),
 }).strict().readonly();
@@ -42,7 +42,7 @@ export const parseManagedServicePlan = (input: unknown) => {
   const owner = parseDataOwnership(value.owner); const inputs = parseServiceInputs(value.inputs);
   if (!owner.ok || !inputs.ok || owner.value.app.length > 48 || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(owner.value.app) || inputs.value.registration.app !== owner.value.app || inputs.value.registration.incarnation !== owner.value.incarnation ||
     value.nativeName !== managedServiceName(owner.value, value.service) || value.privateNetwork.name !== `kayra-app-${owner.value.incarnation}` ||
-    value.privateNetwork.id === value.host.routingNetwork) return err("invalid managed service authority references");
+    value.privateNetwork.id === value.host.routingNetwork || (value.role === "http" ? value.host.routingNetwork === null : value.host.routingNetwork !== null)) return err("invalid managed service authority references");
   if ((value.role === "retained-dependency" && value.overlap !== "forbidden") || (value.role === "singleton" && value.overlap === "allowed") ||
     (value.overlap === "coordinated" && value.role !== "singleton") || (value.role === "singleton" && value.overlap === "coordinated" ? value.handoffCheck === null : value.handoffCheck !== null)) return err("contradictory managed service overlap or handoff");
   const component = "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";

@@ -1,3 +1,4 @@
+import type { DeploymentHealth } from "../../contracts/deployment-health.ts";
 import { readFileSync, statfsSync } from "node:fs";
 import { typed } from "../../lib/typed.ts";
 
@@ -13,7 +14,10 @@ export type HealthFacts = {
   /** undefined when Docker did not answer. */
   readonly containers: readonly Container[] | undefined;
   /** Each registered app, and whether it has ever deployed (a release record). */
-  readonly apps: readonly { readonly name: string; readonly released: boolean }[];
+  readonly apps: readonly { readonly name: string; readonly released: boolean; readonly runtime?: "compose" | "swarm" }[];
+  /** Published by the deployment owner, never reconstructed from private journals or Compose filenames. */
+  readonly deployments?: readonly DeploymentHealth[] | undefined;
+  readonly deploymentObservationsUnavailable?: boolean | undefined;
   /** Names only; malformed registration contents never reach health output. */
   readonly invalidRegistrations?: readonly string[];
   /** Fractions, 0 to 1. */
@@ -40,9 +44,19 @@ const containerProblems = (containers: readonly Container[], apps: HealthFacts["
 export const assess = (facts: HealthFacts) => {
   const disk = facts.diskUsed >= 0.9 ? [`disk ${percent(facts.diskUsed)} full`] : [];
   const memory = facts.memoryAvailable < 0.05 ? [`memory ${percent(facts.memoryAvailable)} available`] : [];
-  const containers = facts.containers === undefined ? ["docker did not answer"] : containerProblems(facts.containers, facts.apps);
+  const deployments = facts.deployments ?? [];
+  const swarm = deployments.filter((app) => app.runtime === "swarm");
+  const owns = (name: string) => swarm.some((app) => app.app === name);
+  const composeApps = facts.apps.filter((app) => app.runtime !== "swarm" && !owns(app.name));
+  const workloadProblems = Object.freeze([
+    ...(facts.deploymentObservationsUnavailable === true ? ["deployment observations unavailable"] : []),
+    ...facts.apps.filter((app) => app.runtime === "swarm" && !owns(app.name)).map((app) => `${app.name}: deployment observations unavailable`),
+    ...facts.apps.filter((app) => app.runtime !== "swarm" && owns(app.name)).map((app) => `${app.name}: runtime ownership conflicts with registration`),
+    ...swarm.filter((app) => app.state !== "available" && app.state !== "not-requested").map((app) => `${app.app}: current runtime ${app.state}`),
+  ]);
+  const containers = facts.containers === undefined ? ["docker did not answer"] : containerProblems(facts.containers, composeApps);
   const registrations = (facts.invalidRegistrations ?? []).map((name) => `${name}: invalid application registration`);
-  const problems = Object.freeze([...containers, ...registrations, ...disk, ...memory]);
+  const problems = Object.freeze([...containers, ...workloadProblems, ...registrations, ...disk, ...memory]);
   const warnings = Object.freeze([
     ...(facts.diskUsed >= 0.8 && facts.diskUsed < 0.9 ? [`disk ${percent(facts.diskUsed)} full`] : []),
     ...(facts.memoryAvailable >= 0.05 && facts.memoryAvailable < 0.1 ? [`memory ${percent(facts.memoryAvailable)} available`] : []),

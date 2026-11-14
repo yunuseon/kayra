@@ -1,0 +1,61 @@
+---
+- name: Observe current Swarm health through the owning coordinator and platform
+  hosts: servers
+  become: true
+  tasks:
+    - name: Allocate isolated runtime health observer source
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: runtime-health-source-
+      register: health_source
+
+    - name: Copy the read-only observer
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/test/lab/swarm-platform/health-observation.mjs"
+        dest: "{{ health_source.path }}/health-observation.mjs"
+        mode: "0644"
+
+    - name: Record its exact source identity
+      ansible.builtin.stat:
+        path: "{{ kayra_root }}/test/lab/swarm-platform/health-observation.mjs"
+        checksum_algorithm: sha256
+      register: health_observer_identity
+      delegate_to: localhost
+      become: false
+
+    - name: Retain the runtime health observer identity
+      ansible.builtin.copy:
+        content: "{{ {'sourceRoot': kayra_root, 'observerSha256': health_observer_identity.stat.checksum, 'destination': health_source.path} | to_json }}\n"
+        dest: "{{ report_path }}.source.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Select exactly the persistent coordinator
+      ansible.builtin.command:
+        argv: [docker, ps, -q, --filter, label=com.docker.compose.project=platform, --filter, label=com.docker.compose.service=deployer, --filter, label=com.docker.compose.oneoff=False]
+      register: health_deployer
+      changed_when: false
+      failed_when: health_deployer.stdout_lines | length != 1
+
+    - name: Copy only the existing image's Node runtime
+      ansible.builtin.command:
+        argv: [docker, cp, "{{ health_deployer.stdout | trim }}:/usr/local/bin/node", "{{ health_source.path }}/node"]
+      changed_when: true
+
+    - name: Observe runtime health without promoting or changing the release
+      ansible.builtin.command:
+        argv: "{{ [health_source.path ~ '/node', health_source.path ~ '/health-observation.mjs', 'rollout-complete', health_source.path ~ '/result.json'] + (['--require-failed-history'] if fixture_require_failed_history | default(false) | bool else []) }}"
+      changed_when: false
+
+    - name: Retain the runtime and platform health result
+      ansible.builtin.fetch:
+        src: "{{ health_source.path }}/result.json"
+        dest: "{{ report_path }}"
+        flat: true
+
+    - name: Remove only the successful runtime health observer
+      ansible.builtin.file:
+        path: "{{ health_source.path }}"
+        state: absent

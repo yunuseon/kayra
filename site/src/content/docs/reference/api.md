@@ -654,6 +654,27 @@ Preview: `POST /api/operations/app.deployment.prepare/preview`. Returns a JSON p
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.deployment.health`
+
+Observe current runtime service health separately from release certification and historical task failures.
+
+`POST /api/operations/app.deployment.health`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.health/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.deployment.pins`
 
 Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.

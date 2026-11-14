@@ -48,3 +48,15 @@ test("memory: MemAvailable over MemTotal; unreadable counts as plenty", () => {
   strictEqual(memoryAvailable("MemTotal:        4000000 kB\nMemFree:          100000 kB\nMemAvailable:    1000000 kB\n"), 0.25);
   strictEqual(memoryAvailable(""), 1);
 });
+
+test("health consumes owned Swarm observations without guessing Compose workloads from history", () => {
+  const deployment = { version: 1, app: "rollout", incarnation: "11111111-1111-4111-8111-111111111111", runtime: "swarm", scope: "runtime-services", observedAt: 1000, state: "available",
+    services: [{ name: "web", state: "available", currentTasks: 1, healthyTasks: 1, ignoredHistoricalTasks: 3 }] } as const;
+  const facts = { ...well, apps: [...well.apps, { name: "rollout", runtime: "swarm" as const, released: true }], deployments: [deployment], containers: [...well.containers ?? [], { project: "rollout", name: "historical-failed-task", state: "exited", status: "Exited (1)" }] };
+  deepStrictEqual(assess(facts), { healthy: true, problems: [], warnings: [] });
+  const unhealthy = { ...deployment, state: "unhealthy", services: [{ ...deployment.services[0], state: "unhealthy", healthyTasks: 0 }] } as const;
+  deepStrictEqual(assess({ ...facts, deployments: [unhealthy] }).problems, ["rollout: current runtime unhealthy"]);
+  deepStrictEqual(assess({ ...facts, deployments: [] }).problems, ["rollout: deployment observations unavailable"]);
+  const conflict = { ...facts, apps: [...well.apps, { name: "rollout", runtime: "compose" as const, released: true }] };
+  deepStrictEqual(assess(conflict).problems, ["rollout: runtime ownership conflicts with registration"]);
+});

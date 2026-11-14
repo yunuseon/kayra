@@ -127,6 +127,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     observeHost: (host: Parameters<typeof observeSwarmHost>[0]) => observeSwarmHost(host, api),
     native: swarmService(api), routing: swarmRouting, readiness: routedReadiness(),
   });
+  const healthPorts = artifacts === undefined ? undefined : Object.freeze({ read: artifacts.read, now: Date.now, observe: swarmService(api).observe });
   let controller: ReturnType<typeof startHttpController> | undefined;
   let rolloutController: ReturnType<typeof startRolloutController> | undefined;
   let lastReport = "";
@@ -147,6 +148,14 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     return claim.isFile() && claim.uid === 0 && claim.gid === 0 && (claim.mode & 0o7777) === 0o444 && claim.nlink === 1;
   };
   return Object.freeze({
+    health: async () => {
+      if (opening === undefined) {
+        const claims = await readdir(join(platform, "managed-apps")).catch((error: unknown) => { if (missing(error)) return Object.freeze([]); throw error; });
+        if (claims.length !== 0) throw new Error("managed ownership exists without a health owner");
+        return Object.freeze([]);
+      }
+      return (await opening).runtimeHealthSnapshot(healthPorts);
+    },
     handle: async (route: string, input: unknown) => {
       if (route === "/registration/initialize") {
         if (typeof input !== "object" || input === null || Array.isArray(input) || Object.keys(input).length !== 0) return undefined;
@@ -161,7 +170,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
-      if (route.startsWith("/deployment/")) return deploymentControl({ artifacts, index: await opening, canAccess: canRegister, now: Date.now,
+      if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
         rollouts: rollouts === undefined || artifacts === undefined ? undefined : { ...rollouts, now: Date.now, retain: artifacts.retain },

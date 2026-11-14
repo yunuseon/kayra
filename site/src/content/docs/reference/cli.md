@@ -396,6 +396,16 @@ The snapshot sets `gcSafe: false`: it does not inventory live Docker attachments
 legacy Compose history or unresolved builds. Existing build pins remain a
 separate export; this command never enables destructive registry GC.
 
+The experimental status, health and pin operations are read-only queries:
+HTTP returns their validated projections directly, and MCP publishes matching
+output schemas. CLI command output is unchanged. The app page's **Deployment**
+tab shows requested/desired releases, the certified active and last-known-good
+release, operation phase, recovery and required action separately from current
+service health. Health from another registration incarnation is withheld until
+refresh. A failed rollout remains failed when the previous release is healthy;
+reading the view cannot promote it. Legacy Compose history stays uncertified.
+This view does not establish worker, maintenance or removal support.
+
 The API and UI expose `app.build` and `app.deployment.prepare`; MCP tools are
 `app_build` and `app_deployment_prepare`. All use the same validated input and
 server lifecycle interface. Existing ordinary Compose applications keep their

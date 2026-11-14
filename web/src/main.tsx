@@ -27,7 +27,7 @@ const Page = () => {
     case "server":
       return <ServerView name={current.server} />;
     case "app":
-      return <AppView server={current.server} app={current.app} />;
+      return <AppView key={`${current.server}/${current.app}`} server={current.server} app={current.app} />;
     case "runs":
       return <RunsView />;
     case "run":

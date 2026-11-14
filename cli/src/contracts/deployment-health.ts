@@ -22,3 +22,5 @@ export const parseDeploymentHealth = (input: unknown) => {
   const parsed = schema.safeParse(input);
   return parsed.success ? ok<DeploymentHealth>(parsed.data) : err("invalid deployment runtime health");
 };
+
+export const deploymentHealthSchema = schema;

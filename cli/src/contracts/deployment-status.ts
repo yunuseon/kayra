@@ -60,3 +60,5 @@ export const parseDeploymentStatus = (input: unknown) => {
   const parsed = schema.safeParse(input);
   return parsed.success ? ok<DeploymentStatus>(parsed.data) : err("invalid deployment status");
 };
+
+export const deploymentStatusSchema = schema;

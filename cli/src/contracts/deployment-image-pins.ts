@@ -21,3 +21,5 @@ export const parseDeploymentImagePins = (input: unknown) => {
   const parsed = schema.safeParse(input);
   return parsed.success ? ok<DeploymentImagePins>(parsed.data) : err("invalid deployment image pins");
 };
+
+export const deploymentImagePinsSchema = schema;

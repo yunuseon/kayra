@@ -119,7 +119,7 @@ const onApp = (ctx: Context, input: { readonly server: string; readonly app: str
 const appDir = (ctx: Context, dir: string | undefined): Result<AbsolutePath | undefined, string> =>
   dir === undefined ? ok(undefined) : absolutePath(resolve(ctx.here, dir));
 
-type RecipeName = PlanName | SessionName | "app.runs" | "app.log" | "app.releases";
+type RecipeName = PlanName | SessionName | "app.deployment.status" | "app.deployment.health" | "app.deployment.pins" | "app.runs" | "app.log" | "app.releases";
 type Plans = { readonly [N in RecipeName]: (ctx: Context, input: InputOf<N>) => Result<Plan, string> };
 
 const withServer =
@@ -194,12 +194,12 @@ export const planOf = <N extends RecipeName>(ctx: Context, call: { readonly name
 export const hasPlan = (call: Invocation): call is RecipeCall => Object.hasOwn(plans, call.name);
 
 /** What each query answers. */
-export type Answers = { readonly "app.values": ValuesReport; readonly validate: readonly Report[]; readonly version: KayraVersion; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
+export type Answers = { readonly "app.values": ValuesReport; readonly validate: readonly Report[]; readonly version: KayraVersion; readonly "app.deployment.status": string; readonly "app.deployment.health": string; readonly "app.deployment.pins": string; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
 
 type Queries = { readonly [N in QueryName]: (ctx: Context, input: InputOf<N>) => Promise<Result<Answers[N], string>> };
 
 /** What a deployer's ctl answers, read whole: its stdout, or why it failed. */
-const deployerAnswer = async (ctx: Context, name: "app.runs" | "app.releases" | "app.log", input: InputOf<typeof name>) => {
+const deployerAnswer = async (ctx: Context, name: "app.deployment.status" | "app.deployment.health" | "app.deployment.pins" | "app.runs" | "app.releases" | "app.log", input: InputOf<typeof name>) => {
   const plan = planOf(ctx, { name, input });
   if (!plan.ok) return plan;
   const [step] = plan.value;
@@ -221,6 +221,9 @@ const queries: Queries = {
     try { return await inspectValues(ctx.fleet.root, target.value[0], target.value[1], dir.value); }
     catch { return err("app values could not be inspected; check file access and secrets.yml"); }
   },
+  "app.deployment.status": (ctx, input) => deployerAnswer(ctx, "app.deployment.status", input),
+  "app.deployment.health": (ctx, input) => deployerAnswer(ctx, "app.deployment.health", input),
+  "app.deployment.pins": (ctx, input) => deployerAnswer(ctx, "app.deployment.pins", input),
   "app.runs": (ctx, input) => deployerAnswer(ctx, "app.runs", input),
   "app.releases": (ctx, input) => deployerAnswer(ctx, "app.releases", input),
   "app.log": (ctx, input) => deployerAnswer(ctx, "app.log", input),

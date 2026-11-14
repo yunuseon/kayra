@@ -1279,3 +1279,33 @@ The fresh full resource-upgrade run passed at that frozen source. See
 [RESOURCE-RESULTS.md](RESOURCE-RESULTS.md) and
 [RESOURCE-RESULTS.json](RESOURCE-RESULTS.json) for measured results, reproduction
 and remaining limitations.
+
+### Platform comparison of retained-service inputs
+
+Run the isolated adapter lab with the real immutable registration readers:
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --platform-inputs
+```
+
+The optional observer creates synthetic root-owned generation files with the
+platform's exact public/private modes and groups, then drops its child to UID
+and GID 1000. It verifies unchanged bound inputs across unrelated configuration
+and unused-secret rotation, changed used secrets/configuration, and unavailable
+outcomes for missing secrets, wrong modes, mismatched manifests and incorrect
+configuration identities. It removes successful synthetic input files before
+archiving results. No application secret or SQL engine is involved.
+
+This passed in fresh `kayra-volume-lab-20261114211442363523`, whose successful VM
+was destroyed. All frozen tracked source hashes match `98132f8`; the original
+context records its pre-commit base, with `commit-source-verification.json`
+proving the exact committed content. Private evidence, reproducible source
+archive, versions, clock gates, results and SHA-256 manifest are retained in
+`.cache/lab-evidence/kayra-platform-inputs-20261114211442/`.
+The existing owned-volume native checks passed again in this run.
+
+This is platform materialization/comparison and runtime-adapter evidence. It
+does not establish retained dependency reconciliation, managed volume creation
+receipts, app-wide rollback, workers, maintenance or coordinator purge safety.
+The coordinator receives only comparison outcomes; runtime materialization is a
+separate typed port. Native source and result archives remain authoritative.

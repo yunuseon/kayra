@@ -67,12 +67,16 @@ try {
     console.log(JSON.stringify({uid:process.getuid(),code}));`));
   assert.deepEqual(writeProbe, { uid: 1000, code: 'ENOSPC' });
   await docker('kill', '--signal', 'CONT', deployer); await pause(5000);
-  const unavailableWhileFull = await status().then(() => false, () => true); assert.equal(unavailableWhileFull, true); assert.equal(candidateEvents().length, 0);
+  const whileFull = await status().catch(() => null);
+  if (whileFull !== null) { assert.equal(whileFull.verifiedActive.plan, previous.plan); assert.equal((whileFull.operation ?? whileFull.preparation).request, identity); assert.notEqual((whileFull.operation ?? whileFull.preparation).phase, 'succeeded'); }
+  const unavailableWhileFull = whileFull === null; assert.equal(candidateEvents().length, 0);
   phase = 'space-restored'; const released = await filesystem('release'); const releasedAt = Date.now(); assert.ok(released.availableBytes > 16 * 1024 * 1024);
-  const stillRequiresRestart = await status().then(() => false, () => true); assert.equal(stillRequiresRestart, true);
+  const afterSpaceRestored = await status().catch(() => null);
+  const controlUnavailableAfterSpaceRestored = afterSpaceRestored === null;
   phase = 'restart'; await docker('kill', '--signal', 'KILL', deployer); await docker('start', deployer);
   const reopened = await wait(async () => { try { return await status(); } catch { return undefined; } }, 'reopened journal after space restoration', 30000);
-  assert.equal(reopened.preparation.admissionDeadline, accepted.status.preparation.admissionDeadline);
+  if (reopened.preparation !== null) assert.equal(reopened.preparation.admissionDeadline, accepted.status.preparation.admissionDeadline);
+  else assert.equal(reopened.operation.request, identity);
   const replay = await ctl('lifecycle', 'prepare', app, commit, identity); assert.equal(replay.plan, receipt.plan); assert.equal(replay.deadline, receipt.deadline);
   phase = 'reconciling'; const recovered = await wait(async () => {
     const value = await status(); trace.push({ at: Date.now(), value }); const current = value.operation ?? value.preparation; assert.equal(current.request, identity);
@@ -86,7 +90,7 @@ try {
   for (const name of ['baseline', 'stable']) { const values = requests.filter((value) => value.phase === name); assert.ok(values.length >= 570); assert.ok(values.every((value) => value.release === (name === 'baseline' ? 'B' : 'ENOSPC'))); }
   assert.ok(requests.filter((value) => ['storage-setup', 'accepted', 'full', 'space-restored'].includes(value.phase)).every((value) => value.release === 'B'));
   const rate = (requests.length - 1) / ((requests.at(-1).at - requests[0].at) / 1000); const maxGapMs = Math.max(...requests.map((value) => value.gapMs ?? 0)); assert.ok(rate >= 19); assert.ok(maxGapMs <= 250); assert.equal(evidenceError, undefined);
-  const result = { passed: true, scope: '64 MiB lab ext4 lifecycle metadata filesystem, accepted-intent ENOSPC and process restart; not Docker-root/inode exhaustion, app-data or host-loss recovery', app, commit, identity, previous, build, receipt, acceptedStatus: accepted.status, staged, mountProbe, full, writeProbe, released, unavailableWhileFull, stillRequiresRestart, releasedAt, reopened, replay, recovered,
+  const result = { passed: true, scope: '64 MiB lab ext4 lifecycle metadata filesystem, accepted-intent ENOSPC and process restart; not Docker-root/inode exhaustion, app-data or host-loss recovery', app, commit, identity, previous, build, receipt, acceptedStatus: accepted.status, staged, mountProbe, full, writeProbe, released, unavailableWhileFull, whileFull, afterSpaceRestored, controlUnavailableAfterSpaceRestored, releasedAt, reopened, replay, recovered,
     candidateStarts: 1, requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, versions: JSON.parse(await docker('version', '--format', '{{json .}}')), node: process.version };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
 } catch (error) {

@@ -263,6 +263,17 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (artifact === undefined || artifact === null) throw new Error("no retained build for this commit; prepare its artifact first");
       return ports.preview(registration, runtime, commit, artifact);
     }),
+    previewRolloutPlan: (app: string, commit: string, ports: RolloutPlanPort) => useReady(app, async (store) => {
+      if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("complete preview requires a full commit id");
+      const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
+      if (envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("complete preview requires the persisted Swarm runtime");
+      const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex"); const state = await readIndex();
+      const artifact = state.builds.find((build) => build.id === id)?.artifact;
+      if (artifact === undefined || artifact === null) throw new Error("complete preview requires a retained build");
+      const checked = parseRolloutPlan(await ports.preview(registration, "swarm", commit, artifact)); if (!checked.ok) throw new Error(checked.error);
+      if (JSON.stringify(checked.value.workload.registration) !== JSON.stringify(registration) || checked.value.workload.commit !== commit || checked.value.workload.artifact !== artifact) throw new Error("complete preview plan ownership mismatch");
+      return checked.value;
+    }),
     prepareRollout: (app: string, request: string, commit: string, ports: RolloutPlanPort & Pick<BuildPorts, "now" | "retain">) => useReady(app, async (store) => {
       if (!z.uuid().safeParse(request).success || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("complete rollout requires a request identity and full commit");
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);

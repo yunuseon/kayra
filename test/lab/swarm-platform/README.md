@@ -744,3 +744,15 @@ socket, app secrets or network access: both common entrypoints loaded, and both
 images answered legacy run-history queries. Raw image identities and output are
 in `/tmp/kayra-optional-image-smoke.json`. Only the successful temporary source
 was removed; original failed lab containers and sources remain unchanged.
+
+### Indexed complete-plan control
+
+The indexed composition can now compile complete plans from retained builder
+artifacts and trusted host policy through its existing preview/prepare interface.
+Preview is read-only; version-two receipts preserve complete-plan identity and
+total deadline. Legacy HTTP request retries keep version-one receipts. Focused
+checks cover actual coordinator/journal progression with fake runtime ports;
+36 passed on Linux, with context `/tmp/kayra-complete-control-context.json` and
+raw output `/tmp/kayra-complete-control-linux.log`. These tests do not exercise
+the real builder or native workload effects. The integrated pipeline experiment
+remains required before claiming complete migration support.

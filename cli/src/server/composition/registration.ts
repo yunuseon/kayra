@@ -1,3 +1,5 @@
+import { readMigrationPolicy } from "../platform/migration-policy.ts";
+import { compileRolloutPlan } from "../deployment/rollout-plan.ts";
 /* eslint-disable functional/no-let -- owns the experimental registration journal across control requests */
 import { startHttpController } from "./http-controller.ts";
 import { httpEnvironment } from "../platform/http-environment.ts";
@@ -39,12 +41,13 @@ export type RegistrationComposition = {
   readonly registrationObservations: string;
   readonly publicRegistrations?: string | undefined;
   readonly builderUrl?: string | undefined;
+  readonly migrationPolicy?: string | undefined;
   readonly swarmAuthority?: string | undefined;
   readonly privateRegistrations?: string | undefined;
   readonly domain?: string | undefined;
 };
 export const startRegistrationControl = async ({ platformDirectory: platform, registrationObservations: observations,
-  publicRegistrations, builderUrl: builder = "http://builder:8081", swarmAuthority, privateRegistrations, domain = "localhost" }: RegistrationComposition) => {
+  publicRegistrations, builderUrl: builder = "http://builder:8081", swarmAuthority, migrationPolicy, privateRegistrations, domain = "localhost" }: RegistrationComposition) => {
   const path = join(platform, "lifecycle", "app-index");
   const observer = registrationObservation(observations);
   const present = await lstat(path).catch((error: unknown) => {
@@ -77,8 +80,8 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       return JSON.stringify(bundleWire(checked.value));
     },
   });
-  const plans = artifacts === undefined || publicRegistrations === undefined || privateRegistrations === undefined || swarmAuthority === undefined ? undefined : Object.freeze({
-    preview: async (registration: RegistrationGeneration, runtime: Runtime, commit: string, artifact: string) => {
+  const proposals = artifacts === undefined || publicRegistrations === undefined || privateRegistrations === undefined || swarmAuthority === undefined ? undefined : Object.freeze({
+    read: async (registration: RegistrationGeneration, runtime: Runtime, commit: string, artifact: string) => {
       const snapshot = await readPublicRegistrationGeneration(publicRegistrations, registration);
       const fullCommit = sha(commit);
       if (!snapshot.ok || !fullCommit.ok || snapshot.value.app.runtime !== runtime) throw new Error("plan registration or commit is invalid");
@@ -90,11 +93,22 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       if (!authority.ok || !configuration.ok) throw new Error("platform plan inputs are unavailable");
       const description = describeCompose(checked.value.compose);
       if (!description.ok) throw new Error(description.error);
-      const compiled = compileHttpPlan({ registration, runtime, app: snapshot.value.app, authority: authority.value, domain,
-        configuration: { identity: configuration.value.identity, keys: Object.keys(configuration.value.configuration) } },
-        { ...checked.value, registration: checked.value.registration, rollout: checked.value.rollout, artifact }, description.value);
-      if (!compiled.ok) throw new Error(compiled.error);
-      return compiled.value;
+      return Object.freeze({ scope: Object.freeze({ registration, runtime, app: snapshot.value.app, authority: authority.value, domain,
+        configuration: Object.freeze({ identity: configuration.value.identity, keys: Object.freeze(Object.keys(configuration.value.configuration)) }) }),
+        artifact: Object.freeze({ ...checked.value, registration: checked.value.registration, rollout: checked.value.rollout, artifact }), description: description.value });
+    },
+  });
+  const plans = proposals === undefined ? undefined : Object.freeze({
+    preview: async (...args: Readonly<Parameters<typeof proposals.read>>) => {
+      const input = await proposals.read(...args); const compiled = compileHttpPlan(input.scope, input.artifact, input.description);
+      if (!compiled.ok) throw new Error(compiled.error); return compiled.value;
+    },
+  });
+  const rollouts = proposals === undefined || migrationPolicy === undefined ? undefined : Object.freeze({
+    preview: async (...args: Readonly<Parameters<typeof proposals.read>>) => {
+      const policy = await readMigrationPolicy(migrationPolicy); if (!policy.ok) throw new Error(policy.error);
+      const input = await proposals.read(...args); const compiled = compileRolloutPlan(input.scope, input.artifact, input.description, policy.value.migrationTimeoutCeilingSeconds);
+      if (!compiled.ok) throw new Error(compiled.error); return compiled.value;
     },
   });
   const api = dockerApi();
@@ -140,10 +154,11 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       if (route.startsWith("/deployment/")) return deploymentControl({ index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
+        rollouts: rollouts === undefined || artifacts === undefined ? undefined : { ...rollouts, now: Date.now, retain: artifacts.retain },
         recovery: artifacts === undefined ? undefined : { actor: { kind: "operator-control", identity: "local-control:uid:" + String(process.getuid?.() ?? "unknown") },
           ports: { read: artifacts.read, now: Date.now, native: oneShotJob(api) } },
       })(route, input);
-      return registrationControl({ index: await opening, canRegister, builds, plans,
+      return registrationControl({ index: await opening, canRegister, builds, plans, rollouts,
         runtimeEnabled: async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok),
       })(route, input);
     },

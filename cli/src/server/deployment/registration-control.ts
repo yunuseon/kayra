@@ -1,3 +1,4 @@
+import type { RolloutPlanPort } from "../../contracts/rollout-plan.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
 import type { BuildPorts } from "../../contracts/build-artifact.ts";
@@ -14,22 +15,24 @@ const reserveRequest = request.extend({ runtime: z.enum(["compose", "swarm"]).de
 const ticketRequest = request.extend({ ticket: z.string().max(80) });
 
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
-  "previewPlan" | "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
+  "previewRolloutPlan" | "previewPlan" | "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
 export type RegistrationPorts = {
   readonly index: AppIndex;
   readonly canRegister: (app: string) => Promise<boolean>;
   readonly builds?: BuildPorts | undefined;
   readonly runtimeEnabled?: ((runtime: Runtime) => Promise<boolean>) | undefined;
+  readonly rollouts?: RolloutPlanPort | undefined;
   readonly plans?: HttpPlanPort | undefined;
 };
-export const registrationControl = ({ index, canRegister, builds, runtimeEnabled = (runtime) => Promise.resolve(runtime === "compose"), plans }: RegistrationPorts) => async (path: string, input: unknown) => {
+export const registrationControl = ({ index, canRegister, builds, runtimeEnabled = (runtime) => Promise.resolve(runtime === "compose"), plans, rollouts }: RegistrationPorts) => async (path: string, input: unknown) => {
   switch (path) {
     case "/registration/preview": {
       const parsed = z.object({ app: z.string().regex(names.app.pattern), commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().safeParse(input);
-      if (!parsed.success || plans === undefined) return undefined;
+      if (!parsed.success || plans === undefined && rollouts === undefined) return undefined;
       if (!(await canRegister(parsed.data.app))) throw new Error("app is outside preview scope");
-      const plan = await index.previewPlan(parsed.data.app, parsed.data.commit, plans);
+      const plan = rollouts !== undefined ? await index.previewRolloutPlan(parsed.data.app, parsed.data.commit, rollouts) :
+        plans === undefined ? undefined : await index.previewPlan(parsed.data.app, parsed.data.commit, plans);
       return Object.freeze({ admitted: false, plan });
     }
     case "/registration/policy": {

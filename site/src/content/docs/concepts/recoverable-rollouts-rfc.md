@@ -1014,6 +1014,30 @@ remain version 1. Status exposes the cancellation timestamp and distinguishes
 cancelling, held and cancelled. A historical verified active certificate is
 never replaced merely because a cancellation request was acknowledged.
 
+## Complete-plan indexed control
+
+When the trusted indexed composition is explicitly configured with host migration
+policy, its existing prepare and preview interfaces use full version-two plans.
+The composition reads the verified registration, retained builder artifact,
+private configuration identity, Compose description and root-owned policy. It
+validates these again before the coordinator records intent. Requests supply only
+app, full commit and request identity; callers cannot supply grants, a runtime,
+a ceiling, private values, phase decisions or replacement deadlines.
+
+Preview validates full ownership and declarations without admission. Preparation
+retains the full plan and migration description, then the existing owner runs
+migrations before creating the HTTP child. Version-two receipts retain the full
+plan identity and original total deadline. Repeated requests reconstruct the
+recorded outcome without recompilation. Existing version-one HTTP requests keep
+their original receipts and controller, including after full-plan support becomes
+available; unsupported declarations never fall back to HTTP-only deployment.
+
+These are indexed experimental interfaces. They do not enable ordinary fleet
+registration, webhook routing, workers, maintenance or retained dependencies.
+Normal Compose startup still loads no optional experimental contract packages.
+The remaining public pipeline and lifecycle/client acceptance is required before
+claiming the integrated experiment complete.
+
 ## Host migration timeout policy
 
 `swarm_migration_timeout_seconds` is a fleet host setting, bounded from one to

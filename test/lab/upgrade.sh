@@ -547,6 +547,10 @@ if [ "$indexed_registration" = true ]; then
         git -C "$complete_repo" add -A
         git -C "$complete_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "complete rollout B with app-provided recovery"
         complete_b="$(git -C "$complete_repo" rev-parse HEAD)"
+        printf '\nVOLUME ["/unsafe-lab-volume"]\n' >> "${complete_repo}/web/Dockerfile"
+        git -C "$complete_repo" add -A
+        git -C "$complete_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "refuse inherited image volume before workload creation"
+        complete_c="$(git -C "$complete_repo" rev-parse HEAD)"
         git clone -q --bare "$complete_repo" "${served}/lab/complete.git"
         git -C "$complete_repo" bundle create "/tmp/kayra-swarm-platform-${vm_name}.complete-fixture.bundle" --all
         complete_requests="$(python3 -c 'import json,uuid; print(json.dumps({"A":str(uuid.uuid4()),"B":str(uuid.uuid4())}))')"
@@ -566,6 +570,18 @@ if [ "$indexed_registration" = true ]; then
         cp "${work}/complete-control.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.complete.source.json"
         cp "${work}/complete-control.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.complete.clock.json"
         echo "✓ real builds, app-owned migration recovery and routed HTTP survived coordinator interruption"
+
+        image_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/image-admission.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e fixture_app=rollout-complete \
+            -e "fixture_commit=${complete_c}" -e "fixture_request=${image_request}" \
+            -e "report_path=${work}/image-admission.json" >> "$log" 2>&1 || die "refusing inherited image volumes before workload creation"
+        cp "${work}/image-admission.json" "/tmp/kayra-swarm-platform-${vm_name}.image-admission.json"
+        cp "${work}/image-admission.json.tar" "/tmp/kayra-swarm-platform-${vm_name}.image-admission.tar"
+        cp "${work}/image-admission.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.image-admission.source.json"
+        echo "✓ inherited image volume refused without accepting a rollout or creating app containers/volumes"
 
     fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"

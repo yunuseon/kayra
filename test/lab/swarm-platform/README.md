@@ -901,3 +901,55 @@ the candidate release, consistently with the existing HTTP matrix, while all
 request errors and non-200 responses still fail the experiment. Raw old-release
 draining responses remain recorded separately. The original failed observation
 is retained; a corrected observer must pass a fresh run before acceptance.
+
+### Immutable image metadata admission
+
+New experimental HTTP and complete-plan proposals now inspect immutable image
+metadata through a typed runtime port before accepting workload intent. The
+adapter reads the existing private registry by digest, verifies manifest/config
+hashes and sizes, selects one unambiguous Linux ARM64/v8 or AMD64 image, and
+refuses inherited `VOLUME` declarations. It never pulls images or writes Docker
+objects. Reads share one ten-second budget and one-MiB limits, refuse redirects,
+and ignore descriptor URLs. Duplicate/case-aliased keys, invalid UTF-8, excessive
+nesting and excessive JSON token counts are refused; metadata values never enter
+public errors. Nested/ambiguous indexes and extra platform-feature requirements
+are unsupported. Existing Compose and accepted experimental journal intents are
+not retroactively reinterpreted.
+
+The full CLI suite passed **690 tests, two existing skips**, including eight
+registry cases. Type/build/lint checks, shell/Node syntax, and Ansible/YAML
+validation passed. A corrected real-builder migration/HTTP run passed **3,025
+requests, zero failures, zero premature exposure**, at 19.998/s, maximum start
+gap 121.6 ms; VM/controller offsets were 338 ms before and 210 ms after. Evidence:
+`/tmp/kayra-complete-live4.json`, `.json.tar`, `.json.source.json`,
+`.json.clock.json`, `-context.json` and `-fixture.bundle`. The source was frozen
+before the later JSON ambiguity hardening; it establishes the positive routing
+path, not that later parser change.
+
+A real builder then produced commit `830bff52bdc810dd19e9e7c91cf49fbecf67afdb`
+with `VOLUME ["/unsafe-lab-volume"]`. Preview and two prepares of request
+`706869fb-a884-4880-8edf-a5b856ae552e` were refused. The existing active release
+and deployment pins were unchanged, with **zero app container writes and zero
+new Docker volumes**. All fifteen observer playbook tasks passed. Evidence:
+`/tmp/kayra-image-admission-native.json`, `.json.tar`, `.json.source.json`,
+`-context.json`, `-installed-source.json`, `-fixture.bundle` and `.log`.
+The ledger and original failed VM remain preserved; only the successful observer
+source was removed.
+
+`/tmp/kayra-image-admission-native-metadata.json` independently records the
+installed final adapter accepting the active image and refusing the inherited
+volume image, with three production source hashes checked byte-for-byte against
+the checkout. Active image digest: `ad34c68f1e0056a3d4d2e8fab0c956eb77f65f904a3a8c723be3e13d228cd668`;
+refused image digest: `b26a9ca0dd7b34e8467c792a6a11a0c559c1b6ce0fea46106ebde95a63548fec`.
+The final native refusal used the hardened JSON parser. Both raw archives passed
+a scan for the fixture's resolved secret value.
+
+The full upgrade lab now adds this negative check after the A/B integration,
+exports `.image-admission.json`, `.image-admission.tar` and
+`.image-admission.source.json`, and includes C in `.complete-fixture.bundle`.
+A separate fresh full upgrade is running from the clean committed parent
+`0067b8e` (`/tmp/kayra-corrected-acceptance-context.json`); it excludes this later
+image-admission code. The previous failed VM
+`kayra-complete-acceptance-20261114041014` was stopped only after proving no
+one-shot jobs were running and exporting its metadata. Its disk, sources and
+fleet remain preserved; no failed VM was deleted.

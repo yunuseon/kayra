@@ -1269,6 +1269,27 @@ conservative export, live runtime attachments and legacy Compose history are
 not inventoried, and legacy destructive registry GC remains refused on hosts
 managing Swarm applications.
 
+New experimental Swarm proposals also validate image metadata before accepting
+workload intent. A runtime adapter reads only the existing private registry,
+verifies immutable manifest/configuration digests and descriptor sizes, and
+refuses inherited image volumes in this stateless integration. The composition
+root calls its typed admission port after compiling both HTTP and complete
+plans. It does not pull images or create Docker objects during preview. Reads
+share one ten-second budget and one-MiB response bounds; redirects and descriptor
+URLs are not followed, and configuration contents never enter public reports. Duplicate and case-aliased JSON keys, excessive nesting and excessive token counts are rejected before metadata interpretation to avoid parser differences.
+
+Supported formats are OCI/Docker schema-two image manifests and an unambiguous
+single-level index for the deployer platform (Linux ARM64/v8 or AMD64 without
+extra platform features). Nested/ambiguous indexes and incompatible platforms
+fail explicitly. These deliberately strict limits may be expanded with tested
+capabilities later. Existing Compose behavior and already-accepted experimental
+journal intents are not retroactively changed. Retained-dependency integration
+will need declared, owned bindings for image volumes before allowing them.
+The format checks follow the [OCI configuration](https://github.com/opencontainers/image-spec/blob/v1.1.1/config.md),
+[manifest](https://github.com/opencontainers/image-spec/blob/v1.1.1/manifest.md)
+and [image-index](https://github.com/opencontainers/image-spec/blob/v1.1.1/image-index.md)
+specifications.
+
 Global OOM, Docker-root or inode exhaustion, backup restoration, host loss and
 multi-node behavior are outside this first single-node integration. Even a
 passing integration is experimental and is not a universal zero-downtime or

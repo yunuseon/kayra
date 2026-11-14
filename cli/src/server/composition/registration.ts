@@ -1,3 +1,4 @@
+import { registryImages } from "../runtime/registry-images.ts";
 import { readMigrationPolicy } from "../platform/migration-policy.ts";
 import { compileRolloutPlan } from "../deployment/rollout-plan.ts";
 /* eslint-disable functional/no-let -- owns the experimental registration journal across control requests */
@@ -98,17 +99,26 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         artifact: Object.freeze({ ...checked.value, registration: checked.value.registration, rollout: checked.value.rollout, artifact }), description: description.value });
     },
   });
+  const imageAdmission = registryImages();
+  const verifyImages = async (workload: Parameters<typeof swarmRouting>[0]) => {
+    const admitted = await imageAdmission.verify(workload.app, Object.values(workload.services).map((service) => service.image));
+    if (admitted !== "accepted") throw new Error(admitted === "unsupported" ? "unsupported workload image metadata; inherited volumes and unsupported platforms are refused" : "immutable image metadata is unavailable or invalid");
+  };
   const plans = proposals === undefined ? undefined : Object.freeze({
     preview: async (...args: Readonly<Parameters<typeof proposals.read>>) => {
       const input = await proposals.read(...args); const compiled = compileHttpPlan(input.scope, input.artifact, input.description);
-      if (!compiled.ok) throw new Error(compiled.error); return compiled.value;
+      if (!compiled.ok) throw new Error(compiled.error);
+      await verifyImages(compiled.value);
+      return compiled.value;
     },
   });
   const rollouts = proposals === undefined || migrationPolicy === undefined ? undefined : Object.freeze({
     preview: async (...args: Readonly<Parameters<typeof proposals.read>>) => {
       const policy = await readMigrationPolicy(migrationPolicy); if (!policy.ok) throw new Error(policy.error);
       const input = await proposals.read(...args); const compiled = compileRolloutPlan(input.scope, input.artifact, input.description, policy.value.migrationTimeoutCeilingSeconds);
-      if (!compiled.ok) throw new Error(compiled.error); return compiled.value;
+      if (!compiled.ok) throw new Error(compiled.error);
+      await verifyImages(compiled.value.workload);
+      return compiled.value;
     },
   });
   const api = dockerApi();

@@ -1120,8 +1120,9 @@ in-container client verifies the public `prepared` checkpoint and immediately
 SIGSTOPs the existing coordinator. The observer rejects a missed checkpoint or
 any early candidate Create/Start. A UID-1000 filler reaches ENOSPC on the bounded
 filesystem; an independent UID-1000 write in the deployer must also return
-`ENOSPC`. On resume, the journal must fail closed with no candidate creation.
-Restoring space must still require journal reopen; after restart the same
+`ENOSPC`. On resume, journal writes must fail closed with no candidate creation or release
+promotion; reads may return the last durable state or be unavailable. After
+space restoration the observer kills/restarts the coordinator, and the same
 accepted plan, request and admission/operation deadlines must recover, with one
 candidate Start after space restoration and eventual certified promotion.
 
@@ -1185,7 +1186,7 @@ Exact results: `/tmp/kayra-candidate-oom-retry.json`, raw
 `/tmp/kayra-candidate-oom-retry.json.tar`, source and clock suffixes, and
 `/tmp/kayra-candidate-oom-retry-context.json`. The original failed coordinator
 image was retained before subsequent lab rebuild under
-`kayra-lab-preserved/deployer:20261114144049` (the exact tag/ID is recorded in
+`kayra-lab-preserved/deployer:20261114144048` (the exact tag/ID is recorded in
 that native-resource workspace's `preserved-coordinator.json`).
 
 The first contender setup was refused by the real builder before the admission
@@ -1196,3 +1197,21 @@ Original bad commits/configuration are retained in
 `/tmp/kayra-native-resources-context.json` and its referenced workspace;
 `/tmp/kayra-native-admission.log` records the refusal. No admission-race or
 integrated ENOSPC pass is claimed from that setup.
+
+
+The first integrated ENOSPC attempt (observer `c9fd4f8`) reached the bounded
+filesystem failure, blocked candidate effects and restored space, then failed
+an overly strict observer assertion that control must remain unavailable until
+process restart. Per-app envelope calls reopen their journal under the same
+exclusive application writer, so safe automatic recovery after space restoration
+is permitted. The accepted rollout subsequently converged with its original
+identity. This does not turn the failed observer into a pass.
+
+Original raw evidence: `/tmp/kayra-native-enospc-failed.tar`; source:
+`/var/lib/kayra/swarm/lifecycle-enospc-source-wwk6uwzc`; bounded filesystem:
+`/var/lib/kayra/swarm/lifecycle-storage-xcc5rwnp`. Both remain preserved in the
+failed VM. The observer now permits last-durable-state reads while full and
+records control availability after space returns, then still explicitly kills
+and restarts the owner. ENOSPC proof, zero candidate effects while full,
+original plan/UUID/deadlines, one post-restoration Start and zero failed/premature
+application requests remain required. A fresh measurement is pending.

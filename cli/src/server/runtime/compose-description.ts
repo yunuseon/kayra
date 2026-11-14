@@ -97,8 +97,8 @@ const service = (key: string, value: unknown) => {
   return ok<readonly [string, DescribedService]>(Object.freeze([key, Object.freeze({ image, environment: env.value, resources: budget.value, health: check.value, stopGraceSeconds, command, entrypoint })]));
 };
 
-/** A deliberately narrow Compose subset; no interpolation, host reads or Docker effects. */
-export const describeCompose = (files: readonly DescriptionFile[]) => {
+/** YAML parsing is shared; each runtime profile validates its own exact field set. */
+export const readComposeDocument = (files: readonly DescriptionFile[]) => {
   if (files.length !== 1) return err("experimental HTTP currently requires exactly one Compose file");
   const file = files[0];
   if (file === undefined || Buffer.byteLength(file.content, "utf8") > maximum || file.path === "" || file.path.startsWith("/") || file.path.split("/").some((part) => part === ".." || part === "")) return err("invalid Compose artifact file");
@@ -106,16 +106,25 @@ export const describeCompose = (files: readonly DescriptionFile[]) => {
     const document = parseDocument(file.content, { uniqueKeys: true, strict: true, merge: true });
     if (document.errors.length !== 0 || document.warnings.length !== 0) return err("invalid Compose YAML");
     const root: unknown = document.toJS({ maxAliasCount: 100 });
-    if (!record(root)) return err("Compose must be a mapping");
-    const unsupported = extra(root, ["services", "networks"]);
-    if (unsupported !== undefined) return err(`unsupported Compose field ${unsupported}`);
-    const networks = root["networks"];
-    if (networks !== undefined && !(record(networks) && Object.keys(networks).length === 1 && record(networks["default"]) && Object.keys(networks["default"]).length === 0)) return err("custom Compose networks are not supported");
-    const services = root["services"];
-    if (!record(services) || Object.keys(services).length === 0 || Object.keys(services).length > 128) return err("Compose services must be a bounded nonempty mapping");
-    const parsed = all(Object.entries(services).map(([key, definition]) => service(key, definition)));
-    return parsed.ok ? ok<ComposeDescription>(Object.freeze({ services: Object.freeze(Object.fromEntries(parsed.value)) })) : parsed;
+    return record(root) ? ok(root) : err("Compose must be a mapping");
   } catch {
     return err("invalid or excessively aliased Compose YAML");
   }
+};
+
+export const describeComposeMapping = (root: Readonly<Record<string, unknown>>) => {
+  const unsupported = extra(root, ["services", "networks"]);
+  if (unsupported !== undefined) return err(`unsupported Compose field ${unsupported}`);
+  const networks = root["networks"];
+  if (networks !== undefined && !(record(networks) && Object.keys(networks).length === 1 && record(networks["default"]) && Object.keys(networks["default"]).length === 0)) return err("custom Compose networks are not supported");
+  const services = root["services"];
+  if (!record(services) || Object.keys(services).length === 0 || Object.keys(services).length > 128) return err("Compose services must be a bounded nonempty mapping");
+  const parsed = all(Object.entries(services).map(([key, definition]) => service(key, definition)));
+  return parsed.ok ? ok<ComposeDescription>(Object.freeze({ services: Object.freeze(Object.fromEntries(parsed.value)) })) : parsed;
+};
+
+/** A deliberately narrow Compose subset; no interpolation, host reads or Docker effects. */
+export const describeCompose = (files: readonly DescriptionFile[]) => {
+  const root = readComposeDocument(files);
+  return root.ok ? describeComposeMapping(root.value) : root;
 };

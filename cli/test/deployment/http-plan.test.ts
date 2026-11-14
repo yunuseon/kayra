@@ -8,6 +8,7 @@ import { parseRegistrationGeneration } from "../../src/contracts/registration-ge
 import { parseRollout } from "../../src/contracts/rollout.ts";
 import { parseSwarmAuthority } from "../../src/contracts/swarm-authority.ts";
 import { compileHttpPlan } from "../../src/server/deployment/http-plan.ts";
+import { describeManagedCompose } from "../../src/server/runtime/managed-compose-description.ts";
 import { describeCompose } from "../../src/server/runtime/compose-description.ts";
 
 const content = readFileSync(new URL("../../../ci/tests/swarm-http/compose.yml", import.meta.url), "utf8");
@@ -99,4 +100,15 @@ test("proposal admission refuses wrong ownership, undeclared bindings, grants an
   const maintenance = parseRollout({ ...rollout.value, strategy: "maintenance", mixed_version_compatible: false, rollback_compatible: false });
   assert.ok(maintenance.ok);
   assert.equal(compileHttpPlan(scope, { ...artifact, rollout: maintenance.value }, description.value).ok, false);
+});
+
+
+test("HTTP-only compiler refuses managed descriptions instead of dropping their storage semantics", () => {
+  const managed = describeManagedCompose([{ path: "compose.yml", content: stringify({ services: { web: { ...base, volumes: ["data:/data"] } }, volumes: { data: {} } }) }]);
+  assert.ok(managed.ok);
+  const compiled = compileHttpPlan(scope, artifact, managed.value);
+  assert.equal(compiled.ok, false); assert.match(compiled.error, /refuses extended/);
+  const web = description.value.services["web"]; assert.ok(web);
+  const dependencies = { services: { ...description.value.services, web: { ...web, dependencies: [] } } };
+  assert.equal(compileHttpPlan(scope, artifact, dependencies).ok, false);
 });

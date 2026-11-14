@@ -22,6 +22,8 @@ const bindings = (environment: Readonly<Record<string, string>>, configuration: 
 
 /** Compile a proposal from immutable inputs. Host admission and runtime effects remain separate. */
 export const compileHttpPlan = (scope: HttpPlanScope, artifact: HttpArtifact, description: ComposeDescription) => {
+  if (Object.keys(description).some((key) => key !== "services") || Object.values(description.services).some((service) =>
+    Object.keys(service).some((key) => !["image", "environment", "command", "entrypoint", "resources", "health", "stopGraceSeconds"].includes(key)))) return err("HTTP-only compilation refuses extended service or volume declarations");
   if (scope.runtime !== "swarm" || scope.app.runtime !== "swarm") return err("experimental HTTP requires the persisted Swarm runtime");
   if (scope.app.name !== scope.registration.app || !matchRegistrationGeneration(artifact.registration, scope.registration, scope.registration).ok ||
     !/^[0-9a-f]{40}$/.test(artifact.sha) || !/^[0-9a-f]{64}$/.test(artifact.artifact)) return err("artifact does not match the verified registration");

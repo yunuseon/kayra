@@ -1326,3 +1326,13 @@ Global OOM, Docker-root or inode exhaustion, backup restoration, host loss and
 multi-node behavior are outside this first single-node integration. Even a
 passing integration is experimental and is not a universal zero-downtime or
 data-safety guarantee.
+
+### Managed Compose description groundwork
+
+The managed description profile preserves logical named-volume mounts and
+service dependencies, with canonical targets, explicit read-only/no-copy
+semantics and started/healthy conditions. It rejects external volumes, driver
+options, host binds, anonymous mounts, overlapping targets, missing dependencies
+and cycles. Application declarations cannot choose physical allocation names.
+The existing HTTP parser and compiler continue to reject the richer profile;
+this parser alone does not enable volumes, dependency orchestration or workers.

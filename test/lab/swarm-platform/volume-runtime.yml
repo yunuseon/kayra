@@ -1,0 +1,96 @@
+---
+- name: Provision the isolated volume adapter host with the existing Docker role
+  hosts: servers
+  become: true
+  roles:
+    - docker
+  tasks:
+    - name: Initialize only this disposable single-node Swarm
+      ansible.builtin.command:
+        argv: [docker, swarm, init, --advertise-addr, "{{ ansible_host }}", --listen-addr, "{{ ansible_host }}:2377"]
+      changed_when: true
+
+    - name: Pull the exact lab-only Node runtime image
+      ansible.builtin.command:
+        argv: [docker, pull, "{{ volume_node_image }}"]
+      changed_when: true
+
+    - name: Create a stopped socket-free runtime copy source
+      ansible.builtin.command:
+        argv: [docker, create, --name, kayra-volume-runtime-copy, --entrypoint, "true", "{{ volume_node_image }}"]
+      changed_when: true
+
+    - name: Allocate the isolated adapter source
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: kayra-volume-source-
+      register: volume_source
+
+    - name: Stage the exact adapter and dependency sources
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ volume_source.path }}"
+        stage_source_paths: [cli/src, package.json, node_modules/zod, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
+
+    - name: Copy the image's Node binary without running a socket holder
+      ansible.builtin.command:
+        argv: [docker, cp, kayra-volume-runtime-copy:/usr/local/bin/node, "{{ volume_source.path }}/node"]
+      changed_when: true
+
+    - name: Remove only the stopped runtime copy container
+      ansible.builtin.command:
+        argv: [docker, rm, kayra-volume-runtime-copy]
+      changed_when: true
+
+    - name: Require synchronized clocks before native writes
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: volume_before_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((volume_before_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Verify local volume ownership and conservative attachment handling
+      ansible.builtin.command:
+        argv: ["{{ volume_source.path }}/node", "{{ volume_source.path }}/test/lab/swarm-platform/volume-runtime.mjs", "{{ volume_node_image }}", "{{ volume_source.path }}/results"]
+      changed_when: true
+
+    - name: Require synchronized clocks after native writes
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: volume_after_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((volume_after_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Retain clock observations
+      ansible.builtin.copy:
+        content: "{{ {'beforeVmEpochSeconds': volume_before_clock.stdout | int, 'afterVmEpochSeconds': volume_after_clock.stdout | int} | to_json }}\n"
+        dest: "{{ report_path }}.clock.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Retain the native adapter result
+      ansible.builtin.fetch:
+        src: "{{ volume_source.path }}/results/result.json"
+        dest: "{{ report_path }}"
+        flat: true
+
+    - name: Archive native volume events and API request identities
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ volume_source.path }}/evidence.tar", -C, "{{ volume_source.path }}/results", .]
+      changed_when: true
+
+    - name: Retain raw adapter evidence
+      ansible.builtin.fetch:
+        src: "{{ volume_source.path }}/evidence.tar"
+        dest: "{{ report_path }}.tar"
+        flat: true
+
+    - name: Remove only the successful adapter observer source
+      ansible.builtin.file:
+        path: "{{ volume_source.path }}"
+        state: absent

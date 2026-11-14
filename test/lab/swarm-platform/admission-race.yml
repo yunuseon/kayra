@@ -1,0 +1,115 @@
+---
+- name: Register and build the first resource contender
+  ansible.builtin.import_playbook: ../registration-generation/build-live.yml
+  vars:
+    fixture_app: "{{ admission_applications[0].app }}"
+    fixture_commit: "{{ admission_applications[0].commit }}"
+    fixture_repo: "{{ admission_applications[0].repo }}"
+    fixture_runtime: swarm
+    fixture_hosts: [admission-left.lab.test]
+    fixture_grants: {memory_bytes: 1073741824, cpu_millicores: 500, maintenance: false}
+    fixture_configuration: {MODE: lab, DB_HOST: kayra-complete-ledger}
+    kayra_lab_swarm: true
+
+- name: Register and build the second resource contender
+  ansible.builtin.import_playbook: ../registration-generation/build-live.yml
+  vars:
+    fixture_app: "{{ admission_applications[1].app }}"
+    fixture_commit: "{{ admission_applications[1].commit }}"
+    fixture_repo: "{{ admission_applications[1].repo }}"
+    fixture_runtime: swarm
+    fixture_hosts: [admission-right.lab.test]
+    fixture_grants: {memory_bytes: 1073741824, cpu_millicores: 500, maintenance: false}
+    fixture_configuration: {MODE: lab, DB_HOST: kayra-complete-ledger}
+    kayra_lab_swarm: true
+
+- name: Measure concurrent admission and restart recovery
+  hosts: servers
+  become: true
+  tasks:
+    - name: Allocate isolated admission race observer source
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: admission-race-source-
+      register: admission_source
+
+    - name: Stage the immutable admission race observer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ admission_source.path }}"
+        stage_source_paths: [cli/src, package.json, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
+
+    - name: Select exactly the persistent deployer for its existing Node runtime
+      ansible.builtin.command:
+        argv: [docker, ps, -q, --filter, label=com.docker.compose.project=platform, --filter, label=com.docker.compose.service=deployer, --filter, label=com.docker.compose.oneoff=False]
+      register: admission_deployer
+      changed_when: false
+      failed_when: admission_deployer.stdout_lines | length != 1
+
+    - name: Copy the observer runtime without adding a socket holder
+      ansible.builtin.command:
+        argv: [docker, cp, "{{ admission_deployer.stdout | trim }}:{{ item.source }}", "{{ admission_source.path }}/{{ item.target }}"]
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Require synchronized clocks before the bounded admission experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: admission_before_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((admission_before_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Persist the exact concurrent request identities
+      ansible.builtin.copy:
+        content: "{{ {'version': 1, 'applications': admission_applications} | to_json }}\n"
+        dest: "{{ admission_source.path }}/manifest.json"
+        mode: "0600"
+
+    - name: Compete for capacity and restart the existing coordinator
+      ansible.builtin.command:
+        argv: ["{{ admission_source.path }}/node", "{{ admission_source.path }}/test/lab/swarm-platform/admission-race.mjs", "{{ admission_source.path }}/manifest.json", "{{ admission_source.path }}/results"]
+      changed_when: true
+
+    - name: Require synchronized clocks after the bounded admission experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: admission_after_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((admission_after_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Retain experiment clock observations
+      ansible.builtin.copy:
+        content: "{{ {'beforeVmEpochSeconds': admission_before_clock.stdout | int, 'afterVmEpochSeconds': admission_after_clock.stdout | int} | to_json }}\n"
+        dest: "{{ report_path }}.clock.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Retain the admission race result
+      ansible.builtin.fetch:
+        src: "{{ admission_source.path }}/results/result.json"
+        dest: "{{ report_path }}"
+        flat: true
+
+    - name: Archive raw admission race evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ admission_source.path }}/evidence.tar", -C, "{{ admission_source.path }}/results", .]
+      changed_when: true
+
+    - name: Retain the raw admission race evidence
+      ansible.builtin.fetch:
+        src: "{{ admission_source.path }}/evidence.tar"
+        dest: "{{ report_path }}.tar"
+        flat: true
+
+    - name: Remove only the successful admission race observer
+      ansible.builtin.file:
+        path: "{{ admission_source.path }}"
+        state: absent

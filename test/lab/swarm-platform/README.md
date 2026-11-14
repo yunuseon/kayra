@@ -1075,3 +1075,30 @@ The upgrade lab exports `.candidate-oom.json`, `.candidate-oom.tar`,
 `/tmp/kayra-swarm-platform-<vm>` prefix. Failed observers, workloads and VMs are
 preserved; only successful observer sources are removed. The harness is added
 but native acceptance is pending.
+
+### Concurrent admission with coordinator restart
+
+`admission-race.yml` registers and builds two new explicitly Swarm applications
+through the platform registration command and existing builder. Each declares a
+1 GiB memory limit (64 MiB scheduler reservation) and 0.25 CPU. The host's
+application budget is 2 GiB, with the existing HTTP applications already charged,
+so one contender fits and both do not. This tests declared-limit admission,
+separately from actual host memory use or Docker's scheduler reservations.
+
+The observer submits both stable UUIDs concurrently, waits for one candidate
+container creation and one still-prepared capacity waiter, kills/restarts the
+existing coordinator, and requires one verified winner and one never-started
+waiter failing at its original 90-second admission deadline. It records the
+pre-interruption deadline, checks that replay retains both receipts' immutable
+plans/deadlines, requires exactly one winner Start and zero loser service or
+container objects, and refuses a held or unexpectedly promoted waiter.
+
+An existing B application receives 20 requests/s throughout a 30-second baseline,
+competition/restart/expiry and at least 30 seconds after convergence. All those
+requests must succeed and identify B, with no retries or timeout changes.
+Per-request data, live Docker events, public projections, VM CPU/memory samples,
+clock gates and exact source identities are retained as `.admission-race.json`,
+`.admission-race.tar`, `.admission-race.source.json` and
+`.admission-race.clock.json`; each contender's exact Git history is exported as
+`.admission-left.bundle` or `.admission-right.bundle`. Native acceptance remains
+pending. This does not complete remove-versus-deploy or bounded ENOSPC testing.

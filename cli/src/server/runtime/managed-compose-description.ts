@@ -1,3 +1,4 @@
+import { volumeMountTargetSchema } from "../../contracts/managed-compose-description.ts";
 import type { DescriptionFile } from "../../contracts/compose-description.ts";
 import type { DeclaredVolumeMount, ManagedComposeDescription, ServiceDependency } from "../../contracts/managed-compose-description.ts";
 import { all, err, ok } from "../../lib/result.ts";
@@ -6,10 +7,7 @@ import { describeComposeMapping, readComposeDocument } from "./compose-descripti
 const record = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value);
 const only = (value: Readonly<Record<string, unknown>>, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key));
 const volumeKey = (value: string) => /^[a-z][a-z0-9_-]{0,62}$/.test(value);
-const targetPath = (value: unknown): value is string => typeof value === "string" && value.length <= 1024 && value.startsWith("/") &&
-  // eslint-disable-next-line no-control-regex -- control bytes cannot be canonical mount path characters
-  value.split("/").slice(1).every((part) => part !== "" && part !== "." && part !== "..") && !/[\x00-\x20\x7f:$\\]/.test(value) &&
-  !["/proc", "/sys", "/dev"].some((path) => value === path || value.startsWith(`${path}/`));
+const targetPath = (value: unknown): value is string => volumeMountTargetSchema.safeParse(value).success;
 const mount = (value: unknown, declared: readonly string[]) => {
   const definition = typeof value === "string" ? (() => {
     const parts = value.split(":");

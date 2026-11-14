@@ -1229,13 +1229,14 @@ tests must pass before calling the experimental integration complete.
 
 ### Integration prerequisites found during implementation
 
-The current builder emits image tags and the existing deployment-plan contract
-is only a fragment. Before using a plan to authorize effects, the coordinator
-needs a reconstructible normalized description and trusted authorities for
-image digests, registration and grant generations, secret-generation
-references, and volume ownership. The HTTP candidate and Swarm service
-renderer under development are disconnected experiments; neither establishes
-those authorities or authorizes a live deployment.
+The initial deployment-plan fragment never authorized effects or entered
+persisted release history. It has been replaced by the managed service contract,
+which contains normalized runnable declarations and exact ownership/input
+references. Existing admitted HTTP and version-two rollout plans remain readable
+under their original contracts. The real HTTP/migration pipeline validates
+immutable image digests, registration/grants and input generations; the richer
+service contract still needs group admission, sequencing and native integration
+before authorizing retained dependencies, workers or singletons.
 
 The existing Docker socket proxy grants broad read access by API prefix. Adding
 Swarm discovery must not assume that read-only access protects secrets: Docker
@@ -1366,3 +1367,28 @@ to deployment journals. Runtime materialization is a distinct port supplied by
 the composition root. References are validated, bounded and scoped to the same
 app incarnation. This comparison groundwork does not yet enable retained
 services or their immutable-spec reconciliation.
+
+
+### Immutable managed service specification
+
+A managed service records exact image digest, role/overlap, health and shutdown
+settings, budgets, dependency conditions, owned volume creation references,
+private network identity, host affinity and service-specific input references.
+Binding names, mounts and dependencies have deterministic ordering. It cannot
+contain resolved environment values supplied by platform materialization.
+Volume reference parsing alone is not evidence of creation: the coordinator
+must synchronize creation receipts and verify actual ownership before effects.
+
+The generated workload name includes the application incarnation in its digest;
+recreated apps cannot target old name barriers or accept their late effects.
+The private overlay is incarnation-scoped and distinct from the platform routing
+overlay. Fleet admission budgets remain in the application/group authority,
+outside the retained service's immutable specification, so changing unrelated
+fleet policy cannot imply a database-engine update. Admission and current host
+authority still gate every workload effect.
+
+Retained reconciliation compares the complete canonical specification, then asks
+the platform to compare its input bindings. Only unchanged evidence carries the
+recorded specification and original input generation forward. Changed inputs or
+specifications require a separate operation; unavailable evidence blocks the
+rollout. This helper and parser do not enable richer runtime capabilities.

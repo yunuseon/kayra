@@ -1,6 +1,4 @@
 import { join } from "node:path";
-import { parseMigrationCleanupRequest } from "../../contracts/migration-cleanup.ts";
-import { parseMigrationResolutionQuery, parseMigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import { releasesAnswer, runAnswer, runsAnswer } from "./answers.ts";
 import { field } from "../app.ts";
 import { appOwner, appName, owner as mintOwner, runId, type AppName, type Owner, type RunId } from "../brand.ts";
@@ -135,6 +133,9 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     const decoded: unknown = await Promise.resolve(Buffer.from(encoded, "base64url").toString("utf8")).then((text) => {
       try { const value: unknown = JSON.parse(text); return value; } catch { return undefined; }
     });
+    const contracts = await Promise.all([import("../../contracts/migration-resolution.ts"), import("../../contracts/migration-cleanup.ts")]).catch(() => undefined);
+    if (contracts === undefined) return fail("experimental migration control unavailable: optional contract dependencies are not installed");
+    const [{ parseMigrationResolutionQuery, parseMigrationResolutionRequest }, { parseMigrationCleanupRequest }] = contracts;
     const request = operation === "resolve" ? parseMigrationResolutionRequest(decoded) : operation === "cleanup" ? parseMigrationCleanupRequest(decoded) : parseMigrationResolutionQuery(decoded);
     if (!request.ok) return fail(request.error);
     const response = await fetch(`http://127.0.0.1:8091/deployment/migration-${operation}`, {

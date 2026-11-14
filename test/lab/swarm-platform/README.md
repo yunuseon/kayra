@@ -719,3 +719,28 @@ passed. Context is `/tmp/kayra-migration-policy-context.json` and raw output is
 `/tmp/kayra-migration-policy-linux.log`. This does not exercise a platform upgrade
 or enable public migration-bearing admission. Successful isolated test sources
 were removed; the previously failed VM remains preserved.
+
+### Dependency-free Compose startup
+
+The full policy upgrade from 0.23.0 exposed eager experimental contract imports
+in `ctl`, which also loaded when starting the builder and deployer. Normal server
+images intentionally omit those optional dependencies. The migration command now
+loads its validators only when invoked; normal startup and existing commands
+remain dependency-free. A regression test copies only server sources to an
+isolated directory without `node_modules`, loads the common entrypoint, reads
+legacy run history, and checks a clear refusal for unavailable migration control.
+
+The failed VM `kayra-policy-upgrade-20261113194653` and its original sources are
+preserved. Logs: `/tmp/kayra-policy-upgrade-20261113194653.log` and the fleet log
+under `/var/folders/pm/02mk70kx247bbsttcvzkqtw00000gn/T/tmp.kZxmZDgKh7/`.
+After inspection, explicit cleanup is the lab's printed `kayra down lab` command
+from that temporary fleet, followed by removing only that temporary directory.
+No cleanup of the failed lab has been performed. A new unique VM tests the fix;
+its context is `/tmp/kayra-import-upgrade-context.json`.
+
+Four invocations against the failed lab's original builder/deployer images also
+passed with the corrected frozen source mounted read-only and without a Docker
+socket, app secrets or network access: both common entrypoints loaded, and both
+images answered legacy run-history queries. Raw image identities and output are
+in `/tmp/kayra-optional-image-smoke.json`. Only the successful temporary source
+was removed; original failed lab containers and sources remain unchanged.

@@ -178,6 +178,25 @@ secrets. Legacy Compose history remains readable, but its newest filename alone
 is not proof of a verified active release, and new recovery guarantees do not
 apply retroactively to interrupted legacy runs.
 
+New indexed applications receive a durable data-owner UUID in the same initial
+index write that reserves their application incarnation. The identifiers are
+distinct: data ownership must later survive app removal and reincarnation.
+Each physical local volume has a separate allocation UUID and an exact generated
+name, with application/data-owner/key/allocation labels. A new allocation after
+purge uses a new name; stale effects must not target a later allocation.
+Ownership references are read-only metadata, not resource admission or workload
+permission, and do not choose an application's runtime.
+
+Older index rows remain readable without this field. They do not acquire data
+ownership inferred from app incarnations, directories, Compose prefixes or
+existing Docker objects. The first integration must explicitly refuse managed
+data plans for such rows. Removing or purging records must retain the minimal
+data-owner/allocation tombstone needed to prevent name reuse or unsafe adoption.
+Runtime deletion requires exact local ownership plus stopped-container and both
+current/previous service-spec attachment checks under the coordinator's
+lifecycle fence. An unresolved creation or purge remains the owner's concern;
+a runtime observation alone does not authorize deletion.
+
 Removal first fences new deployments, then cancels or settles existing work and
 removes owned workloads. It retains named volumes and a minimal ownership
 tombstone. Purge is a separate guarded operation that checks ownership,

@@ -57,6 +57,7 @@ const extra = (call: Invocation) => {
     case "adopt":
     case "backup.test":
     case "app.purge":
+    case "app.deployment.pins":
     case "app.deployment.status":
     case "app.runs":
     case "app.releases":

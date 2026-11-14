@@ -146,11 +146,11 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     return 0;
   },
   lifecycle: async ([operation, app, commit, request, extra]) => {
-    const query = operation === "status" && app !== undefined && commit === undefined;
+    const query = (operation === "status" || operation === "pins") && app !== undefined && commit === undefined;
     const cancel = operation === "cancel" && app !== undefined && commit !== undefined && request === undefined;
     const prepare = operation === "prepare" && app !== undefined && commit !== undefined && request !== undefined && extra === undefined;
-    if (!query && !prepare && !cancel) return fail("usage: ctl lifecycle status <app> | prepare <app> <full-commit> <request-uuid> | cancel <app> <request-uuid>");
-    const response = await fetch(`http://127.0.0.1:8091/deployment/${query ? "status" : cancel ? "cancel" : "prepare"}`, {
+    if (!query && !prepare && !cancel) return fail("usage: ctl lifecycle status <app> | pins <app> | prepare <app> <full-commit> <request-uuid> | cancel <app> <request-uuid>");
+    const response = await fetch(`http://127.0.0.1:8091/deployment/${query ? operation : cancel ? "cancel" : "prepare"}`, {
       method: "POST", body: JSON.stringify(query ? { app } : cancel ? { app, request: commit } : { app, commit, request }), signal: AbortSignal.timeout(15_000),
     }).catch(() => undefined);
     if (!response?.ok) return fail("deployment control unavailable; inspect status and retry only the same request identity");

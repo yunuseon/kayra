@@ -131,6 +131,7 @@ test("run records retain their history and session identity, and only live runs 
 const samples = {
   "app.build": { server: "lab", app: "shop", commit: "a".repeat(40) },
   "app.deployment.prepare": { server: "lab", app: "shop", commit: "a".repeat(40), request: "12345678-1234-4234-8234-123456789abc" },
+  "app.deployment.pins": { server: "lab", app: "shop" },
   "app.deployment.status": { server: "lab", app: "shop" },
   "app.deployment.cancel": { server: "lab", app: "shop", request: "12345678-1234-4234-8234-123456789abc" },
   "app.migration.cleanup": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", purpose: "migration", attempt: 1, action: "23456789-1234-4234-8234-123456789abc", reason: "Fence failed migration before inspecting ledger" },

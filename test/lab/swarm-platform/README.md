@@ -1047,3 +1047,31 @@ The subsequent ShellCheck correction renames only the unused response-drain
 variable; it is not part of the frozen lab source. Earlier failed runs remain
 failures and are preserved. This pass does not complete worker, maintenance,
 retained-data, lifecycle-removal or integrated resource-failure acceptance.
+
+### Integrated candidate memory exhaustion
+
+`candidate-oom.yml` builds a fourth exact fixture commit through the existing
+builder, then submits it through the running coordinator after the migration
+and image-admission checks. This candidate has no migrations. On its first
+routed application request it arms a ten-second timer, then touches 512 MiB
+inside the unchanged 128 MiB container limit. Healthy A/B have no allocation
+configured. The observer must see a matching Docker OOM event and retained
+container `State.OOMKilled`, native `rollback_completed`, and the coordinator's
+certified previous B within 90 seconds of the OOM. Candidate promotion or a held
+operation fails the test. Replaying the UUID must preserve plan and deadline.
+
+The observer sends 20 short requests per second, split between fresh and
+persistent connections, with a two-second timeout and no retries. It requires
+30-second, failure-free B baseline and stable recovery periods, no premature
+candidate exposure, and records all intervening failures and their time window
+separately. This is not an uninterrupted-rollback assertion. It captures a live
+bounded Docker event stream before submission, lifecycle observations, app
+logs, per-request results, VM CPU/memory and exact Docker/Node versions. Host
+available memory must stay above 512 MiB; this tests container OOM, not global
+host OOM. No Docker-root or application-data filesystem is filled.
+
+The upgrade lab exports `.candidate-oom.json`, `.candidate-oom.tar`,
+`.candidate-oom.source.json` and `.candidate-oom.clock.json` under its usual
+`/tmp/kayra-swarm-platform-<vm>` prefix. Failed observers, workloads and VMs are
+preserved; only successful observer sources are removed. The harness is added
+but native acceptance is pending.

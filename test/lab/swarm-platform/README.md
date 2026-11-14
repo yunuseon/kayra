@@ -1150,3 +1150,21 @@ success and failure, including final teardown output on success. Cleanup prints
 0700 and the log 0600. Successful fleet/VM cleanup no longer deletes the only
 copy. Original failed fleets and logs remain preserved as before. These are
 local evidence files; they are not published in the package or to a service.
+
+The first integrated OOM attempt at `589a387` reached native rollback and
+coordinator certification of B, with one OOM event and 105 failed requests out
+of 2,451, then **failed** while collecting unbounded aggregate
+`docker service logs` (the command exceeded its 30-second bound). The failed VM
+`kayra-candidate-oom-20261114135433`, observer source
+`/var/lib/kayra/swarm/candidate-oom-source-s7rqb3dl` and raw evidence remain
+preserved. Export: `/tmp/kayra-candidate-oom-failed.tar`; failure summary:
+`/tmp/kayra-candidate-oom-failure-summary.json`. A subsequent read-only
+`service logs --tail 5` returned immediately. This is not a passing OOM case or
+an uninterrupted-rollback result.
+
+The observer now collects bounded logs directly from exact owned service
+container IDs, starting at the case's baseline, including the OOM container's
+allocation marker. It rejects truncation or missing candidate evidence, and
+persists normalized runtime OOM/recovery evidence before optional collection
+can fail. Traffic, budgets, health, monitoring, discovery and all recovery
+criteria are unchanged. A new request/source measurement is required.

@@ -48,7 +48,7 @@ try {
       metrics.push({ at: Date.now(), phase, memory, cpuBusyFraction });
     } catch { evidenceError = 'resource observer failed'; }
   }, 1000);
-  phase = 'baseline'; stop = traffic(target, (value) => requests.push({ ...value, phase })); await pause(30000);
+  const baselineAt = Date.now(); phase = 'baseline'; stop = traffic(target, (value) => requests.push({ ...value, phase })); await pause(30000);
   phase = 'candidate'; const receipt = await ctl('lifecycle', 'prepare', app, commit, identity); const candidatePlan = nativeHttpIntent(receipt, preview);
   assert.equal(receipt.version, 2); assert.notEqual(receipt.plan, previous.plan);
   const oom = await wait(() => events.find((value) => value.Action === 'oom' && value.Actor?.Attributes?.['com.kayra.plan'] === candidatePlan), 'candidate cgroup OOM', 90000);
@@ -73,12 +73,21 @@ try {
   assert.ok(metrics.length >= 60); const minimumAvailableMemoryBytes = Math.min(...metrics.map((value) => value.memory.MemAvailable)); assert.ok(minimumAvailableMemoryBytes >= 536870912, 'host memory pressure exceeded the bounded container experiment');
   const firstFailureAt = failures.length === 0 ? null : Math.min(...failures.map((value) => value.at)); const lastFailureEndedAt = failures.length === 0 ? null : Math.max(...failures.map((value) => value.endedAt));
   const nextSuccess = failures.length === 0 ? undefined : requests.find((value) => value.at > Math.max(...failures.map((failure) => failure.at)) && value.status === 200 && value.error === undefined);
-  const logs = await docker('service', 'logs', '--raw', '--timestamps', 'kayra-' + app + '--web'); await writeFile(join(output, 'application.log'), logs);
+  await writeFile(join(output, 'runtime-evidence.json'), JSON.stringify({ receipt, recovered, replay, oom: { event: oom, state }, nativeUpdate: update, taskState, restoredAt, recoveryMs: restoredAt - oomAt }, null, 2));
+  const containerIds = (await docker('ps', '-aq', '--no-trunc', '--filter', 'label=com.kayra.app=' + app, '--filter', 'label=com.docker.swarm.service.name=kayra-' + app + '--web')).split('\n');
+  assert.ok(containerIds.includes(oom.Actor.ID)); const applicationLogs = [];
+  for (const container of containerIds) {
+    assert.match(container, /^[a-f0-9]{64}$/);
+    const logs = await docker('logs', '--timestamps', '--since', new Date(baselineAt).toISOString(), '--tail', '10000', container);
+    assert.ok(logs.split('\n').length < 10000, 'application log evidence was truncated');
+    const file = 'application-' + container + '.log'; await writeFile(join(output, file), logs); applicationLogs.push({ container, file });
+    if (container === oom.Actor.ID) assert.ok(logs.includes('"kind":"oom-allocation"'));
+  }
   assert.equal(evidenceError, undefined);
   const result = { passed: true, scope: 'real builder/coordinator, container cgroup OOM and native rollback; disruption is measured, not uninterrupted rollback or global OOM acceptance', app, commit, identity, build, receipt, candidatePlan, before, recovered, replay,
     oom: { at: oomAt, container: oom.Actor.ID, state }, nativeUpdate: update, taskState, restoredAt, recoveryMs: restoredAt - oomAt,
     requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, firstFailureAt, lastFailureEndedAt, failureWindowMs: failures.length === 0 ? 0 : lastFailureEndedAt - firstFailureAt, nextSuccessAt: nextSuccess?.at ?? null,
-    achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, minimumAvailableMemoryBytes, peakCpuBusyFraction: Math.max(...metrics.map((value) => value.cpuBusyFraction ?? 0)), versions: JSON.parse(await docker('version', '--format', '{{json .}}')), node: process.version };
+    achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, minimumAvailableMemoryBytes, peakCpuBusyFraction: Math.max(...metrics.map((value) => value.cpuBusyFraction ?? 0)), versions: JSON.parse(await docker('version', '--format', '{{json .}}')), node: process.version, applicationLogs };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
 } catch (error) {
   await writeFile(join(output, 'failure.json'), JSON.stringify({ error: String(error), phase, app, commit, identity }, null, 2)); process.exitCode = 1; console.error(JSON.stringify({ error: String(error), output }));

@@ -1165,6 +1165,34 @@ an uninterrupted-rollback result.
 The observer now collects bounded logs directly from exact owned service
 container IDs, starting at the case's baseline, including the OOM container's
 allocation marker. It rejects truncation or missing candidate evidence, and
-persists normalized runtime OOM/recovery evidence before optional collection
+persists normalized runtime OOM/recovery evidence before later collection
 can fail. Traffic, budgets, health, monitoring, discovery and all recovery
 criteria are unchanged. A new request/source measurement is required.
+
+
+The corrected OOM observer at `2763e8c` passed with a new UUID against the
+existing coordinator installed from `589a387`. Docker recorded `OOMKilled`,
+`rollback_completed`, and certified B recovery 6,975.6 ms after the OOM. There
+were 110 failed requests out of 1,844 at 19.9675/s, no premature candidate
+exposure, and a 7,429 ms failure-observation window (first failed request start
+to last failed response completion, not a claim of continuous outage). Largest
+request-start gap: 190.5 ms; minimum host available memory: 3,062,951,936 bytes;
+peak sampled CPU busy fraction: 0.4278. This is automatic recovery with
+disruption, not uninterrupted rollback. The failed original attempt remains
+failed and preserved.
+
+Exact results: `/tmp/kayra-candidate-oom-retry.json`, raw
+`/tmp/kayra-candidate-oom-retry.json.tar`, source and clock suffixes, and
+`/tmp/kayra-candidate-oom-retry-context.json`. The original failed coordinator
+image was retained before subsequent lab rebuild under
+`kayra-lab-preserved/deployer:20261114144049` (the exact tag/ID is recorded in
+that native-resource workspace's `preserved-coordinator.json`).
+
+The first contender setup was refused by the real builder before the admission
+observer ran: copying the fixture changed its app name but left image metadata
+in `rollout-complete/web`. The upgrade now sets each contender's own immutable
+image namespace, as the existing indexed and Swarm build fixtures already do.
+Original bad commits/configuration are retained in
+`/tmp/kayra-native-resources-context.json` and its referenced workspace;
+`/tmp/kayra-native-admission.log` records the refusal. No admission-race or
+integrated ENOSPC pass is claimed from that setup.

@@ -1,0 +1,61 @@
+---
+- name: Refuse inherited image volumes before accepting a rollout
+  hosts: servers
+  become: true
+  tasks:
+    - name: Allocate isolated image admission observer source
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: image-admission-source-
+      register: image_source
+
+    - name: Stage the immutable image admission observer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ image_source.path }}"
+        stage_source_paths: [cli/src, package.json, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
+
+    - name: Select exactly the persistent deployer for its existing Node runtime
+      ansible.builtin.command:
+        argv: [docker, ps, -q, --filter, label=com.docker.compose.project=platform, --filter, label=com.docker.compose.service=deployer, --filter, label=com.docker.compose.oneoff=False]
+      register: image_deployer
+      changed_when: false
+      failed_when: image_deployer.stdout_lines | length != 1
+
+    - name: Copy the observer runtime without adding a socket holder
+      ansible.builtin.command:
+        argv: [docker, cp, "{{ image_deployer.stdout | trim }}:{{ item.source }}", "{{ image_source.path }}/{{ item.target }}"]
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Build the inherited-volume fixture and require refusal without workload effects
+      ansible.builtin.command:
+        argv: ["{{ image_source.path }}/node", "{{ image_source.path }}/test/lab/swarm-platform/image-admission.mjs", "{{ fixture_app }}", "{{ fixture_commit }}", "{{ fixture_request }}", "{{ image_source.path }}/results"]
+      changed_when: true
+
+    - name: Retain the image admission result
+      ansible.builtin.fetch:
+        src: "{{ image_source.path }}/results/result.json"
+        dest: "{{ report_path }}"
+        flat: true
+
+    - name: Archive raw image admission evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ image_source.path }}/evidence.tar", -C, "{{ image_source.path }}/results", .]
+      changed_when: true
+
+    - name: Retain the raw image admission evidence
+      ansible.builtin.fetch:
+        src: "{{ image_source.path }}/evidence.tar"
+        dest: "{{ report_path }}.tar"
+        flat: true
+
+    - name: Remove only the successful image admission observer
+      ansible.builtin.file:
+        path: "{{ image_source.path }}"
+        state: absent

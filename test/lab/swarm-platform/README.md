@@ -1003,3 +1003,20 @@ A lighter app-owned fixture probe will be tested separately with the same
 readiness semantics, resource/time budgets and zero-failure traffic criteria.
 The health projection does not claim worker/maintenance/removal semantics or
 routed readiness; those acceptance checks remain outstanding.
+
+### Lower-cost integration readiness fixture
+
+Only `complete-fixture/` now uses `bash /health.sh` for its declared health check.
+It makes one loopback HTTP readiness request, accepts the fixture's HTTP 200
+response and drains the small body. It has no retry loop, Node startup, extra
+package install or traffic-policy change. The Node server and pinned base image
+remain the same. Limits stay at 128 MiB/0.25 CPU, health interval two seconds,
+timeout one second, retries two, start period twenty seconds; rollout monitoring,
+shutdown grace, refresh, 20/s load and two-second request timeout are unchanged.
+The existing HTTP matrix fixture and previously frozen sources are unchanged.
+
+Ten lab checks pass, including ready/not-ready status, exactly one request per
+probe and refusal of an invalid port. This fixture change follows measured
+Node-probe timeouts and the same-container timings above; it does not turn the
+failed 233-request run into a pass or establish universal readiness guarantees.
+A new full upgrade must pass with this source before full acceptance is claimed.

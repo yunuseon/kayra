@@ -36,3 +36,13 @@ test('fixture health mode checks readiness without loading the fetch runtime or 
     status = 200; const ready = await run(process.execPath, [script, 'health'], { env }); assert.equal(ready.stdout, '');
   }
 });
+
+test('the integration readiness script makes one HTTP request and preserves ready/not-ready semantics', async (t) => {
+  let status = 503; let calls = 0;
+  const server = createServer((incoming, response) => { calls++; assert.equal(incoming.url, '/health'); response.writeHead(status); response.end('{}'); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise((resolve) => server.close(resolve)));
+  const env = { ...process.env, PORT: String(server.address().port) }; const script = fileURLToPath(new URL('./complete-fixture/web/health.sh', import.meta.url));
+  await assert.rejects(run('bash', [script], { env }), (error) => error.code === 1); assert.equal(calls, 1);
+  status = 200; await run('bash', [script], { env }); assert.equal(calls, 2);
+  await assert.rejects(run('bash', [script], { env: { ...env, PORT: 'invalid' } }), (error) => error.code === 1); assert.equal(calls, 2);
+});

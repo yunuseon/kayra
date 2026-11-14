@@ -16,7 +16,7 @@ services:
         limits: {memory: 128m, cpus: "0.25"}
         reservations: {memory: 64m, cpus: "0.125"}
     healthcheck:
-      test: [CMD, node, /fixture.mjs, health]
+      test: [CMD, bash, /health.sh]
       interval: 2s
       timeout: 1s
       start_period: 20s

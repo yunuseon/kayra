@@ -627,6 +627,8 @@ if [ "$indexed_registration" = true ]; then
             APP_NAME="$admission_app" yq -i '.name = strenv(APP_NAME) |
                 .routes[0].host = strenv(APP_NAME) | .rollout.migrations = []' "${admission_repo}/app.yml"
             yq -i '.services.web.deploy.resources.limits.memory = "1024m"' "${admission_repo}/deploy/compose.yml"
+            jq --arg image "${admission_app}/web" '.image = $image' "${admission_repo}/web/docker/image.json" > "${work}/admission-image.json"
+            mv "${work}/admission-image.json" "${admission_repo}/web/docker/image.json"
             git -C "$admission_repo" init -q -b main
             git -C "$admission_repo" add -A
             git -C "$admission_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "declared admission contender"

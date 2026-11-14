@@ -1,3 +1,4 @@
+import type { DeploymentHealthPort } from "../contracts/deployment-health.ts";
 import { randomBytes } from "node:crypto";
 import { lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -213,18 +214,19 @@ const accept = (s: Settings, response: ServerResponse, request: Request) => {
 };
 
 /** POST /push/<app>, from the builder once a webhook proved itself: a deploy of the app's own ref. */
-const health = async (s: Settings, response: ServerResponse, gatherFacts: typeof gather) => {
+const health = async (s: Settings, response: ServerResponse, gatherFacts: typeof gather, observations?: DeploymentHealthPort) => {
   const scanned = registrations(s.platformDir);
   const apps = scanned.apps.map((app) => {
-    return Object.freeze({ name: app.name, released: legacyReleases(s.platformDir, app.name).hasEntries });
+    return Object.freeze({ name: app.name, runtime: app.runtime, released: app.runtime === "compose" && legacyReleases(s.platformDir, app.name).hasEntries });
   });
-  const assessed = assess({ ...await gatherFacts(apps, runsDir(s)), invalidRegistrations: scanned.invalid });
+  const deployments = observations === undefined ? undefined : await observations.snapshot().then((value) => Object.freeze({ available: true, value }), () => Object.freeze({ available: false, value: undefined }));
+  const assessed = assess({ ...await gatherFacts(apps, runsDir(s)), invalidRegistrations: scanned.invalid, deployments: deployments?.value, deploymentObservationsUnavailable: deployments?.available === false });
   send(response, assessed.healthy ? 200 : 503, JSON.stringify(assessed), "application/json");
 };
 
-const push = async (s: Settings, request: IncomingMessage, response: ServerResponse, gatherFacts: typeof gather) => {
+const push = async (s: Settings, request: IncomingMessage, response: ServerResponse, gatherFacts: typeof gather, observations?: DeploymentHealthPort) => {
   if (request.method === "GET" && new URL(request.url ?? "/", "http://deployer").pathname === "/health") {
-    await health(s, response, gatherFacts);
+    await health(s, response, gatherFacts, observations);
     return;
   }
   const name = /^\/push\/([^/]+)$/.exec(new URL(request.url ?? "/", "http://deployer").pathname)?.[1];
@@ -240,10 +242,10 @@ const push = async (s: Settings, request: IncomingMessage, response: ServerRespo
   accept(s, response, deployRequest(app.value, app.value.ref, "push"));
 };
 
-const pushHandler = (s: Settings, gatherFacts: typeof gather) => handle((request, response) => push(s, request, response, gatherFacts));
+const pushHandler = (s: Settings, gatherFacts: typeof gather, observations?: DeploymentHealthPort) => handle((request, response) => push(s, request, response, gatherFacts, observations));
 
 /** The internal push/health HTTP surface, with injectable health observations. */
-export const deployerPushHandler = (env: NodeJS.ProcessEnv, gatherFacts: typeof gather = gather) => pushHandler(settings(env), gatherFacts);
+export const deployerPushHandler = (env: NodeJS.ProcessEnv, gatherFacts: typeof gather = gather, observations?: DeploymentHealthPort) => pushHandler(settings(env), gatherFacts, observations);
 
 type RegistrationHandler = (route: string, input: unknown) => Promise<unknown>;
 
@@ -307,7 +309,7 @@ export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
       });
     if (registration !== undefined) process.once("exit", () => { void registration.close(); });
     abandonInterruptedRuns(runsDir(s), () => new Date().toISOString());
-    createServer(pushHandler(s, gather)).listen(8090);
+    createServer(pushHandler(s, gather, registration === undefined ? undefined : { snapshot: registration.health })).listen(8090);
     createServer(deployerControlHandler(env, registration?.handle)).listen(8091, "127.0.0.1");
     schedule(s, {
       poll: () => { void poll(s); },

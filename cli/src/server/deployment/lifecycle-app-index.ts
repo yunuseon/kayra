@@ -1,3 +1,4 @@
+import { deploymentHealth } from "./deployment-health.ts";
 import { deploymentImagePins } from "./deployment-image-pins.ts";
 import type { RolloutRequest } from "./rollout-request.ts";
 import { settledMigrationPrefix } from "./migration-prefix.ts";
@@ -575,6 +576,19 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return verified;
     }),
     reconcileHttpResources: (app: string, ticket: string) => useReady(app, (store) => reconcileHttpResources(app, store, ticket)),
+    runtimeHealthSnapshot: async (ports: Parameters<typeof deploymentHealth>[2] | undefined) => {
+      if (closed) throw new Error("lifecycle app index is closed");
+      const snapshot = await serialIndex(readIndex);
+      const observations = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
+        const envelope = await store.read();
+        // Unverified registrations cannot own Swarm workloads. Compose retains its existing observations.
+        if (envelope?.registrationReceipt?.runtime !== "swarm" || envelope.fence?.lifecycle.phase !== "registered") return Object.freeze([]);
+        if (ports === undefined) throw new Error("runtime health observations are unavailable");
+        return Object.freeze([await deploymentHealth(app.app, envelope, ports)]);
+      })));
+      return Object.freeze(observations.flat());
+    },
+    deploymentHealth: (app: string, ports: Parameters<typeof deploymentHealth>[2]) => useReady(app, async (store) => deploymentHealth(app, await store.read(), ports)),
     deploymentImagePins: (app: string, ports: Pick<BuildPorts, "read">) => useReady(app, async (store) => {
       const envelope = await store.read(); if (envelope === undefined) throw new Error("image pins lack lifecycle ownership");
       return deploymentImagePins(app, envelope, ports);

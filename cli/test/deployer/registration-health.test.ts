@@ -37,7 +37,7 @@ test("HTTP health reports invalid registrations without exposing their contents"
   mkdirSync(apps);
   writeFileSync(join(apps, "shop.json"), JSON.stringify(shop));
   const server = createServer(deployerPushHandler({ PLATFORM_DIR: dir }, (observedApps, disk) => {
-    deepStrictEqual(observedApps, [{ name: "shop", released: false }]);
+    deepStrictEqual(observedApps, [{ name: "shop", runtime: "compose", released: false }]);
     strictEqual(disk, join(dir, "runs"));
     return Promise.resolve({ apps: observedApps, containers: [], diskUsed: 0.2, memoryAvailable: 0.5 });
   }));
@@ -59,5 +59,24 @@ test("HTTP health reports invalid registrations without exposing their contents"
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => { if (error === undefined) resolve(); else reject(error); }));
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("HTTP health consumes the deployment owner's current projection and hides observation errors", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kayra-runtime-health-http-")); mkdirSync(join(dir, "apps"));
+  const available = { version: 1, app: "rollout", incarnation: "11111111-1111-4111-8111-111111111111", runtime: "swarm", scope: "runtime-services", observedAt: 1000, state: "available",
+    services: [{ name: "web", state: "available", currentTasks: 1, healthyTasks: 1, ignoredHistoricalTasks: 7 }] } as const;
+  // eslint-disable-next-line functional/no-let -- fixture changes only the published read port
+  let unavailable = false;
+  const server = createServer(deployerPushHandler({ PLATFORM_DIR: dir }, (apps) => Promise.resolve({ apps, containers: [], diskUsed: 0.2, memoryAvailable: 0.5 }), {
+    snapshot: () => unavailable ? Promise.reject(new Error("PRIVATE-TEST-VALUE")) : Promise.resolve([available]),
+  }));
+  server.listen(0, "127.0.0.1");
+  try {
+    await once(server, "listening"); const address = server.address(); if (address === null || typeof address === "string") throw new Error("no listening address");
+    const url = `http://127.0.0.1:${String(address.port)}/health`; const response = await fetch(url); strictEqual(response.status, 200); deepStrictEqual(await response.json(), { healthy: true, problems: [], warnings: [] });
+    unavailable = true; const failed = await fetch(url); strictEqual(failed.status, 503); const body = await failed.text(); strictEqual(body.includes("PRIVATE-TEST-VALUE"), false); deepStrictEqual(JSON.parse(body), { healthy: false, problems: ["deployment observations unavailable"], warnings: [] });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => { if (error === undefined) resolve(); else reject(error); })); rmSync(dir, { recursive: true, force: true });
   }
 });

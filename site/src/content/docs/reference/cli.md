@@ -366,6 +366,7 @@ For an explicitly registered indexed application on an experimental host:
 kayra app build SERVER APP FULL_COMMIT
 kayra app deployment prepare SERVER APP FULL_COMMIT REQUEST_UUID
 kayra app deployment status SERVER APP
+kayra app deployment health SERVER APP
 kayra app deployment pins SERVER APP
 kayra app deployment cancel SERVER APP REQUEST_UUID
 ```
@@ -377,6 +378,14 @@ uncertain request, then read status. Version-two receipts identify the complete
 plan and its original total deadline; older HTTP requests retain version one.
 The host selects the runtime and grants. These commands accept no runtime,
 resource override, migration command, secret value or deadline.
+
+`deployment health` observes current Swarm HTTP services through the deployment
+owner. It reports current healthy task counts separately from ignored historical
+tasks. This is runtime availability, separate from routed readiness and the
+historical active-release certificate shown by `deployment status`; reading it
+never promotes a release. API/UI operation `app.deployment.health` and MCP tool
+`app_deployment_health` expose the same read. Compose keeps its existing health
+path. Missing or unavailable Swarm observations do not fall back to Compose.
 
 `deployment pins` publishes exact image digests for active, candidate, rollback
 and unresolved plans, with complete-plan and workload identities. It includes

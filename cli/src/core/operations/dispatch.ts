@@ -74,6 +74,7 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("app.purge"), input: operations["app.purge"].input }),
   z.strictObject({ name: z.literal("app.build"), input: operations["app.build"].input }),
   z.strictObject({ name: z.literal("app.deployment.prepare"), input: operations["app.deployment.prepare"].input }),
+  z.strictObject({ name: z.literal("app.deployment.health"), input: operations["app.deployment.health"].input }),
   z.strictObject({ name: z.literal("app.deployment.pins"), input: operations["app.deployment.pins"].input }),
   z.strictObject({ name: z.literal("app.deployment.status"), input: operations["app.deployment.status"].input }),
   z.strictObject({ name: z.literal("app.deployment.cancel"), input: operations["app.deployment.cancel"].input }),
@@ -126,7 +127,7 @@ const withServer =
   (ctx: Context, input: { readonly server: string }) =>
     flatMap(onServer(ctx, input.server), (target) => make(ctx.engine, target));
 
-type DeployerName = "app.build" | "app.deployment.prepare" | "app.deployment.pins" | "app.deployment.status" | "app.deployment.cancel" | "app.migration.cleanup" | "app.migration.cleanup.audit" | "app.migration.resolve" | "app.migration.audit" | "app.runs" | "app.log" | "app.deploy" | "app.releases" | "app.rollback";
+type DeployerName = "app.build" | "app.deployment.prepare" | "app.deployment.health" | "app.deployment.pins" | "app.deployment.status" | "app.deployment.cancel" | "app.migration.cleanup" | "app.migration.cleanup.audit" | "app.migration.resolve" | "app.migration.audit" | "app.runs" | "app.log" | "app.deploy" | "app.releases" | "app.rollback";
 
 const onDeployer =
   <N extends DeployerName>(command: (app: AppName, input: InputOf<N>) => DeployerCommand) =>
@@ -163,6 +164,7 @@ const plans: Plans = {
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),
   "app.build": onDeployer<"app.build">((app, input) => ({ kind: "build", app, commit: input.commit } as const)),
   "app.deployment.prepare": onDeployer<"app.deployment.prepare">((app, input) => ({ kind: "lifecycle-prepare", app, commit: input.commit, request: input.request } as const)),
+  "app.deployment.health": onDeployer<"app.deployment.health">((app) => ({ kind: "lifecycle", app, operation: "health", request: undefined } as const)),
   "app.deployment.pins": onDeployer<"app.deployment.pins">((app) => ({ kind: "lifecycle", app, operation: "pins", request: undefined } as const)),
   "app.deployment.status": onDeployer<"app.deployment.status">((app) => ({ kind: "lifecycle", app, operation: "status", request: undefined } as const)),
   "app.deployment.cancel": onDeployer<"app.deployment.cancel">((app, input) => ({ kind: "lifecycle", app, operation: "cancel", request: input.request } as const)),

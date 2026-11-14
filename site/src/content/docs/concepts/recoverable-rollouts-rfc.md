@@ -1290,6 +1290,19 @@ The format checks follow the [OCI configuration](https://github.com/opencontaine
 and [image-index](https://github.com/opencontainers/image-spec/blob/v1.1.1/image-index.md)
 specifications.
 
+Current runtime health is a separate owner projection from release history.
+The coordinator reads normalized adapter observations and considers only tasks
+whose desired state is running, matched to owned deployment identities. A
+healthy previous task can preserve availability during start-first overlap;
+failed historical tasks do not mark the current application unhealthy. The
+platform consumes a typed snapshot for its existing health endpoint instead
+of interpreting journals or assuming a Compose backend. Observation failures
+are reported explicitly. This first projection covers verified, registered
+Swarm HTTP applications; worker, singleton, maintenance and removal health
+semantics remain part of their integrations. Runtime availability does not
+certify routed readiness or promote a candidate, and existing Compose health
+behavior is preserved.
+
 Global OOM, Docker-root or inode exhaustion, backup restoration, host loss and
 multi-node behavior are outside this first single-node integration. Even a
 passing integration is experimental and is not a universal zero-downtime or

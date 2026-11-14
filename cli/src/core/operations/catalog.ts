@@ -165,6 +165,10 @@ export const operations = {
     scope: "app", effect: "changes", kind: "plan", bare: true,
     input: deploymentRequestSchema.unwrap().extend({ server }).strict().readonly(),
   },
+  "app.deployment.health": {
+    summary: "Observe current runtime service health separately from release certification and historical task failures.",
+    scope: "app", effect: "reads", kind: "plan", bare: true, input: appInput,
+  },
   "app.deployment.pins": {
     summary: "Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.",
     scope: "app", effect: "reads", kind: "plan", bare: true, input: appInput,

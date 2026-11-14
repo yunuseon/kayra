@@ -37,6 +37,7 @@ export const reaches = {
   "app.purge": { tool: "app_purge" },
   "app.build": { tool: "app_build" },
   "app.deployment.prepare": { tool: "app_deployment_prepare" },
+  "app.deployment.health": { tool: "app_deployment_health" },
   "app.deployment.pins": { tool: "app_deployment_pins" },
   "app.deployment.status": { tool: "app_deployment_status" },
   "app.deployment.cancel": { tool: "app_deployment_cancel" },

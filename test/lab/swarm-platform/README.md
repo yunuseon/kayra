@@ -953,3 +953,53 @@ image-admission code. The previous failed VM
 `kayra-complete-acceptance-20261114041014` was stopped only after proving no
 one-shot jobs were running and exporting its metadata. Its disk, sources and
 fleet remain preserved; no failed VM was deleted.
+
+### Current runtime health projection
+
+`kayra app deployment health SERVER APP` (`ctl lifecycle health APP`) observes
+current owned Swarm HTTP tasks separately from the historical active-release
+certificate. API/UI/MCP clients expose the same operation. The coordinator
+publishes a typed snapshot for the existing platform `/health`; the platform
+neither reads private journals nor guesses a backend from Docker containers.
+Missing/unavailable observations fail explicitly. Historical tasks are counted
+but do not make a currently available service unhealthy. Compose health remains
+on its existing path. Reading health never promotes or mutates a release.
+
+Validation: full CLI suite **698 passed, two existing skips**; fourteen focused
+health cases; CLI type/build/lint and web type/lint/build plus **21 web tests**.
+Cases cover overlap, current/historical failures, missing or foreign tasks,
+unchanged certification, ownership conflicts, unavailable ports and private
+error suppression. The normal dependency-free entrypoint tests still pass.
+
+Native observation passed all ten tasks on the preserved failed full-upgrade VM:
+**one current healthy task, four ignored historical tasks with actual probe
+timeouts, platform HTTP 200/healthy, unchanged release certificate and container
+identities**. Swarm records these gracefully terminated, health-failed historical
+tasks as `complete`, so the observer records both task state and container probe
+failure evidence. Its earlier task-state-only assertion failed and is preserved
+in `/tmp/kayra-runtime-health-native.log` and
+`/var/lib/kayra/swarm/runtime-health-source-rwi6bslm`; this was an observer failure,
+not a false healthy runtime report. The corrected evidence is
+`/tmp/kayra-runtime-health-native2.json`, `.json.source.json` and `.log`.
+Installed production source/context is `/tmp/kayra-runtime-health-native-context.json`
+and `-installed-source.json`. The original coordinator image is preserved under
+`kayra-lab-preserved/deployer:20261114114523`; original failed app containers,
+sources and journals remain on that VM. Only the successful observer was removed.
+
+The fresh full run at clean `0067b8e` passed normal Compose paths, mixed TLS,
+all 79 component tasks and real migration recovery/B promotion, then **failed
+with 233 request failures out of 3,054** during post-convergence traffic. B's
+one-second Node health probe timed out and Swarm restarted B after promotion.
+There was no OOM (over 3 GB available memory); CPU peaked at 98.6%. Original
+failed run/archive and diagnostics are preserved at
+`/tmp/kayra-corrected-acceptance-failed.tar`,
+`/tmp/kayra-corrected-acceptance-failure-summary.json` and
+`/tmp/kayra-corrected-acceptance-health-failure.json`. This is not a full pass.
+
+Three same-container, quarter-CPU timing samples, including Docker exec overhead,
+measured Node probes at 448–929 ms and equivalent Bash HTTP probes at 77–166 ms
+without traffic load. Exact samples are `/tmp/kayra-health-probe-cost.json`.
+A lighter app-owned fixture probe will be tested separately with the same
+readiness semantics, resource/time budgets and zero-failure traffic criteria.
+The health projection does not claim worker/maintenance/removal semantics or
+routed readiness; those acceptance checks remain outstanding.

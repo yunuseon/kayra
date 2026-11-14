@@ -583,6 +583,15 @@ if [ "$indexed_registration" = true ]; then
         cp "${work}/image-admission.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.image-admission.source.json"
         echo "✓ inherited image volume refused without accepting a rollout or creating app containers/volumes"
 
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/health-observation.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" \
+            -e "report_path=${work}/runtime-health.json" >> "$log" 2>&1 || die "current runtime and platform health observations"
+        cp "${work}/runtime-health.json" "/tmp/kayra-swarm-platform-${vm_name}.runtime-health.json"
+        cp "${work}/runtime-health.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.runtime-health.source.json"
+        echo "✓ runtime health ignores historical tasks without changing the certified release"
+
     fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi

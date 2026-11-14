@@ -1,0 +1,85 @@
+---
+- name: Measure candidate container OOM and previous-release recovery
+  hosts: servers
+  become: true
+  tasks:
+    - name: Allocate isolated candidate OOM observer source
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: candidate-oom-source-
+      register: oom_source
+
+    - name: Stage the immutable candidate OOM observer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ oom_source.path }}"
+        stage_source_paths: [cli/src, package.json, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
+
+    - name: Select exactly the persistent deployer for its existing Node runtime
+      ansible.builtin.command:
+        argv: [docker, ps, -q, --filter, label=com.docker.compose.project=platform, --filter, label=com.docker.compose.service=deployer, --filter, label=com.docker.compose.oneoff=False]
+      register: oom_deployer
+      changed_when: false
+      failed_when: oom_deployer.stdout_lines | length != 1
+
+    - name: Copy the observer runtime without adding a socket holder
+      ansible.builtin.command:
+        argv: [docker, cp, "{{ oom_deployer.stdout | trim }}:{{ item.source }}", "{{ oom_source.path }}/{{ item.target }}"]
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Require synchronized clocks before the bounded OOM experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: oom_before_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((oom_before_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Build and deploy the memory-exhausting candidate through the existing coordinator
+      ansible.builtin.command:
+        argv: ["{{ oom_source.path }}/node", "{{ oom_source.path }}/test/lab/swarm-platform/candidate-oom.mjs", "{{ fixture_app }}", "{{ fixture_commit }}", "{{ fixture_request }}", "{{ oom_source.path }}/results"]
+      changed_when: true
+
+    - name: Require synchronized clocks after the bounded OOM experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: oom_after_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((oom_after_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Retain experiment clock observations
+      ansible.builtin.copy:
+        content: "{{ {'beforeVmEpochSeconds': oom_before_clock.stdout | int, 'afterVmEpochSeconds': oom_after_clock.stdout | int} | to_json }}\n"
+        dest: "{{ report_path }}.clock.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Retain the candidate OOM result
+      ansible.builtin.fetch:
+        src: "{{ oom_source.path }}/results/result.json"
+        dest: "{{ report_path }}"
+        flat: true
+
+    - name: Archive raw candidate OOM evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ oom_source.path }}/evidence.tar", -C, "{{ oom_source.path }}/results", .]
+      changed_when: true
+
+    - name: Retain the raw candidate OOM evidence
+      ansible.builtin.fetch:
+        src: "{{ oom_source.path }}/evidence.tar"
+        dest: "{{ report_path }}.tar"
+        flat: true
+
+    - name: Remove only the successful candidate OOM observer
+      ansible.builtin.file:
+        path: "{{ oom_source.path }}"
+        state: absent

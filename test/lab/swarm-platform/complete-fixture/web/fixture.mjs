@@ -20,6 +20,9 @@ const task = os.hostname();
 let draining = false;
 const failAfter = Number(process.env.FAIL_AFTER_READY_MS ?? 0);
 let failureScheduled = false;
+const oomBytes = Number(process.env.OOM_BYTES ?? 0);
+let oomScheduled = false;
+const allocations = [];
 const event = (kind, fields = {}) => console.log(JSON.stringify({ at: Date.now(), kind, release, task, ...fields }));
 const ready = () => !neverReady && Date.now() >= readyAt && !draining;
 
@@ -46,6 +49,11 @@ const server = http.createServer((request, response) => {
     }, Math.min(Number(url.searchParams.get('ms') ?? 20000), 25000));
   } else {
     response.end(JSON.stringify(body));
+  }
+  if (!health && oomBytes > 0 && !oomScheduled) {
+    oomScheduled = true;
+    event('oom-armed', { bytes: oomBytes });
+    setTimeout(() => { event('oom-allocation', { bytes: oomBytes }); allocations.push(Buffer.alloc(oomBytes, 1)); }, 10000);
   }
   if (!health) event('request', { path: url.pathname, requestStartedAt, ready: body.ready });
 });

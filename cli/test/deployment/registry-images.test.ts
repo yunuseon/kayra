@@ -103,3 +103,32 @@ test("metadata nesting is bounded and the supported AMD64 platform remains accep
   const image = lab.image({ os: "linux", architecture: "amd64", config: {} }); assert.equal(await registryImages(lab.origin, "amd64").verify("shop", [image.ref]), "accepted");
   const before = lab.calls.length; assert.equal(await registryImages(lab.origin, "riscv64").verify("shop", [image.ref]), "unsupported"); assert.equal(lab.calls.length, before);
 });
+
+test("declared service mounts must cover every inherited image volume at its exact canonical target", async (t) => {
+  const lab = await fixture(t); const image = lab.image({ os: "linux", architecture: "arm64", config: { Volumes: { "/data": {}, "/cache": {} } } });
+  assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets: ["/data", "/cache"] }]), "accepted");
+  for (const volumeTargets of [["/data"], ["/data/child", "/cache"], ["/other", "/cache"], []]) assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets }]), "unsupported");
+  assert.equal(await lab.port.verify("shop", [image.ref]), "unsupported");
+});
+
+test("one-shot usage cannot inherit volumes even when the same image is allowed for a mounted service", async (t) => {
+  const lab = await fixture(t); const image = lab.image({ os: "linux", architecture: "arm64", config: { Volumes: { "/data": {} } } });
+  assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets: ["/data"] }, { image: image.ref, kind: "one-shot", volumeTargets: [] }]), "unsupported");
+  assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref, kind: "one-shot", volumeTargets: ["/data"] }]), "unsupported");
+  assert.equal(await lab.port.verifyDeclared("shop", [{ image: lab.image().ref, kind: "one-shot", volumeTargets: [] }]), "accepted");
+});
+
+test("ambiguous inherited targets and unsupported volume metadata cannot bypass explicit coverage", async (t) => {
+  const lab = await fixture(t);
+  for (const Volumes of [{ "/data": null }, { "/data": { unsupported: true } }, { "/data": [] }, { "/data/../host": {} }, { "/data/": {} }, { "/": {} }]) {
+    const image = lab.image({ os: "linux", architecture: "arm64", config: { Volumes } });
+    assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets: ["/data"] }]), "unsupported");
+  }
+});
+
+test("invalid declared mounts and foreign images refuse before reading the registry", async (t) => {
+  const lab = await fixture(t); const image = lab.image();
+  for (const volumeTargets of [["/"], ["/data/../host"], ["/data", "/data"], Array.from({ length: 33 }, (_, index) => `/data${String(index)}`)]) assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets }]), "unsupported");
+  assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref.replace("shop/", "other/"), kind: "service", volumeTargets: ["/data"] }]), "unsupported");
+  assert.equal(lab.calls.length, 0);
+});

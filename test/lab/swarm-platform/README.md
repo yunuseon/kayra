@@ -1309,3 +1309,38 @@ does not establish retained dependency reconciliation, managed volume creation
 receipts, app-wide rollback, workers, maintenance or coordinator purge safety.
 The coordinator receives only comparison outcomes; runtime materialization is a
 separate typed port. Native source and result archives remain authoritative.
+
+### Image volume coverage against a real registry
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --image-admission
+```
+
+The optional probe uses the platform-pinned Registry 3.1.2 digest, bound only to
+the disposable VM's loopback. It produces a synthetic image declaring `/data`,
+pushes it, and verifies exact declared service coverage, uncovered/descendant
+mount refusal, one-shot refusal, mixed service/job refusal, unchanged legacy
+no-volumes policy, and a plain no-volumes positive control. Container and volume
+identities must remain unchanged during admission. This is metadata inspection,
+not a managed rollout or evidence of volume creation/data safety.
+
+The corrected probe passed at exact source `e11947b` in fresh
+`kayra-volume-lab-20261114214000422632`; the successful VM was destroyed. Private
+source archives, hashes, raw registry logs, versions, clock gates and results
+are retained at `.cache/lab-evidence/kayra-declared-images-retry-20261114214000/`.
+The existing owned-volume checks passed again. Root regression checks also
+passed: 741 tests passed, 2 skipped; typecheck/build/lint and Ansible/YAML checks
+passed.
+
+The first probe failed only at its plain control: Docker's local `RepoDigests`
+retained the original multi-platform index digest after a platform-specific
+retag/push, but that index was absent in the target registry. Admission correctly
+returned unavailable. The fixture now pins the manifest actually served by its
+registry tag, checking the response digest against exact bytes before using that
+immutable reference. This changes fixture reference discovery, not production
+admission. The original failed run remains failed and preserved in stopped
+`kayra-volume-lab-20261114213518881406`, with original frozen source, fixture
+images and a disk copy of the registry's RAM-backed storage at
+`/tmp/kayra-declared-image-failure-preserved/registry-storage`. Raw failure results
+and preservation details are retained at
+`.cache/lab-evidence/kayra-declared-images-20261114213518/`.

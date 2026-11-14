@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[3])
 parser.add_argument('--output', type=Path)
 parser.add_argument('--keep', action='store_true')
+parser.add_argument('--platform-inputs', action='store_true', help='also verify exact platform input generations and permissions as deployer UID 1000')
 args = parser.parse_args()
 source = args.source.resolve()
 vm = 'kayra-volume-lab-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S%f')
@@ -29,6 +30,8 @@ frozen.mkdir()
 paths = ['cli/src/contracts', 'cli/src/lib', 'cli/src/server/runtime/owned-volume.ts', 'cli/src/server/runtime/docker-api.ts',
          'package.json', 'test/lab/stage-source.yml', 'test/lab/swarm-platform/volume-runtime.mjs',
          'test/lab/swarm-platform/volume-runtime.yml', 'ansible/roles/docker', 'ansible/ansible.cfg', 'ansible/callback_plugins', 'node_modules/zod']
+if args.platform_inputs:
+    paths += ['cli/src/server/platform', 'test/lab/swarm-platform/platform-inputs.mjs']
 for relative in paths:
     origin, target = source / relative, frozen / relative
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +45,8 @@ files = [{'path': str(path.relative_to(frozen)), 'sha256': hashlib.sha256(path.r
 with tarfile.open(report / 'source.tar', 'w') as archive:
     archive.add(frozen, arcname='source')
 image = 'node:24.22.1-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea'
-context = {'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'runtime adapter only; no managed application or coordinator'}
+commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
+context = {'sourceCommit': commit, 'sourceManifest': 'source-files.json', 'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'runtime adapter and optional platform input readers only; no managed application or coordinator', 'platformInputs': args.platform_inputs}
 (report / 'context.json').write_text(json.dumps(context, indent=2))
 log = (report / 'lab.log').open('w')
 awake = subprocess.Popen(['caffeinate', '-i', '-s'])
@@ -65,7 +69,7 @@ try:
     inventory = work / 'inventory.ini'
     inventory.write_text('[servers]\nvolume-lab ansible_host=' + address + ' ansible_user=deploy ansible_ssh_private_key_file=' + str(key) + ' ansible_ssh_common_args="-o IdentitiesOnly=yes"\n')
     env = {**os.environ, 'ANSIBLE_CONFIG': str(frozen / 'ansible/ansible.cfg'), 'PYTHONDONTWRITEBYTECODE': '1'}
-    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json')], env=env)
+    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json'), '-e', 'platform_input_probe=' + ('true' if args.platform_inputs else 'false')], env=env)
     if not args.keep:
         run(['multipass', 'delete', '--purge', vm])
         shutil.rmtree(work)

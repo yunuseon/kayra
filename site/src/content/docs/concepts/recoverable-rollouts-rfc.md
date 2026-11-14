@@ -1347,3 +1347,22 @@ owner; old ownerless rows and Compose registrations cannot allocate these
 identities. This is metadata intent, not proof that a volume was created or
 resource admission. A future create receipt and missing-volume recovery policy
 must be bound before enabling retained application workloads.
+
+### Retained dependency input comparison
+
+A retained dependency keeps its original input-generation references when its
+immutable service declaration and bound input values remain unchanged. A new
+registration or whole-configuration identity alone does not require replacing
+that dependency. The platform resolves both exact generations and compares only
+that service's declared bindings. Unrelated configuration or unused secret
+rotation therefore does not force a database restart. A changed bound value or
+binding is a dependency change and must be refused by ordinary first-integration
+rollouts. Missing evidence is unavailable, never unchanged.
+
+The coordinator's typed comparison port returns only `unchanged`, `changed` or
+`unavailable`. Resolved values and private errors stay inside platform
+materialization; no resolved secret values or secret-derived hashes are written
+to deployment journals. Runtime materialization is a distinct port supplied by
+the composition root. References are validated, bounded and scoped to the same
+app incarnation. This comparison groundwork does not yet enable retained
+services or their immutable-spec reconciliation.

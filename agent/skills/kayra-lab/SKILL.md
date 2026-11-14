@@ -76,7 +76,10 @@ and rerun against a fresh source snapshot.
 
 ## After a pass
 
-The VM and the temp fleet are destroyed unless `--keep`. Report the five
+The VM and the temp fleet are destroyed unless `--keep`. Cleanup prints a
+private retained raw log path under `/tmp/kayra-upgrade-<vm>.<unique>/lab.log`,
+including teardown output after success. Copy evidence needed beyond temporary
+storage to a private persistent directory. Report the five
 phases and the final `kayra verify`, and what the run covered. A bug found on
 a real server, which the lab did not catch, gets a step here: the lab is
 only as good as the history it encodes.

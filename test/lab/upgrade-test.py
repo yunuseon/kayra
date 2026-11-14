@@ -1,6 +1,7 @@
 """Exercise upgrade-lab resource safety without starting a VM."""
 
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -44,9 +45,40 @@ class UpgradeLabSafety(unittest.TestCase):
                 for process in processes:
                     process.wait(timeout=5)
 
+    def test_success_retains_private_raw_log_after_teardown_before_removing_fleet(self):
+        source = LAB.read_text()
+        cleanup = source[source.index("retain_lab_log() {"):source.index("\ntrap cleanup EXIT")]
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary) / "work"
+            fleet = work / "fleet"
+            (fleet / "servers/lab/terraform").mkdir(parents=True)
+            log = work / "lab.log"
+            log.write_text("platform and component evidence\n")
+            script = cleanup + """
+work=$1
+fleet=$2
+log=$3
+server=lab
+vm_name=fixture-log-retention
+passed=true
+keep=false
+kayra_cmd() { echo 'teardown completed'; }
+cleanup
+"""
+            result = subprocess.run(["bash", "-c", script, "cleanup-test", str(work), str(fleet), str(log)], text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(work.exists())
+            archived = Path(result.stdout.strip().removeprefix("raw lab log: "))
+            try:
+                self.assertEqual(archived.read_text(), "platform and component evidence\nteardown completed\n")
+                self.assertEqual(archived.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(archived.parent.stat().st_mode & 0o777, 0o700)
+            finally:
+                shutil.rmtree(archived.parent)
+
     def test_failed_teardown_retains_fleet_and_reports_failure(self):
         source = LAB.read_text()
-        cleanup = source[source.index("cleanup() {"):source.index("\ntrap cleanup EXIT")]
+        cleanup = source[source.index("retain_lab_log() {"):source.index("\ntrap cleanup EXIT")]
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary) / "work"
             fleet = work / "fleet"

@@ -24,6 +24,8 @@ export const reaches = {
   "app.secret.import": { label: "Import app secret", icon: "+" },
   "app.secret.generate": { label: "Generate app secret", icon: "+" },
   "app.purge": { label: "Purge app data", icon: "×" },
+  "app.build": { label: "Retain experimental build", icon: "⚙" },
+  "app.deployment.prepare": { label: "Request experimental rollout", icon: "▶" },
   "app.deployment.status": { label: "Deployment state", icon: "≡" },
   "app.deployment.cancel": { label: "Cancel deployment", icon: "×" },
   "app.migration.cleanup": { label: "Fence held migration attempt", icon: "×" },

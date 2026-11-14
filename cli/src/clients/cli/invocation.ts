@@ -49,6 +49,10 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "app.secret.generate", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }), key: command.key } });
     case "app purge":
       return plainly({ name: "app.purge", input: { server: command.server, app: command.app } });
+    case "app build":
+      return plainly({ name: "app.build", input: { server: command.server, app: command.app, commit: command.commit } });
+    case "app deployment prepare":
+      return plainly({ name: "app.deployment.prepare", input: { server: command.server, app: command.app, commit: command.commit, request: command.request } });
     case "app deployment status":
       return plainly({ name: "app.deployment.status", input: { server: command.server, app: command.app } });
     case "app deployment cancel":
@@ -115,6 +119,8 @@ export const reaches = {
   "app.secret.import": ["app", "secret", "import", "SERVER", "APP", "API_KEY", "/tmp/credential"],
   "app.secret.generate": ["app", "secret", "generate", "SERVER", "APP", "DATABASE_PASSWORD"],
   "app.purge": ["app", "purge", "SERVER", "APP"],
+  "app.build": ["app", "build", "SERVER", "APP", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+  "app.deployment.prepare": ["app", "deployment", "prepare", "SERVER", "APP", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "12345678-1234-4234-8234-123456789abc"],
   "app.deployment.status": ["app", "deployment", "status", "SERVER", "APP"],
   "app.deployment.cancel": ["app", "deployment", "cancel", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc"],
   "app.migration.cleanup": ["app", "migration", "cleanup", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema", "migration", "1", "23456789-1234-4234-8234-123456789abc", "--reason", "Fence failed migration before inspecting ledger"],

@@ -3,6 +3,10 @@ import type { Invocation } from "../../core/operations/catalog.ts";
 /** What follows the server and the app on the command line, by operation. */
 const extra = (call: Invocation) => {
   switch (call.name) {
+    case "app.build":
+      return [call.input.commit];
+    case "app.deployment.prepare":
+      return [call.input.commit, call.input.request];
     case "app.deployment.cancel":
       return [call.input.request];
     case "app.migration.cleanup":

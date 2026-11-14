@@ -609,6 +609,51 @@ Preview: `POST /api/operations/app.purge/preview`. Returns a JSON plan with stat
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.build`
+
+Build and retain an exact commit through the experimental indexed builder.
+
+`POST /api/operations/app.build`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `commit` | `string` | yes | — | Pattern: `^[0-9a-f]{40}$`. |
+
+Preview: `POST /api/operations/app.build/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.deployment.prepare`
+
+Request an experimental rollout of a retained build under a stable request identity.
+
+`POST /api/operations/app.deployment.prepare`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]*$`. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `commit` | `string` | yes | — | Pattern: `^[0-9a-f]{40}$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.prepare/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.deployment.status`
 
 Read deployment phase, verified active release and required recovery action.

@@ -66,6 +66,8 @@ export const appPurge = (engine: Engine, server: Server, app: AppName) =>
 
 /** What `kayra app …` and `kayra job …` ask of a server: its deployer's ctl, over SSH. */
 export type DeployerCommand =
+  | { readonly kind: "build"; readonly app: AppName; readonly commit: string }
+  | { readonly kind: "lifecycle-prepare"; readonly app: AppName; readonly commit: string; readonly request: string }
   | { readonly kind: "runs" | "logs" | "deploy" | "rollback"; readonly app: AppName; readonly more: string | undefined }
   | { readonly kind: "lifecycle"; readonly app: AppName; readonly operation: "status" | "cancel"; readonly request: string | undefined }
   | { readonly kind: "migration"; readonly app: AppName; readonly operation: "resolve" | "audit" | "cleanup" | "cleanup-audit"; readonly payload: Readonly<Record<string, string | number>> }
@@ -76,6 +78,10 @@ type CtlCall = { readonly title: string; readonly args: readonly string[]; reado
 
 const ctlCall = (server: Server, command: DeployerCommand) => {
   switch (command.kind) {
+    case "build":
+      return typed<CtlCall>({ title: `Retain build of ${command.app}`, args: ["build", command.app, command.commit], stdout: "show" });
+    case "lifecycle-prepare":
+      return typed<CtlCall>({ title: `Request rollout of ${command.app}`, args: ["lifecycle", "prepare", command.app, command.commit, command.request], stdout: "show" });
     case "lifecycle":
       return typed<CtlCall>({ title: `Deployment ${command.operation} for ${command.app}`, args: ["lifecycle", command.operation, command.app, ...(command.request === undefined ? [] : [command.request])], stdout: "show" });
     case "migration":

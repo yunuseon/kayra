@@ -91,3 +91,9 @@ test("managed plans snapshot indexed arrays without trusting custom iterators an
   assert.equal(parsed.value.mounts[0]?.readOnly, false);
   assert.equal(parseManagedServicePlan({ ...declaration, mounts: Array(1) }).ok, false);
 });
+
+
+test("a synchronously failing comparison port is unavailable and cannot leak its private error", async () => {
+  const result = await retainService(previous, previous, { compare: () => { throw new Error("sensitive-provider-error"); } });
+  assert.equal(result.ok, false); assert.equal(result.error, "retained dependency input evidence is unavailable");
+});

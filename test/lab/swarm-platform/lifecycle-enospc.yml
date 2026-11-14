@@ -1,0 +1,92 @@
+---
+- name: Measure bounded lifecycle ENOSPC and restart recovery
+  hosts: servers
+  become: true
+  tasks:
+    - name: Allocate isolated lifecycle ENOSPC observer source
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: lifecycle-enospc-source-
+      register: enospc_source
+
+    - name: Stage the immutable lifecycle ENOSPC observer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ enospc_source.path }}"
+        stage_source_paths: [cli/src, package.json, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
+
+    - name: Select exactly the persistent deployer for its existing Node runtime
+      ansible.builtin.command:
+        argv: [docker, ps, -q, --filter, label=com.docker.compose.project=platform, --filter, label=com.docker.compose.service=deployer, --filter, label=com.docker.compose.oneoff=False]
+      register: enospc_deployer
+      changed_when: false
+      failed_when: enospc_deployer.stdout_lines | length != 1
+
+    - name: Copy the observer runtime without adding a socket holder
+      ansible.builtin.command:
+        argv: [docker, cp, "{{ enospc_deployer.stdout | trim }}:{{ item.source }}", "{{ enospc_source.path }}/{{ item.target }}"]
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Require synchronized clocks before the bounded ENOSPC experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: enospc_before_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((enospc_before_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Allocate separate bounded lifecycle storage outside Docker-root
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: lifecycle-storage-
+      register: enospc_storage
+
+    - name: Require recovery of the same accepted intent after bounded ENOSPC
+      ansible.builtin.command:
+        argv: ["{{ enospc_source.path }}/node", "{{ enospc_source.path }}/test/lab/swarm-platform/lifecycle-enospc.mjs", "{{ fixture_app }}", "{{ fixture_commit }}", "{{ fixture_request }}", "{{ enospc_storage.path }}", "{{ enospc_source.path }}/results"]
+      changed_when: true
+
+    - name: Require synchronized clocks after the bounded ENOSPC experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: enospc_after_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((enospc_after_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Retain experiment clock observations
+      ansible.builtin.copy:
+        content: "{{ {'beforeVmEpochSeconds': enospc_before_clock.stdout | int, 'afterVmEpochSeconds': enospc_after_clock.stdout | int} | to_json }}\n"
+        dest: "{{ report_path }}.clock.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Retain the lifecycle ENOSPC result
+      ansible.builtin.fetch:
+        src: "{{ enospc_source.path }}/results/result.json"
+        dest: "{{ report_path }}"
+        flat: true
+
+    - name: Archive raw lifecycle ENOSPC evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ enospc_source.path }}/evidence.tar", -C, "{{ enospc_source.path }}/results", .]
+      changed_when: true
+
+    - name: Retain the raw lifecycle ENOSPC evidence
+      ansible.builtin.fetch:
+        src: "{{ enospc_source.path }}/evidence.tar"
+        dest: "{{ report_path }}.tar"
+        flat: true
+
+    - name: Remove only the successful lifecycle ENOSPC observer
+      ansible.builtin.file:
+        path: "{{ enospc_source.path }}"
+        state: absent

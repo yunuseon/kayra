@@ -558,6 +558,11 @@ if [ "$indexed_registration" = true ]; then
         git -C "$complete_repo" add -A
         git -C "$complete_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "candidate exceeds its container memory budget after routed readiness"
         complete_oom="$(git -C "$complete_repo" rev-parse HEAD)"
+        yq -i '.services.web.environment.RELEASE = "ENOSPC" |
+            .services.web.environment.OOM_BYTES = "0"' "${complete_repo}/deploy/compose.yml"
+        git -C "$complete_repo" add -A
+        git -C "$complete_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "resume accepted rollout after bounded lifecycle ENOSPC"
+        complete_enospc="$(git -C "$complete_repo" rev-parse HEAD)"
         git clone -q --bare "$complete_repo" "${served}/lab/complete.git"
         git -C "$complete_repo" bundle create "/tmp/kayra-swarm-platform-${vm_name}.complete-fixture.bundle" --all
         complete_requests="$(python3 -c 'import json,uuid; print(json.dumps({"A":str(uuid.uuid4()),"B":str(uuid.uuid4())}))')"
@@ -633,6 +638,19 @@ if [ "$indexed_registration" = true ]; then
         cp "${work}/admission-race.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.admission-race.source.json"
         cp "${work}/admission-race.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.admission-race.clock.json"
         echo "✓ concurrent admission survived restart without overcommit or extending the waiter's deadline"
+
+        enospc_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/lifecycle-enospc.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e fixture_app=rollout-complete \
+            -e "fixture_commit=${complete_enospc}" -e "fixture_request=${enospc_request}" \
+            -e "report_path=${work}/lifecycle-enospc.json" >> "$log" 2>&1 || die "bounded lifecycle ENOSPC and restart recovery"
+        cp "${work}/lifecycle-enospc.json" "/tmp/kayra-swarm-platform-${vm_name}.lifecycle-enospc.json"
+        cp "${work}/lifecycle-enospc.json.tar" "/tmp/kayra-swarm-platform-${vm_name}.lifecycle-enospc.tar"
+        cp "${work}/lifecycle-enospc.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.lifecycle-enospc.source.json"
+        cp "${work}/lifecycle-enospc.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.lifecycle-enospc.clock.json"
+        echo "✓ accepted rollout survived bounded lifecycle ENOSPC without replacing its identity or deadline"
 
         ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
             -i "servers/${server}/inventory.ini" \

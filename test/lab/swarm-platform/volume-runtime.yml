@@ -57,6 +57,31 @@
         argv: ["{{ volume_source.path }}/node", "{{ volume_source.path }}/test/lab/swarm-platform/volume-runtime.mjs", "{{ volume_node_image }}", "{{ volume_source.path }}/results"]
       changed_when: true
 
+    - name: Make only the lab observer root traversable for its unprivileged reader
+      ansible.builtin.file:
+        path: "{{ volume_source.path }}"
+        mode: "0755"
+      when: platform_input_probe | default(false) | bool
+
+    - name: Make only the lab results traversable for the synthetic input reader
+      ansible.builtin.file:
+        path: "{{ volume_source.path }}/results"
+        mode: "0755"
+      when: platform_input_probe | default(false) | bool
+
+    - name: Verify platform input generations as the unprivileged deployer identity
+      ansible.builtin.command:
+        argv: ["{{ volume_source.path }}/node", "{{ volume_source.path }}/test/lab/swarm-platform/platform-inputs.mjs", --prepare, "{{ volume_source.path }}/results"]
+      changed_when: true
+      when: platform_input_probe | default(false) | bool
+
+    - name: Retain the synthetic platform input comparison evidence
+      ansible.builtin.fetch:
+        src: "{{ volume_source.path }}/results/platform-inputs.json"
+        dest: "{{ report_path }}.platform-inputs.json"
+        flat: true
+      when: platform_input_probe | default(false) | bool
+
     - name: Require synchronized clocks after native writes
       ansible.builtin.command:
         argv: [date, "+%s"]

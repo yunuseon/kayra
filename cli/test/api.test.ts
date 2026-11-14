@@ -60,7 +60,19 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
   program("sops", "echo 'a: b'");
   program("sudo", "exit 1");
   program("tofu", 'case "$*" in *output*) echo 192.0.2.1;; *state*) echo hcloud_server.this;; esac');
+  const deployment = { version: 1, app: "shop", incarnation: "12345678-1234-4234-8234-123456789abc", runtime: "swarm", lifecycle: "registered", verification: "verified",
+    requested: { plan: "b".repeat(64), commit: "b".repeat(40) }, desired: { plan: "a".repeat(64), commit: "a".repeat(40) },
+    verifiedActive: { plan: "a".repeat(64), commit: "a".repeat(40), verifiedAt: 1000 }, lastKnownGood: { plan: "a".repeat(64), commit: "a".repeat(40), verifiedAt: 1000 },
+    operation: { request: "23456789-1234-4234-8234-123456789abc", phase: "failed", reason: "runtime", cancelRequestedAt: null, updateDeadline: 90000, recoveryDeadline: 180000, recovery: "automatic-rollback" },
+    preparation: null, requiredAction: "none", runtimeObservation: "not-observed" };
+  const runtimeHealth = { version: 1, app: "shop", incarnation: deployment.incarnation, runtime: "swarm", scope: "runtime-services", observedAt: 2000, state: "available",
+    services: [{ name: "web", state: "available", currentTasks: 1, healthyTasks: 1, ignoredHistoricalTasks: 3 }] };
+  const deploymentPins = { version: 1, app: "shop", incarnation: deployment.incarnation, runtime: "swarm", scope: "coordinator-plans", gcSafe: false, plans: [] };
   program("ssh", `case "$*" in
+    *'ctl lifecycle status malformed'*) echo '{}' ;;
+    *'ctl lifecycle status'*) echo '${JSON.stringify(deployment)}' ;;
+    *'ctl lifecycle health'*) echo '${JSON.stringify(runtimeHealth)}' ;;
+    *'ctl lifecycle pins'*) echo '${JSON.stringify(deploymentPins)}' ;;
     *'ctl runs'*) echo '{"app":"shop","runs":[]}' ;;
     *'ctl rollback'*) echo '{"app":"shop","releases":[]}' ;;
     *'ctl log'*) echo 'a test log' ;;
@@ -114,6 +126,21 @@ test("generated browser types, OpenAPI and API reference match the catalog and p
   strictEqual(readFileSync(join(clients, "wire", "contract.gen.ts"), "utf8"), contractTypes());
   strictEqual(readFileSync(join(clients, "api", "openapi.json"), "utf8"), `${JSON.stringify(openapi(version), null, 2)}\n`);
   strictEqual(readFileSync(join(import.meta.dirname, "../../site/src/content/docs/reference/api.md"), "utf8"), apiReference(openapi(version)));
+});
+
+test("deployment queries return validated scoped projections without creating operator runs", async (t) => {
+  const api = await fixture(); t.after(api.cleanup);
+  const before = await call(api.port, "/api/runs", { token: api.token });
+  const status = await api.post("app.deployment.status", { server: "lab", app: "shop" });
+  strictEqual(status.status, 200); const value = schemas.DeploymentStatus.parse(JSON.parse(status.body));
+  strictEqual(value.verifiedActive?.commit, "a".repeat(40)); strictEqual(value.requested?.commit, "b".repeat(40));
+  strictEqual(value.operation?.phase, "failed"); strictEqual(value.operation.recovery, "automatic-rollback");
+  const health = await api.post("app.deployment.health", { server: "lab", app: "shop" });
+  strictEqual(health.status, 200); const observed = schemas.DeploymentHealth.parse(JSON.parse(health.body)); strictEqual(observed.state, "available"); strictEqual(observed.services[0]?.ignoredHistoricalTasks, 3);
+  const pins = await api.post("app.deployment.pins", { server: "lab", app: "shop" }); strictEqual(pins.status, 200); strictEqual(schemas.DeploymentImagePins.parse(JSON.parse(pins.body)).gcSafe, false);
+  for (const name of ["app.deployment.status", "app.deployment.health", "app.deployment.pins"]) strictEqual((await api.post(name, { server: "lab", app: "another" })).status, 502);
+  strictEqual((await api.post("app.deployment.status", { server: "lab", app: "malformed" })).status, 502);
+  strictEqual((await call(api.port, "/api/runs", { token: api.token })).body, before.body);
 });
 
 test("run records retain their history and session identity, and only live runs lock a server", () => {

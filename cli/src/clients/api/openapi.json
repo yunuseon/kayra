@@ -4748,120 +4748,138 @@
         },
         "responses": {
           "200": {
-            "description": "Dry run",
+            "description": "Observe current runtime service health separately from release certification and historical task failures.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Preview"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Started",
-            "content": {
-              "application/json": {
-                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "readOnly": true,
                   "type": "object",
                   "properties": {
-                    "run": {
-                      "type": "string"
+                    "version": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "app": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    },
+                    "incarnation": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "runtime": {
+                      "type": "string",
+                      "enum": [
+                        "compose",
+                        "swarm"
+                      ]
+                    },
+                    "scope": {
+                      "type": "string",
+                      "const": "runtime-services"
+                    },
+                    "observedAt": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "available",
+                        "starting",
+                        "unhealthy",
+                        "missing",
+                        "mismatch",
+                        "unavailable",
+                        "not-requested",
+                        "unsupported"
+                      ]
+                    },
+                    "services": {
+                      "readOnly": true,
+                      "maxItems": 128,
+                      "type": "array",
+                      "items": {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]*$"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "available",
+                              "starting",
+                              "unhealthy",
+                              "missing",
+                              "mismatch",
+                              "unavailable"
+                            ]
+                          },
+                          "currentTasks": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "healthyTasks": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "ignoredHistoricalTasks": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "state",
+                          "currentTasks",
+                          "healthyTasks",
+                          "ignoredHistoricalTasks"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
-                    "run"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid input"
-          },
-          "403": {
-            "description": "Real server not confirmed"
-          },
-          "409": {
-            "description": "Server busy"
-          }
-        }
-      }
-    },
-    "/operations/app.deployment.health/preview": {
-      "post": {
-        "summary": "Preview: Observe current runtime service health separately from release certification and historical task failures.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "input": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "type": "object",
-                    "properties": {
-                      "server": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "A server of the fleet (servers/<name>/)"
-                      },
-                      "app": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "An app name, including a removed app whose records or data remain"
-                      }
-                    },
-                    "required": [
-                      "server",
-                      "app"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "options": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "type": "object",
-                    "properties": {
-                      "verbose": {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "dryRun": {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "columns": {
-                        "default": 120,
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1000
-                      },
-                      "rows": {
-                        "default": 32,
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1000
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "confirm": {
-                    "type": "string",
-                    "description": "The real server's name, required before a change"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Plan preview",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Preview"
+                    "version",
+                    "app",
+                    "incarnation",
+                    "runtime",
+                    "scope",
+                    "observedAt",
+                    "state",
+                    "services"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -4940,120 +4958,109 @@
         },
         "responses": {
           "200": {
-            "description": "Dry run",
+            "description": "Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Preview"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Started",
-            "content": {
-              "application/json": {
-                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "readOnly": true,
                   "type": "object",
                   "properties": {
-                    "run": {
-                      "type": "string"
+                    "version": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "app": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    },
+                    "incarnation": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "runtime": {
+                      "type": "string",
+                      "enum": [
+                        "compose",
+                        "swarm"
+                      ]
+                    },
+                    "scope": {
+                      "type": "string",
+                      "const": "coordinator-plans"
+                    },
+                    "gcSafe": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "plans": {
+                      "readOnly": true,
+                      "maxItems": 4096,
+                      "type": "array",
+                      "items": {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "plan": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "workload": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "commit": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          },
+                          "roles": {
+                            "readOnly": true,
+                            "minItems": 1,
+                            "maxItems": 5,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "active",
+                                "last-known-good",
+                                "candidate",
+                                "rollback",
+                                "unresolved"
+                              ]
+                            }
+                          },
+                          "images": {
+                            "readOnly": true,
+                            "minItems": 1,
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "workload",
+                          "commit",
+                          "roles",
+                          "images"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
-                    "run"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid input"
-          },
-          "403": {
-            "description": "Real server not confirmed"
-          },
-          "409": {
-            "description": "Server busy"
-          }
-        }
-      }
-    },
-    "/operations/app.deployment.pins/preview": {
-      "post": {
-        "summary": "Preview: Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "input": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "type": "object",
-                    "properties": {
-                      "server": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "A server of the fleet (servers/<name>/)"
-                      },
-                      "app": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "An app name, including a removed app whose records or data remain"
-                      }
-                    },
-                    "required": [
-                      "server",
-                      "app"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "options": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "type": "object",
-                    "properties": {
-                      "verbose": {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "dryRun": {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "columns": {
-                        "default": 120,
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1000
-                      },
-                      "rows": {
-                        "default": 32,
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1000
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "confirm": {
-                    "type": "string",
-                    "description": "The real server's name, required before a change"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Plan preview",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Preview"
+                    "version",
+                    "app",
+                    "incarnation",
+                    "runtime",
+                    "scope",
+                    "gcSafe",
+                    "plans"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -5132,120 +5139,512 @@
         },
         "responses": {
           "200": {
-            "description": "Dry run",
+            "description": "Read deployment phase, verified active release and required recovery action.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Preview"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Started",
-            "content": {
-              "application/json": {
-                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "readOnly": true,
                   "type": "object",
                   "properties": {
-                    "run": {
-                      "type": "string"
+                    "version": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "app": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    },
+                    "incarnation": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "runtime": {
+                      "type": "string",
+                      "enum": [
+                        "compose",
+                        "swarm"
+                      ]
+                    },
+                    "lifecycle": {
+                      "type": "string",
+                      "enum": [
+                        "registering",
+                        "registered",
+                        "removal-requested",
+                        "removing",
+                        "removed",
+                        "purging",
+                        "purged"
+                      ]
+                    },
+                    "verification": {
+                      "type": "string",
+                      "enum": [
+                        "legacy-unverified",
+                        "unverified",
+                        "verified"
+                      ]
+                    },
+                    "requested": {
+                      "anyOf": [
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "plan": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "commit": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{40}$"
+                            }
+                          },
+                          "required": [
+                            "plan",
+                            "commit"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "desired": {
+                      "anyOf": [
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "plan": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "commit": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{40}$"
+                            }
+                          },
+                          "required": [
+                            "plan",
+                            "commit"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "verifiedActive": {
+                      "anyOf": [
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "plan": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "commit": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{40}$"
+                            },
+                            "verifiedAt": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "plan",
+                            "commit",
+                            "verifiedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastKnownGood": {
+                      "anyOf": [
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "plan": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "commit": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{40}$"
+                            },
+                            "verifiedAt": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "plan",
+                            "commit",
+                            "verifiedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "operation": {
+                      "anyOf": [
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "request": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "phase": {
+                              "type": "string",
+                              "enum": [
+                                "prepared",
+                                "admitted",
+                                "applying",
+                                "verifying",
+                                "recovering",
+                                "held",
+                                "succeeded",
+                                "failed",
+                                "cancelled"
+                              ]
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "deadline",
+                                    "admission",
+                                    "runtime",
+                                    "routed",
+                                    "cancelled"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "cancelRequestedAt": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "updateDeadline": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "recoveryDeadline": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "recovery": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "automatic-rollback",
+                                    "previous-preserved",
+                                    "compensated",
+                                    "removed-unverified",
+                                    "unstarted"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "request",
+                            "phase",
+                            "reason",
+                            "cancelRequestedAt",
+                            "updateDeadline",
+                            "recoveryDeadline",
+                            "recovery"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "requiredAction": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "inspect-and-resolve"
+                      ]
+                    },
+                    "preparation": {
+                      "default": null,
+                      "anyOf": [
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "request": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "phase": {
+                              "type": "string",
+                              "enum": [
+                                "prepared",
+                                "admitted",
+                                "migrating",
+                                "ready-for-http",
+                                "held",
+                                "cancelling",
+                                "cancelled",
+                                "failed"
+                              ]
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "deadline",
+                                    "migration",
+                                    "cancelled"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "admissionDeadline": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "deadline": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "migrationDeadline": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "httpDeadline": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "completedAt": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "cancelRequestedAt": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "recovery": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "previous-preserved",
+                                    "no-active-release"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "migrationOutcomes": {
+                              "default": [],
+                              "readOnly": true,
+                              "maxItems": 128,
+                              "type": "array",
+                              "items": {
+                                "readOnly": true,
+                                "type": "object",
+                                "properties": {
+                                  "step": {
+                                    "type": "string",
+                                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "applied",
+                                      "not-applied",
+                                      "unstarted"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "step",
+                                  "outcome"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "resolution": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{64}$"
+                                    },
+                                    "outcome": {
+                                      "type": "string",
+                                      "enum": [
+                                        "applied",
+                                        "not-applied"
+                                      ]
+                                    },
+                                    "at": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "outcome",
+                                    "at"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "step": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "request",
+                            "phase",
+                            "reason",
+                            "admissionDeadline",
+                            "deadline",
+                            "migrationDeadline",
+                            "httpDeadline",
+                            "completedAt",
+                            "cancelRequestedAt",
+                            "recovery",
+                            "migrationOutcomes",
+                            "resolution",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "runtimeObservation": {
+                      "type": "string",
+                      "const": "not-observed"
                     }
                   },
                   "required": [
-                    "run"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid input"
-          },
-          "403": {
-            "description": "Real server not confirmed"
-          },
-          "409": {
-            "description": "Server busy"
-          }
-        }
-      }
-    },
-    "/operations/app.deployment.status/preview": {
-      "post": {
-        "summary": "Preview: Read deployment phase, verified active release and required recovery action.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "input": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "type": "object",
-                    "properties": {
-                      "server": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "A server of the fleet (servers/<name>/)"
-                      },
-                      "app": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "An app name, including a removed app whose records or data remain"
-                      }
-                    },
-                    "required": [
-                      "server",
-                      "app"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "options": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "type": "object",
-                    "properties": {
-                      "verbose": {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "dryRun": {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "columns": {
-                        "default": 120,
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1000
-                      },
-                      "rows": {
-                        "default": 32,
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 1000
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "confirm": {
-                    "type": "string",
-                    "description": "The real server's name, required before a change"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Plan preview",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Preview"
+                    "version",
+                    "app",
+                    "incarnation",
+                    "runtime",
+                    "lifecycle",
+                    "verification",
+                    "requested",
+                    "desired",
+                    "verifiedActive",
+                    "lastKnownGood",
+                    "operation",
+                    "requiredAction",
+                    "preparation",
+                    "runtimeObservation"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -10082,6 +10481,738 @@
           "config",
           "secrets",
           "hint"
+        ],
+        "additionalProperties": false
+      },
+      "DeploymentStatus": {
+        "readOnly": true,
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "const": 1
+          },
+          "app": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "incarnation": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "compose",
+              "swarm"
+            ]
+          },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "registering",
+              "registered",
+              "removal-requested",
+              "removing",
+              "removed",
+              "purging",
+              "purged"
+            ]
+          },
+          "verification": {
+            "type": "string",
+            "enum": [
+              "legacy-unverified",
+              "unverified",
+              "verified"
+            ]
+          },
+          "requested": {
+            "anyOf": [
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "commit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                },
+                "required": [
+                  "plan",
+                  "commit"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "desired": {
+            "anyOf": [
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "commit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  }
+                },
+                "required": [
+                  "plan",
+                  "commit"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verifiedActive": {
+            "anyOf": [
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "commit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  "verifiedAt": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "plan",
+                  "commit",
+                  "verifiedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastKnownGood": {
+            "anyOf": [
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "commit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  "verifiedAt": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "plan",
+                  "commit",
+                  "verifiedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "prepared",
+                      "admitted",
+                      "applying",
+                      "verifying",
+                      "recovering",
+                      "held",
+                      "succeeded",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "deadline",
+                          "admission",
+                          "runtime",
+                          "routed",
+                          "cancelled"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "cancelRequestedAt": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "updateDeadline": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "recoveryDeadline": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "recovery": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "automatic-rollback",
+                          "previous-preserved",
+                          "compensated",
+                          "removed-unverified",
+                          "unstarted"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "request",
+                  "phase",
+                  "reason",
+                  "cancelRequestedAt",
+                  "updateDeadline",
+                  "recoveryDeadline",
+                  "recovery"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredAction": {
+            "type": "string",
+            "enum": [
+              "none",
+              "inspect-and-resolve"
+            ]
+          },
+          "preparation": {
+            "default": null,
+            "anyOf": [
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "prepared",
+                      "admitted",
+                      "migrating",
+                      "ready-for-http",
+                      "held",
+                      "cancelling",
+                      "cancelled",
+                      "failed"
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "deadline",
+                          "migration",
+                          "cancelled"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "admissionDeadline": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "deadline": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "migrationDeadline": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "httpDeadline": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "completedAt": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "cancelRequestedAt": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "recovery": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "previous-preserved",
+                          "no-active-release"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "migrationOutcomes": {
+                    "default": [],
+                    "readOnly": true,
+                    "maxItems": 128,
+                    "type": "array",
+                    "items": {
+                      "readOnly": true,
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "string",
+                          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "applied",
+                            "not-applied",
+                            "unstarted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "outcome"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "resolution": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "applied",
+                              "not-applied"
+                            ]
+                          },
+                          "at": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "outcome",
+                          "at"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "step": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "request",
+                  "phase",
+                  "reason",
+                  "admissionDeadline",
+                  "deadline",
+                  "migrationDeadline",
+                  "httpDeadline",
+                  "completedAt",
+                  "cancelRequestedAt",
+                  "recovery",
+                  "migrationOutcomes",
+                  "resolution",
+                  "step"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtimeObservation": {
+            "type": "string",
+            "const": "not-observed"
+          }
+        },
+        "required": [
+          "version",
+          "app",
+          "incarnation",
+          "runtime",
+          "lifecycle",
+          "verification",
+          "requested",
+          "desired",
+          "verifiedActive",
+          "lastKnownGood",
+          "operation",
+          "requiredAction",
+          "preparation",
+          "runtimeObservation"
+        ],
+        "additionalProperties": false
+      },
+      "DeploymentHealth": {
+        "readOnly": true,
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "const": 1
+          },
+          "app": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "incarnation": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "compose",
+              "swarm"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "const": "runtime-services"
+          },
+          "observedAt": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "starting",
+              "unhealthy",
+              "missing",
+              "mismatch",
+              "unavailable",
+              "not-requested",
+              "unsupported"
+            ]
+          },
+          "services": {
+            "readOnly": true,
+            "maxItems": 128,
+            "type": "array",
+            "items": {
+              "readOnly": true,
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "available",
+                    "starting",
+                    "unhealthy",
+                    "missing",
+                    "mismatch",
+                    "unavailable"
+                  ]
+                },
+                "currentTasks": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "healthyTasks": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "ignoredHistoricalTasks": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "state",
+                "currentTasks",
+                "healthyTasks",
+                "ignoredHistoricalTasks"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "version",
+          "app",
+          "incarnation",
+          "runtime",
+          "scope",
+          "observedAt",
+          "state",
+          "services"
+        ],
+        "additionalProperties": false
+      },
+      "DeploymentImagePins": {
+        "readOnly": true,
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number",
+            "const": 1
+          },
+          "app": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "incarnation": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "compose",
+              "swarm"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "const": "coordinator-plans"
+          },
+          "gcSafe": {
+            "type": "boolean",
+            "const": false
+          },
+          "plans": {
+            "readOnly": true,
+            "maxItems": 4096,
+            "type": "array",
+            "items": {
+              "readOnly": true,
+              "type": "object",
+              "properties": {
+                "plan": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "workload": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "commit": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "roles": {
+                  "readOnly": true,
+                  "minItems": 1,
+                  "maxItems": 5,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "last-known-good",
+                      "candidate",
+                      "rollback",
+                      "unresolved"
+                    ]
+                  }
+                },
+                "images": {
+                  "readOnly": true,
+                  "minItems": 1,
+                  "maxItems": 128,
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "plan",
+                "workload",
+                "commit",
+                "roles",
+                "images"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "version",
+          "app",
+          "incarnation",
+          "runtime",
+          "scope",
+          "gcSafe",
+          "plans"
         ],
         "additionalProperties": false
       },

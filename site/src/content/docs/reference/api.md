@@ -665,15 +665,9 @@ Observe current runtime service health separately from release certification and
 | `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
 | `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
 
-Preview: `POST /api/operations/app.deployment.health/preview`. Returns a JSON plan with status 200.
-
 | Status | Response | Content type |
 | --- | --- | --- |
-| `200` | Dry run | `application/json` |
-| `202` | Started | `application/json` |
-| `400` | Invalid input | — |
-| `403` | Real server not confirmed | — |
-| `409` | Server busy | — |
+| `200` | Observe current runtime service health separately from release certification and historical task failures. | `application/json` |
 
 ### `app.deployment.pins`
 
@@ -686,15 +680,9 @@ Read immutable images needed by deployment and recovery plans; this does not aut
 | `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
 | `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
 
-Preview: `POST /api/operations/app.deployment.pins/preview`. Returns a JSON plan with status 200.
-
 | Status | Response | Content type |
 | --- | --- | --- |
-| `200` | Dry run | `application/json` |
-| `202` | Started | `application/json` |
-| `400` | Invalid input | — |
-| `403` | Real server not confirmed | — |
-| `409` | Server busy | — |
+| `200` | Read immutable images needed by deployment and recovery plans; this does not authorize registry GC. | `application/json` |
 
 ### `app.deployment.status`
 
@@ -707,15 +695,9 @@ Read deployment phase, verified active release and required recovery action.
 | `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
 | `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
 
-Preview: `POST /api/operations/app.deployment.status/preview`. Returns a JSON plan with status 200.
-
 | Status | Response | Content type |
 | --- | --- | --- |
-| `200` | Dry run | `application/json` |
-| `202` | Started | `application/json` |
-| `400` | Invalid input | — |
-| `403` | Real server not confirmed | — |
-| `409` | Server busy | — |
+| `200` | Read deployment phase, verified active release and required recovery action. | `application/json` |
 
 ### `app.deployment.cancel`
 

@@ -167,15 +167,15 @@ export const operations = {
   },
   "app.deployment.health": {
     summary: "Observe current runtime service health separately from release certification and historical task failures.",
-    scope: "app", effect: "reads", kind: "plan", bare: true, input: appInput,
+    scope: "app", effect: "reads", kind: "query", bare: true, input: appInput,
   },
   "app.deployment.pins": {
     summary: "Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.",
-    scope: "app", effect: "reads", kind: "plan", bare: true, input: appInput,
+    scope: "app", effect: "reads", kind: "query", bare: true, input: appInput,
   },
   "app.deployment.status": {
     summary: "Read deployment phase, verified active release and required recovery action.",
-    scope: "app", effect: "reads", kind: "plan", bare: true, input: appInput,
+    scope: "app", effect: "reads", kind: "query", bare: true, input: appInput,
   },
   "app.deployment.cancel": {
     summary: "Cancel a deployment; ambiguous migration outcomes stay blocked for recovery.",

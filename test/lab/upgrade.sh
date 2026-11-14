@@ -603,6 +603,37 @@ if [ "$indexed_registration" = true ]; then
         cp "${work}/candidate-oom.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.clock.json"
         echo "✓ container OOM recovered the previous release without promoting the failed candidate"
 
+        printf '{"admission_applications":[]}\n' > "${work}/admission-inputs.json"
+        for admission_app in admission-left admission-right; do
+            admission_repo="${work}/${admission_app}"
+            cp -R "${KAYRA_ROOT}/test/lab/swarm-platform/complete-fixture" "$admission_repo"
+            APP_NAME="$admission_app" yq -i '.name = strenv(APP_NAME) |
+                .routes[0].host = strenv(APP_NAME) | .rollout.migrations = []' "${admission_repo}/app.yml"
+            yq -i '.services.web.deploy.resources.limits.memory = "1024m"' "${admission_repo}/deploy/compose.yml"
+            git -C "$admission_repo" init -q -b main
+            git -C "$admission_repo" add -A
+            git -C "$admission_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "declared admission contender"
+            admission_commit="$(git -C "$admission_repo" rev-parse HEAD)"
+            git clone -q --bare "$admission_repo" "${served}/lab/${admission_app}.git"
+            git -C "$admission_repo" bundle create "/tmp/kayra-swarm-platform-${vm_name}.${admission_app}.bundle" --all
+            admission_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+            jq --arg app "$admission_app" --arg commit "$admission_commit" --arg request "$admission_request" \
+                --arg repo "http://${host_ip}:${port}/lab/${admission_app}.git" \
+                '.admission_applications += [{app:$app,commit:$commit,request:$request,repo:$repo}]' \
+                "${work}/admission-inputs.json" > "${work}/admission-inputs.next.json"
+            mv "${work}/admission-inputs.next.json" "${work}/admission-inputs.json"
+        done
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/admission-race.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e "@${work}/admission-inputs.json" \
+            -e "report_path=${work}/admission-race.json" >> "$log" 2>&1 || die "concurrent admission and restart recovery"
+        cp "${work}/admission-race.json" "/tmp/kayra-swarm-platform-${vm_name}.admission-race.json"
+        cp "${work}/admission-race.json.tar" "/tmp/kayra-swarm-platform-${vm_name}.admission-race.tar"
+        cp "${work}/admission-race.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.admission-race.source.json"
+        cp "${work}/admission-race.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.admission-race.clock.json"
+        echo "✓ concurrent admission survived restart without overcommit or extending the waiter's deadline"
+
         ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
             -i "servers/${server}/inventory.ini" \
             "${KAYRA_ROOT}/test/lab/swarm-platform/health-observation.yml" \

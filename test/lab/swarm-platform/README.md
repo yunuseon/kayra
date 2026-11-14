@@ -1215,3 +1215,62 @@ records control availability after space returns, then still explicitly kills
 and restarts the owner. ENOSPC proof, zero candidate effects while full,
 original plan/UUID/deadlines, one post-restoration Start and zero failed/premature
 application requests remain required. A fresh measurement is pending.
+
+### Owned local-volume runtime foundation
+
+`owned-volume.ts` adds a narrow shared identity and runtime port for local named
+volumes. The app's durable data owner and each volume allocation are separate
+UUIDs; the physical name is derived only from the allocation. A later allocation
+gets a different physical name, so a stale creation cannot become the new
+allocation's data. The coordinator must persist these identities before effects
+and retain them across app removal/recreation. Builder output cannot allocate
+physical names. This foundation is not wired into app admission or lifecycle.
+
+The adapter checks exact ownership labels, local driver/scope, empty driver
+options and the retained creation receipt. It checks **all containers, including
+stopped ones**, and every Swarm service's current and `PreviousSpec` mounts.
+Unknown observations refuse deletion. Deletion rechecks ownership and always
+uses `force=false`, preserving Docker's own attachment-race refusal. A service
+reference blocks even when the volume is currently absent. No prefix-based
+adoption/deletion, host mountpoint projection, shell effects or background
+controller is introduced. Lifecycle fences, authorization, unresolved creation
+outcomes, resource admission and the purge decision remain coordinator work;
+these primitives alone do not make purge safe or enable registry GC.
+
+Run the isolated native adapter lab:
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py [--keep] [--output <new-directory>]
+```
+
+It creates a unique Ubuntu 24.04 Multipass VM (2 CPUs, 4 GiB, 20 GiB), a lab-only
+SSH key and temporary inventory, then uses the existing Docker role. The pinned
+Node image supplies a host-side observer binary; no new socket-holding container
+is started. A single-node Swarm supplies native attachment observations, with
+no application ports published. The lab writes/reads fixture data across
+workload recreation, requires stopped-container and zero-replica service/previous
+specification purge refusals, clears both specifications before deleting only
+the exact owned volume, and verifies another fixture volume's data remains.
+
+Exact source files, a reproducible source archive, versions, image digest,
+clock observations, native events and request identities are retained in a
+private `.cache/lab-evidence/kayra-volume-lab-<timestamp>/` directory by default.
+Successful VMs and temporary keys/sources are removed unless `--keep`; failed
+VMs and sources remain with explicit cleanup instructions. Ten mocked-runtime
+checks pass. Native validation is pending. This is an adapter lab, not proof of
+coordinator removal/purge, retained dependencies, SQL safety or application data
+retention across rollout/rollback/removal.
+
+The isolated volume adapter lab passed at `e296993` in fresh
+`kayra-volume-lab-20261114201749570660`; its successful VM and temporary key were
+removed. Native Docker confirmed retained fixture writes across workload
+recreation, stopped-container and zero-replica service attachment refusals,
+`PreviousSpec` refusal after the first scrub, successful removal only after both
+specifications were cleared, and preservation of the unrelated fixture data.
+Versions: Engine/CLI 29.9.3, API 1.56, Compose 5.7.1, Node 24.22.1 and the exact
+pinned Node digest above. Private source archives, file hashes, source manifest,
+clock gates, requests/events and results are retained at
+`.cache/lab-evidence/kayra-volume-lab-20261114201749570660/`.
+This pass does not enable app volumes or establish coordinator lifecycle/SQL
+safety. The fresh full resource-upgrade run uses independent frozen source
+`9e6daef`, so it does not include these later volume primitives.

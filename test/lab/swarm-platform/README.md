@@ -1135,3 +1135,18 @@ and its bounded filesystem; a kept or failed VM retains the mount, image,
 original metadata and observer evidence. This tests process recovery from
 bounded metadata ENOSPC, not global Docker-root/inode exhaustion, host loss,
 backup restoration or application-data durability. Native acceptance is pending.
+
+The filesystem helper alone passed on Ubuntu 24.04 in the fresh disposable
+`kayra-fs-smoke-20261114142322` VM using source `c317a15`. Its 64 MiB ext4
+filesystem had 57,307,136 available bytes before fill, zero as UID 1000 at
+ENOSPC, and 57,307,136 after release. The fixture record and UID ownership
+survived all three steps. Exact output is
+`/tmp/kayra-fs-smoke-20261114142322.log`; the successful VM was destroyed.
+This is helper validation, not integrated coordinator ENOSPC acceptance.
+
+The upgrade lab now retains its detailed raw Ansible/platform log after both
+success and failure, including final teardown output on success. Cleanup prints
+`raw lab log: /tmp/kayra-upgrade-<vm>.<unique>/lab.log`; the directory is mode
+0700 and the log 0600. Successful fleet/VM cleanup no longer deletes the only
+copy. Original failed fleets and logs remain preserved as before. These are
+local evidence files; they are not published in the package or to a service.

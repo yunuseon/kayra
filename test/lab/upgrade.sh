@@ -68,17 +68,29 @@ die() { echo "✗ $*" >&2; echo "  the lab: ${work} (log: ${log})" >&2; exit 1; 
 host_ip="$(ifconfig bridge100 2>/dev/null | awk '/inet / {print $2; exit}')"
 [ -n "$host_ip" ] || die "no Multipass bridge (bridge100): is Multipass running?"
 passed=false
+retain_lab_log() {
+    [ -f "$log" ] || return 0
+    local archive
+    archive="$(mktemp -d "/tmp/kayra-upgrade-${vm_name}.XXXXXX")"
+    cp "$log" "${archive}/lab.log"
+    chmod 0600 "${archive}/lab.log"
+    echo "raw lab log: ${archive}/lab.log"
+}
 cleanup() {
     [ -z "${server_pid:-}" ] || kill "$server_pid" 2>/dev/null || true
     if [ "$passed" = false ]; then
+        retain_lab_log
         echo "kept for a look: the VM (${vm_name}), the fleet ${fleet}, the log ${log}"
         echo "  then: (cd ${fleet} && node node_modules/@yunuseon/kayra/bin/kayra.js down ${server}) && rm -rf ${work}"
     elif [ "$keep" = true ]; then
+        retain_lab_log
         echo "kept: the VM (${vm_name}) and ${work}; kayra down ${server} from ${fleet} removes the VM"
     elif [ -d "${fleet}/servers/${server}/terraform" ]; then
         if (cd "$fleet" && kayra_cmd down "$server" >> "$log" 2>&1); then
+            retain_lab_log
             rm -rf "$work"
         else
+            retain_lab_log
             echo "kayra down ${server} failed; kept the VM (${vm_name}), fleet ${fleet}, and log ${log}" >&2
             echo "  retry: (cd ${fleet} && node node_modules/@yunuseon/kayra/bin/kayra.js down ${server}) && rm -rf ${work}" >&2
             trap - EXIT

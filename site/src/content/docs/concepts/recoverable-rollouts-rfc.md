@@ -1392,3 +1392,11 @@ the platform to compare its input bindings. Only unchanged evidence carries the
 recorded specification and original input generation forward. Changed inputs or
 specifications require a separate operation; unavailable evidence blocks the
 rollout. This helper and parser do not enable richer runtime capabilities.
+
+Managed image preview may accept inherited image volumes only when every exact,
+canonical target is covered by a declared named mount. An ancestor or descendant
+mount is insufficient. Preview inspects immutable registry metadata without
+creating containers or volumes and does not certify physical ownership or data.
+One-shot migration/probe usages still require images with no inherited volumes,
+even when the same digest is permitted for a mounted long-running service.
+The existing HTTP-only image-admission method keeps its no-volumes restriction.

@@ -6,8 +6,9 @@ import { httpEnvironment } from '../../../cli/src/server/platform/http-environme
 const [app, commit] = process.argv.slice(2);
 assert.ok(app && /^[0-9a-f]{40}$/.test(commit));
 const fromFile = process.argv[4];
-const container = fromFile === undefined ? execFileSync('docker', ['ps', '-q', '--filter', 'label=com.docker.compose.service=deployer', '--filter', 'label=com.docker.compose.project=platform'], { encoding: 'utf8' }).trim() : undefined;
-const { plan } = JSON.parse(fromFile === undefined ? execFileSync('docker', ['exec', container, 'kayra-deployer', 'ctl', 'preview', app, commit], { encoding: 'utf8' }) : await readFile(fromFile, 'utf8'));
+const container = fromFile === undefined ? execFileSync('docker', ['ps', '-q', '--filter', 'label=com.docker.compose.service=deployer', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.oneoff=False'], { encoding: 'utf8' }).trim() : undefined;
+const preview = JSON.parse(fromFile === undefined ? execFileSync('docker', ['exec', container, 'kayra-deployer', 'ctl', 'preview', app, commit], { encoding: 'utf8' }) : await readFile(fromFile, 'utf8'));
+const plan = preview.plan.version === 2 ? preview.plan.workload : preview.plan;
 const inputs = httpEnvironment('/var/lib/kayra/registration-lab/public', '/var/lib/kayra/registration-lab/private', 1000);
 const environment = await inputs.materialize(plan);
 const name = Object.keys(plan.services)[0];

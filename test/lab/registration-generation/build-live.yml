@@ -201,15 +201,19 @@
               register: preview
               changed_when: false
 
+            - name: Select the validated HTTP projection of the proposal
+              ansible.builtin.set_fact:
+                preview_workload: "{{ (preview.stdout | from_json).plan.workload if (preview.stdout | from_json).plan.version == 2 else (preview.stdout | from_json).plan }}"
+
             - name: Require a proposal with exact grants and unresolved input references
               ansible.builtin.assert:
                 that:
                   - not (preview.stdout | from_json).admitted
-                  - (preview.stdout | from_json).plan.commit == fixture_commit
-                  - (preview.stdout | from_json).plan.registration == (pointer.content | b64decode | from_json)
-                  - (preview.stdout | from_json).plan.grants == build_registration.grants
-                  - (preview.stdout | from_json).plan.services.web.environment.GREETING == {'kind':'secret','key':'GREETING'}
-                  - (preview.stdout | from_json).plan.services.web.environment.MODE == {'kind':'configuration','key':'MODE'}
+                  - preview_workload.commit == fixture_commit
+                  - preview_workload.registration == (pointer.content | b64decode | from_json)
+                  - preview_workload.grants == build_registration.grants
+                  - preview_workload.services.web.environment.GREETING == {'kind':'secret','key':'GREETING'}
+                  - preview_workload.services.web.environment.MODE == {'kind':'configuration','key':'MODE'}
                   - request.secrets.GREETING not in preview.stdout
                 quiet: true
               no_log: true

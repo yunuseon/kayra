@@ -15,7 +15,7 @@ test('the traffic client verifies TLS, distinguishes connections and records abs
   const server = https.createServer({ key: await readFile(join(root, 'key.pem')), cert: ca }, (incoming, response) => {
     received += 1;
     response.writeHead(200, { 'content-type': 'application/json', 'x-probe-release': 'A', 'x-probe-task': 'task-a' });
-    if (incoming.url === '/hang') { response.flushHeaders(); setTimeout(() => response.end('{}'), 200); }
+    if (incoming.url === '/hang') { response.flushHeaders(); setTimeout(() => response.end('{}'), 1000); }
     else response.end(incoming.url === '/bad' ? 'PRIVATE unexpected body' : JSON.stringify({ release: 'A', task: 'task-a', ready: true, readyAt: 1, requestStartedAt: Date.now() }));
   });
   server.on('secureConnection', () => { connections += 1; });
@@ -27,7 +27,7 @@ test('the traffic client verifies TLS, distinguishes connections and records abs
   const agent = new https.Agent({ keepAlive: true, maxSockets: 1 }); t.after(() => agent.destroy());
   await request(target, { agent }); await request(target, { agent }); assert.equal(connections, 3);
   let headers;
-  const timeout = await request(target, { path: '/hang', timeout: 25, onHeaders: (value) => { headers = value; } });
+  const timeout = await request(target, { path: '/hang', timeout: 200, onHeaders: (value) => { headers = value; } });
   assert.equal(timeout.error, 'timeout'); assert.equal(timeout.status, 200); assert.equal(headers.release, 'A');
   const bad = await request(target, { path: '/bad' }); assert.equal(bad.error, 'invalid-json'); assert.equal(JSON.stringify(bad).includes('PRIVATE'), false);
   const before = received; const untrusted = await request({ ...target, ca: undefined });

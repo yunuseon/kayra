@@ -1344,3 +1344,43 @@ images and a disk copy of the registry's RAM-backed storage at
 `/tmp/kayra-declared-image-failure-preserved/registry-storage`. Raw failure results
 and preservation details are retained at
 `.cache/lab-evidence/kayra-declared-images-20261114213518/`.
+
+### Durable volume-creation state and native process kills
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --volume-state
+```
+
+The optional probe kills the real creation-controller process after its synced
+create intent but before Docker, after native Create acknowledgement, and after
+its synced receipt but before acknowledgement. A second writer must be refused
+while the child holds its SQLite-backed OS lock. Restart opens the existing
+journal, preserves the exact action/allocation/deadline and records observed
+creation. All three cases require exactly one native volume Create event.
+A separate known-volume deletion must hold without empty recreation; an expired
+intent must create nothing. Authorization here is a lab fixture port, not the
+indexed deployer's registration/admission fence.
+
+This passed at source `252c63b` in fresh
+`kayra-volume-lab-20261114220837342711`; the successful VM was destroyed. All
+three kills recovered to recorded creation-ready, with one native Create each
+and unchanged deadlines. Missing/expired cases passed. Private exact source
+archives, hashes, raw API/event logs, child checkpoints, journal files, clock
+gates and results are retained at
+`.cache/lab-evidence/kayra-volume-state-retry-20261114220837/`.
+The component's 14 focused checks and the full root suite passed (756 passed,
+2 skipped), with typecheck/build/lint and Node/Python/Ansible/YAML checks.
+
+The first native run remains failed and preserved in stopped
+`kayra-volume-lab-20261114220424504537`, with source
+`/tmp/kayra-volume-source-v1tdy_tj` and private evidence at
+`.cache/lab-evidence/kayra-volume-state-20261114220424/`. Its first two kills
+recovered; its receipt checkpoint child naturally exited on unsettled top-level
+await before the intended kill, releasing the lock. The corrected fixture keeps
+its checkpoint child alive until SIGKILL. This did not change journal locking.
+
+Creation-ready is historical creation evidence, not current application health
+or permission to start workloads. The controller never deletes volumes or
+starts consumers. Post-deadline inspection is separately bounded and read-only.
+This is isolated component recovery, not indexed admission, retained dependency
+or app data-retention/rollback/removal/purge acceptance.

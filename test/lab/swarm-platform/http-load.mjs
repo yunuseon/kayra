@@ -1,3 +1,4 @@
+import { nativeHttpIntent } from './http-intent.mjs';
 // Run on the isolated VM. Workload writes go only through the real deployer's ctl.
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
@@ -94,10 +95,23 @@ if (mode === 'prepare') {
       const accepted = await ctl('lifecycle', 'prepare', manifest.app, commit, id);
       assert.equal(accepted.request, id); assert.equal(accepted.commit, commit);
       assert.ok(!['succeeded', 'failed', 'cancelled', 'held'].includes(accepted.phase), 'request already settled; do not reuse it for a new measurement');
+      accepted.nativePlan = nativeHttpIntent(accepted, await ctl("preview", manifest.app, commit));
       return accepted;
     };
+    const projection = async (accepted) => {
+      const value = await status(); const operation = value.operation;
+      if (operation === null) {
+        assert.equal(value.preparation.request, accepted.request);
+        assert.ok(!['failed', 'held', 'cancelled'].includes(value.preparation.phase), 'HTTP fixture preparation did not converge'); return undefined;
+      }
+      assert.equal(operation.request, accepted.request);
+      accepted.httpDeadline ??= operation.updateDeadline;
+      assert.equal(operation.updateDeadline, accepted.httpDeadline);
+      assert.ok(accepted.version === 1 ? accepted.httpDeadline === accepted.deadline : accepted.httpDeadline <= accepted.deadline);
+      return value;
+    };
     const terminal = async (accepted) => wait(async () => {
-      const projected = await status(); assert.equal(projected.operation.request, accepted.request);
+      const projected = await projection(accepted); if (projected === undefined) return undefined;
       const observed = await native.observe(scope); events({ at: Date.now(), phase, case: currentCase, kind: 'observation', status: projected, native: observed });
       assert.notEqual(projected.operation.phase, 'held', 'intervention required; preserve this run');
       return ['succeeded', 'failed', 'cancelled'].includes(projected.operation.phase) ? { status: projected, native: observed, at: Date.now() } : undefined;
@@ -136,7 +150,9 @@ if (mode === 'prepare') {
       if (item.name === 'observer-interruption') {
         const acknowledged = await wait(async () => {
           const observed = await native.observe(scope);
-          return observed.status === 'owned' && observed.id === before.id && observed.version > before.version && observed.taskPlan === accepted.plan ? observed : undefined;
+          if (observed.status !== 'owned' || observed.id !== before.id || observed.version <= before.version || observed.taskPlan !== accepted.nativePlan) return undefined;
+          const projected = await projection(accepted); if (projected === undefined) return undefined;
+          assert.ok(['applying', 'verifying'].includes(projected.operation.phase), 'interruption must precede terminal convergence'); return observed;
         }, 'native update acknowledgement', 90000);
         const deployer = await compose('ps', '-q', 'deployer');
           const previousStart = (await run('docker', ['inspect', deployer, '--format', '{{.State.StartedAt}}'])).stdout.trim();
@@ -152,7 +168,7 @@ if (mode === 'prepare') {
       const expected = ['never-ready', 'crash-after-ready'].includes(item.name) ? 'A' : item.release;
       assert.equal(outcome.status.operation.phase, expected === 'A' ? 'failed' : 'succeeded');
       assert.equal(outcome.status.verifiedActive.commit, expected === 'A' ? manifest.commits.A : item.commit);
-      assert.equal(outcome.status.operation.updateDeadline, accepted.deadline);
+      assert.equal(outcome.status.operation.updateDeadline, accepted.httpDeadline);
       phase = 'stable'; announce('runtime-converged', { outcome, expected, elapsedMs: convergedAt - submittedAt });
       await pause(30000); await stopTraffic(); stopTraffic = undefined;
       const longResult = long === undefined ? null : await long;
@@ -163,7 +179,7 @@ if (mode === 'prepare') {
       const backend = caseAccess.filter((record) => typeof record.ServiceAddr === 'string' && record.ServiceAddr !== '');
       const vipDiscovery = backend.length > 0 && backend.every((record) => record.ServiceAddr === vip + ':8080');
       const retryAttempts = caseAccess.reduce((sum, record) => sum + Number(record.RetryAttempts ?? 0), 0);
-      const candidateEvents = caseDocker.filter((event) => event.Actor?.Attributes?.['com.kayra.plan'] === accepted.plan);
+      const candidateEvents = caseDocker.filter((event) => event.Actor?.Attributes?.['com.kayra.plan'] === accepted.nativePlan);
       const healthy = candidateEvents.find((event) => event.Action === 'health_status: healthy');
       const crash = candidateEvents.find((event) => event.Action === 'die' && event.Actor?.Attributes?.exitCode === '42');
       const healthyBeforeCrash = healthy !== undefined && crash !== undefined && healthy.timeNano < crash.timeNano;

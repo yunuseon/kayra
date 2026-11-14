@@ -58,7 +58,7 @@
       changed_when: false
       retries: 90
       delay: 1
-      until: observed.rc == 0 and (observed.stdout | from_json).operation.phase in ['succeeded', 'failed', 'held']
+      until: observed.rc == 0 and (((observed.stdout | from_json).operation is not none and (observed.stdout | from_json).operation.phase in ['succeeded', 'failed', 'held']) or ((observed.stdout | from_json).preparation is not none and (observed.stdout | from_json).preparation.phase in ['failed', 'held', 'cancelled']))
 
     - name: Require verified promotion of the retained immutable plan
       ansible.builtin.assert:

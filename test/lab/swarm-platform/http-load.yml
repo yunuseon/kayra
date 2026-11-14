@@ -100,7 +100,7 @@
         owner: root
         group: root
         mode: '0644'
-      loop: [package.json, test/lab/swarm-platform/http-load.mjs, test/lab/swarm-platform/http-probe.mjs]
+      loop: [package.json, test/lab/swarm-platform/http-load.mjs, test/lab/swarm-platform/http-intent.mjs, test/lab/swarm-platform/http-probe.mjs]
 
     - name: Copy the stable experiment requests and immutable commits
       ansible.builtin.copy:

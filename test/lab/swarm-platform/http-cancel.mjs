@@ -1,3 +1,4 @@
+import { nativeHttpIntent } from './http-intent.mjs';
 import { strict as assert } from 'node:assert';
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -24,19 +25,23 @@ const wait = async (condition, label, timeout = 95000) => {
 try {
   const reset = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits.A, manifest.resetRequest);
   assert.ok(!['succeeded', 'failed', 'cancelled', 'held'].includes(reset.phase));
-  const initial = await wait(async () => { const value = await status(); assert.notEqual(value.operation.phase, 'held'); return value.operation.phase === 'succeeded' ? value : undefined; }, 'verified A');
+  reset.nativePlan = nativeHttpIntent(reset, await ctl("preview", manifest.app, manifest.commits.A));
+  const initial = await wait(async () => { const value = await status(); if (value.operation === null) { assert.ok(!['failed', 'held', 'cancelled'].includes(value.preparation.phase)); return undefined; } assert.notEqual(value.operation.phase, 'held'); return value.operation.phase === 'succeeded' ? value : undefined; }, 'verified A');
   const scope = { app: manifest.app, service: 'web', incarnation: initial.incarnation }; const before = await native.observe(scope); assert.equal(before.status, 'owned');
   stop = traffic(target, (value) => values.push(value)); await pause(5000);
   const headers = Promise.withResolvers(); const long = request(target, { path: '/slow?ms=20000', timeout: 25000, onHeaders: (value) => headers.resolve(value) });
   const longHeaders = await headers.promise; assert.equal(longHeaders.release, 'A'); event('long-request-started', longHeaders);
   const accepted = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits['slow-ready'], manifest.updateRequest);
-  await wait(async () => { const value = await native.observe(scope); return value.status === 'owned' && value.id === before.id && value.version > before.version && value.taskPlan === accepted.plan ? value : undefined; }, 'candidate acknowledgement', 90000);
+  accepted.nativePlan = nativeHttpIntent(accepted, await ctl('preview', manifest.app, manifest.commits['slow-ready']));
+  await wait(async () => { const value = await native.observe(scope); return value.status === 'owned' && value.id === before.id && value.version > before.version && value.taskPlan === accepted.nativePlan ? value : undefined; }, 'candidate acknowledgement', 90000);
+  const acknowledged = await status(); assert.equal(acknowledged.operation.request, accepted.request); accepted.httpDeadline = acknowledged.operation.updateDeadline;
+  assert.ok(accepted.version === 1 ? accepted.httpDeadline === accepted.deadline : accepted.httpDeadline <= accepted.deadline);
   const cancelledAt = Date.now(); const cancelled = await ctl('lifecycle', 'cancel', manifest.app, manifest.updateRequest);
   assert.equal(cancelled.phase, 'recovering'); assert.ok(cancelled.cancelRequestedAt >= cancelledAt); event('cancellation-accepted', { cancelled });
   const restoration = await wait(async () => {
     const value = await native.observe(scope); if (value.status !== 'owned') return undefined;
     peakTasks = Math.max(peakTasks, value.tasks.filter((task) => !['shutdown', 'complete', 'failed', 'rejected', 'remove', 'orphaned'].includes(task.state)).length);
-    return value.taskPlan === reset.plan && value.taskEffect === 'restore' ? value : undefined;
+    return value.taskPlan === reset.nativePlan && value.taskEffect === 'restore' ? value : undefined;
   }, 'restoration acknowledgement');
   const deployer = await compose('ps', '-q', 'deployer'); event('observer-killed-after-restore', { native: restoration });
   await run('docker', ['kill', '--signal', 'KILL', deployer]); await pause(3000); await run('docker', ['start', deployer]);
@@ -48,7 +53,7 @@ try {
   }, 'durable cancellation');
   const recoveryMs = Date.now() - cancelledAt; assert.ok(recoveryMs <= 90000);
   assert.equal(final.status.requested.plan, accepted.plan); assert.equal(final.status.desired.plan, reset.plan); assert.equal(final.status.verifiedActive.plan, reset.plan);
-  assert.equal(final.status.operation.cancelRequestedAt, cancelled.cancelRequestedAt); assert.equal(final.status.operation.updateDeadline, accepted.deadline);
+  assert.equal(final.status.operation.cancelRequestedAt, cancelled.cancelRequestedAt); assert.equal(final.status.operation.updateDeadline, accepted.httpDeadline);
   assert.equal(final.native.status, 'owned'); assert.equal(final.native.taskEffect, 'restore'); assert.ok(final.native.tasks.some((task) => task.desired === 'running' && task.action.endsWith(':restore:1')));
   const replay = await ctl('lifecycle', 'cancel', manifest.app, manifest.updateRequest); assert.equal(replay.phase, 'cancelled'); assert.equal(replay.cancelRequestedAt, cancelled.cancelRequestedAt);
   await pause(30000); await stop(); stop = undefined;
@@ -58,7 +63,7 @@ try {
   await writeFile(join(output, 'requests.jsonl'), values.map((value) => JSON.stringify(value)).join('\n') + '\n');
   await writeFile(join(output, 'trace.json'), JSON.stringify(trace, null, 2));
   const result = { passed: true, requests: values.length, failedRequests: failures.length, recoveryMs, long: longResult, peakNonterminalTasks: peakTasks, recoveryCopiesReserved: 3,
-    oneAcceptedRestore: true, cancellationSurvivedRestart: true, originalDeadline: accepted.deadline, cancellation: cancelled, final, replay };
+    oneAcceptedRestore: true, cancellationSurvivedRestart: true, originalDeadline: accepted.httpDeadline, deploymentDeadline: accepted.deadline, cancellation: cancelled, final, replay };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); event('cancellation-passed', { result });
 } catch (error) {
   await writeFile(join(output, 'failure.json'), JSON.stringify({ at: Date.now(), error: String(error), trace, requests: values }, null, 2));

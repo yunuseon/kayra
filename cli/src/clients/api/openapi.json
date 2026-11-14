@@ -4677,6 +4677,198 @@
         }
       }
     },
+    "/operations/app.deployment.pins": {
+      "post": {
+        "summary": "Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.",
+        "operationId": "app.deployment.pins",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.deployment.pins/preview": {
+      "post": {
+        "summary": "Preview: Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      },
+                      "app": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "An app name, including a removed app whose records or data remain"
+                      }
+                    },
+                    "required": [
+                      "server",
+                      "app"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/operations/app.deployment.status": {
       "post": {
         "summary": "Read deployment phase, verified active release and required recovery action.",
@@ -9882,6 +10074,7 @@
               "app.purge",
               "app.build",
               "app.deployment.prepare",
+              "app.deployment.pins",
               "app.deployment.status",
               "app.deployment.cancel",
               "app.migration.cleanup",

@@ -1258,6 +1258,17 @@ normal fleet integration, worker/maintenance/data acceptance or the full
 upgrade lab. An earlier run exposed health-probe CPU overhead and failed with
 116 HTTP errors; that evidence remains recorded alongside the corrected fixture.
 
+The coordinator publishes per-application plan image pins through
+`kayra app deployment pins SERVER APP` and the operation catalog's API/UI/MCP
+clients. Pins distinguish active, last-known-good, candidate, rollback and
+unresolved plans; complete-plan and HTTP-workload identities stay distinct.
+Missing or corrupt immutable descriptions refuse the whole snapshot. The
+projection contains image digests and release identities without materialized
+inputs. It explicitly sets `gcSafe: false`: build pins remain a separate
+conservative export, live runtime attachments and legacy Compose history are
+not inventoried, and legacy destructive registry GC remains refused on hosts
+managing Swarm applications.
+
 Global OOM, Docker-root or inode exhaustion, backup restoration, host loss and
 multi-node behavior are outside this first single-node integration. Even a
 passing integration is experimental and is not a universal zero-downtime or

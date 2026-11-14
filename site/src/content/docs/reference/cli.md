@@ -366,6 +366,7 @@ For an explicitly registered indexed application on an experimental host:
 kayra app build SERVER APP FULL_COMMIT
 kayra app deployment prepare SERVER APP FULL_COMMIT REQUEST_UUID
 kayra app deployment status SERVER APP
+kayra app deployment pins SERVER APP
 kayra app deployment cancel SERVER APP REQUEST_UUID
 ```
 
@@ -376,6 +377,15 @@ uncertain request, then read status. Version-two receipts identify the complete
 plan and its original total deadline; older HTTP requests retain version one.
 The host selects the runtime and grants. These commands accept no runtime,
 resource override, migration command, secret value or deadline.
+
+`deployment pins` publishes exact image digests for active, candidate, rollback
+and unresolved plans, with complete-plan and workload identities. It includes
+last-known-good references, excludes resolved secret values and fails if a
+required immutable description is missing or corrupt. API/UI operation
+`app.deployment.pins` and MCP tool `app_deployment_pins` expose the same read.
+The snapshot sets `gcSafe: false`: it does not inventory live Docker attachments,
+legacy Compose history or unresolved builds. Existing build pins remain a
+separate export; this command never enables destructive registry GC.
 
 The API and UI expose `app.build` and `app.deployment.prepare`; MCP tools are
 `app_build` and `app_deployment_prepare`. All use the same validated input and

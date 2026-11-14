@@ -1,3 +1,4 @@
+import { deploymentImagePins } from "./deployment-image-pins.ts";
 import type { RolloutRequest } from "./rollout-request.ts";
 import { settledMigrationPrefix } from "./migration-prefix.ts";
 import { rolloutCleanupRecord } from "./rollout-cleanup.ts";
@@ -574,6 +575,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return verified;
     }),
     reconcileHttpResources: (app: string, ticket: string) => useReady(app, (store) => reconcileHttpResources(app, store, ticket)),
+    deploymentImagePins: (app: string, ports: Pick<BuildPorts, "read">) => useReady(app, async (store) => {
+      const envelope = await store.read(); if (envelope === undefined) throw new Error("image pins lack lifecycle ownership");
+      return deploymentImagePins(app, envelope, ports);
+    }),
     deploymentStatus: (app: string) => useReady(app, async (store) => {
       const envelope = await store.read();
       const registration = verifiedRegistration(app, envelope);

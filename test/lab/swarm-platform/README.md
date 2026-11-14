@@ -847,3 +847,28 @@ uninterrupted recovery from a real post-readiness application failure.
 Eight local lab checks, Ansible syntax/validation and the byte-identical staging
 smoke passed. Full upgrade acceptance and the remaining application roles are
 still outstanding.
+
+### Deployment plan image pins
+
+The owner publishes `/deployment/pins` through `ctl lifecycle pins APP` and
+`kayra app deployment pins SERVER APP`, also available through the API/UI/MCP
+operation catalog. The read model groups exact images by active, last-known-good,
+candidate, rollback and unresolved plan references. It retains the separate
+complete-plan/workload identities, refuses missing/corrupt descriptions and
+excludes materialized inputs. `gcSafe: false` is mandatory: live attachments,
+legacy Compose inventory and unresolved builds are not covered; build pins are
+still exported separately and destructive Swarm-host GC remains refused.
+
+Seven focused checks cover promotion/restart, pending and held migration/HTTP
+plans, cancellation, missing/corrupt descriptions, scope and contract validation.
+The full CLI suite passed 681 tests with two existing skips; the additional HTTP
+pin test passed in the focused seven-case run. Web type/lint/build and 21 tests
+passed. A Linux subset passed 35 tests using an isolated source on the preserved
+failed VM, with fake workload ports, not a second native rollout. Evidence is
+`/tmp/kayra-deployment-pins-linux2-linux-context.json` and
+`/tmp/kayra-deployment-pins-linux2-linux.log`; its successful source was removed.
+An earlier isolated Linux attempt included the ESLint-based architecture test
+without its development dependency. Its source and failure log are preserved at
+`/tmp/kayra-deployment-pins-linux-context.json` and
+`/tmp/kayra-deployment-pins-linux.log`; architecture checks pass locally with
+the full development dependencies installed. No failed VM was deleted.

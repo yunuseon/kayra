@@ -19,7 +19,7 @@ import { swarmService } from '../../../cli/src/server/runtime/swarm-service.ts';
 import { observeSwarmHost } from '../../../cli/src/server/runtime/swarm-host.ts';
 import { routedReadiness } from '../../../cli/src/server/platform/routed-readiness.ts';
 import { swarmRouting } from '../../../cli/src/server/platform/swarm-routing.ts';
-import { serverCode, migrationCommand, probeCommand } from './migration-fixture.mjs';
+import { serverCode, migrationCommand, probeCommand, healthCommand } from './migration-fixture.mjs';
 
 const [mode, directory] = process.argv.slice(2); assert.ok(directory);
 const api = dockerApi(); const run = promisify(execFile); const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,7 +65,7 @@ try {
     const tasks = await api.request('GET', '/tasks?filters=' + encodeURIComponent(JSON.stringify({ service: [stateId] })));
     const container = tasks.value.find((task) => task.DesiredState === 'running' && task.Status.State === 'running')?.Status.ContainerStatus.ContainerID;
     if (!container) return false;
-    const result = await run('docker', ['exec', container, 'node', '-e', "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]).catch(() => undefined);
+    const result = await run('docker', ['exec', container, ...healthCommand]).catch(() => undefined);
     return result ? container : false;
   }, 'application state fixture');
   const chunks = []; let eventBytes = 0; let eventError;
@@ -83,7 +83,7 @@ try {
     const workload = { ...template, app, registration, host, commit, artifact, routes: template.routes.map((route) => ({ ...route, host: `${app}.lab.test`, check: '/version' })),
       services: { web: { ...template.services.web, image, command: ['--input-type=module', '-e', fixtureCommand], entrypoint: ['node'], environment: { ...environment, TOKEN: { kind: 'secret', key: 'TOKEN' } },
         resources: { ...template.services.web.resources, memoryBytes: 128 * 1024 * 1024, nanoCpus: 250_000_000 },
-        health: { command: ['node', '-e', "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], intervalSeconds: 1, timeoutSeconds: 1, startPeriodSeconds: 1, retries: 3 } } } };
+        health: { command: healthCommand, intervalSeconds: 1, timeoutSeconds: 1, startPeriodSeconds: 1, retries: 3 } } } };
     const plan = parseRolloutPlan({ version: 2, runtime: 'swarm', workload, policy: { version: 1, migrationTimeoutCeilingSeconds: 90, schedulingSeconds: 90, cleanupSeconds: 30, maximumAttempts: 8 },
       rollout: { ...workload.rollout, migrations: [{ id: 'schema', service: 'web', command: migrationCommand, timeout_seconds: 30,
         recovery: unsafe ? { kind: 'status-probe', command: probeCommand, timeout_seconds: 15 } : { kind: 'replay-safe' } }] } });

@@ -438,6 +438,7 @@ if [ "$swarm_host" = true ]; then
         "${KAYRA_ROOT}/test/lab/swarm-platform/http-coordinator.yml" \
         -e "kayra_root=${KAYRA_ROOT}" -e "report_path=${work}/http-coordinator.json" >> "$log" 2>&1 || die "durable HTTP coordinator component"
     cp "${work}/http-coordinator.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.json"
+    cp "${work}/http-coordinator.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.source.json"
     cp "${work}/http-coordinator.json.overlap.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.overlap.json"
     cp "${work}/http-coordinator.json.overlap.native.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.overlap.native.json"
     cp "${work}/http-coordinator.json.jobs.json" "/tmp/kayra-swarm-platform-${vm_name}.coordinator.jobs.json"
@@ -533,6 +534,39 @@ if [ "$indexed_registration" = true ]; then
             -e "report_path=${work}/http-control.json" >> "$log" 2>&1 || die "experimental HTTP control and promotion"
         cp "${work}/http-control.json" "/tmp/kayra-swarm-platform-${vm_name}.control.json"
         echo "✓ the real deployer promoted the retained Swarm plan with routed TLS readiness"
+
+        complete_repo="${work}/rollout-complete"
+        cp -R "${KAYRA_ROOT}/test/lab/swarm-platform/complete-fixture" "$complete_repo"
+        git -C "$complete_repo" init -q -b main
+        git -C "$complete_repo" add -A
+        git -C "$complete_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "complete rollout A"
+        complete_a="$(git -C "$complete_repo" rev-parse HEAD)"
+        yq -i '.services.web.environment.RELEASE = "B" |
+            .services.web.environment.FAIL_AFTER_EFFECT = "true" |
+            .services.web.environment.MIGRATION_HOLD_MS = "30000"' "${complete_repo}/deploy/compose.yml"
+        git -C "$complete_repo" add -A
+        git -C "$complete_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "complete rollout B with app-provided recovery"
+        complete_b="$(git -C "$complete_repo" rev-parse HEAD)"
+        git clone -q --bare "$complete_repo" "${served}/lab/complete.git"
+        git -C "$complete_repo" bundle create "/tmp/kayra-swarm-platform-${vm_name}.complete-fixture.bundle" --all
+        complete_requests="$(python3 -c 'import json,uuid; print(json.dumps({"A":str(uuid.uuid4()),"B":str(uuid.uuid4())}))')"
+        jq -n --arg repo "http://${host_ip}:${port}/lab/complete.git" --arg a "$complete_a" --arg b "$complete_b" --argjson requests "$complete_requests" '{
+            fixture_app: "rollout-complete", fixture_runtime: "swarm", fixture_hosts: ["complete.lab.test"],
+            fixture_grants: {memory_bytes: 268435456, cpu_millicores: 500, maintenance: false},
+            fixture_configuration: {MODE: "lab", DB_HOST: "kayra-complete-ledger"}, fixture_ledger: "kayra-complete-ledger",
+            fixture_repo: $repo, fixture_commit: $a, fixture_commits: {A: $a, B: $b}, fixture_requests: $requests, kayra_lab_swarm: true
+        }' > "${work}/complete-registration-inputs.json"
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/complete-control.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e "@${work}/complete-registration-inputs.json" \
+            -e "report_path=${work}/complete-control.json" >> "$log" 2>&1 || die "integrated migration, restart recovery and HTTP promotion"
+        cp "${work}/complete-control.json" "/tmp/kayra-swarm-platform-${vm_name}.complete.json"
+        cp "${work}/complete-control.json.tar" "/tmp/kayra-swarm-platform-${vm_name}.complete.tar"
+        cp "${work}/complete-control.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.complete.source.json"
+        cp "${work}/complete-control.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.complete.clock.json"
+        echo "✓ real builds, app-owned migration recovery and routed HTTP survived coordinator interruption"
+
     fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi

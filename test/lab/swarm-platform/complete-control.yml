@@ -1,0 +1,178 @@
+---
+- name: Prepare an external application-owned ledger fixture
+  hosts: servers
+  become: true
+  vars:
+    compose_env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:docker-compose.swarm.yml:registration-lab.yml
+  tasks:
+    - name: Read the application-owned ledger program
+      ansible.builtin.command:
+        argv:
+          - node
+          - --input-type=module
+          - --eval
+          - "import {pathToFileURL} from 'node:url'; import {join} from 'node:path'; console.log((await import(pathToFileURL(join(process.argv[1], 'test/lab/swarm-platform/migration-fixture.mjs')))).serverCode);"
+          - "{{ kayra_root }}"
+      register: complete_ledger_program
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Refuse an existing ledger instead of resetting fixture effects
+      ansible.builtin.command:
+        argv: [docker, ps, -aq, --filter, "name=^/{{ fixture_ledger }}$"]
+      register: complete_existing_ledger
+      changed_when: false
+      failed_when: complete_existing_ledger.stdout | trim | length > 0
+
+    - name: Select the existing image's pinned Node runtime for the external fixture
+      ansible.builtin.command:
+        argv: [docker, compose, images, -q, deployer]
+        chdir: /opt/platform
+      environment: "{{ compose_env }}"
+      register: complete_ledger_image
+      changed_when: false
+
+    - name: Start the external fixture without platform privileges or published ports
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - -d
+          - --name
+          - "{{ fixture_ledger }}"
+          - --network
+          - platform-swarm
+          - --memory
+          - 64m
+          - --cpus
+          - "0.1"
+          - --read-only
+          - --cap-drop
+          - ALL
+          - --security-opt
+          - no-new-privileges
+          - --label
+          - io.kayra.lab=complete-control-ledger
+          - --entrypoint
+          - node
+          - "{{ complete_ledger_image.stdout | trim }}"
+          - --input-type=commonjs
+          - -e
+          - "{{ complete_ledger_program.stdout }}"
+      changed_when: true
+
+- name: Register and retain the actual application build
+  ansible.builtin.import_playbook: ../registration-generation/build-live.yml
+
+- name: Measure complete application rollouts through the existing coordinator
+  hosts: servers
+  become: true
+  vars:
+    compose_env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:docker-compose.swarm.yml:registration-lab.yml
+  tasks:
+    - name: Retain the second immutable build through the real builder
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ fixture_app }}", "{{ fixture_commits.B }}"]
+        chdir: /opt/platform
+      environment: "{{ compose_env }}"
+      register: complete_second_build
+      changed_when: true
+
+    - name: Require a retained build for the requested exact commit
+      ansible.builtin.assert:
+        that:
+          - (complete_second_build.stdout | from_json).commit == fixture_commits.B
+          - (complete_second_build.stdout | from_json).artifact is match('^[0-9a-f]{64}$')
+        quiet: true
+
+    - name: Allocate an isolated observer source directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: complete-control-source-
+      register: complete_source
+
+    - name: Stage the immutable observer sources in one transfer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ complete_source.path }}"
+        stage_source_paths: [cli/src, package.json, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
+
+    - name: Select exactly the persistent coordinator
+      ansible.builtin.command:
+        argv: [docker, ps, -q, --filter, label=com.docker.compose.project=platform, --filter, label=com.docker.compose.service=deployer, --filter, label=com.docker.compose.oneoff=False]
+      register: complete_deployer
+      changed_when: false
+      failed_when: complete_deployer.stdout_lines | length != 1
+
+    - name: Copy the observer runtime and contract dependencies from the existing image
+      ansible.builtin.command:
+        argv: [docker, cp, "{{ complete_deployer.stdout | trim }}:{{ item.source }}", "{{ complete_source.path }}/{{ item.target }}"]
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Persist the measurement identities before contacting deployment control
+      ansible.builtin.copy:
+        content: "{{ {'version': 1, 'app': fixture_app, 'host': fixture_hosts[0], 'commits': fixture_commits, 'requests': fixture_requests, 'ledger': fixture_ledger, 'migrationCeilingSeconds': 90} | to_json }}\n"
+        dest: "{{ complete_source.path }}/manifest.json"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Require synchronized clocks before the timed experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: complete_before_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((complete_before_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Run real build, migration recovery, coordinator interruption and routed HTTP convergence
+      ansible.builtin.command:
+        argv: ["{{ complete_source.path }}/node", "{{ complete_source.path }}/test/lab/swarm-platform/complete-control.mjs", "{{ complete_source.path }}/manifest.json", "{{ complete_source.path }}/results"]
+      changed_when: true
+
+    - name: Require synchronized clocks after the timed experiment
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: complete_after_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((complete_after_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Retain the experiment clock observations
+      ansible.builtin.copy:
+        content: "{{ {'beforeVmEpochSeconds': complete_before_clock.stdout | int, 'afterVmEpochSeconds': complete_after_clock.stdout | int} | to_json }}\n"
+        dest: "{{ report_path }}.clock.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Retain the integrated result
+      ansible.builtin.fetch:
+        src: "{{ complete_source.path }}/results/result.json"
+        dest: "{{ report_path }}"
+        flat: true
+
+    - name: Archive raw integrated evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ complete_source.path }}/evidence.tar", -C, "{{ complete_source.path }}/results", .]
+      changed_when: true
+
+    - name: Retain raw integrated evidence
+      ansible.builtin.fetch:
+        src: "{{ complete_source.path }}/evidence.tar"
+        dest: "{{ report_path }}.tar"
+        flat: true
+
+    - name: Remove successful observer source
+      ansible.builtin.file:
+        path: "{{ complete_source.path }}"
+        state: absent

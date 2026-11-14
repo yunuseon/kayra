@@ -2,12 +2,14 @@ import http from 'node:http';
 import os from 'node:os';
 
 if (process.argv[2] === 'health') {
-  try {
-    const response = await fetch(`http://127.0.0.1:${process.env.PORT ?? 8080}/health`, { signal: AbortSignal.timeout(800) });
-    process.exit(response.ok ? 0 : 1);
-  } catch {
-    process.exit(1);
-  }
+  const healthy = await new Promise((resolve) => {
+    const probe = http.get({ host: '127.0.0.1', port: Number(process.env.PORT ?? 8080), path: '/health', timeout: 800 }, (response) => {
+      response.resume(); resolve(response.statusCode >= 200 && response.statusCode < 300);
+    });
+    probe.on('timeout', () => { probe.destroy(); resolve(false); });
+    probe.on('error', () => resolve(false));
+  });
+  process.exit(healthy ? 0 : 1);
 }
 
 const startedAt = Date.now();

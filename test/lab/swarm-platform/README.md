@@ -743,7 +743,7 @@ passed with the corrected frozen source mounted read-only and without a Docker
 socket, app secrets or network access: both common entrypoints loaded, and both
 images answered legacy run-history queries. Raw image identities and output are
 in `/tmp/kayra-optional-image-smoke.json`. Only the successful temporary source
-was removed; original failed lab containers and sources remain unchanged.
+was removed; original failed lab sources and stored container evidence remain preserved.
 
 ### Indexed complete-plan control
 
@@ -756,3 +756,94 @@ checks cover actual coordinator/journal progression with fake runtime ports;
 raw output `/tmp/kayra-complete-control-linux.log`. These tests do not exercise
 the real builder or native workload effects. The integrated pipeline experiment
 remains required before claiming complete migration support.
+
+### Real-builder migration and HTTP integration
+
+With `--indexed-registration --swarm-host`, the upgrade lab now creates a new
+`rollout-complete` application from `complete-fixture/`. Real builder artifacts
+retain the complete migration declaration, exact image digests and trusted host
+ceiling. An external app-owned HTTP ledger records unsafe effects; it has no
+platform secrets, socket, published port or writable host mount. This tests the
+migration protocol without claiming SQL-engine or retained-volume acceptance.
+
+Release A applies once and serves a thirty-second baseline. Release B applies
+its effect, stays running while the coordinator is killed, then exits with an
+error. Its declared status probe must report `applied` before native HTTP B
+starts. The observer requires exactly two migration Starts, one probe Start and
+one effect per release. It checks zero failed or premature HTTP requests at
+20 requests/second, fresh and persistent connections, no client retries and a
+two-second request timeout, with thirty seconds of traffic after convergence.
+Source staging and final measurements require synchronized VM/controller clocks.
+
+The lab exports `.complete.json`, `.complete.tar`, `.complete.source.json`,
+`.complete.clock.json` and `.complete-fixture.bundle` under its usual
+`/tmp/kayra-swarm-platform-<vm>` prefix. Raw archives include per-request records,
+Docker events, public status/receipts, app-owned effect counts and CPU/memory
+samples. The summary records exact Engine, CLI, Compose, OS, Node and image
+versions. The fixture bundle preserves the actual A/B commits.
+
+Reproduce through the normal full-lab command:
+
+```bash
+bash test/lab/upgrade.sh --from 0.23.0 \
+  --vm-name kayra-complete-upgrade-$(date -u +%Y%m%d%H%M%S) \
+  --indexed-registration --swarm-host
+```
+
+Passing VMs are destroyed unless `--keep`; failed sources, ledger/runtime state,
+fleet and VM remain for inspection. After exporting failed evidence, use only
+the lab's printed cleanup command. Ordinary fleet registration and the remaining
+worker, singleton, maintenance, removal and data-retention acceptance are still
+separate requirements.
+
+`test/lab/stage-source.yml` transfers trusted code as one archive and records its
+SHA-256 instead of copying each file separately. A VM smoke check verified all
+285 staged files byte-for-byte; it passed all eleven tasks in 141 seconds on the
+then-loaded host. Proof is `/tmp/kayra-source-stage-smoke-context.json`,
+`/tmp/kayra-source-stage-smoke.source.json` and `.log`. The old transfer had spent
+over forty minutes staging individual files before workload effects began.
+The interrupted run `kayra-import-upgrade-20261114000217` is preserved on disk;
+its logs and fleet are under the temporary directory recorded in
+`/tmp/kayra-import-upgrade-context.json`. It passed the normal Compose upgrade,
+cache/policy/rollback/GC/poll paths and mixed TLS routing before interruption.
+
+The failed `kayra-policy-upgrade-20261113194653` and idle component VM
+`kayra-builder-indexed-20261111080734` are also preserved on disk and stopped to
+free resources. Restart an individual lab with `multipass start <name>` and
+resynchronize its clock before any new timed experiment. Daemon failure logs
+were exported to `/tmp/kayra-policy-upgrade-failure/`; idle-container metadata is
+`/tmp/kayra-builder-indexed-preserved-containers.txt`. No failed VM was deleted.
+
+The full run recorded in `/tmp/kayra-complete-upgrade-context.json` passed the
+normal Compose paths and mixed TLS setup, then was invalidated by a two-hour
+host suspension during a timed component case. Its failed source, journals and
+VM remain preserved; this is not a full upgrade acceptance pass.
+
+A separate real-pipeline rerun on that VM passed: **3,029 requests, zero failures,
+zero premature exposure**, 19.993 requests/second and a 230.2 ms maximum start
+gap. The coordinator was killed after B's unsafe migration effect; the original
+container continued independently, failed, and the declared probe reported
+`applied`. There were exactly two migration Starts and one probe Start across
+A/B, one effect and one call per operation, and replay preserved the original
+plan/deadline. Host/VM clock offsets were 500 ms before and 295 ms after.
+
+Evidence: `/tmp/kayra-complete-live2.json`, `.json.tar`, `.json.source.json`,
+`.json.clock.json`, `-context.json`, `-inputs.json` and `-fixture.bundle`.
+The archive contains requests, live Docker events, status trace and resource
+samples. Exact versions: Ubuntu 24.04.5 ARM64, kernel 6.8.0-147, Docker Engine/CLI
+29.9.3 (API 1.56), Compose 5.7.1, Node 24.22.1, Traefik 3.7.16 and socket-proxy
+0.5.0; immutable application/shared image identities are in the summary.
+
+The first targeted run **failed with 116 failed requests out of 3,042**. After B
+was promoted, its Node fetch-based health probe exceeded the one-second timeout;
+Swarm restarted B after its failure-monitoring window. App requests still
+reported ready until termination; there was no OOM. Evidence is preserved in
+`/tmp/kayra-complete-live-failed.tar` and
+`/tmp/kayra-complete-live-health-failure.json`. The passing rerun uses a cheaper
+built-in HTTP health probe; CPU, health timeout, traffic rate, client timeout,
+refresh interval and retry policy remain unchanged. This does not establish
+uninterrupted recovery from a real post-readiness application failure.
+
+Eight local lab checks, Ansible syntax/validation and the byte-identical staging
+smoke passed. Full upgrade acceptance and the remaining application roles are
+still outstanding.

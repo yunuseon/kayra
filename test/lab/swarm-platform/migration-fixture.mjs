@@ -36,3 +36,6 @@ function probeMigration() {
 export const serverCode = `(${stateServer.toString()})()`;
 export const migrationCommand = ['--input-type=commonjs', '-e', `(${applyMigration.toString()})()`];
 export const probeCommand = ['--input-type=commonjs', '-e', `(${probeMigration.toString()})()`];
+
+// Keep the readiness probe inexpensive under the fixture's quarter-CPU limit.
+export const healthCommand = ['node', '--input-type=commonjs', '-e', "const r=require('node:http').get('http://127.0.0.1:'+(process.env.PORT||8080)+'/health',{timeout:800},s=>{s.resume();process.exit(s.statusCode>=200&&s.statusCode<300?0:1)});r.on('timeout',()=>{r.destroy();process.exit(1)});r.on('error',()=>process.exit(1))"];

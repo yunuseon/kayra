@@ -12,7 +12,7 @@ import { openArtifactStore } from '../../../cli/src/server/deployment/artifact-s
 import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
 import { dockerApi } from '../../../cli/src/server/runtime/docker-api.ts';
 import { oneShotJob } from '../../../cli/src/server/runtime/one-shot-job.ts';
-import { serverCode, migrationCommand, probeCommand } from './migration-fixture.mjs';
+import { serverCode, migrationCommand, probeCommand, healthCommand } from './migration-fixture.mjs';
 import { indexedMigrationOwner } from './indexed-migration-owner.mjs';
 
 const [mode, directory, checkpoint] = process.argv.slice(2); assert.ok(directory);
@@ -52,7 +52,7 @@ const serviceName = app + '-state'; let serviceId; let activeObserver; const rep
 try {
   const created = await api.request('POST', '/services/create', { Name: serviceName, Labels: { 'com.kayra.lab': app, 'traefik.enable': 'false' },
     TaskTemplate: { ContainerSpec: { Image: image, Command: ['node'], Args: ['--input-type=commonjs', '-e', serverCode],
-      Healthcheck: { Test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], Interval: 2e9, Timeout: 1e9, Retries: 3 }, StopGracePeriod: 30e9 },
+      Healthcheck: { Test: ['CMD', ...healthCommand], Interval: 2e9, Timeout: 1e9, Retries: 3 }, StopGracePeriod: 30e9 },
       Resources: { Limits: { MemoryBytes: 128 * 1024 * 1024, NanoCPUs: 250_000_000 } }, RestartPolicy: { Condition: 'none' },
       Placement: { Constraints: [`node.id==${host.node}`] }, Networks: [{ Target: host.network.id }] }, Mode: { Replicated: { Replicas: 1 } }, EndpointSpec: { Mode: 'vip' } });
   assert.equal(created.status, 201); serviceId = created.value.ID; assert.ok(serviceId);

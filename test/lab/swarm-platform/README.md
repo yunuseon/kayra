@@ -1102,3 +1102,36 @@ clock gates and exact source identities are retained as `.admission-race.json`,
 `.admission-race.clock.json`; each contender's exact Git history is exported as
 `.admission-left.bundle` or `.admission-right.bundle`. Native acceptance remains
 pending. This does not complete remove-versus-deploy or bounded ENOSPC testing.
+
+### Bounded lifecycle filesystem ENOSPC
+
+`lifecycle-enospc.yml` builds a no-migration candidate and measures it through the
+existing coordinator. The lab stops only that coordinator, copies its opaque
+lifecycle metadata with ownership intact onto a new **64 MiB ext4 loopback
+filesystem**, bind-mounts that filesystem at its existing lifecycle path, and
+restarts it. Original underlying metadata is preserved. Docker-root, registry,
+application volumes and registration secrets are outside this fault scope.
+The helper refuses paths outside its owned lab-storage prefix, a previously
+mounted lifecycle path, more than 16 MiB of existing metadata, or less than
+1 GiB of free host storage. No production fault switch or extra daemon is added.
+
+After the normal control endpoint acknowledges a stable request UUID, an
+in-container client verifies the public `prepared` checkpoint and immediately
+SIGSTOPs the existing coordinator. The observer rejects a missed checkpoint or
+any early candidate Create/Start. A UID-1000 filler reaches ENOSPC on the bounded
+filesystem; an independent UID-1000 write in the deployer must also return
+`ENOSPC`. On resume, the journal must fail closed with no candidate creation.
+Restoring space must still require journal reopen; after restart the same
+accepted plan, request and admission/operation deadlines must recover, with one
+candidate Start after space restoration and eventual certified promotion.
+
+Traffic runs at 20/s, fresh and persistent connections, two-second short timeout
+and no retries, starting with a 30-second B baseline before storage setup and
+ending after a 30-second stable candidate period. Every request must succeed,
+and no candidate may be exposed prematurely. The result, raw requests/events,
+public status trace, CPU/memory samples and source/clock identities use the
+`.lifecycle-enospc` output prefix. Successful full-lab teardown destroys the VM
+and its bounded filesystem; a kept or failed VM retains the mount, image,
+original metadata and observer evidence. This tests process recovery from
+bounded metadata ENOSPC, not global Docker-root/inode exhaustion, host loss,
+backup restoration or application-data durability. Native acceptance is pending.

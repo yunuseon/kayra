@@ -1,4 +1,4 @@
-import { parseDataOwnership } from "../../contracts/owned-volume.ts";
+import { ownedVolume, ownedVolumeKeySchema, ownedVolumeSchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
 import { deploymentHealth } from "./deployment-health.ts";
 import { deploymentImagePins } from "./deployment-image-pins.ts";
 import type { RolloutRequest } from "./rollout-request.ts";
@@ -44,8 +44,11 @@ const entry = z.object({
   app: appName,
   incarnation: z.uuid(),
   dataOwner: z.uuid().exactOptional(),
+  volumes: z.array(ownedVolumeSchema).max(32).default([]),
   phase: z.enum(["initializing", "ready"]),
-}).strict();
+}).strict().refine((owner) => owner.volumes.every((volume) => volume.app === owner.app && volume.dataOwner === owner.dataOwner) &&
+  new Set(owner.volumes.map((volume) => volume.key)).size === owner.volumes.length &&
+  new Set(owner.volumes.map((volume) => volume.allocation)).size === owner.volumes.length);
 const build = z.object({
   id: z.string().regex(/^[0-9a-f]{64}$/),
   registration: z.object({ version: z.literal(1), app: appName, incarnation: z.uuid(), actionId: z.string(), registrationGeneration: z.uuid() }).strict(),
@@ -58,6 +61,7 @@ const schema = z.object({ version: z.literal(1), resources: z.unknown().default(
   new Set(apps.map((app) => app.incarnation)).size === apps.length &&
   new Set(apps.flatMap((app) => app.dataOwner === undefined ? [] : [app.dataOwner])).size === apps.filter((app) => app.dataOwner !== undefined).length &&
   apps.every((app) => app.dataOwner === undefined || app.dataOwner !== app.incarnation) &&
+  new Set(apps.flatMap((app) => app.volumes.map((volume) => volume.allocation))).size === apps.reduce((total, app) => total + app.volumes.length, 0) &&
   new Set(builds.map((item) => item.id)).size === builds.length &&
   builds.every((item) => parseRegistrationGeneration(item.registration).ok &&
     apps.some((app) => app.app === item.registration.app && app.incarnation === item.registration.incarnation) &&
@@ -224,6 +228,26 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const checked = parseDataOwnership({ version: 1, app, incarnation: registration.incarnation, dataOwner: owner.dataOwner });
       if (!checked.ok || owner.incarnation !== registration.incarnation) throw new Error("managed data ownership disagrees with the registered application");
       return checked.value;
+    }),
+    reserveDataVolumeIdentities: (app: string, requested: readonly string[]) => useReady(app, async (store) => {
+      const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
+      if (envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("managed volume identities require an explicitly registered Swarm application");
+      const keys = z.array(ownedVolumeKeySchema).max(32).safeParse(requested);
+      if (!keys.success || new Set(keys.data).size !== keys.data.length) throw new Error("invalid logical volume keys");
+      return serialIndex(async () => {
+        const index = await readIndex(); const owner = index.apps.find((item) => item.app === app);
+        if (owner?.dataOwner === undefined || owner.incarnation !== registration.incarnation) throw new Error("managed data ownership is unavailable; existing volumes are never inferred");
+        const dataOwner = owner.dataOwner;
+        const additions = keys.data.filter((key) => !owner.volumes.some((volume) => volume.key === key)).sort().map((key) => {
+          const volume = ownedVolume(app, dataOwner, randomUUID(), key);
+          if (!volume.ok) throw new Error(volume.error);
+          return volume.value;
+        });
+        const updated = entry.parse({ ...owner, volumes: [...owner.volumes, ...additions] });
+        if (additions.some((volume) => index.apps.some((item) => item.volumes.some((existing) => existing.allocation === volume.allocation)))) throw new Error("volume allocation collision");
+        if (additions.length > 0) await journal.write({ ...index, apps: index.apps.map((item) => item.app === app ? updated : item) });
+        return Object.freeze(updated.volumes.filter((volume) => keys.data.includes(volume.key)).sort((first, second) => first.key.localeCompare(second.key)));
+      });
     }),
     verifiedRegistration: (app: string) => useReady(app, async (store) => {
       return verifiedRegistration(app, await store.read());

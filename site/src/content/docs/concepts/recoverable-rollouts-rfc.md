@@ -1336,3 +1336,14 @@ options, host binds, anonymous mounts, overlapping targets, missing dependencies
 and cycles. Application declarations cannot choose physical allocation names.
 The existing HTTP parser and compiler continue to reject the richer profile;
 this parser alone does not enable volumes, dependency orchestration or workers.
+
+Logical volume keys receive stable physical allocation identities through the
+indexed coordinator writer. The full set is synchronized before any adapter
+can receive an identity, and a lost acknowledgement reopens that exact set.
+Concurrent reservations share the same key allocation. Omission from a later
+request preserves the existing record; it does not authorize deletion or name
+reuse. Allocation requires verified Swarm registration and an existing data
+owner; old ownerless rows and Compose registrations cannot allocate these
+identities. This is metadata intent, not proof that a volume was created or
+resource admission. A future create receipt and missing-volume recovery policy
+must be bound before enabling retained application workloads.

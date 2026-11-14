@@ -2,8 +2,9 @@ import { z } from "zod";
 import { names } from "../lib/names.ts";
 import { err, ok } from "../lib/result.ts";
 
+export const ownedVolumeKeySchema = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 const identity = z.object({ version: z.literal(1), app: z.string().max(48).regex(names.app.pattern), dataOwner: z.uuid(), allocation: z.uuid(),
-  key: z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/), name: z.string(),
+  key: ownedVolumeKeySchema, name: z.string(),
 }).strict().readonly().superRefine((value, context) => {
   if (value.name !== `kayra-data-${value.allocation}`) context.addIssue({ code: "custom", message: "volume name must identify its durable allocation" });
 });
@@ -14,6 +15,7 @@ export const parseDataOwnership = (input: unknown) => {
   const checked = dataOwnershipSchema.safeParse(input);
   return checked.success ? ok<DataOwnership>(checked.data) : err("invalid application data ownership");
 };
+export const ownedVolumeSchema = identity;
 export type OwnedVolume = z.infer<typeof identity>;
 export type VolumeAction = { readonly volume: OwnedVolume; readonly operation: string; readonly deadline: number };
 export type VolumeReceipt = { readonly volume: OwnedVolume; readonly createdAt: string };

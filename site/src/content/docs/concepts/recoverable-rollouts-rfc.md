@@ -1737,3 +1737,26 @@ Consumer updates, compensation, cancellation, indexed lifecycle ownership and
 all public rollout paths remain work. The native group probe uses explicit
 fixture authority and an app-owned HTTP ledger on a retained volume; it does not
 establish SQL, admission, SIGKILL, worker delivery or release promotion guarantees.
+
+### Platform-owned routing for managed service groups
+
+Managed routing generates labels separately for each HTTP service; workers and
+retained dependencies receive none. Router identities derive from incarnation,
+host and path rather than route-list position, so adding a route does not rename
+unrelated routers. Backend identities also bind the service and port. Existing
+version-one HTTP label behavior remains in its compatibility implementation.
+
+Transition validation treats routing-only changes as workload changes even when
+the service specification digest is unchanged. A rolling transition refuses
+moving an existing host/path between logical services: overlapping native
+service definitions can conflict in Traefik. The app can declare maintenance,
+subject to its fleet grant. This is runtime capability validation, not custom
+traffic switching or an app-selected infrastructure backend.
+
+Managed routed verification checks every route of the selected HTTP service,
+using the shared platform HTTPS policy, trusted TLS/SNI, fresh connections and no
+redirect following or retries. It does not accept another service's success in
+place of a failing route. The observation uses the oldest completion timestamp
+for freshness. These platform ports remain disconnected from normal managed
+consumer rollout until group convergence, compensation and indexed ownership
+are integrated; unit TLS evidence is not integrated Traefik continuity evidence.

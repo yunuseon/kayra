@@ -1668,3 +1668,15 @@ recovery deadlines, restored worker convergence, unchanged existing dependency,
 and fully scrubbed zero-replica barriers for both new-only services. Fixture grants
 do not establish indexed resource admission or release promotion. HTTP continuity,
 SQL safety, SIGKILL and maintenance/check integration remain separate acceptance.
+
+Whole-group recovery at `a01a284` passed in fresh VM
+`kayra-volume-lab-20261115212423366099`, which was destroyed. After converging a
+candidate with a new worker and retained helper, reopening the recovery journal
+after restore acknowledgement preserved its deadline and reached `verified`.
+Both new-only services were fully scrubbed at zero replicas; the original
+retained dependency stayed running. Live events recorded five original-worker
+starts across both candidate/restore pairs, one dependency start and one migration
+start. Private exact-source, API/events/clock/journal evidence has a SHA-256
+manifest. This fixture-authorized component probe still does not establish indexed
+admission, active-release publication, HTTP continuity, SIGKILL, SQL safety or
+maintenance/check integration.

@@ -1,3 +1,4 @@
+import { parseRegistrationOwnership } from "../../contracts/registration-ownership.ts";
 import { ownedVolume, ownedVolumeKeySchema, ownedVolumeSchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
 import { deploymentHealth } from "./deployment-health.ts";
 import { deploymentImagePins } from "./deployment-image-pins.ts";
@@ -199,6 +200,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return completed;
   };
 
+  const ownershipReference = async (app: string, incarnation: string) => {
+    const owner = (await serialIndex(readIndex)).apps.find((item) => item.app === app);
+    if (owner?.dataOwner === undefined) throw new Error("managed data ownership is unavailable for this older application; existing volumes are never inferred");
+    const checked = parseDataOwnership({ version: 1, app, incarnation, dataOwner: owner.dataOwner });
+    if (!checked.ok || owner.incarnation !== incarnation) throw new Error("managed data ownership disagrees with the registered application");
+    return checked.value;
+  };
+
   return {
     prepareApp: (app: string) => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
@@ -223,11 +232,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     })),
     dataOwnership: (app: string) => useReady(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
-      const owner = (await serialIndex(readIndex)).apps.find((item) => item.app === app);
-      if (owner?.dataOwner === undefined) throw new Error("managed data ownership is unavailable for this older application; existing volumes are never inferred");
-      const checked = parseDataOwnership({ version: 1, app, incarnation: registration.incarnation, dataOwner: owner.dataOwner });
-      if (!checked.ok || owner.incarnation !== registration.incarnation) throw new Error("managed data ownership disagrees with the registered application");
-      return checked.value;
+      return ownershipReference(app, registration.incarnation);
     }),
     reserveDataVolumeIdentities: (app: string, requested: readonly string[]) => useReady(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
@@ -693,6 +698,21 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         }));
       });
     },
+    registrationOwnership: (app: string, ticket: string, generation: string) => useReady(app, async (store) => {
+      const envelope = await store.read(); const allocation = envelope?.registrationAllocation; const fence = envelope?.fence;
+      if (envelope === undefined || allocation?.runtime !== "swarm" || allocation.ticket !== ticket || allocation.generation !== generation || (fence === null || fence === undefined)) throw new Error("registration ownership requires its admitted Swarm intent");
+      const lifecycle = fence.lifecycle;
+      const registeringAction = lifecycle.phase === "registering" && lifecycle.active.kind === "register" ? lifecycleActionId(fence, lifecycle.active.sequence) : undefined;
+      const metadata = lifecycle.phase === "registered" && envelope.registrationReceipt?.ticket === ticket
+        ? envelope.registrationReceipt.metadata
+        : registeringAction !== undefined && envelope.operations.some((operation) => operation.ticket === ticket && operation.action === registeringAction && operation.descriptor.kind === "register" && operation.descriptor.registrationGeneration === generation)
+          ? { version: 1, app, incarnation: envelope.tickets.incarnation, actionId: registeringAction, registrationGeneration: generation }
+          : undefined;
+      if (metadata === undefined) throw new Error("registration ownership is outside its lifecycle fence");
+      const checked = parseRegistrationOwnership({ version: 1, runtime: "swarm", registration: metadata, ownership: await ownershipReference(app, envelope.tickets.incarnation) });
+      if (!checked.ok) throw new Error(checked.error);
+      return checked.value;
+    }),
     reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useReady(app, (store) => store.reserveRegistration(generation, runtime)),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.submitRegistration(ticket, generation)),

@@ -1447,3 +1447,21 @@ provisioning instead of silently recreating infrastructure for live workloads.
 These helper interfaces still require registration-publication wiring, durable
 grant storage and lifecycle cleanup before the richer workload capability can
 be enabled. They confer no app-selected infrastructure authority.
+
+### Initial registration ownership read model
+
+The platform can request `ctl registration ownership <app> <generation> <ticket>`
+after the coordinator accepts that exact initial Swarm registration intent. The
+read model binds the registration metadata to the indexed data-owner reference;
+it remains identical after publication, acknowledgement loss and reopen. A
+Compose registration, unsubmitted reservation, mismatched ticket/generation or
+foreign scope cannot obtain this Swarm bootstrap reference. Old ownerless rows
+remain unavailable rather than inventing a data owner.
+
+The model contains no secrets, deployment state, private journal fields or
+physical allocation grants. It does not authorize network/volume creation,
+workloads or resource admission. The platform consumes the normal component
+command/read model instead of reading deployment files. Existing reserve replies
+remain unchanged, and the existing privileged process/control listener carries
+this additional internal read. Platform publication still needs to validate and
+persist the resulting infrastructure grant before richer plans can consume it.

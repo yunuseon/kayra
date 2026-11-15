@@ -205,3 +205,21 @@ test("migration control refuses malformed and authority-bearing requests before 
     strictEqual(answer.stderr.includes("SyntaxError"), false);
   }
 });
+
+test("ctl registration ownership forwards the exact generation and admitted ticket to the existing listener", async () => {
+  const generation = "22222222-2222-4222-8222-222222222222"; const ticket = "11111111-1111-4111-8111-111111111111:1";
+  // eslint-disable-next-line functional/no-let -- records the control request
+  let call = "";
+  const control = createServer((incoming, response) => {
+    // eslint-disable-next-line functional/no-let -- receives the HTTP body
+    let body = "";
+    incoming.setEncoding("utf8").on("data", (chunk: string) => { body += chunk; });
+    incoming.on("end", () => { call = JSON.stringify([incoming.url, body]); response.writeHead(200, { "content-type": "application/json" }).end('{"version":1}'); });
+  });
+  await new Promise<void>((resolve) => { control.listen(8091, "127.0.0.1", resolve); });
+  try {
+    const result = await ctlLater("registration", "ownership", "shop", generation, ticket); strictEqual(result.code, 0); strictEqual(result.stdout, '{"version":1}\n');
+    strictEqual(call, JSON.stringify(["/registration/ownership", JSON.stringify({ app: "shop", generation, ticket })]));
+    strictEqual((await ctlLater("registration", "ownership", "shop", generation)).code, 1);
+  } finally { control.close(); }
+});

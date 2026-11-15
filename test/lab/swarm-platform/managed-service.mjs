@@ -74,6 +74,7 @@ export const probeManagedService = async (app, image, output) => {
     const artifacts = await openArtifactStore(join(executionPath, 'artifacts'));
     const ports = { ...artifacts, now: Date.now, authorize: async () => true, runtime: {
       apply: (action, expected, plan) => adapter.apply(action, expected, plan, inputs),
+      reactivate: (action, expected, plan) => adapter.reactivate(action, expected, plan, inputs),
       observeDesired: (action, plan) => adapter.observeDesired(action, plan, inputs),
     } };
     let journal = await openJournal(executionPath); let owner = managedServiceExecution(journal, ports); let execution;
@@ -93,28 +94,53 @@ export const probeManagedService = async (app, image, output) => {
     const before = requests.filter((request) => request.method === 'POST').length;
     assert.equal(await adapter.apply(actionFor(first, 3), { id: started.id, version: started.version }, first, inputs), 'refused');
     assert.equal(requests.filter((request) => request.method === 'POST').length, before); assert.equal(await readCounter(started), 1);
-    const removing = actionFor(first, 4, 'remove');
-    const barrierPath = join(output, 'managed-service-barrier'); await mkdir(barrierPath, { mode: 0o700 });
-    const barrierArtifacts = await openArtifactStore(join(barrierPath, 'artifacts'));
-    const barrierPorts = { ...barrierArtifacts, now: Date.now, authorize: async () => true, runtime: { observe: adapter.observe, tombstone: adapter.tombstone } };
-    let barrierJournal = await openJournal(barrierPath); let barrier = managedServiceBarrier(barrierJournal, barrierPorts); let fenced;
+    const reserveBarrier = async (service, sequence, name) => {
+      const removing = actionFor(first, sequence, 'remove');
+      const barrierPath = join(output, name); await mkdir(barrierPath, { mode: 0o700 });
+      const barrierArtifacts = await openArtifactStore(join(barrierPath, 'artifacts'));
+      const barrierPorts = { ...barrierArtifacts, now: Date.now, authorize: async () => true, runtime: { observe: adapter.observe, tombstone: adapter.tombstone } };
+      let barrierJournal = await openJournal(barrierPath); let barrier = managedServiceBarrier(barrierJournal, barrierPorts); let fenced;
+      try {
+        const prepared = await barrier.prepare(first, removing, [{ id: service.id, version: service.version }]);
+        assert.equal((await barrier.tick()).steps.length, 1);
+        await barrierJournal.close(); barrierJournal = await openJournal(barrierPath, 'existing'); barrier = managedServiceBarrier(barrierJournal, barrierPorts);
+        fenced = await wait(async () => { const value = await barrier.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'complete' ? value : false; }, 'reopened drained and scrubbed service barrier', removing.deadline);
+        assert.equal(fenced.action.deadline, prepared.action.deadline); assert.equal(fenced.proof.native.id, service.id); assert.ok(fenced.proof.native.version > service.version);
+        assert.equal(JSON.stringify(await barrierJournal.read()).includes('synthetic-managed-private-value'), false);
+      } finally { await barrierJournal.close(); }
+      await writeFile(join(output, name + '.json'), JSON.stringify(fenced, null, 2));
+      return fenced;
+    };
+    const fenced = await reserveBarrier(started, 4, "managed-service-barrier");
+    const reactivation = actionFor(first, 5);
+    const settledBarrier = await wait(async () => { const value = await adapter.observe(scopeOf(first)); return value.status === 'owned' && value.id === fenced.proof.native.id && value.version >= fenced.proof.native.version && value.effect === 'scrub' && value.retainedInputsCleared && value.replicas === 0 && [null, 'completed', 'rollback_completed'].includes(value.update) ? value : false; }, 'stable retained activation barrier', reactivation.deadline);
+    const activationVersion = { id: settledBarrier.id, version: settledBarrier.version };
+    const ordinaryPosts = requests.filter((request) => request.method === 'POST').length;
+    assert.equal(await adapter.apply(reactivation, activationVersion, first, inputs), 'refused');
+    const changed = parseManagedServicePlan({ ...first, resources: { ...first.resources, memoryBytes: first.resources.memoryBytes + 1 } }); assert.ok(changed.ok);
+    assert.equal(await adapter.reactivate({ ...reactivation, plan: managedServiceDigest(changed.value) }, activationVersion, changed.value, inputs), 'refused');
+    assert.equal(requests.filter((request) => request.method === 'POST').length, ordinaryPosts);
+    const reactivationPath = join(output, 'managed-service-reactivation'); await mkdir(reactivationPath, { mode: 0o700 });
+    const reactivationArtifacts = await openArtifactStore(join(reactivationPath, 'artifacts'));
+    let reactivationJournal = await openJournal(reactivationPath); let reactivationOwner = managedServiceExecution(reactivationJournal, { ...ports, ...reactivationArtifacts }); let activated;
     try {
-      const prepared = await barrier.prepare(first, removing, [{ id: started.id, version: started.version }]);
-      assert.equal((await barrier.tick()).steps.length, 1);
-      await barrierJournal.close(); barrierJournal = await openJournal(barrierPath, 'existing'); barrier = managedServiceBarrier(barrierJournal, barrierPorts);
-      fenced = await wait(async () => { const value = await barrier.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'complete' ? value : false; }, 'reopened drained and scrubbed service barrier', removing.deadline);
-      assert.equal(fenced.action.deadline, prepared.action.deadline); assert.equal(fenced.proof.native.id, started.id); assert.ok(fenced.proof.native.version > started.version);
-      assert.equal(JSON.stringify(await barrierJournal.read()).includes('synthetic-managed-private-value'), false);
-    } finally { await barrierJournal.close(); }
-    await writeFile(join(output, 'managed-service-barrier.json'), JSON.stringify(fenced, null, 2));
+      await reactivationOwner.prepare(first, reactivation, activationVersion, 'reactivate-retained');
+      assert.equal((await reactivationOwner.tick()).phase, 'observing');
+      await reactivationJournal.close(); reactivationJournal = await openJournal(reactivationPath, 'existing'); reactivationOwner = managedServiceExecution(reactivationJournal, { ...ports, ...reactivationArtifacts });
+      activated = await wait(async () => { const state = await reactivationOwner.tick(); assert.notEqual(state.phase, 'held'); return state.phase === 'converged' ? state : false; }, 'retained reactivation after journal reopen', reactivation.deadline);
+      assert.equal(activated.mode, 'reactivate-retained'); assert.equal(activated.action.deadline, reactivation.deadline);
+    } finally { await reactivationJournal.close(); }
+    const resumed = await healthy(first, reactivation); assert.equal(resumed.id, started.id); assert.equal(await readCounter(resumed), 2);
+    await writeFile(join(output, 'managed-service-reactivation.json'), JSON.stringify(activated, null, 2));
+    await reserveBarrier(resumed, 6, 'managed-service-reactivation-barrier');
     assert.equal((await api.request('POST', '/services/create', renderNativeManagedService(first, initial, inputs))).status, 409);
     const second = await planFor(randomUUID()); const recreate = actionFor(second, 2);
     assert.ok(['acknowledged', 'uncertain'].includes(await adapter.apply(recreate, null, second, inputs)));
-    const restored = await healthy(second, recreate); tracked.services.push(restored.id); assert.notEqual(restored.id, started.id); assert.equal(await readCounter(restored), 2);
+    const restored = await healthy(second, recreate); tracked.services.push(restored.id); assert.notEqual(restored.id, started.id); assert.equal(await readCounter(restored), 3);
     assert.deepEqual(await volumes.observe(volume.value), observedVolume);
     await pause(200); finished = true; observer.kill('SIGTERM'); await observerExit; assert.equal(eventError, undefined); assert.equal(partial, '');
-    const starts = tracked.services.map((id) => ({ id, starts: events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === id).length })); assert.ok(starts.every((service) => service.starts === 1));
-    const result = { passed: true, scope: 'native managed runtime with fixture authorization/rebinding; not indexed admission, lifecycle removal/recreation or group rollout acceptance', receipt, starts, retainedOrdinaryUpdateRefused: true, delayedOldCreateFenced: true, dataRetainedAcrossDistinctIncarnations: true, noSecretInNormalizedObservation: true, serviceExecutionJournalReopen: true, serviceExecutionOriginalDeadline: true, serviceExecutionCreates: 1, serviceBarrierJournalReopen: true, serviceBarrierOriginalDeadline: true, serviceBarrierSteps: fenced.steps.map((step) => ({ effect: step.effect, attempt: step.attempt })), node: process.version };
+    const starts = tracked.services.map((id) => ({ id, starts: events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === id).length })); assert.ok(starts.every((service) => service.starts === (service.id === started.id ? 2 : 1)));
+    const result = { passed: true, scope: 'native managed runtime with fixture authorization/rebinding; not indexed admission, lifecycle removal/recreation or group rollout acceptance', receipt, starts, retainedOrdinaryUpdateRefused: true, delayedOldCreateFenced: true, dataRetainedAcrossDistinctIncarnations: true, noSecretInNormalizedObservation: true, serviceExecutionJournalReopen: true, serviceExecutionOriginalDeadline: true, serviceExecutionCreates: 1, retainedReactivationJournalReopen: true, retainedReactivationPreservedPhysicalService: true, retainedReactivationRejectsChangedSpec: true, serviceBarrierJournalReopen: true, serviceBarrierOriginalDeadline: true, serviceBarrierSteps: fenced.steps.map((step) => ({ effect: step.effect, attempt: step.attempt })), node: process.version };
     await writeFile(join(output, 'managed-service.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(output, 'managed-service-failure.json'), JSON.stringify({ error: String(error), stack: error.stack, tracked }, null, 2)); throw error; }
   finally {

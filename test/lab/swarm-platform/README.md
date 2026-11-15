@@ -1570,3 +1570,15 @@ event and retained data matched its receipt. Successful VM
 `kayra-volume-lab-20261115142459792209` was destroyed. Its private source, clock,
 request/event/spec and journal evidence has a SHA-256 manifest. This remains
 fixture authorization and journal reopen, not indexed group/SIGKILL acceptance.
+
+The 2026-11-15 run at `9fdcc2b` passed explicit unchanged retained reactivation
+through the durable service slot after scrubbing. Journal reopen preserved its
+original action/deadline, physical service identity and volume creation receipt;
+the retained counter advanced once. A changed spec and ordinary replacement
+were refused. After another scrub, a distinct fixture incarnation read that data
+and advanced the counter again. Live starts were exactly two for the original
+service (initial creation and explicit reactivation) and one for the new service.
+Successful VM `kayra-volume-lab-20261115143520813152` was destroyed. Private raw
+source/clock/request/event/journal evidence has a SHA-256 manifest. Authorization
+and rebinding remain fixture-owned: this does not establish indexed cancellation,
+retry, migration or group rollout acceptance.

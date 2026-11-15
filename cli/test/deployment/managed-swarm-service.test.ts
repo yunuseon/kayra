@@ -105,3 +105,47 @@ test("materialized inputs are snapshotted before asynchronous volume observation
   const adapter = managedSwarmService(f.api, { observe: () => { inputs.environment.TOKEN = "CHANGED-PRIVATE"; inputs.volumes[0] = { ...f.receipt, createdAt: "2026-11-15T13:00:00Z" }; return Promise.resolve({ status: "owned", receipt: f.receipt }); } }, f.now);
   assert.equal(await adapter.apply(f.action, f.version, f.plan, inputs), "acknowledged"); assert.deepEqual(f.calls[1]?.body, f.spec);
 });
+
+const retainedBarrier = (f: ReturnType<typeof fixture>) => {
+  const parsed = parseManagedServicePlan({ ...f.plan, role: "retained-dependency" }); assert.ok(parsed.ok);
+  const plan = parsed.value; const digest = managedServiceDigest(plan);
+  const labels = { ...f.spec.Labels, "com.kayra.plan": digest, "com.kayra.effect": "scrub", "com.kayra.action": f.owner.incarnation + ":3:scrub:1", "com.kayra.tombstone": "true" };
+  const spec = { Name: plan.nativeName, Labels: labels, TaskTemplate: { ContainerSpec: { Image: plan.image, Labels: labels } }, Mode: { Replicated: { Replicas: 0 } }, EndpointSpec: { Mode: "dnsrr" } };
+  const actual = { ID: f.id, Version: { Index: 100 }, Spec: spec, PreviousSpec: spec };
+  f.setService(actual);
+  return { plan, actual, action: { ...f.action, action: f.owner.incarnation + ":4", plan: digest }, expected: { id: f.id, version: 100 } };
+};
+
+test("explicit retained reactivation requires the unchanged digest and a fully scrubbed owned barrier", async () => {
+  const f = fixture(); const retained = retainedBarrier(f);
+  assert.equal(await f.adapter.apply(retained.action, retained.expected, retained.plan, f.inputs), "refused");
+  assert.equal(await f.adapter.reactivate(retained.action, retained.expected, retained.plan, f.inputs), "acknowledged");
+  assert.equal(f.calls.filter((call) => call.method === "POST").length, 1);
+  assert.equal(f.calls.at(-1)?.path, `/services/${f.id}/update?version=100`);
+  for (const actual of [
+    { ...retained.actual, PreviousSpec: f.spec },
+    { ...retained.actual, UpdateStatus: { State: "updating" } },
+    { ...retained.actual, Spec: { ...retained.actual.Spec, Mode: { Replicated: { Replicas: 1 } } } },
+    { ...retained.actual, Spec: { ...retained.actual.Spec, Labels: { ...retained.actual.Spec.Labels, "com.kayra.plan": "f".repeat(64) } } },
+  ]) {
+    f.setService(actual); f.calls.length = 0;
+    assert.equal(await f.adapter.reactivate(retained.action, retained.expected, retained.plan, f.inputs), "refused"); assert.ok(f.calls.every((call) => call.method === "GET"));
+  }
+  f.setService(retained.actual); f.calls.length = 0;
+  assert.equal(await f.adapter.reactivate(retained.action, { ...retained.expected, version: 99 }, retained.plan, f.inputs), "refused");
+  const changed = parseManagedServicePlan({ ...retained.plan, resources: { ...retained.plan.resources, memoryBytes: retained.plan.resources.memoryBytes + 1 } }); assert.ok(changed.ok);
+  assert.equal(await f.adapter.reactivate({ ...retained.action, plan: managedServiceDigest(changed.value) }, retained.expected, changed.value, f.inputs), "refused");
+  assert.ok(f.calls.every((call) => call.method === "GET"));
+  f.calls.length = 0; f.volume({ status: "absent" });
+  assert.equal(await f.adapter.reactivate(retained.action, retained.expected, retained.plan, f.inputs), "refused"); assert.equal(f.calls.length, 0);
+});
+
+test("managed writes snapshot the exact expected CAS before asynchronous volume observations", async () => {
+  for (const reactivation of [false, true]) {
+    const f = fixture(); const retained = retainedBarrier(f); const expected = { ...(reactivation ? retained.expected : f.version) };
+    const adapter = managedSwarmService(f.api, { observe: () => { expected.id = "x".repeat(25); expected.version = 999; return Promise.resolve({ status: "owned", receipt: f.receipt }); } }, f.now);
+    const result = reactivation ? await adapter.reactivate(retained.action, expected, retained.plan, f.inputs) : await adapter.apply(f.action, expected, f.plan, f.inputs);
+    assert.equal(result, "acknowledged");
+    assert.equal(f.calls.at(-1)?.path, `/services/${f.id}/update?version=${reactivation ? "100" : "42"}`);
+  }
+});

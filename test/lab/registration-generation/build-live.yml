@@ -94,6 +94,30 @@
           - (selected_policy.stdout | from_json).metadata == (pointer.content | b64decode | from_json)
         quiet: true
 
+    - name: Inspect the deployer's explicit private platform-state mount
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, "{{ '{{json .Mounts}}' }}", platform-deployer-1]
+      register: platform_state_mounts
+      changed_when: false
+      when: build_registration.runtime == 'swarm'
+
+    - name: Inspect private platform state directory ownership
+      ansible.builtin.stat:
+        path: "{{ platform_dir }}/platform-state"
+      register: platform_state_directory
+      when: build_registration.runtime == 'swarm'
+
+    - name: Require host-backed private platform ownership records
+      ansible.builtin.assert:
+        that:
+          - platform_state_directory.stat.isdir
+          - platform_state_directory.stat.uid == 1000
+          - platform_state_directory.stat.gid == 1000
+          - platform_state_directory.stat.mode == '0700'
+          - platform_state_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/opt/platform/platform-state') | selectattr('Source', 'equalto', platform_dir ~ '/platform-state') | selectattr('RW', 'equalto', true) | list | length == 1
+        quiet: true
+      when: build_registration.runtime == 'swarm'
+
     - name: Read the published private-overlay grant through the platform reader
       ansible.builtin.command:
         argv:
@@ -187,6 +211,15 @@
             chdir: "{{ platform_dir }}"
           environment: "{{ compose_env }}"
           changed_when: true
+          when: build_registration.runtime != 'swarm'
+
+        - name: Recreate the Swarm coordinator to prove platform state survives container replacement
+          ansible.builtin.command:
+            argv: [docker, compose, up, -d, --force-recreate, --no-deps, deployer]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+          when: build_registration.runtime == 'swarm'
 
         - name: Recover the same build receipt while the builder is stopped
           ansible.builtin.command:

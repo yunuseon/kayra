@@ -1477,3 +1477,32 @@ The reader uses the expected immutable registration generation and never follows
 a newer current pointer. These references still confer no infrastructure or
 resource admission authority. Physical overlay grants and managed workload
 admission remain separate, pending integration work.
+
+### Durable platform overlay allocations
+
+Platform infrastructure allocations have their own synchronized records, separate
+from deployment journals. The composition root supplies storage and native ports;
+platform logic imports neither coordinator storage nor runtime implementation.
+The internal `ctl platform app-overlay <app> <generation> <ticket>` command first
+obtains the exact admitted ownership reference through the lifecycle interface.
+It persists an operation identity and a 90-second absolute effect deadline before
+any network creation. Operator host enablement and lifecycle authority are checked
+again before the effect. One owner serializes concurrent requests and holds the
+exclusive storage lock; uncertain writes require reopen before further effects.
+
+Restart observes a possibly created overlay and preserves the original identity
+and deadline. An expired intent may only acquire fresh read evidence, never a new
+creation deadline. Recorded physical network IDs remain pinned: missing or
+replaced networks block provisioning. This internal command runs in the existing
+privileged process and creates no additional socket holder or listener. It is
+not yet called by the registration publisher and grants no workload admission;
+immutable infrastructure-grant publication and lifecycle cleanup remain required
+before enabling managed service groups.
+
+The coordinator additionally publishes whether the scoped registration is still
+initial or already verified. This permits initial platform storage provisioning
+without treating a missing record for a registered application as a new grant.
+Registered applications require existing allocation storage; absent storage is
+an intervention condition, including older registrations that predate this path.
+The platform obtains this state through a typed lifecycle read and never opens
+private deployment records.

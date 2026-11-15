@@ -1423,3 +1423,30 @@ weaker ownership validation. A hung/late observer cannot renew authority.
 This is isolated platform-policy/runtime evidence. Registration publication,
 durable grant storage, richer service rendering, group admission and lifecycle
 cleanup are not enabled by this helper.
+
+### Durable platform overlay recovery
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --app-overlay-state
+```
+
+This optional isolated probe kills the allocation process after synchronized
+intent, after native network-create acknowledgement, and after synchronized
+physical-grant receipt. It verifies the exclusive writer lock before each kill,
+reopens the same state, and requires the original operation identity and absolute
+deadline. A Docker network-event stream starts before effects and must show one
+create for each recovered physical ID. Removing a recorded empty fixture network
+must block further provisioning without recreation. Raw journals, events and API
+request identities accompany the JSON summary. Lifecycle authorization is a
+fixture port; this does not establish full registration publication, workload
+admission or removal acceptance.
+
+The 2026-11-15 run at source `ade46bd` passed all three real SIGKILL cuts on
+Engine 29.9.3 / API 1.56 and Node 24.22.1. Each physical network had one live
+Create event; operation identities and absolute deadlines survived restart.
+Recorded-network deletion was refused without recreation. VM
+`kayra-volume-lab-20261115113422548241` was destroyed after success. Private raw
+journals, request/event logs, clock checks, source hashes and summary are retained
+under `.cache/lab-evidence/kayra-volume-lab-20261115113422548241/` with a SHA-256
+manifest. Later registered-record-loss guards have local regression coverage;
+the native probe exercises the allocation component, not that registration seam.

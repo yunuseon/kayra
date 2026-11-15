@@ -185,6 +185,16 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     console.log(await response.text());
     return 0;
   },
+  platform: async ([operation, app, generation, ticket, extra]) => {
+    if (operation !== "app-overlay" || app === undefined || generation === undefined || ticket === undefined || extra !== undefined) return fail("usage: ctl platform app-overlay <app> <generation> <ticket>");
+    const response = await fetch("http://127.0.0.1:8091/platform/app-overlay", {
+      method: "POST", body: JSON.stringify({ app, generation, ticket }), signal: AbortSignal.timeout(95_000),
+    }).catch(() => undefined);
+    if (response === undefined) return fail("platform overlay control unavailable; retry only the same registration identity");
+    if (!response.ok) return fail(`platform overlay control returned ${String(response.status)}`);
+    console.log(await response.text());
+    return 0;
+  },
   registration: async ([operation, app, generation, ticket]) => {
     const initialize = operation === "initialize" && app === undefined;
     const verified = (operation === "verified" || operation === "policy") && app !== undefined && generation === undefined;

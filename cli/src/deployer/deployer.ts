@@ -259,13 +259,13 @@ const control = async (
     send(response, 400, "bad request\n");
     return;
   }
-  if (registration !== undefined && (path.startsWith("/registration/") || path.startsWith("/deployment/"))) {
+  if (registration !== undefined && (path.startsWith("/registration/") || path.startsWith("/deployment/") || path.startsWith("/platform/"))) {
     try {
       const result = await registration(path, input);
-      if (result === undefined) send(response, 400, path.startsWith("/deployment/") ? "bad deployment request\n" : "bad registration request\n");
+      if (result === undefined) send(response, 400, path.startsWith("/deployment/") ? "bad deployment request\n" : path.startsWith("/platform/") ? "bad platform request\n" : "bad registration request\n");
       else send(response, 200, JSON.stringify(result), "application/json; charset=utf-8");
     } catch {
-      send(response, 409, path.startsWith("/deployment/") ? "deployment unavailable; inspect status and retry only the same request identity\n" : "registration unavailable; inspect the operation before retrying\n");
+      send(response, 409, path.startsWith("/deployment/") ? "deployment unavailable; inspect status and retry only the same request identity\n" : path.startsWith("/platform/") ? "platform operation unavailable; inspect the operation before retrying\n" : "registration unavailable; inspect the operation before retrying\n");
     }
     return;
   }

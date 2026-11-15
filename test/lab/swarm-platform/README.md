@@ -1682,8 +1682,9 @@ admission, active-release publication, HTTP continuity, SIGKILL, SQL safety or
 maintenance/check integration.
 
 The managed-group fixture also probes declared checks through Docker Exec inside
-its admitted database and worker containers. The database check reads the existing
-owned mount; the worker check uses its inherited granted environment. Exec receives
+its admitted app inspector and worker containers. The inspector is a declared
+long-running app service with a read-only owned mount; the worker check uses its
+inherited granted environment. Retained dependencies are not check targets. Exec receives
 only the stable check operation identity, with no privilege expansion, attachment,
 or output capture. Reopening after acknowledged Start must preserve the execution
 deadline and retain known exit status. A deliberately lost acknowledgement for a
@@ -1693,3 +1694,15 @@ This component probe does not enable checks or singleton handoffs in normal
 managed execution; held/expired checks do not imply the process was stopped.
 
 Exec request/inspection fields follow the [Docker Engine API v1.56 reference](https://docs.docker.com/reference/api/engine/version/v1.56/).
+
+The first check probe at `3df34e1`, VM
+`kayra-volume-lab-20261115224419669696`, stopped before check selection/Exec because
+its fixture incorrectly declared a check on a retained dependency. The contract
+correctly refused that target. The corrected fixture declares an app inspector
+with a read-only owned mount. The failed VM is stopped and preserved with frozen
+source, native results/journals/events/API evidence, process/container snapshots,
+and a verified registry RAM archive, all covered by a SHA-256 manifest. An extra
+service-inspect JSON snapshot is missing: cleanup validation rejected truncated
+service IDs, and its shell still proceeded to stop the VM. The disk retains
+Docker state. Subsequent cleanup separates successful archive verification from
+VM stopping. No native check guarantee follows from this failed run.

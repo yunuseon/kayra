@@ -9,7 +9,7 @@ import type { TestContext } from "node:test";
 import { managedPlanFixture } from "./managed-plan-fixture.ts";
 import { parseManagedApplicationPlan } from "../../src/contracts/managed-application-plan.ts";
 import { parseCheckTarget } from "../../src/contracts/container-check.ts";
-import { managedServiceDigest } from "../../src/contracts/managed-service-plan.ts";
+import { managedServiceName, managedServiceDigest } from "../../src/contracts/managed-service-plan.ts";
 import { describeManagedCheck } from "../../src/server/deployment/managed-check-description.ts";
 import { containerCheckExecution, parseContainerCheckExecution } from "../../src/server/deployment/container-check-execution.ts";
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
@@ -89,5 +89,15 @@ test("check descriptions reject scope mismatches and unsupported argv or reserve
   const web = lab.application.services["web"]; assert.ok(web);
   assert.equal(parseManagedApplicationPlan({ ...lab.application, services: { ...lab.application.services, web: { ...web, inputs: { ...web.inputs, environment: { ...web.inputs.environment, KAYRA_OPERATION_ID: { kind: "literal", value: "injected" } } } } } }).ok, false);
   assert.equal(parseManagedApplicationPlan({ ...lab.application, rollout: { ...lab.application.rollout, checks: [{ id: "confirm", service: "web", command: Array.from({ length: 129 }, () => "arg"), timeout_seconds: 2 }] } }).ok, false);
+  assert.equal(await lab.journal().read(), undefined);
+});
+
+test("mounted checks target declared app containers while retained dependency targets remain refused", async (t) => {
+  const lab = await fixture(t); const worker = lab.application.services["worker"]; const database = lab.application.services["db"]; assert.ok(worker); const mount = database?.mounts[0]; assert.ok(mount);
+  const inspector = { ...worker, service: "inspector", nativeName: managedServiceName(worker.owner, "inspector"), mounts: [{ ...mount, target: "/shared", readOnly: true }] };
+  const checked = parseManagedApplicationPlan({ ...lab.application, services: { ...lab.application.services, inspector }, rollout: { ...lab.application.rollout, services: { ...lab.application.rollout.services, inspector: { role: "worker", overlap: "forbidden" } }, checks: [{ id: "ledger", service: "inspector", command: ["node", "/mounted-check.js"], timeout_seconds: 2 }] } }); assert.ok(checked.ok);
+  const target = parseCheckTarget({ ...lab.target, action: { ...lab.target.action, service: "inspector", plan: managedServiceDigest(inspector) } }); assert.ok(target.ok);
+  assert.equal(describeManagedCheck(checked.value, lab.plan.run, "ledger", target.value, lab.plan.deadline).ok, true);
+  assert.equal(parseManagedApplicationPlan({ ...lab.application, rollout: { ...lab.application.rollout, checks: [{ id: "ledger", service: "db", command: ["node", "/check.js"], timeout_seconds: 2 }] } }).ok, false);
   assert.equal(await lab.journal().read(), undefined);
 });

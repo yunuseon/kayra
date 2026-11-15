@@ -90,7 +90,10 @@ try {
   await wait(async () => await routed().catch(() => false) === 200, 'TLS routing A');
   const originalTasks = before.tasks.filter((task) => task.desired === 'running').map((task) => task.id);
   const fencing = action(3, a, "fence"); acceptedWrite('fence', await adapter.fence(fencing, version(before)));
-  const fenced = await wait(async () => { const value = await observe(); return matchesAction(value, fencing) ? value : false; }, 'metadata fence', fencing.deadline);
+  await wait(async () => { const value = await observe(); return matchesAction(value, fencing) ? value : false; }, 'metadata fence', fencing.deadline);
+  await pause(2000);
+  assert.ok(Date.now() < fencing.deadline);
+  const fenced = await observe(); assert.ok(matchesAction(fenced, fencing));
   assert.ok(fenced.version > before.version);
   assert.deepEqual(fenced.tasks.filter((task) => task.desired === 'running').map((task) => task.id), originalTasks);
   assert.equal(await adapter.apply(action(4, b), version(before), b, { RELEASE: 'B', TOKEN: 'fixture-private-value' }, swarmRouting(b)), 'uncertain');

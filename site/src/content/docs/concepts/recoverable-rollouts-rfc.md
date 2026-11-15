@@ -1600,3 +1600,27 @@ Docker specs. The coordinator still cannot import runtime implementation modules
 or execute raw commands. This adapter remains disconnected from the normal
 application rollout path until group admission, sequencing and recovery are
 complete.
+
+### Managed transition admission
+
+Managed transition preparation now carries retained dependency specifications and
+input-generation references forward unchanged. Recorded dependency baselines also
+bind retries of a failed first rollout, even when no release has become verified
+active. A missing dependency, changed engine/resource/mount specification, changed
+used input or unavailable comparison evidence refuses preparation. Read-only input
+comparison has one absolute, bounded preparation deadline.
+
+The transition computes a conservative resource envelope for steady workloads,
+retained startup, migration plus status-probe overlap, and candidate/previous/
+restored-consumer overlap during recovery. It checks the application grant and
+passes that envelope to the existing host resource book; the owning lifecycle
+writer must synchronize the reservation before effects. Replaying the same
+reservation reads its recorded result without extending its deadline or granting
+fresh effect authority. Ordinary transitions cannot change host authority,
+application ownership or the physical private overlay. A rolling transition must
+retain permission to restore its previous routes.
+
+This preparation/reservation seam is not yet connected to normal managed group
+execution. It does not establish migration sequencing, release promotion,
+compensation or cancellation guarantees for version-three plans. Group execution
+remains disabled pending those integrations and their native acceptance tests.

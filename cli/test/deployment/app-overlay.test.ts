@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { appOverlayActionSchema, parseAppOverlayScope } from "../../src/contracts/app-overlay.ts";
-import type { AppOverlayGrant, AppOverlayPort } from "../../src/contracts/app-overlay.ts";
+import type { AppOverlayGrant, AppOverlayObservation, AppOverlayPort } from "../../src/contracts/app-overlay.ts";
 import { parseSwarmAuthority } from "../../src/contracts/swarm-authority.ts";
 import { appOverlayRequest, provisionAppOverlay } from "../../src/server/platform/app-overlay.ts";
 import { appOverlays } from "../../src/server/runtime/app-overlay.ts";
@@ -80,9 +80,9 @@ test("changed node/cluster authority and unavailable metadata cannot cause netwo
 test("platform provisioning preserves a stored ID and refuses missing, replaced or foreign evidence", async () => {
   let creates = 0;
   const port: AppOverlayPort = { observe: () => Promise.resolve({ status: "owned", grant }), create: () => { creates++; return Promise.resolve("acknowledged"); } };
-  assert.deepEqual(await provisionAppOverlay(action, grant, port), { ok: true, value: grant });
+  assert.deepEqual(await provisionAppOverlay(action, grant, port, () => 1000), { ok: true, value: grant });
   for (const observation of [{ status: "absent" }, { status: "owned", grant: { scope, id: "m".repeat(25) } }, { status: "owned", grant: { scope: { ...scope, app: "other" }, id } }] as const) {
-    const refused = await provisionAppOverlay(action, grant, { ...port, observe: () => Promise.resolve(observation) }); assert.equal(refused.ok, false);
+    const refused = await provisionAppOverlay(action, grant, { ...port, observe: () => Promise.resolve(observation) }, () => 1000); assert.equal(refused.ok, false);
   }
   assert.equal(creates, 0);
 });
@@ -90,6 +90,19 @@ test("platform provisioning preserves a stored ID and refuses missing, replaced 
 test("uncertain initial creation is observed once and never blindly retried by platform policy", async () => {
   let observedCount = 0; let creates = 0;
   const port: AppOverlayPort = { observe: () => Promise.resolve(++observedCount === 1 ? { status: "absent" } : { status: "owned", grant }), create: () => { creates++; return Promise.resolve("uncertain"); } };
-  assert.deepEqual(await provisionAppOverlay(action, null, port), { ok: true, value: grant }); assert.equal(creates, 1);
-  const failed = await provisionAppOverlay(action, null, { ...port, observe: () => { throw new Error("private-driver-message"); } }); assert.equal(failed.ok, false); assert.equal(failed.error.includes("private"), false);
+  assert.deepEqual(await provisionAppOverlay(action, null, port, () => 1000), { ok: true, value: grant }); assert.equal(creates, 1);
+  const failed = await provisionAppOverlay(action, null, { ...port, observe: () => { throw new Error("private-driver-message"); } }, () => 1000); assert.equal(failed.ok, false); assert.equal(failed.error.includes("private"), false);
+});
+
+
+test("post-create allocation settles through read-only observation without another Create", async () => {
+  let observations = 0; let creates = 0;
+  const port: AppOverlayPort = { observe: () => Promise.resolve(++observations === 1 ? { status: "absent" } : observations === 2 ? { status: "foreign" } : { status: "owned", grant }), create: () => { creates++; return Promise.resolve("acknowledged"); } };
+  assert.deepEqual(await provisionAppOverlay(action, null, port, () => 1000), { ok: true, value: grant }); assert.equal(creates, 1); assert.equal(observations, 3);
+});
+
+test("an unsettled or hung overlay observation cannot extend the original deadline", async () => {
+  const deadline = Date.now() + 120; let creates = 0; let observations = 0; const gate = Promise.withResolvers<AppOverlayObservation>();
+  const port: AppOverlayPort = { observe: () => ++observations === 1 ? Promise.resolve({ status: "absent" }) : gate.promise, create: () => { creates++; return Promise.resolve("acknowledged"); } };
+  const result = await provisionAppOverlay({ ...action, deadline }, null, port); assert.equal(result.ok, false); assert.equal(creates, 1); assert.equal(observations, 2); gate.resolve({ status: "owned", grant });
 });

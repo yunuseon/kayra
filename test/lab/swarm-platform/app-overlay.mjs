@@ -9,8 +9,8 @@ import { appOverlays } from '../../../cli/src/server/runtime/app-overlay.ts';
 import { dockerApi } from '../../../cli/src/server/runtime/docker-api.ts';
 
 const [image, output] = process.argv.slice(2); assert.ok(output); assert.match(image, /^node:24\.22\.1-trixie-slim@sha256:[a-f0-9]{64}$/);
-const api = dockerApi(); const calls = []; const tracked = { networks: [], containers: [] };
-const runtime = appOverlays({ request: async (...args) => { const reply = await api.request(...args); calls.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); return reply; } });
+const api = dockerApi(); const calls = []; const networkSnapshots = []; const tracked = { networks: [], containers: [] };
+const runtime = appOverlays({ request: async (...args) => { const reply = await api.request(...args); calls.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); if (args[0] === "GET" && args[1].startsWith("/networks/")) { assert.ok(networkSnapshots.length < 512); networkSnapshots.push({ at: Date.now(), path: args[1], value: reply.value }); } return reply; } });
 const creates = () => calls.filter((call) => call.method === 'POST').length;
 try {
   const info = await api.request('GET', '/info'); assert.equal(info.status, 200); const swarm = info.value.Swarm;
@@ -38,4 +38,4 @@ try {
     secondProvisionCreatedNothing: true, privateAndRoutingNetworksDistinct: true, attachableContainerUsedExactId: true, missingStoredGrantRefusedWithoutRecreation: true, foreignOwnershipRefused: true, node: process.version };
   await writeFile(join(output, 'app-overlay.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
 } catch (error) { await writeFile(join(output, 'app-overlay-failure.json'), JSON.stringify({ error: String(error), tracked }, null, 2)); throw error; }
-finally { await writeFile(join(output, 'app-overlay-requests.json'), JSON.stringify(calls, null, 2)); }
+finally { await writeFile(join(output, 'app-overlay-requests.json'), JSON.stringify(calls, null, 2)); await writeFile(join(output, 'app-overlay-network-snapshots.json'), JSON.stringify(networkSnapshots, null, 2)); }

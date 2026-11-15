@@ -47,8 +47,29 @@ try {
   cases.mixedUsage = await port.verifyDeclared(app, [{ image: inherited, kind: 'service', volumeTargets: ['/data'] }, { image: inherited, kind: 'one-shot', volumeTargets: [] }]); assert.equal(cases.mixedUsage, 'unsupported');
   cases.legacyNoVolumes = await port.verify(app, [inherited]); assert.equal(cases.legacyNoVolumes, 'unsupported');
   cases.plainOneShot = await port.verify(app, [noVolumes]); assert.equal(cases.plainOneShot, 'accepted');
+  const directResolution = await port.resolveDeclared(app, [{ image: noVolumes, kind: 'one-shot', volumeTargets: [] }]); assert.equal(directResolution.status, 'accepted');
+  const selectedPin = directResolution.images[0].pull; const selectedDigest = selectedPin.split('@')[1];
+  const leafReply = await fetch(`http://127.0.0.1:5000/v2/${app}/plain/manifests/${selectedDigest}`, { headers: { Accept: 'application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' }, signal: AbortSignal.timeout(10000) });
+  assert.equal(leafReply.status, 200); const leafBytes = Buffer.from(await leafReply.arrayBuffer()); assert.ok(leafBytes.length <= 1024 * 1024);
+  assert.equal('sha256:' + createHash('sha256').update(leafBytes).digest('hex'), selectedDigest);
+  const leaf = JSON.parse(leafBytes.toString('utf8'));
+  const indexPin = async (revision) => {
+    // Fixture metadata writes precede the read-only adapter call; no image or workload is created here.
+    const bytes = Buffer.from(JSON.stringify({ schemaVersion: 2, mediaType: 'application/vnd.oci.image.index.v1+json',
+      manifests: [{ mediaType: leaf.mediaType ?? leafReply.headers.get('content-type'), digest: selectedDigest, size: leafBytes.length, platform: { os: 'linux', architecture: process.arch === 'x64' ? 'amd64' : process.arch } }], annotations: { 'io.kayra.lab.revision': revision } }));
+    const digest = 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+    const pushed = await fetch(`http://127.0.0.1:5000/v2/${app}/plain/manifests/${revision}`, { method: 'PUT', headers: { 'Content-Type': 'application/vnd.oci.image.index.v1+json' }, body: bytes, signal: AbortSignal.timeout(10000) });
+    assert.equal(pushed.status, 201); assert.equal(pushed.headers.get('docker-content-digest'), digest); await pushed.arrayBuffer();
+    return `localhost:5000/${app}/plain@${digest}`;
+  };
+  const sourceA = await indexPin('index-a'); const sourceB = await indexPin('index-b'); assert.notEqual(sourceA, sourceB);
+  const resolvedA = await port.resolveDeclared(app, [{ image: sourceA, kind: 'one-shot', volumeTargets: [] }]);
+  const resolvedB = await port.resolveDeclared(app, [{ image: sourceB, kind: 'one-shot', volumeTargets: [] }]);
+  assert.equal(resolvedA.status, 'accepted'); assert.equal(resolvedB.status, 'accepted');
+  assert.equal(resolvedA.images[0].source, sourceA); assert.equal(resolvedB.images[0].source, sourceB);
+  assert.equal(resolvedA.images[0].pull, selectedPin); assert.equal(resolvedB.images[0].pull, selectedPin);
   const after = await identities(); assert.deepEqual(after, before);
-  const result = { passed: true, scope: 'isolated real registry metadata and explicit mount coverage; not managed service rollout or volume-creation evidence', cases, inherited, noVolumes, inheritedVolumeTargets: Object.keys(inheritedVolumes), registryImage, node: process.version, noContainerOrVolumeAllocationDuringAdmission: true };
+  const result = { passed: true, scope: 'isolated real registry metadata and explicit mount coverage; not managed service rollout or volume-creation evidence', cases, inherited, noVolumes, inheritedVolumeTargets: Object.keys(inheritedVolumes), selectedNativeImages: { direct: directResolution, indexA: resolvedA, indexB: resolvedB }, registryImage, node: process.version, noContainerOrVolumeAllocationDuringAdmission: true };
   await writeFile(join(output, 'declared-images.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
   const logs = spawnSync('docker', ['logs', '--since', started, registry], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 }); assert.equal(logs.status, 0);
   await writeFile(join(output, 'declared-images-registry.log'), logs.stdout + logs.stderr);

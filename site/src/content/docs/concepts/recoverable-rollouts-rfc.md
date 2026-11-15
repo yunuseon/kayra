@@ -1535,3 +1535,34 @@ or replaced instances fail validation. The caller must still establish fresh
 observations under the current admission lease and lifecycle fence. Contract
 matching alone grants no workload authority. Existing HTTP/one-shot plans are
 unchanged; this managed-plan format is still unenabled and unpersisted.
+
+
+### Immutable managed application proposals
+
+The version-three managed proposal format joins the published registration and
+private overlay, exact host/grants/hostnames, configuration identity, canonical
+service specifications, ordered rollout declarations and normalized routes.
+Compilation accepts operator-supplied capabilities and durable allocation IDs;
+unsupported combinations, dependency cycles, conflicting volume identities,
+missing image resolutions and out-of-grant steady workloads fail before any
+runtime effect. Dependency validation removes ready graph layers, bounding dense
+acyclic graphs rather than traversing every possible path. Candidate overlap and
+one-shot reservations remain separate admission work, not a guarantee made by
+proposal parsing.
+
+Registry inspection can return both the immutable source reference and the
+selected native manifest reference. Both digests are byte-verified through the
+index/manifest/config chain, and all service and one-shot usage contexts are
+validated independently. Selected references remain in the same app repository.
+Changing source index attestations/provenance therefore need not change a
+retained service's native image specification. Source provenance remains pinned
+in the application proposal. Shape parsing does not establish this relationship;
+the trusted read-only runtime adapter must supply it.
+
+Image inspection contexts are derived from Compose mounts and migration targets.
+A service's inherited-volume coverage cannot authorize using that same image for
+a one-shot. Check commands target existing app containers and do not acquire
+one-shot mount privileges. The compiler and format remain disconnected from the
+normal admission/control path until managed execution, reconciliation and
+recovery implement these declarations. Existing version-one HTTP and version-two
+migration/HTTP plans retain their behavior.

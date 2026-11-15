@@ -34,25 +34,25 @@ def trusted_root(value):
         yield fd
 
 
-def execute(root, mode, gid, request, *, ownership=None):
+def execute(root, mode, gid, request, *, ownership=None, infrastructure=None):
     if mode == "stage":
         registration_request(request)
         return {"generation": storage.stage_initial_registration(root, **request)}
     if mode == "verify":
-        return storage.record_publication_evidence(root, request, gid, ownership)
+        return storage.record_publication_evidence(root, request, gid, ownership, infrastructure)
 
-    evidence = storage.record_publication_evidence(root, request, gid, ownership)
+    evidence = storage.record_publication_evidence(root, request, gid, ownership, infrastructure)
     if evidence["status"] == "applied":
         return evidence
     try:
-        storage.publish_staged_initial_registration(root, request, gid, ownership)
+        storage.publish_staged_initial_registration(root, request, gid, ownership, infrastructure)
     except storage.RegistrationError:
         # Publication may have completed despite a failed acknowledgement.
-        evidence = storage.record_publication_evidence(root, request, gid, ownership)
+        evidence = storage.record_publication_evidence(root, request, gid, ownership, infrastructure)
         if evidence["status"] == "applied":
             return evidence
         raise
-    return storage.record_publication_evidence(root, request, gid, ownership)
+    return storage.record_publication_evidence(root, request, gid, ownership, infrastructure)
 
 
 def registration_request(request):
@@ -107,7 +107,7 @@ def claim_experimental_app(platform_dir, app, inspect=legacy_objects, inspect_na
         os.close(fd)
 
 
-def register(root, gid, request, ctl):
+def register(root, gid, request, ctl, platform_ctl=None):
     generation = execute(root, "stage", gid, request)["generation"]
     app = request["app"]
     reservation = ctl("reserve", app, generation, request["registration"]["runtime"])
@@ -128,9 +128,13 @@ def register(root, gid, request, ctl):
     # The platform command uses the immutable staged inputs and exclusive
     # generation creation even if the original submit acknowledgement was lost.
     ownership = None
+    infrastructure = None
     if request["registration"]["runtime"] == "swarm":
         ownership = storage._ownership(ctl("ownership", app, generation, ticket), metadata)
-    evidence = execute(root, "publish", gid, metadata, ownership=ownership)
+        storage._require(platform_ctl is not None, "Swarm registration requires platform infrastructure control")
+        overlay = platform_ctl("app-overlay", app, generation, ticket)
+        infrastructure = storage._infrastructure({**ownership, "overlay": overlay}, metadata, ownership)
+    evidence = execute(root, "publish", gid, metadata, ownership=ownership, infrastructure=infrastructure)
     storage._require(evidence["status"] == "applied", "registration publication remains unresolved")
     receipt = ctl("reconcile", app, generation, ticket)
     storage._require(receipt in ({"status": "verified"}, {"status": "terminal", "outcome": "success"}),
@@ -138,16 +142,24 @@ def register(root, gid, request, ctl):
     return receipt
 
 
-def docker_control(platform_dir, *args):
+def _docker_control(platform_dir, component, timeout, *args):
     try:
         result = subprocess.run(
-            ["docker", "compose", "exec", "-T", "deployer", "kayra-deployer", "ctl", "registration", *args],
-            cwd=platform_dir, check=True, capture_output=True, timeout=20,
+            ["docker", "compose", "exec", "-T", "deployer", "kayra-deployer", "ctl", component, *args],
+            cwd=platform_dir, check=True, capture_output=True, timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
         raise storage.RegistrationError("registration control unavailable; retry the same request") from None
     storage._require(len(result.stdout) <= storage.MAX_FILE_BYTES, "registration control reply too large")
     return storage._decode(result.stdout)
+
+
+def docker_control(platform_dir, *args):
+    return _docker_control(platform_dir, "registration", 20, *args)
+
+
+def docker_platform_control(platform_dir, *args):
+    return _docker_control(platform_dir, "platform", 100, *args)
 
 
 def docker_json(*arguments):
@@ -215,7 +227,8 @@ def main():
                 admit_runtime(request["registration"])
                 with claim_experimental_app(args.platform_dir, app, inspect_native=swarm_objects if request["registration"]["runtime"] == "swarm" else None):
                     result = register(root, args.private_gid, request,
-                                      lambda *values: docker_control(args.platform_dir, *values))
+                                      lambda *values: docker_control(args.platform_dir, *values),
+                                      lambda *values: docker_platform_control(args.platform_dir, *values))
             else:
                 result = execute(root, args.mode, args.private_gid, request)
         print(json.dumps(result))

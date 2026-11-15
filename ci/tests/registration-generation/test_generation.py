@@ -402,6 +402,41 @@ class GenerationTest(unittest.TestCase):
         reference["ownership"].update(app=self.meta["app"], incarnation=self.meta["incarnation"])
         return reference
 
+    def infrastructure(self, metadata=None):
+        reference = json.loads(Path(__file__).with_name("infrastructure.json").read_text())
+        reference.update(self.ownership(metadata))
+        reference["overlay"]["scope"].update(app=self.meta["app"], incarnation=self.meta["incarnation"], name="kayra-app-" + self.meta["incarnation"])
+        return reference
+
+    def test_infrastructure_publication_matches_owner_and_pins_physical_grant(self):
+        self.swarm_registration()
+        owner, infrastructure = self.ownership(), self.infrastructure()
+        storage.publish(self.fd, self.meta, self.fixture["registration"], self.fixture["configuration"], self.fixture["secrets"], GID, ownership=owner, infrastructure=infrastructure)
+        path = self.path() / "infrastructure.json"
+        self.assertEqual(json.loads(path.read_text()), infrastructure)
+        self.assertEqual((stat.S_IMODE(path.stat().st_mode), path.stat().st_uid, path.stat().st_gid), (0o444, 0, 0))
+        self.assertEqual(storage.observe(self.fd, self.meta, GID, owner, infrastructure)["status"], "applied")
+        changed = copy.deepcopy(infrastructure)
+        changed["overlay"]["id"] = "z" * 25
+        self.assertEqual(storage.observe(self.fd, self.meta, GID, owner, changed)["status"], "unknown")
+        path.unlink()
+        self.assertEqual(storage.observe(self.fd, self.meta, GID, owner, infrastructure)["status"], "unknown")
+        self.assertEqual(self.observation()["status"], "applied")
+
+    def test_infrastructure_rejects_mismatched_scope_before_any_publication(self):
+        self.swarm_registration()
+        owner, infrastructure = self.ownership(), self.infrastructure()
+        invalid = [{**infrastructure, "authority": True}, {**infrastructure, "runtime": "compose"}]
+        for field, value in (("app", "foreign"), ("incarnation", "44444444-4444-4444-8444-444444444444"), ("name", "platform-swarm"), ("cluster", "invalid")):
+            invalid.append({**infrastructure, "overlay": {**infrastructure["overlay"], "scope": {**infrastructure["overlay"]["scope"], field: value}}})
+        invalid.append({**infrastructure, "overlay": {**infrastructure["overlay"], "id": "invalid"}})
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(storage.RegistrationError):
+                storage.publish(self.fd, self.meta, self.fixture["registration"], self.fixture["configuration"], self.fixture["secrets"], GID, ownership=owner, infrastructure=value)
+        with self.assertRaises(storage.RegistrationError):
+            storage.publish(self.fd, self.meta, self.fixture["registration"], self.fixture["configuration"], self.fixture["secrets"], GID, infrastructure=infrastructure)
+        self.assertFalse((self.root / "public").exists())
+
     def test_ownership_publication_is_bound_immutable_and_required_on_retry(self):
         self.swarm_registration()
         owner = self.ownership()
@@ -470,11 +505,15 @@ class GenerationTest(unittest.TestCase):
                 return self.ownership({**self.meta, "registrationGeneration": generation})
             self.assertEqual(operation, "reconcile")
             return {"status": "verified"}
-        self.assertEqual(command.register(self.fd, GID, request, control), {"status": "verified"})
-        self.assertEqual(calls, ["reserve", "submit", "ownership", "reconcile"])
+        def platform(operation, app, generation, ticket):
+            calls.append("platform/app-overlay")
+            self.assertEqual((operation, app, ticket), ("app-overlay", self.meta["app"], self.meta["actionId"]))
+            return self.infrastructure({**self.meta, "registrationGeneration": generation})["overlay"]
+        self.assertEqual(command.register(self.fd, GID, request, control, platform), {"status": "verified"})
+        self.assertEqual(calls, ["reserve", "submit", "ownership", "platform/app-overlay", "reconcile"])
         calls.clear()
-        self.assertEqual(command.register(self.fd, GID, request, control), {"status": "verified"})
-        self.assertEqual(calls, ["reserve", "submit", "ownership", "reconcile"])
+        self.assertEqual(command.register(self.fd, GID, request, control, platform), {"status": "verified"})
+        self.assertEqual(calls, ["reserve", "submit", "ownership", "platform/app-overlay", "reconcile"])
 
     def test_swarm_payloads_are_explicit_and_publication_refuses_backend_conversion(self):
         registration = self.swarm_registration()

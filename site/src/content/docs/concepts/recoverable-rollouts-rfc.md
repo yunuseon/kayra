@@ -1494,9 +1494,9 @@ Restart observes a possibly created overlay and preserves the original identity
 and deadline. An expired intent may only acquire fresh read evidence, never a new
 creation deadline. Recorded physical network IDs remain pinned: missing or
 replaced networks block provisioning. This internal command runs in the existing
-privileged process and creates no additional socket holder or listener. It is
-not yet called by the registration publisher and grants no workload admission;
-immutable infrastructure-grant publication and lifecycle cleanup remain required
+privileged process and creates no additional socket holder or listener. The initial Swarm registration publisher calls this platform command and
+publishes its physical grant before registration reconciliation. This grants no
+workload admission; lifecycle cleanup and managed-plan admission remain required
 before enabling managed service groups.
 
 The coordinator additionally publishes whether the scoped registration is still
@@ -1506,3 +1506,16 @@ Registered applications require existing allocation storage; absent storage is
 an intervention condition, including older registrations that predate this path.
 The platform obtains this state through a typed lifecycle read and never opens
 private deployment records.
+
+
+### Immutable registration infrastructure references
+
+New initial Swarm registrations publish `infrastructure.json` alongside the owner
+reference in their immutable public generation. The platform command supplies the
+physical overlay ID; app inputs cannot supply it. Publication and retry validation
+bind its app/incarnation scope and exact owner. The reader requires the expected
+registration generation, strict root-owned files, matching owner publication and
+the selected node/cluster. It refuses the shared routing network as a private
+network. Older snapshots remain readable but cannot supply inferred grants. This
+reference is metadata: admission still requires current lifecycle authority,
+resource reservations and native observations. Compose publication is unchanged.

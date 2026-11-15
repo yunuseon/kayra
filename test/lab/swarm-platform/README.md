@@ -1535,3 +1535,11 @@ source/version evidence are under
 `.cache/lab-evidence/kayra-volume-lab-20261115132425426016/` with a SHA-256 manifest.
 This remains fixture authorization/rebinding rather than indexed lifecycle or
 application group rollout acceptance.
+
+The fresh 2026-11-15 full upgrade at `1e32190` passed registration/private grant
+publication and deployer recreation, alongside existing TLS/Authelia, Compose,
+HTTP/migration/resource and health paths. The successful VM was destroyed.
+[INFRASTRUCTURE-RESULTS.md](./INFRASTRUCTURE-RESULTS.md) and its JSON companion
+record exact scope and measurements. This earlier source does not cover the
+subsequent managed runtime, admission or migration-binding changes; managed
+group execution remains disabled.

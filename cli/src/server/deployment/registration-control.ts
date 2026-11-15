@@ -15,7 +15,7 @@ const reserveRequest = request.extend({ runtime: z.enum(["compose", "swarm"]).de
 const ticketRequest = request.extend({ ticket: z.string().max(80) });
 
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
-  "previewRolloutPlan" | "previewPlan" | "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
+  "registrationOwnership" | "previewRolloutPlan" | "previewPlan" | "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
 export type RegistrationPorts = {
   readonly index: AppIndex;
@@ -66,6 +66,13 @@ export const registrationControl = ({ index, canRegister, builds, runtimeEnabled
       const incarnation = await index.prepareApp(app);
       const ticket = await index.reserveRegistration(app, generation, runtime);
       return Object.freeze({ incarnation, ticket });
+    }
+    case "/registration/ownership": {
+      const parsed = ticketRequest.safeParse(input);
+      if (!parsed.success) return undefined;
+      const { app, generation, ticket } = parsed.data;
+      if (!(await canRegister(app))) throw new Error("app is outside registration ownership scope");
+      return index.registrationOwnership(app, ticket, generation);
     }
     case "/registration/submit":
     case "/registration/reconcile": {

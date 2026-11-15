@@ -1582,3 +1582,39 @@ Successful VM `kayra-volume-lab-20261115143520813152` was destroyed. Private raw
 source/clock/request/event/journal evidence has a SHA-256 manifest. Authorization
 and rebinding remain fixture-owned: this does not establish indexed cancellation,
 retry, migration or group rollout acceptance.
+
+### Native retained-startup and migration parent
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --managed-group
+```
+
+This includes the managed-service/storage probes, then allocates a distinct
+fixture incarnation and owned volume. The rolling preparation parent must start
+its retained app-owned HTTP ledger, wait for readiness, and run a declared
+one-shot migration through the private `db` DNS alias. Input materialization is
+inside the fixture composition port. Reopening the parent journal after migration
+Start must preserve deadlines, observe one execution and retain one ledger entry.
+A live container-event stream records dependency and job starts. This tests
+fixture-authorized preparation only: consumer updates, admission, SIGKILL,
+release promotion, SQL safety and full group lifecycle are not established.
+
+The first native group-preparation run at `5c78d69`, VM
+`kayra-volume-lab-20261115150506587649`, held at its original startup deadline
+before any migration. Its retained service was healthy, but Docker omitted the
+empty environment array and the adapter's desired-spec comparison rejected that
+harmless default. The shared matcher now accepts omitted/null empty arrays while
+retaining exact nonempty arrays; a regression also rejects undeclared environment
+entries. This failed run is preserved with native service/container snapshots,
+journals, registry RAM contents and a SHA-256 manifest. The VM is stopped after
+archiving RAM state and confirming no active observer/coordinator.
+
+The corrected native group run at `2bdbcdf` passed retained startup and its
+private-DNS migration after reopening the parent journal. The live event stream
+recorded one dependency start and one migration start; the retained ledger held
+one stable operation ID. Startup/migration deadlines survived reopen, and the
+journal held no materialized secret value. Successful VM
+`kayra-volume-lab-20261115185513728940` was destroyed. Private exact-source,
+clock, API/event, receipt and journal evidence has a SHA-256 manifest. This is
+fixture-authorized preparation with an HTTP ledger, not indexed admission,
+SIGKILL, SQL or complete group rollout acceptance.

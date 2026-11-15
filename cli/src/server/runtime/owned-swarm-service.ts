@@ -23,9 +23,9 @@ const effectReference = (value: unknown) => { const parsed = effectSchema.safePa
 const planReference = (value: unknown) => reference(value, /^[0-9a-f]{64}$/);
 const actionReference = (value: unknown) => reference(value, /^[0-9a-f-]{36}:[1-9][0-9]*(?::(?:apply|restore|fence|remove|scrub):[1-8])?$/);
 const states = new Set(["new", "allocated", "pending", "assigned", "accepted", "preparing", "ready", "starting", "running", "complete", "shutdown", "failed", "rejected", "remove", "orphaned"]);
-// Docker adds defaults. Compare every field Kayra supplies, retaining exact arrays.
+// Docker omits empty arrays or returns null. Nonempty arrays and every supplied field still compare exactly.
 const matches = (observed: unknown, expected: unknown): boolean => {
-  if (Array.isArray(expected)) return Array.isArray(observed) && expected.length === observed.length && expected.every((value: unknown, index) => matches(observed[index], value));
+  if (Array.isArray(expected)) return expected.length === 0 && (observed === undefined || observed === null) || Array.isArray(observed) && expected.length === observed.length && expected.every((value: unknown, index) => matches(observed[index], value));
   if (nativeRecord(expected)) return nativeRecord(observed) && Object.entries(expected).every(([key, value]) => matches(observed[key], value));
   return observed === expected || (observed === undefined && expected === 0);
 };

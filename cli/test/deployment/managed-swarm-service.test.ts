@@ -149,3 +149,17 @@ test("managed writes snapshot the exact expected CAS before asynchronous volume 
     assert.equal(f.calls.at(-1)?.path, `/services/${f.id}/update?version=${reactivation ? "100" : "42"}`);
   }
 });
+
+
+test("Docker's omitted or null empty environment is normalized without accepting unexpected entries", async () => {
+  const f = fixture(); const parsed = parseManagedServicePlan({ ...f.plan, inputs: { ...f.plan.inputs, environment: {} } }); assert.ok(parsed.ok);
+  const action = { ...f.action, plan: managedServiceDigest(parsed.value) }; const inputs = { ...f.inputs, environment: {} };
+  const spec = renderNativeManagedService(parsed.value, action, inputs);
+  const container = { ...spec.TaskTemplate.ContainerSpec, Env: undefined };
+  for (const actual of [container, { ...container, Env: null }]) {
+    f.setService({ ID: f.id, Version: { Index: 100 }, Spec: { ...spec, TaskTemplate: { ...spec.TaskTemplate, ContainerSpec: actual } } });
+    const observed = await f.adapter.observeDesired(action, parsed.value, inputs); assert.equal(observed.status, "owned"); assert.equal(observed.specMatches, true);
+  }
+  f.setService({ ID: f.id, Version: { Index: 100 }, Spec: { ...spec, TaskTemplate: { ...spec.TaskTemplate, ContainerSpec: { ...container, Env: ["UNDECLARED=value"] } } } });
+  const unexpected = await f.adapter.observeDesired(action, parsed.value, inputs); assert.equal(unexpected.status, "owned"); assert.equal(unexpected.specMatches, false);
+});

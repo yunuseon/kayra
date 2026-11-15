@@ -1,4 +1,4 @@
-// Isolated synthetic-image metadata checks; no managed application is deployed.
+// Isolated image metadata checks and optional fixture-authorized runtime probes.
 import { strict as assert } from 'node:assert';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -68,10 +68,12 @@ try {
   assert.equal(resolvedA.status, 'accepted'); assert.equal(resolvedB.status, 'accepted');
   assert.equal(resolvedA.images[0].source, sourceA); assert.equal(resolvedB.images[0].source, sourceB);
   assert.equal(resolvedA.images[0].pull, selectedPin); assert.equal(resolvedB.images[0].pull, selectedPin);
+  const databaseResolution = await port.resolveDeclared(app, [{ image: inherited, kind: 'service', volumeTargets: ['/data'] }]); assert.equal(databaseResolution.status, 'accepted');
   const after = await identities(); assert.deepEqual(after, before);
-  const result = { passed: true, scope: 'isolated real registry metadata and explicit mount coverage; not managed service rollout or volume-creation evidence', cases, inherited, noVolumes, inheritedVolumeTargets: Object.keys(inheritedVolumes), selectedNativeImages: { direct: directResolution, indexA: resolvedA, indexB: resolvedB }, registryImage, node: process.version, noContainerOrVolumeAllocationDuringAdmission: true };
+  const result = { passed: true, scope: 'isolated real registry metadata and explicit mount coverage; not managed service rollout or volume-creation evidence', cases, inherited, noVolumes, inheritedVolumeTargets: Object.keys(inheritedVolumes), selectedNativeImages: { direct: directResolution, indexA: resolvedA, indexB: resolvedB, database: databaseResolution }, registryImage, node: process.version, noContainerOrVolumeAllocationDuringAdmission: true };
   await writeFile(join(output, 'declared-images.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
-  if (managed === '--managed-service') await (await import('./managed-service.mjs')).probeManagedService(app, selectedPin, output);
+  if (['--managed-service', '--managed-group'].includes(managed)) await (await import('./managed-service.mjs')).probeManagedService(app, selectedPin, output);
+  if (managed === '--managed-group') await (await import('./managed-group.mjs')).probeManagedGroup(app, databaseResolution.images[0].pull, selectedPin, output);
   const logs = spawnSync('docker', ['logs', '--since', started, registry], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 }); assert.equal(logs.status, 0);
   await writeFile(join(output, 'declared-images-registry.log'), logs.stdout + logs.stderr);
   docker('stop', '--time', '10', registry); docker('rm', registry);

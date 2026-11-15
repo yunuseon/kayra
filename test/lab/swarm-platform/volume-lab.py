@@ -21,7 +21,10 @@ parser.add_argument('--volume-state', action='store_true', help='also kill and r
 parser.add_argument('--app-overlay', action='store_true', help='also verify platform-owned private app overlay provisioning')
 parser.add_argument('--app-overlay-state', action='store_true', help='also kill and recover durable platform overlay allocations against native networks')
 parser.add_argument('--managed-service', action='store_true', help='also verify native managed mounts, retained protection and fixture data reuse')
+parser.add_argument('--managed-group', action='store_true', help='also verify retained startup and private-network migrations through the durable parent')
 args = parser.parse_args()
+if args.managed_group:
+    args.managed_service = True
 if args.managed_service:
     args.image_admission = True
 source = args.source.resolve()
@@ -49,6 +52,9 @@ if args.app_overlay_state:
     paths += ['cli/src/server/runtime/app-overlay.ts', 'cli/src/server/platform/app-overlay.ts', 'cli/src/server/platform/app-overlay-allocation.ts', 'cli/src/server/deployment/journal.ts', 'test/lab/swarm-platform/app-overlay-allocation.mjs']
 if args.managed_service:
     paths += ['cli/src/server/runtime/managed-swarm-service.ts', 'cli/src/server/runtime/owned-swarm-service.ts', 'cli/src/server/runtime/app-overlay.ts', 'test/lab/swarm-platform/managed-service.mjs', 'cli/src/server/deployment/managed-service-execution.ts', 'cli/src/server/deployment/managed-service-barrier.ts', 'cli/src/server/deployment/service-convergence.ts', 'cli/src/server/deployment/journal.ts', 'cli/src/server/deployment/journal-claim.ts', 'cli/src/server/deployment/artifact-store.ts']
+if args.managed_group:
+    paths = [path for path in paths if not path.startswith('cli/src/server/deployment/')]
+    paths += ['cli/src/server/deployment', 'cli/src/server/runtime/one-shot-job.ts', 'cli/src/server/runtime/migration-probe-output.ts', 'test/lab/swarm-platform/managed-group.mjs']
 paths = list(dict.fromkeys(paths))
 for relative in paths:
     origin, target = source / relative, frozen / relative
@@ -64,7 +70,7 @@ with tarfile.open(report / 'source.tar', 'w') as archive:
     archive.add(frozen, arcname='source')
 image = 'node:24.22.1-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea'
 commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-context = {'sourceCommit': commit, 'sourceManifest': 'source-files.json', 'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'runtime adapters and optional isolated platform/creation fixtures; no indexed application rollout admission', 'platformInputs': args.platform_inputs, 'declaredImages': args.image_admission, 'volumeState': args.volume_state, 'appOverlay': args.app_overlay, 'appOverlayState': args.app_overlay_state, 'managedService': args.managed_service}
+context = {'sourceCommit': commit, 'sourceManifest': 'source-files.json', 'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'runtime adapters and optional isolated platform/creation fixtures; no indexed application rollout admission', 'platformInputs': args.platform_inputs, 'declaredImages': args.image_admission, 'volumeState': args.volume_state, 'appOverlay': args.app_overlay, 'appOverlayState': args.app_overlay_state, 'managedService': args.managed_service, 'managedGroup': args.managed_group}
 (report / 'context.json').write_text(json.dumps(context, indent=2))
 log = (report / 'lab.log').open('w')
 awake = subprocess.Popen(['caffeinate', '-i', '-s'])
@@ -87,7 +93,7 @@ try:
     inventory = work / 'inventory.ini'
     inventory.write_text('[servers]\nvolume-lab ansible_host=' + address + ' ansible_user=deploy ansible_ssh_private_key_file=' + str(key) + ' ansible_ssh_common_args="-o IdentitiesOnly=yes"\n')
     env = {**os.environ, 'ANSIBLE_CONFIG': str(frozen / 'ansible/ansible.cfg'), 'PYTHONDONTWRITEBYTECODE': '1'}
-    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json'), '-e', 'platform_input_probe=' + ('true' if args.platform_inputs else 'false'), '-e', 'declared_image_probe=' + ('true' if args.image_admission else 'false'), '-e', 'volume_state_probe=' + ('true' if args.volume_state else 'false'), '-e', 'app_overlay_probe=' + ('true' if args.app_overlay else 'false'), '-e', 'app_overlay_state_probe=' + ('true' if args.app_overlay_state else 'false'), '-e', 'managed_service_probe=' + ('true' if args.managed_service else 'false')], env=env)
+    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json'), '-e', 'platform_input_probe=' + ('true' if args.platform_inputs else 'false'), '-e', 'declared_image_probe=' + ('true' if args.image_admission else 'false'), '-e', 'volume_state_probe=' + ('true' if args.volume_state else 'false'), '-e', 'app_overlay_probe=' + ('true' if args.app_overlay else 'false'), '-e', 'app_overlay_state_probe=' + ('true' if args.app_overlay_state else 'false'), '-e', 'managed_service_probe=' + ('true' if args.managed_service else 'false'), '-e', 'managed_group_probe=' + ('true' if args.managed_group else 'false')], env=env)
     if not args.keep:
         run(['multipass', 'delete', '--purge', vm])
         shutil.rmtree(work)

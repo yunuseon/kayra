@@ -1543,3 +1543,13 @@ HTTP/migration/resource and health paths. The successful VM was destroyed.
 record exact scope and measurements. This earlier source does not cover the
 subsequent managed runtime, admission or migration-binding changes; managed
 group execution remains disabled.
+
+The 2026-11-15 native run at `bcf7f74` also exercised retained creation through
+the group-owned service execution slot. Reopening its journal after dispatch
+observed the original workload, preserved its deadline/action, and issued no
+additional service create. The original service had one live container Start
+event. Retained update refusal, the old name barrier and fixture data reuse also
+passed. Successful VM `kayra-volume-lab-20261115141010934467` was destroyed;
+private evidence and SHA-256 manifest are in its `.cache/lab-evidence/` directory.
+This was a journal reopen with fixture authorization, not a SIGKILL or indexed
+managed-group lifecycle/admission acceptance run.

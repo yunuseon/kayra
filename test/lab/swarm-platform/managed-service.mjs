@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { appendFile, open, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ownedVolume } from '../../../cli/src/contracts/owned-volume.ts';
 import { managedServiceName, managedServiceDigest, parseManagedServicePlan } from '../../../cli/src/contracts/managed-service-plan.ts';
@@ -11,6 +11,9 @@ import { managedSwarmService, renderNativeManagedService } from '../../../cli/sr
 import { appOverlays } from '../../../cli/src/server/runtime/app-overlay.ts';
 import { ownedVolumes } from '../../../cli/src/server/runtime/owned-volume.ts';
 import { dockerApi } from '../../../cli/src/server/runtime/docker-api.ts';
+import { managedServiceExecution } from '../../../cli/src/server/deployment/managed-service-execution.ts';
+import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
+import { openArtifactStore } from '../../../cli/src/server/deployment/artifact-store.ts';
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const wait = async (predicate, description, deadline) => {
@@ -66,7 +69,24 @@ export const probeManagedService = async (app, image, output) => {
       return Number(execFileSync('docker', ['exec', id, 'node', '-e', 'process.stdout.write(require("node:fs").readFileSync("/data/starts","utf8"))'], { encoding: 'utf8', timeout: 10000 }));
     };
     const first = await planFor(randomUUID()); const initial = actionFor(first, 2);
-    assert.ok(['acknowledged', 'uncertain'].includes(await adapter.apply(initial, null, first, inputs)));
+    const executionPath = join(output, 'managed-service-execution'); await mkdir(executionPath, { mode: 0o700 });
+    const artifacts = await openArtifactStore(join(executionPath, 'artifacts'));
+    const ports = { ...artifacts, now: Date.now, authorize: async () => true, runtime: {
+      apply: (action, expected, plan) => adapter.apply(action, expected, plan, inputs),
+      observeDesired: (action, plan) => adapter.observeDesired(action, plan, inputs),
+    } };
+    let journal = await openJournal(executionPath); let owner = managedServiceExecution(journal, ports); let execution;
+    try {
+      const prepared = await owner.prepare(first, initial, null); assert.equal(prepared.phase, 'planned');
+      assert.equal((await owner.tick()).phase, 'observing');
+      const creates = requests.filter((request) => request.method === 'POST' && request.path === '/services/create').length; assert.equal(creates, 1);
+      await journal.close(); journal = await openJournal(executionPath, 'existing'); owner = managedServiceExecution(journal, ports);
+      execution = await wait(async () => { const value = await owner.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'converged' ? value : false; }, 'reopened service execution', initial.deadline);
+      assert.equal(execution.action.deadline, prepared.action.deadline); assert.equal(execution.action.action, prepared.action.action);
+      assert.equal(requests.filter((request) => request.method === 'POST' && request.path === '/services/create').length, creates);
+      assert.equal(JSON.stringify(await journal.read()).includes('synthetic-managed-private-value'), false);
+    } finally { await journal.close(); }
+    await writeFile(join(output, 'managed-service-execution.json'), JSON.stringify(execution, null, 2));
     const started = await healthy(first, initial); tracked.services.push(started.id); assert.equal(await readCounter(started), 1);
     assert.equal(JSON.stringify(started).includes('synthetic-managed-private-value'), false);
     const before = requests.filter((request) => request.method === 'POST').length;
@@ -83,7 +103,7 @@ export const probeManagedService = async (app, image, output) => {
     assert.deepEqual(await volumes.observe(volume.value), observedVolume);
     await pause(200); finished = true; observer.kill('SIGTERM'); await observerExit; assert.equal(eventError, undefined); assert.equal(partial, '');
     const starts = tracked.services.map((id) => ({ id, starts: events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === id).length })); assert.ok(starts.every((service) => service.starts === 1));
-    const result = { passed: true, scope: 'native managed runtime with fixture authorization/rebinding; not indexed admission, lifecycle removal/recreation or group rollout acceptance', receipt, starts, retainedOrdinaryUpdateRefused: true, delayedOldCreateFenced: true, dataRetainedAcrossDistinctIncarnations: true, noSecretInNormalizedObservation: true, node: process.version };
+    const result = { passed: true, scope: 'native managed runtime with fixture authorization/rebinding; not indexed admission, lifecycle removal/recreation or group rollout acceptance', receipt, starts, retainedOrdinaryUpdateRefused: true, delayedOldCreateFenced: true, dataRetainedAcrossDistinctIncarnations: true, noSecretInNormalizedObservation: true, serviceExecutionJournalReopen: true, serviceExecutionOriginalDeadline: true, serviceExecutionCreates: 1, node: process.version };
     await writeFile(join(output, 'managed-service.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(output, 'managed-service-failure.json'), JSON.stringify({ error: String(error), stack: error.stack, tracked }, null, 2)); throw error; }
   finally {

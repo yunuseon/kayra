@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { parseManagedServicePlan, managedServiceName, managedServiceDigest } from "../../contracts/managed-service-plan.ts";
 import type { ManagedServicePlan } from "../../contracts/managed-service-plan.ts";
+import { managedServiceScopeSchema, parseManagedServiceAction } from "../../contracts/managed-swarm-service.ts";
 import type { ManagedServiceAction, ManagedServiceInputs, ManagedServiceScope, ManagedSwarmServicePort } from "../../contracts/managed-swarm-service.ts";
 import { matchManagedVolumeReceipts, matchManagedVolumeEvidence } from "../../contracts/managed-volume-evidence.ts";
 import { volumeMountTargetSchema } from "../../contracts/managed-compose-description.ts";
@@ -12,14 +13,9 @@ import { dockerApi } from "./docker-api.ts";
 import { ownedVolumes } from "./owned-volume.ts";
 import { ownedSwarmService, nativeField, nativeSpecMatches, validNativeVersion } from "./owned-swarm-service.ts";
 
-const scopeSchema = z.object({ app: z.string().max(48).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), service: z.string().max(48).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), incarnation: z.uuid(), dataOwner: z.uuid() }).strict().readonly().refine((value) => value.incarnation !== value.dataOwner);
-const actionSchema = z.object({ app: z.string(), service: z.string(), incarnation: z.uuid(), dataOwner: z.uuid(), action: z.string().max(80), plan: z.string().regex(/^[a-f0-9]{64}$/), deadline: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), effect: z.enum(["apply", "restore", "fence", "remove", "scrub"]) }).strict().readonly();
+const scopeSchema = managedServiceScopeSchema;
 const scopeOf = (value: ManagedServiceScope) => ({ app: value.app, service: value.service, incarnation: value.incarnation, dataOwner: value.dataOwner });
-const parseAction = (input: unknown) => {
-  const parsed = actionSchema.safeParse(input);
-  if (!parsed.success || !scopeSchema.safeParse(scopeOf(parsed.data)).success || !new RegExp(`^${parsed.data.incarnation}:[1-9][0-9]*(?::${parsed.data.effect}:[1-8])?$`).test(parsed.data.action) || !Number.isSafeInteger(Number(parsed.data.action.split(":")[1]))) return undefined;
-  return parsed.data;
-};
+const parseAction = (input: unknown) => { const parsed = parseManagedServiceAction(input); return parsed.ok ? parsed.value : undefined; };
 const nativeName = (scope: ManagedServiceScope) => managedServiceName({ app: scope.app, incarnation: scope.incarnation }, scope.service);
 const ownership = (scope: ManagedServiceScope) => ({ "com.kayra.app": scope.app, "com.kayra.service": scope.service, "com.kayra.incarnation": scope.incarnation, "com.kayra.data-owner": scope.dataOwner });
 const labelsFor = (action: ManagedServiceAction) => ({ ...ownership(action), "com.kayra.action": action.action, "com.kayra.plan": action.plan, "com.kayra.effect": action.effect });

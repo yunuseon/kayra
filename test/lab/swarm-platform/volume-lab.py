@@ -48,7 +48,7 @@ if args.app_overlay:
 if args.app_overlay_state:
     paths += ['cli/src/server/runtime/app-overlay.ts', 'cli/src/server/platform/app-overlay.ts', 'cli/src/server/platform/app-overlay-allocation.ts', 'cli/src/server/deployment/journal.ts', 'test/lab/swarm-platform/app-overlay-allocation.mjs']
 if args.managed_service:
-    paths += ['cli/src/server/runtime/managed-swarm-service.ts', 'cli/src/server/runtime/owned-swarm-service.ts', 'cli/src/server/runtime/app-overlay.ts', 'test/lab/swarm-platform/managed-service.mjs']
+    paths += ['cli/src/server/runtime/managed-swarm-service.ts', 'cli/src/server/runtime/owned-swarm-service.ts', 'cli/src/server/runtime/app-overlay.ts', 'test/lab/swarm-platform/managed-service.mjs', 'cli/src/server/deployment/managed-service-execution.ts', 'cli/src/server/deployment/service-convergence.ts', 'cli/src/server/deployment/journal.ts', 'cli/src/server/deployment/journal-claim.ts', 'cli/src/server/deployment/artifact-store.ts']
 paths = list(dict.fromkeys(paths))
 for relative in paths:
     origin, target = source / relative, frozen / relative

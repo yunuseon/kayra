@@ -1647,3 +1647,27 @@ A journal-reopen test binds a managed description to that existing sequence owne
 and recovers a lost Start acknowledgement without duplicate execution or a new
 deadline. This is component integration with a modeled Docker API, not native
 multi-service rollout acceptance. Normal managed execution remains disabled.
+
+### Group-owned service execution slots
+
+A managed service execution slot now retains its exact canonical specification,
+original deadline, stable effect identity and expected native version before
+apply/restore dispatch. The group supplies a private journal view and typed
+ports that check lifecycle/admission authority and materialize inputs in the
+composition root. The slot records no resolved environment or routing values.
+It grants neither admission nor active-release promotion.
+
+An uncertain write is observed rather than dispatched again, including restart
+between synchronized intent and actual dispatch. A missing runtime object is not
+proof that the original create cannot arrive later; it waits within the original
+window, then holds for group recovery/fencing. Journal acknowledgement uncertainty
+poisons the live handle until reopen. Late authorization responses cannot trigger
+writes, and healthy evidence observed after expiry cannot certify convergence.
+Existing retained dependencies cannot acquire an ordinary replacement slot.
+
+Native identity validation is shared by the adapter and coordinator. Role-neutral
+service convergence checks are shared with the existing HTTP implementation;
+routed readiness remains a separate HTTP requirement. Group sequencing,
+compensation, cancellation and indexed ownership still must connect these slots
+before normal managed execution can be enabled. These component tests do not
+replace integrated crash-matrix or application-behavior acceptance.

@@ -1,3 +1,5 @@
+import { appOverlays } from "../runtime/app-overlay.ts";
+import { platformOverlayControl } from "./platform-overlays.ts";
 import { registryImages } from "../runtime/registry-images.ts";
 import { readMigrationPolicy } from "../platform/migration-policy.ts";
 import { compileRolloutPlan } from "../deployment/rollout-plan.ts";
@@ -147,6 +149,22 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     const claim = await lstat(join(platform, "managed-apps", app + ".json"));
     return claim.isFile() && claim.uid === 0 && claim.gid === 0 && (claim.mode & 0o7777) === 0o444 && claim.nlink === 1;
   };
+  const overlays = platformOverlayControl({ directory: join(platform, "platform-state", "app-overlays"), native: appOverlays(api),
+    ownership: async (app, generation, ticket) => {
+      if (opening === undefined || !(await canRegister(app))) throw new Error("app is outside platform overlay scope");
+      return (await opening).registrationOwnership(app, ticket, generation);
+    },
+    host: async () => {
+      if (swarmAuthority === undefined) return undefined;
+      const host = await readSwarmAuthority(swarmAuthority); return host.ok ? host.value : undefined;
+    },
+    authorize: async (reference) => {
+      if (opening === undefined || !(await canRegister(reference.registration.app))) return false;
+      const { app, registrationGeneration, actionId } = reference.registration;
+      const current = await (await opening).registrationOwnership(app, actionId, registrationGeneration);
+      return JSON.stringify(current) === JSON.stringify(reference);
+    },
+  });
   return Object.freeze({
     health: async () => {
       if (opening === undefined) {
@@ -157,6 +175,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       return (await opening).runtimeHealthSnapshot(healthPorts);
     },
     handle: async (route: string, input: unknown) => {
+      if (route === "/platform/app-overlay") return overlays.provision(input);
       if (route === "/registration/initialize") {
         if (typeof input !== "object" || input === null || Array.isArray(input) || Object.keys(input).length !== 0) return undefined;
         // Only this explicit local control request can provision an empty index.
@@ -182,6 +201,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       })(route, input);
     },
     close: async () => {
+      await overlays.close();
       await controller?.close();
       await rolloutController?.close();
       const index = await opening;

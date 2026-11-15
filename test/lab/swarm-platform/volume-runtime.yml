@@ -108,6 +108,19 @@
         flat: true
       when: volume_state_probe | default(false) | bool
 
+    - name: Recover durable platform overlay allocations after process kills
+      ansible.builtin.command:
+        argv: ["{{ volume_source.path }}/node", "{{ volume_source.path }}/test/lab/swarm-platform/app-overlay-allocation.mjs", --run, "{{ volume_source.path }}/results/app-overlay-state"]
+      changed_when: true
+      when: app_overlay_state_probe | default(false) | bool
+
+    - name: Retain durable platform overlay recovery evidence
+      ansible.builtin.fetch:
+        src: "{{ volume_source.path }}/results/app-overlay-state/app-overlay-state.json"
+        dest: "{{ report_path }}.app-overlay-state.json"
+        flat: true
+      when: app_overlay_state_probe | default(false) | bool
+
     - name: Verify platform-owned private app overlay provisioning
       ansible.builtin.command:
         argv: ["{{ volume_source.path }}/node", "{{ volume_source.path }}/test/lab/swarm-platform/app-overlay.mjs", "{{ volume_node_image }}", "{{ volume_source.path }}/results"]

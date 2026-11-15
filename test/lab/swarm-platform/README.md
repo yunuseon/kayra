@@ -1479,3 +1479,13 @@ source identities while returning the same selected pull digest. These fixture
 registry writes occur outside the admission adapter. No Docker workload or
 volume may be allocated during inspection. This is registry metadata evidence,
 not acceptance of retained database rollouts.
+
+
+The 2026-11-15 resolver run at `f9529d8` passed the declared-volume and one-shot
+checks plus two real OCI index publications resolving to the same native
+manifest. Inspection allocated no containers or volumes. Successful VM
+`kayra-volume-lab-20261115122751241212` was destroyed. Private raw registry logs,
+selected/source image pins, exact versions, clock checks and source hashes are
+retained under
+`.cache/lab-evidence/kayra-volume-lab-20261115122751241212/` with a SHA-256 manifest.
+This does not establish managed workload or retained database rollout acceptance.

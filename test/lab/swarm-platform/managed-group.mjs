@@ -9,6 +9,10 @@ import { ownedVolume } from '../../../cli/src/contracts/owned-volume.ts';
 import { managedServiceDigest, managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
 import { parseManagedApplicationPlan } from '../../../cli/src/contracts/managed-application-plan.ts';
 import { managedGroupPreparation } from '../../../cli/src/server/deployment/managed-group-preparation.ts';
+import { managedServiceExecution } from '../../../cli/src/server/deployment/managed-service-execution.ts';
+import { containerChecks } from '../../../cli/src/server/runtime/container-check.ts';
+import { containerCheckExecution } from '../../../cli/src/server/deployment/container-check-execution.ts';
+import { describeManagedCheck } from '../../../cli/src/server/deployment/managed-check-description.ts';
 import { managedGroupCompensation } from '../../../cli/src/server/deployment/managed-group-compensation.ts';
 import { managedServiceCompensation } from '../../../cli/src/server/deployment/managed-service-compensation.ts';
 import { convergedService } from '../../../cli/src/server/deployment/service-convergence.ts';
@@ -38,7 +42,7 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     for (const line of lines) if (line) { try { events.push(JSON.parse(line)); } catch { eventError = 'invalid event'; } }
   }); eventExit.then(() => { if (!finished) eventError = 'event observer ended early'; });
   const transport = dockerApi(); const api = { request: async (...args) => { assert.ok(requests.length < 16384); const reply = await transport.request(...args); requests.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); return reply; } };
-  let journal; let consumerJournal; let compensationJournal; let groupPreparationJournal; let groupConsumerJournal; let groupRecoveryJournal;
+  let journal; let consumerJournal; let compensationJournal; let groupPreparationJournal; let groupConsumerJournal; let groupRecoveryJournal; let checkJournal; let inspectorJournal;
   try {
     await pause(200); const info = await api.request('GET', '/info'); assert.equal(info.status, 200); const swarm = info.value.Swarm;
     const incarnation = randomUUID(); const dataOwner = randomUUID(); const registration = { version: 1, app, incarnation, actionId: incarnation + ':1', registrationGeneration: randomUUID() };
@@ -138,17 +142,47 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     const recoveredGroup = await wait(async () => { const value = await recoverGroup.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'verified' ? value : false; }, groupRecoveryIntent.deadline, 'reopened whole-group recovery');
     assert.equal(recoveredGroup.deadline, groupRecoveryIntent.deadline); assert.equal(JSON.stringify(await groupRecoveryJournal.read()).includes('synthetic-group-private-value'), false);
     for (const name of ['cache', 'extra']) { const node = recoveredGroup.nodes.find((node) => node.name === name); assert.equal(node.child.phase, 'complete'); assert.equal(node.child.attempts.length, 0); const live = await serviceRuntime.observe({ app, service: name, incarnation, dataOwner }); assert.equal(live.status, 'owned'); assert.equal(live.replicas, 0); assert.equal(live.retainedInputsCleared, true); }
+    const checkRun = randomUUID(); const declarations = [
+      { id: 'ledger', service: 'inspector', command: ['node', '--eval', `const fs=require('node:fs');const ledger=JSON.parse(fs.readFileSync('/shared/ledger.json','utf8'));if(!ledger.includes(${JSON.stringify(run + ':schema')})||process.env.KAYRA_OPERATION_ID!==${JSON.stringify(checkRun + ':check:ledger')})process.exit(1)`], timeout_seconds: 30 },
+      { id: 'secret', service: 'worker', command: ['node', '--eval', `if(!process.env.TOKEN||process.env.KAYRA_OPERATION_ID!==${JSON.stringify(checkRun + ':check:secret')})process.exit(1)`], timeout_seconds: 30 },
+      { id: 'uncertain', service: 'worker', command: ['node', '--eval', 'process.exit(0)'], timeout_seconds: 30 },
+    ];
+    const inspectorSpec = { ...plan.services.worker, service: 'inspector', nativeName: managedServiceName(ownership, 'inspector'), mounts: [{ volume: allocation.value, target: '/shared', readOnly: true, noCopy: true }] };
+    const checkApp = parseManagedApplicationPlan({ ...plan, services: { ...plan.services, inspector: inspectorSpec }, rollout: { ...plan.rollout, services: { ...plan.rollout.services, inspector: { role: 'worker', overlap: 'forbidden' } }, checks: declarations } }); assert.ok(checkApp.ok);
+    const inspectorPath = join(groupPath, 'inspector'); await mkdir(inspectorPath, { mode: 0o700 }); inspectorJournal = await openJournal(inspectorPath);
+    const inspectorOwner = managedServiceExecution(inspectorJournal, { ...artifacts, now: Date.now, authorize: async () => true, runtime: ports.services });
+    const inspectorIntent = await inspectorOwner.prepare(checkApp.value.services.inspector, { app, service: 'inspector', incarnation, dataOwner, action: incarnation + ':5', plan: managedServiceDigest(checkApp.value.services.inspector), effect: 'apply', deadline: Date.now() + 90000 }, null);
+    const inspectorReady = await wait(async () => { const state = await inspectorOwner.tick(); assert.notEqual(state.phase, 'held'); return state.phase === 'converged' ? state : false; }, inspectorIntent.action.deadline, 'mounted app inspector');
+    const checksRuntime = containerChecks(api); const checkResults = [];
+    for (const declaration of declarations) {
+      const restoredWorker = recoveredGroup.nodes.find((node) => node.name === 'worker'); const action = declaration.service === 'inspector' ? inspectorReady.action : restoredWorker.child.attempts.at(-1).action;
+      const native = declaration.service === 'inspector' ? inspectorReady.verified.native : restoredWorker.child.proof.native;
+      const live = await serviceRuntime.observe({ app, service: declaration.service, incarnation, dataOwner }); assert.equal(live.status, 'owned'); const runningTask = live.tasks.find((task) => task.desired === 'running' && task.state === 'running'); assert.ok(runningTask);
+      const selected = await checksRuntime.select(action, native, runningTask.id); assert.equal(selected.status, 'owned');
+      const checkDescription = describeManagedCheck(checkApp.value, checkRun, declaration.id, selected.target, Date.now() + 90000); assert.ok(checkDescription.ok);
+      const checkPath = join(groupPath, 'check-' + declaration.id); await mkdir(checkPath, { mode: 0o700 }); checkJournal = await openJournal(checkPath);
+      const checkPorts = { ...artifacts, now: Date.now, authorize: async () => true, runtime: { ...checksRuntime, start: async (...args) => { const result = await checksRuntime.start(...args); return declaration.id === 'uncertain' && result === 'acknowledged' ? 'uncertain' : result; } } };
+      let check = containerCheckExecution(checkJournal, checkPorts); await check.prepare(checkDescription.value); const startedCheck = await wait(async () => { const state = await check.tick(); assert.notEqual(state.phase, 'held'); return ['starting', 'observing'].includes(state.phase) ? state : false; }, checkDescription.value.deadline, 'check Start'); assert.ok(startedCheck.id); assert.ok(startedCheck.executionDeadline);
+      await wait(async () => { const value = await checksRuntime.observe(checkDescription.value, startedCheck.id); return value.status === 'owned' && !value.running; }, startedCheck.executionDeadline, 'check exit');
+      await checkJournal.close(); checkJournal = await openJournal(checkPath, 'existing'); check = containerCheckExecution(checkJournal, checkPorts);
+      const checked = await check.tick(); assert.equal(checked.executionDeadline, startedCheck.executionDeadline);
+      if (declaration.id === 'uncertain') { assert.equal(checked.phase, 'held'); assert.equal(checked.reason, 'unknown-start'); assert.equal(checked.evidence, null); }
+      else { assert.equal(checked.phase, 'complete'); assert.equal(checked.evidence.exitCode, 0); }
+      assert.equal(JSON.stringify(await checkJournal.read()).includes('synthetic-group-private-value'), false); checkResults.push({ check: declaration.id, id: checked.id, phase: checked.phase, reason: checked.reason, exitCode: checked.evidence?.exitCode ?? null });
+      await checkJournal.close(); checkJournal = undefined;
+    }
     await pause(200); finished = true; eventProcess.kill('SIGTERM'); await eventExit; assert.equal(eventError, undefined); assert.equal(partial, '');
+    for (const check of checkResults) assert.equal(events.filter((event) => String(event.Action).startsWith('exec_start') && event.Actor?.Attributes?.execID === check.id).length, 1);
     const migrationContainer = ready.sequence.steps[0].attempts[0].execution.container;
     const migrationStarts = events.filter((event) => event.Action === 'start' && event.Actor?.ID === migrationContainer).length; assert.equal(migrationStarts, 1);
     const dependencyStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === database.ready.native.id).length; assert.equal(dependencyStarts, 1);
     const workerStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === worker.ready.native.id).length; assert.equal(workerStarts, 5);
-    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout, injected pre-transport restore interruption, metadata fencing, whole-group rollback and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
-      consumerDeadline: consumerReady.deadline, workerStarts, workerCandidateAndRestoreStarts: 4, wholeGroupRecovery: recoveredGroup.phase, wholeGroupOriginalDeadline: recoveredGroup.deadline, scrubbedNewOnlyServices: ['cache', 'extra'], compensationAttempts: restored.attempts.length, metadataFencePreservedTask: fenceTasks.length === 1, originalRecoveryDeadline: restored.action.deadline, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
+    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout, injected pre-transport restore interruption, metadata fencing, whole-group rollback, in-container checks and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
+      consumerDeadline: consumerReady.deadline, containerChecks: checkResults, mountedInspector: true, checkExecStartsEach: 1, workerStarts, workerCandidateAndRestoreStarts: 4, wholeGroupRecovery: recoveredGroup.phase, wholeGroupOriginalDeadline: recoveredGroup.deadline, scrubbedNewOnlyServices: ['cache', 'extra'], compensationAttempts: restored.attempts.length, metadataFencePreservedTask: fenceTasks.length === 1, originalRecoveryDeadline: restored.action.deadline, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
     await writeFile(join(path, 'result.json'), JSON.stringify(result, null, 2)); await writeFile(join(output, 'managed-group.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(path, 'failure.json'), JSON.stringify({ error: String(error), stack: error.stack }, null, 2)); throw error; }
   finally {
-    if (groupRecoveryJournal) await groupRecoveryJournal.close(); if (groupConsumerJournal) await groupConsumerJournal.close(); if (groupPreparationJournal) await groupPreparationJournal.close(); if (compensationJournal) await compensationJournal.close(); if (consumerJournal) await consumerJournal.close(); if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
+    if (checkJournal) await checkJournal.close(); if (inspectorJournal) await inspectorJournal.close(); if (groupRecoveryJournal) await groupRecoveryJournal.close(); if (groupConsumerJournal) await groupConsumerJournal.close(); if (groupPreparationJournal) await groupPreparationJournal.close(); if (compensationJournal) await compensationJournal.close(); if (consumerJournal) await consumerJournal.close(); if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
     await writeFile(join(path, 'events.json'), JSON.stringify(events, null, 2)); await writeFile(join(path, 'requests.json'), JSON.stringify(requests, null, 2));
     await writeFile(join(path, 'event-observer.json'), JSON.stringify({ complete: eventError === undefined && partial === '', error: eventError ?? null }));
   }

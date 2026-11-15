@@ -1680,3 +1680,54 @@ start. Private exact-source, API/events/clock/journal evidence has a SHA-256
 manifest. This fixture-authorized component probe still does not establish indexed
 admission, active-release publication, HTTP continuity, SIGKILL, SQL safety or
 maintenance/check integration.
+
+The managed-group fixture also probes declared checks through Docker Exec inside
+its admitted app inspector and worker containers. The inspector is a declared
+long-running app service with a read-only owned mount; the worker check uses its
+inherited granted environment. Retained dependencies are not check targets. Exec receives
+only the stable check operation identity, with no privilege expansion, attachment,
+or output capture. Reopening after acknowledged Start must preserve the execution
+deadline and retain known exit status. A deliberately lost acknowledgement for a
+fast check must hold as `unknown-start`, despite stopped/exit-zero inspection, and
+the live event stream must show exactly one Start for each recorded exec ID.
+This component probe does not enable checks or singleton handoffs in normal
+managed execution; held/expired checks do not imply the process was stopped.
+
+Exec request/inspection fields follow the [Docker Engine API v1.56 reference](https://docs.docker.com/reference/api/engine/version/v1.56/).
+
+The first check probe at `3df34e1`, VM
+`kayra-volume-lab-20261115224419669696`, stopped before check selection/Exec because
+its fixture incorrectly declared a check on a retained dependency. The contract
+correctly refused that target. The corrected fixture declares an app inspector
+with a read-only owned mount. The failed VM is stopped and preserved with frozen
+source, native results/journals/events/API evidence, process/container snapshots,
+and a verified registry RAM archive, all covered by a SHA-256 manifest. An extra
+service-inspect JSON snapshot is missing: cleanup validation rejected truncated
+service IDs, and its shell still proceeded to stop the VM. The disk retains
+Docker state. Subsequent cleanup separates successful archive verification from
+VM stopping. No native check guarantee follows from this failed run.
+
+The next check run at `481d7c3`, VM
+`kayra-volume-lab-20261115225406948642`, found that Engine 29.9.3 reports a newly
+created exec with `Running: false` and `ExitCode: null`. The adapter incorrectly
+classified that as unavailable, and the fixture assumed Start after two ticks.
+No check started. The adapter now accepts nullable exit status, and the fixture
+waits for explicit Start intent/acknowledgement. A regression retains both null
+and zero initial-state handling without interpreting either as execution proof.
+The failed VM is stopped and preserved after separately verifying its results,
+journals/events/API, registry RAM, service/container/process snapshots and native
+initial ExecInspect response. Private evidence has a SHA-256 manifest.
+
+The corrected check run at `7c66556`, VM
+`kayra-volume-lab-20261115230808817172`, passed and the VM was destroyed. After
+journal reopening, the declared app inspector verified its existing read-only
+owned mount and the worker verified its inherited granted environment and stable
+check identity. Both checks retained known exit zero and their original execution
+deadlines. A fast check whose Start acknowledgement was deliberately hidden held
+as `unknown-start`; it was not repeated or misclassified as successful. The live
+event stream recorded one Start per check exec ID. Private exact-source,
+API/events/clock/journal evidence has a SHA-256 manifest. Normal check/singleton
+integration, indexed admission, active-release publication and SIGKILL acceptance
+remain pending. Unknown or running checks require the pinned container to be
+fenced before lifecycle settlement; service metadata fences alone cannot settle
+an Exec Start.

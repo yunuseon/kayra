@@ -106,7 +106,7 @@ export const managedServiceBarrier = (journal: OperationJournal, ports: Ports) =
       const state = await load(); if (state === undefined) throw new Error("managed barrier intent is missing");
       const plan = await description(state); time(state.createdAt);
       if (state.phase !== "fencing") return state;
-      const observed = await bounded(time() + 10_000, () => ports.runtime.observe(state.action)); const now = time(state.createdAt);
+      const observed = await bounded(time() + 10_000, () => ports.runtime.observe({ app: state.action.app, service: state.action.service, incarnation: state.action.incarnation, dataOwner: state.action.dataOwner })); const now = time(state.createdAt);
       if (now >= state.action.deadline) return hold(state, "deadline");
       if (observed === undefined || observed.status === "unavailable") return state;
       const latest = state.steps.at(-1);

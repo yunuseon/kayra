@@ -7,7 +7,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { managedPlanFixture } from "./managed-plan-fixture.ts";
 import { managedServiceDigest } from "../../src/contracts/managed-service-plan.ts";
-import type { ManagedServiceAction } from "../../src/contracts/managed-swarm-service.ts";
+import type { ManagedServiceAction, ManagedServiceScope } from "../../src/contracts/managed-swarm-service.ts";
 import type { ServiceObservation, ServiceVersion } from "../../src/contracts/swarm-service.ts";
 import { managedServiceBarrier } from "../../src/server/deployment/managed-service-barrier.ts";
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
@@ -24,7 +24,9 @@ const fixture = async (t: TestContext, absent = false) => {
     tombstone: false, retainedInputsCleared: false, specMatches: null, replicas: 1, endpoint: "vip", update: "completed", tasks: [] };
   let observed: ServiceObservation = absent ? { status: "absent" } : old;
   const ports = { ...artifacts, now: () => clock, authorize: () => Promise.resolve(admitted), runtime: {
-    observe: () => Promise.resolve(observed),
+    observe: (scope: ManagedServiceScope) => {
+      assert.deepEqual(Object.keys(scope).toSorted(), ["app", "dataOwner", "incarnation", "service"]); return Promise.resolve(observed);
+    },
     tombstone: (requested: ManagedServiceAction, expected: ServiceVersion | null) => {
       calls++;
       if (observed.status === "owned" && (observed.id !== expected?.id || observed.version !== expected.version)) return Promise.resolve("conflict" as const);

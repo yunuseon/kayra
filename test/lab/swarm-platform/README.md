@@ -1553,3 +1553,12 @@ passed. Successful VM `kayra-volume-lab-20261115141010934467` was destroyed;
 private evidence and SHA-256 manifest are in its `.cache/lab-evidence/` directory.
 This was a journal reopen with fixture authorization, not a SIGKILL or indexed
 managed-group lifecycle/admission acceptance run.
+
+The first native barrier run, `kayra-volume-lab-20261115142040482277` at
+`7e505bd`, failed before a removal write: the coordinator supplied a full action
+to a strict scope-only observation port. The adapter refused that shape and the
+operation held. This exposed a coordinator integration bug, not a successful
+barrier run. A regression assertion now checks the exact scope keys. Raw results,
+native snapshots and the fixture registry's RAM-only state are archived privately
+with source hashes and a SHA-256 manifest. The failed VM and frozen source remain
+preserved; the VM is stopped after checking for active observers/coordinators.

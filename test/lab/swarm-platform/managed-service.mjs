@@ -11,6 +11,7 @@ import { managedSwarmService, renderNativeManagedService } from '../../../cli/sr
 import { appOverlays } from '../../../cli/src/server/runtime/app-overlay.ts';
 import { ownedVolumes } from '../../../cli/src/server/runtime/owned-volume.ts';
 import { dockerApi } from '../../../cli/src/server/runtime/docker-api.ts';
+import { managedServiceBarrier } from '../../../cli/src/server/deployment/managed-service-barrier.ts';
 import { managedServiceExecution } from '../../../cli/src/server/deployment/managed-service-execution.ts';
 import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
 import { openArtifactStore } from '../../../cli/src/server/deployment/artifact-store.ts';
@@ -92,10 +93,20 @@ export const probeManagedService = async (app, image, output) => {
     const before = requests.filter((request) => request.method === 'POST').length;
     assert.equal(await adapter.apply(actionFor(first, 3), { id: started.id, version: started.version }, first, inputs), 'refused');
     assert.equal(requests.filter((request) => request.method === 'POST').length, before); assert.equal(await readCounter(started), 1);
-    const removing = actionFor(first, 4, 'remove'); assert.ok(['acknowledged', 'uncertain'].includes(await adapter.tombstone(removing, { id: started.id, version: started.version }, image)));
-    const empty = await wait(async () => { const value = await adapter.observe(scopeOf(first)); return value.status === 'owned' && value.action === removing.action && value.effect === 'remove' && value.replicas === 0 && value.tasks.every((task) => terminal.has(task.state)) ? value : false; }, 'empty retained tombstone', removing.deadline);
-    const scrubbing = { ...removing, effect: 'scrub' }; assert.ok(['acknowledged', 'uncertain'].includes(await adapter.tombstone(scrubbing, { id: empty.id, version: empty.version }, image)));
-    await wait(async () => { const value = await adapter.observe(scopeOf(first)); return value.status === 'owned' && value.effect === 'scrub' && value.retainedInputsCleared ? value : false; }, 'scrubbed retained tombstone', scrubbing.deadline);
+    const removing = actionFor(first, 4, 'remove');
+    const barrierPath = join(output, 'managed-service-barrier'); await mkdir(barrierPath, { mode: 0o700 });
+    const barrierArtifacts = await openArtifactStore(join(barrierPath, 'artifacts'));
+    const barrierPorts = { ...barrierArtifacts, now: Date.now, authorize: async () => true, runtime: { observe: adapter.observe, tombstone: adapter.tombstone } };
+    let barrierJournal = await openJournal(barrierPath); let barrier = managedServiceBarrier(barrierJournal, barrierPorts); let fenced;
+    try {
+      const prepared = await barrier.prepare(first, removing, [{ id: started.id, version: started.version }]);
+      assert.equal((await barrier.tick()).steps.length, 1);
+      await barrierJournal.close(); barrierJournal = await openJournal(barrierPath, 'existing'); barrier = managedServiceBarrier(barrierJournal, barrierPorts);
+      fenced = await wait(async () => { const value = await barrier.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'complete' ? value : false; }, 'reopened drained and scrubbed service barrier', removing.deadline);
+      assert.equal(fenced.action.deadline, prepared.action.deadline); assert.equal(fenced.proof.native.id, started.id); assert.ok(fenced.proof.native.version > started.version);
+      assert.equal(JSON.stringify(await barrierJournal.read()).includes('synthetic-managed-private-value'), false);
+    } finally { await barrierJournal.close(); }
+    await writeFile(join(output, 'managed-service-barrier.json'), JSON.stringify(fenced, null, 2));
     assert.equal((await api.request('POST', '/services/create', renderNativeManagedService(first, initial, inputs))).status, 409);
     const second = await planFor(randomUUID()); const recreate = actionFor(second, 2);
     assert.ok(['acknowledged', 'uncertain'].includes(await adapter.apply(recreate, null, second, inputs)));
@@ -103,7 +114,7 @@ export const probeManagedService = async (app, image, output) => {
     assert.deepEqual(await volumes.observe(volume.value), observedVolume);
     await pause(200); finished = true; observer.kill('SIGTERM'); await observerExit; assert.equal(eventError, undefined); assert.equal(partial, '');
     const starts = tracked.services.map((id) => ({ id, starts: events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === id).length })); assert.ok(starts.every((service) => service.starts === 1));
-    const result = { passed: true, scope: 'native managed runtime with fixture authorization/rebinding; not indexed admission, lifecycle removal/recreation or group rollout acceptance', receipt, starts, retainedOrdinaryUpdateRefused: true, delayedOldCreateFenced: true, dataRetainedAcrossDistinctIncarnations: true, noSecretInNormalizedObservation: true, serviceExecutionJournalReopen: true, serviceExecutionOriginalDeadline: true, serviceExecutionCreates: 1, node: process.version };
+    const result = { passed: true, scope: 'native managed runtime with fixture authorization/rebinding; not indexed admission, lifecycle removal/recreation or group rollout acceptance', receipt, starts, retainedOrdinaryUpdateRefused: true, delayedOldCreateFenced: true, dataRetainedAcrossDistinctIncarnations: true, noSecretInNormalizedObservation: true, serviceExecutionJournalReopen: true, serviceExecutionOriginalDeadline: true, serviceExecutionCreates: 1, serviceBarrierJournalReopen: true, serviceBarrierOriginalDeadline: true, serviceBarrierSteps: fenced.steps.map((step) => ({ effect: step.effect, attempt: step.attempt })), node: process.version };
     await writeFile(join(output, 'managed-service.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(output, 'managed-service-failure.json'), JSON.stringify({ error: String(error), stack: error.stack, tracked }, null, 2)); throw error; }
   finally {

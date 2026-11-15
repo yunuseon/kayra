@@ -16,6 +16,8 @@ export type ManagedSwarmServicePort = {
   readonly observe: (scope: ManagedServiceScope) => Promise<ServiceObservation>;
   readonly observeDesired: (action: ManagedServiceAction, plan: ManagedServicePlan, inputs: ManagedServiceInputs) => Promise<ServiceObservation>;
   readonly apply: (action: ManagedServiceAction, expected: ServiceVersion | null, plan: ManagedServicePlan, inputs: ManagedServiceInputs) => Promise<ServiceWrite>;
+  /** Restart only an unchanged retained specification from its fully scrubbed, owned name barrier. */
+  readonly reactivate: (action: ManagedServiceAction, expected: ServiceVersion, plan: ManagedServicePlan, inputs: ManagedServiceInputs) => Promise<ServiceWrite>;
   readonly fence: (action: ManagedServiceAction, expected: ServiceVersion) => Promise<ServiceWrite>;
   readonly tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null, image: string) => Promise<ServiceWrite>;
 };

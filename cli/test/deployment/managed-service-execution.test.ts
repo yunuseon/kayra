@@ -15,28 +15,29 @@ import { managedServiceExecution } from "../../src/server/deployment/managed-ser
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 
-const fixture = async (t: TestContext, deadline = 91000) => {
-  const { plan } = await managedPlanFixture(); const service = plan.services["worker"]; assert.ok(service);
+const fixture = async (t: TestContext, deadline = 91000, retained = false) => {
+  const { plan } = await managedPlanFixture(); const service = plan.services[retained ? "db" : "worker"]; assert.ok(service);
   const path = await mkdtemp(join(tmpdir(), "kayra-managed-effect-")); const artifacts = await openArtifactStore(join(path, "artifacts"));
-  let journal = await openJournal(path); let clock = 1000; let calls = 0; let lost = false; let loseWrite = false; let admitted = true;
+  let journal = await openJournal(path); let clock = 1000; let calls = 0; let reactivations = 0; let lost = false; let loseWrite = false; let admitted = true;
   let observed: ServiceObservation = { status: "absent" };
   const action: ManagedServiceAction = { app: service.owner.app, incarnation: service.owner.incarnation, dataOwner: service.owner.dataOwner, service: service.service, action: service.owner.incarnation + ":2", plan: managedServiceDigest(service), deadline, effect: "apply" };
-  const ports = { ...artifacts, now: () => clock, authorize: () => Promise.resolve(admitted), runtime: {
-    observeDesired: () => Promise.resolve(observed),
-    apply: () => {
+  const apply = () => {
       calls++;
       observed = { status: "owned", id: "s".repeat(25), version: 2, action: action.action, effect: "apply", taskEffect: "apply", plan: action.plan, taskPlan: action.plan,
         tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
         tasks: [{ id: "t".repeat(25), incarnation: action.incarnation, effect: "apply", plan: action.plan, action: action.action, desired: "running", state: "running", health: "healthy" }] };
       return lost ? Promise.reject(new Error("private lost acknowledgement")) : Promise.resolve("acknowledged" as const);
-    },
+  };
+  const ports = { ...artifacts, now: () => clock, authorize: () => Promise.resolve(admitted), runtime: {
+    observeDesired: () => Promise.resolve(observed),
+    apply, reactivate: () => { reactivations++; return apply(); },
   } };
   const view = () => typed<OperationJournal>({ read: journal.read, write: async (value) => {
     await journal.write(value); if (loseWrite) throw new Error("synchronized acknowledgement lost");
   } });
   let owner = managedServiceExecution(view(), ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
-  return { plan, service, action, artifacts, ports, calls: () => calls, owner: () => owner, journal: () => journal,
+  return { plan, service, action, artifacts, ports, calls: () => calls, reactivations: () => reactivations, owner: () => owner, journal: () => journal,
     prepare: () => owner.prepare(service, action, null), now: (now: number) => { clock = now; }, lost: () => { lost = true; }, loseWrite: () => { loseWrite = true; }, deny: () => { admitted = false; },
     observe: (value: ServiceObservation) => { observed = value; },
     reopen: async (changed: Partial<typeof ports> = {}) => { await journal.close(); loseWrite = false; journal = await openJournal(path, "existing"); owner = managedServiceExecution(view(), { ...ports, ...changed }); },
@@ -92,4 +93,21 @@ test("healthy native evidence observed after the original deadline cannot certif
   const lab = await fixture(t); await lab.prepare(); await lab.owner().tick(); lab.now(lab.action.deadline);
   const held = await lab.owner().tick(); assert.equal(held.phase, "held"); assert.equal(held.reason, "deadline"); assert.equal(held.verified, null);
   await lab.reopen(); assert.deepEqual(await lab.owner().tick(), held); assert.equal(lab.calls(), 1);
+});
+
+
+test("retained reactivation is an explicit durable mode and an uncertain activation is never replayed", async (t) => {
+  const lab = await fixture(t, 91000, true); lab.lost();
+  const expected = { id: "s".repeat(25), version: 1 };
+  const intent = await lab.owner().prepare(lab.service, lab.action, expected, "reactivate-retained"); assert.equal(intent.mode, "reactivate-retained");
+  await lab.owner().tick(); assert.equal(lab.reactivations(), 1);
+  await lab.reopen(); const done = await lab.owner().tick(); assert.equal(done.phase, "converged"); assert.equal(done.mode, "reactivate-retained");
+  assert.equal(lab.calls(), 1); assert.equal(lab.reactivations(), 1);
+  await assert.rejects(lab.owner().prepare(lab.service, lab.action, expected), /scope/);
+});
+
+test("reactivation mode cannot target consumers or create an absent dependency", async (t) => {
+  const worker = await fixture(t); await assert.rejects(worker.owner().prepare(worker.service, worker.action, { id: "s".repeat(25), version: 1 }, "reactivate-retained"), /scope/);
+  const db = await fixture(t, 91000, true); assert.throws(() => db.owner().prepare(db.service, db.action, null, "reactivate-retained"), /inconsistent/);
+  assert.equal(await worker.journal().read(), undefined); assert.equal(await db.journal().read(), undefined);
 });

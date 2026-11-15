@@ -111,13 +111,31 @@ export const managedSwarmService = (api = dockerApi(), volumes: Pick<OwnedVolume
     apply: async (requested, expected, plan, inputs) => {
       const action = parseAction(requested);
       if (action === undefined || action.effect !== "apply" && action.effect !== "restore" || expected !== null && !validNativeVersion(expected)) return "refused";
+      const version = expected === null ? null : Object.freeze({ id: expected.id, version: expected.version });
       try {
         const left = action.deadline - now(); if (!Number.isSafeInteger(left) || left <= 0 || left > 90000) return "refused";
         const prepared = prepare(plan, action, inputs);
         if (prepared.plan.role === "retained-dependency" && expected !== null) return "refused";
         const spec = renderPrepared(prepared);
         if (!(await verifyVolumes(prepared.plan, prepared.inputs, action.deadline))) return "refused";
-        return await native.replace(prepared.action, expected, spec);
+        return await native.replace(prepared.action, version, spec);
+      } catch { return "refused"; }
+    },
+    reactivate: async (requested, expected, plan, inputs) => {
+      const action = parseAction(requested);
+      if (action?.effect !== "apply" || !validNativeVersion(expected)) return "refused";
+      const version = Object.freeze({ id: expected.id, version: expected.version });
+      try {
+        const left = action.deadline - now(); if (!Number.isSafeInteger(left) || left <= 0 || left > 90000) return "refused";
+        const prepared = prepare(plan, action, inputs); if (prepared.plan.role !== "retained-dependency") return "refused";
+        const spec = renderPrepared(prepared);
+        if (!(await verifyVolumes(prepared.plan, prepared.inputs, action.deadline))) return "refused";
+        const observed = await native.observe(scopeOf(prepared.action));
+        const terminal = new Set(["shutdown", "complete", "failed", "rejected", "remove", "orphaned"]);
+        if (observed.status !== "owned" || observed.id !== version.id || observed.version !== version.version || observed.plan !== action.plan || observed.effect !== "scrub" ||
+          !observed.tombstone || !observed.retainedInputsCleared || ![null, "completed", "rollback_completed"].includes(observed.update) || observed.replicas !== 0 || observed.endpoint !== "dnsrr" || !observed.tasks.every((task) => terminal.has(task.state))) return "refused";
+        // Re-observation never changes the caller's recorded CAS. Any later revision invalidates it.
+        return await native.replace(prepared.action, version, spec);
       } catch { return "refused"; }
     },
     fence: native.fence, tombstone: native.tombstone,

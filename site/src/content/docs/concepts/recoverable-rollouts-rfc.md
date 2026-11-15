@@ -1693,3 +1693,22 @@ services may quiesce; retaining a dependency during maintenance is its policy.
 
 These slots are prerequisites for group cancellation, maintenance and removal.
 They are not yet connected to indexed group execution or lifecycle completion.
+
+### Retained dependency reactivation after quiescence
+
+Cancelling an initial rollout may stop and scrub a retained dependency while
+preserving its volume. A retry in the same incarnation therefore needs an
+explicit reactivation effect. Ordinary retained replacement remains refused.
+The separate adapter port requires the exact owned, scrubbed zero-replica barrier
+revision, terminal tasks, no retained inputs/VIP, an unchanged canonical service
+digest in the barrier, and fresh volume creation evidence. Any changed engine,
+inputs, resource/mount configuration or physical revision refuses the effect.
+
+The service slot persists an explicit reactivation mode and expected barrier
+revision before dispatch; recovery observes it without replaying an uncertain
+activation. Missing dependencies use initial creation, and consumers cannot use
+reactivation mode. Composition must supply this capability and the lifecycle
+owner must still authenticate admission and the retained baseline. Both ordinary
+and reactivation writes snapshot the caller's exact CAS before asynchronous reads.
+This port is a prerequisite for group cancellation/retry, not group admission or
+normal execution enablement.

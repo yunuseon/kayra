@@ -223,7 +223,16 @@ the distribution checksum. It uses no Docker context. Successful VMs and frozen
 temporary sources are removed unless `--keep` is supplied. Failures preserve
 both and print a command that removes only that VM after inspection.
 
-The ownership checks cover scoped publication, unchanged retry identity, lost
-pointer acknowledgement, missing/changed owner refusal and strict root-owned
-reader permissions. They do not replace the full platform upgrade lab or
+The checks cover scoped owner and infrastructure publication, unchanged retry
+identity, lost pointer acknowledgement, missing/changed owner or physical-grant
+refusal, exact node/cluster binding, private-versus-routing network separation
+and strict root-owned reader permissions. They do not replace the full platform upgrade lab or
 establish volume/network admission and application rollout behavior.
+
+The 2026-11-15 run at source `f7b3149` passed 27 Linux-root filesystem cases and
+all three TypeScript publication/reader checks on Ubuntu 24.04.5 ARM64 and Node
+24.22.1. Successful VM `kayra-registration-ownership-20261115114310` was destroyed;
+private source hashes, command logs and exact environment are retained under
+`.cache/lab-evidence/kayra-registration-ownership-20261115114310/`. The root host
+flow in this component suite uses a fixture platform reply. The full upgrade
+lab separately exercises the real platform command and restart handoff.

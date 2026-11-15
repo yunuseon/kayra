@@ -1444,9 +1444,9 @@ prune/delete operation or workload orchestration.
 An initial uncertain create is followed by observation rather than blind retry.
 A stored grant pins its exact network ID: absence or replacement blocks ordinary
 provisioning instead of silently recreating infrastructure for live workloads.
-These helper interfaces still require registration-publication wiring, durable
-grant storage and lifecycle cleanup before the richer workload capability can
-be enabled. They confer no app-selected infrastructure authority.
+Initial registration now uses these interfaces with durable grant storage and
+immutable publication. Lifecycle cleanup and managed workload admission remain
+required before the richer workload capability can be enabled. They confer no app-selected infrastructure authority.
 
 ### Initial registration ownership read model
 
@@ -1463,8 +1463,9 @@ physical allocation grants. It does not authorize network/volume creation,
 workloads or resource admission. The platform consumes the normal component
 command/read model instead of reading deployment files. Existing reserve replies
 remain unchanged, and the existing privileged process/control listener carries
-this additional internal read. Platform publication still needs to validate and
-persist the resulting infrastructure grant before richer plans can consume it.
+this additional internal read. Platform publication validates and persists the
+resulting infrastructure grant; richer-plan admission must independently verify
+its ownership and current native evidence.
 
 The initial Swarm host publisher now obtains this reference after submit and
 writes `ownership.json` into the same immutable public generation before sealing

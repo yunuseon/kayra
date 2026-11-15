@@ -1489,3 +1489,20 @@ selected/source image pins, exact versions, clock checks and source hashes are
 retained under
 `.cache/lab-evidence/kayra-volume-lab-20261115122751241212/` with a SHA-256 manifest.
 This does not establish managed workload or retained database rollout acceptance.
+
+
+The next full upgrade attempt, `kayra-infra-upgrade-20261115120807` at
+`fda9e27`, passed the native adapter and preceding Swarm component suite, then
+found a platform integration bug during initial Swarm registration. The new
+platform-state path lacked a persistent deployer bind mount; UID 1000 could not
+write the container's root-owned `/opt/platform` parent (`EACCES`). Compose
+indexed registration/build/restart had already passed. This remains a failed
+acceptance run. Its VM, fleet, frozen source and raw evidence are preserved; the
+VM is stopped after confirming no active runs. Evidence is under
+`.cache/lab-evidence/kayra-infra-upgrade-20261115120807/` with a SHA-256 manifest.
+
+The corrected setup provisions a private UID/GID-1000 `0700` host directory and
+mounts it only in the existing deployer. The lab requires that exact writable
+bind and verifies the same physical grant after replacing the deployer
+container. Platform namespace entries are synchronized before effect intent.
+The builder gets no platform-state mount, Docker access or application secrets.

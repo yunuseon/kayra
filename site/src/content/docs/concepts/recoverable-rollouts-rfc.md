@@ -1566,3 +1566,11 @@ one-shot mount privileges. The compiler and format remain disconnected from the
 normal admission/control path until managed execution, reconciliation and
 recovery implement these declarations. Existing version-one HTTP and version-two
 migration/HTTP plans retain their behavior.
+
+
+Platform state is backed by its own private host directory and writable bind in
+the existing deployer. Host setup provisions UID/GID 1000 and mode `0700`; the
+builder has no mount. Composition synchronizes new allocation directory entries
+before journaling effect intent. Container replacement must retain original
+physical grants and deadlines, rather than relying on a writable container
+layer. The upgrade fixture checks the actual host bind and container recreation.

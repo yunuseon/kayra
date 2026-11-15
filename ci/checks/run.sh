@@ -154,6 +154,23 @@ rule_builder_has_no_socket() {
     done | none
 }
 
+# Infrastructure ownership records are private to the existing deployer.
+rule_platform_state_is_private() {
+    local files file
+    mapfile -t files < <(engine_compose_files)
+    {
+        for file in "${files[@]}"; do
+            yq '.services // {} | to_entries | .[] | .key + " " + ((.value.volumes // []) | @json)' "$file" \
+                | grep platform-state | awk '$1 != "deployer" { print $1 " mounts private platform state" }' \
+                | sed "s#^#${file}: #"
+        done
+        if ! yq '.services.deployer.volumes // [] | .[]' "$E/compose/docker-compose.ci.yml" \
+            | grep -Fqx './platform-state:/opt/platform/platform-state'; then
+            echo "deployer lacks its writable private platform-state bind"
+        fi
+    } | none
+}
+
 # "The builder has no docker CLI."
 rule_builder_has_no_docker_cli() {
     grep -nE 'docker-ce-cli|docker-compose-plugin|docker\.io|get\.docker\.com' "$E/compose/deployer/Dockerfile.builder" | none
@@ -326,6 +343,7 @@ if [ "$platform" = true ]; then
     check platform:web-build web_build
     check platform:rule:no-tls-true rule_platform_no_tls_true
     check platform:rule:builder-has-no-socket rule_builder_has_no_socket
+    check platform:rule:platform-state-is-private rule_platform_state_is_private
     check platform:rule:builder-has-no-docker-cli rule_builder_has_no_docker_cli
     check platform:rule:traefik-has-no-socket rule_traefik_has_no_socket
     check platform:rule:deployer-has-no-project-name rule_deployer_has_no_project_name

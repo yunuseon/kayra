@@ -1,7 +1,7 @@
 /* eslint-disable functional/no-let -- composition owns the platform journal lifetimes */
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, open } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { AppOverlayPort } from "../../contracts/app-overlay.ts";
 import { parseRegistrationOwnership } from "../../contracts/registration-ownership.ts";
@@ -45,7 +45,13 @@ export const platformOverlayControl = (ports: Ports) => {
       // eslint-disable-next-line functional/prefer-immutable-types -- the composition owns this live journal handle
       entry = (async () => {
         const path = join(ports.directory, key);
-        if (admitted.initial) await mkdir(path, { recursive: true, mode: 0o700 });
+        if (admitted.initial) {
+          await mkdir(path, { recursive: true, mode: 0o700 });
+          // Synchronize the app entry and newly provisioned platform namespace before recording effect intent.
+          for (const parent of [ports.directory, dirname(ports.directory)]) {
+            const directory = await open(parent, "r"); try { await directory.sync(); } finally { await directory.close(); }
+          }
+        }
         else if (!(await lstat(path).catch(() => undefined))?.isDirectory()) throw new Error("registered platform overlay records are missing; intervention required");
         const journal = await openJournal(path, admitted.initial ? "initialize" : "existing");
         const allocation = appOverlayAllocation({ storage: journal, native: ports.native, now: Date.now, newId: randomUUID,

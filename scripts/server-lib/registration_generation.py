@@ -48,6 +48,19 @@ def _metadata(value):
     return dict(value)
 
 
+def _ownership(value, expected):
+    """Validated owner reference from the admitted coordinator control read."""
+    _require(type(value) is dict and set(value) == {"version", "runtime", "registration", "ownership"}, "invalid registration ownership")
+    _require(type(value["version"]) is int and value["version"] == 1 and value["runtime"] == "swarm", "invalid registration ownership")
+    _require(_metadata(value["registration"]) == expected, "registration ownership scope disagrees")
+    owner = value["ownership"]
+    _require(type(owner) is dict and set(owner) == {"version", "app", "incarnation", "dataOwner"}, "invalid registration ownership")
+    canonical_uuid = r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)"
+    _require(type(owner["version"]) is int and owner["version"] == 1 and owner["app"] == expected["app"] and owner["incarnation"] == expected["incarnation"], "registration ownership scope disagrees")
+    _require(all(type(owner[key]) is str and bool(re.fullmatch(canonical_uuid, owner[key])) for key in ("incarnation", "dataOwner")) and owner["incarnation"] != owner["dataOwner"], "invalid registration ownership")
+    return {"version": 1, "runtime": "swarm", "registration": dict(expected), "ownership": dict(owner)}
+
+
 def _encoded(value, limit=MAX_FILE_BYTES):
     try:
         data = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
@@ -238,14 +251,14 @@ def stage_initial_registration(root, app, registration, configuration, secrets):
         raise RegistrationError("initial registration staging uncertain; retry with the same payload") from None
 
 
-def publish_staged_initial_registration(root, metadata, private_gid):
+def publish_staged_initial_registration(root, metadata, private_gid, ownership=None):
     """Publish staged inputs under an already-held durable registration fence."""
     expected = _metadata(metadata)
     with _staging(root, expected["app"]) as staged:
         generation, payload = _read_staged(staged, expected["app"])
         _require(generation == expected["registrationGeneration"], "staged registration generation conflict")
         os.fsync(staged)
-    return publish(root, expected, **payload, private_gid=private_gid)
+    return publish(root, expected, **payload, private_gid=private_gid, ownership=ownership)
 
 
 @contextlib.contextmanager
@@ -276,7 +289,7 @@ def _pointer(parent, app):
         return None
 
 
-def publish(root, metadata, registration, configuration, secrets, private_gid, previous=None):
+def publish(root, metadata, registration, configuration, secrets, private_gid, previous=None, ownership=None):
     """Publish once under an already-held durable app fence. Never retries effects.
 
     Existing generations, including partial ones, require reconciliation. A failed
@@ -289,6 +302,9 @@ def publish(root, metadata, registration, configuration, secrets, private_gid, p
         _require(previous["app"] == expected["app"] and previous["incarnation"] == expected["incarnation"], "registration identity changed")
         _require(int(expected["actionId"].rpartition(":")[2]) > int(previous["actionId"].rpartition(":")[2]), "registration action did not advance")
     payload = _payload(expected["app"], registration, configuration, secrets)
+    if ownership is not None:
+        _require(payload["registration"]["runtime"] == "swarm", "ownership requires Swarm registration")
+        ownership = _ownership(ownership, expected)
     secrets = payload["secrets"]
     metadata_bytes = _encoded(expected)
     registration_bytes = _encoded(payload["registration"])
@@ -317,6 +333,8 @@ def publish(root, metadata, registration, configuration, secrets, private_gid, p
                     os.fsync(secret_dir)
                 _new_file(public_generation, "manifest.json", metadata_bytes, 0o444)
                 _new_file(public_generation, "registration.json", registration_bytes, 0o444)
+                if ownership is not None:
+                    _new_file(public_generation, "ownership.json", _encoded(ownership), 0o444)
                 os.fchown(private, 0, private_gid)
                 os.fchmod(private, 0o550)
                 os.fchmod(public_generation, 0o555)
@@ -338,13 +356,14 @@ def _evidence(expected, status):
     return {key: expected[key] for key in ("app", "incarnation", "actionId", "registrationGeneration")} | {"status": status}
 
 
-def observe(root, expected, private_gid):
+def observe(root, expected, private_gid, ownership=None):
     """Root-side durability barrier and validation, under the same app fence.
 
     It never returns secret values. `not-applied` describes the authoritative
     pointer only; it does not assert that no partial publication effects exist.
     """
     expected = _metadata(expected)
+    ownership = None if ownership is None else _ownership(ownership, expected)
     status = "unknown"
     try:
         with _app(root, expected, private_gid) as (public, public_generations, private_generations):
@@ -354,11 +373,18 @@ def observe(root, expected, private_gid):
                 return _evidence(expected, "not-applied")
             generation = expected["registrationGeneration"]
             with _dir(public_generations, generation, 0o555) as public_generation, _dir(private_generations, generation, 0o550, private_gid) as private:
-                _require(set(os.listdir(public_generation)) == {"manifest.json", "registration.json"})
+                files = set(os.listdir(public_generation))
+                base_files = {"manifest.json", "registration.json"}
+                _require(files in (base_files, base_files | {"ownership.json"}))
+                _require(ownership is None or "ownership.json" in files)
                 _require(set(os.listdir(private)) == {"manifest.json", "configuration.json", "secrets"})
                 _require(_metadata(_decode(_read_file(public_generation, "manifest.json", 0o444))) == expected)
                 _require(_metadata(_decode(_read_file(private, "manifest.json", 0o440, private_gid))) == expected)
                 registration = _registration(_decode(_read_file(public_generation, "registration.json", 0o444)), expected)
+                if "ownership.json" in files:
+                    _require(registration["runtime"] == "swarm")
+                    published_owner = _ownership(_decode(_read_file(public_generation, "ownership.json", 0o444)), expected)
+                    _require(ownership is None or ownership == published_owner)
                 configuration = _values(_decode(_read_file(private, "configuration.json", 0o440, private_gid)))
                 _require(not set(configuration).intersection(registration["secrets"]))
                 with _dir(private, "secrets", 0o550, private_gid) as secret_dir:
@@ -377,10 +403,10 @@ def observe(root, expected, private_gid):
     return _evidence(expected, status)
 
 
-def record_publication_evidence(root, metadata, private_gid):
+def record_publication_evidence(root, metadata, private_gid, ownership=None):
     """Record applied evidence while the caller still holds the app fence."""
     expected = _metadata(metadata)
-    evidence = observe(root, expected, private_gid)
+    evidence = observe(root, expected, private_gid, ownership)
     if evidence["status"] != "applied":
         return evidence
     key = hashlib.sha256(expected["app"].encode("utf8")).hexdigest()

@@ -396,6 +396,86 @@ class GenerationTest(unittest.TestCase):
         self.key = hashlib.sha256(self.meta["app"].encode()).hexdigest()
         return self.fixture["registration"]
 
+    def ownership(self, metadata=None):
+        reference = json.loads((Path(__file__).with_name("ownership.json")).read_text())
+        reference["registration"] = dict(metadata or self.meta)
+        reference["ownership"].update(app=self.meta["app"], incarnation=self.meta["incarnation"])
+        return reference
+
+    def test_ownership_publication_is_bound_immutable_and_required_on_retry(self):
+        self.swarm_registration()
+        owner = self.ownership()
+        storage.publish(self.fd, self.meta, self.fixture["registration"], self.fixture["configuration"], self.fixture["secrets"], GID, ownership=owner)
+        path = self.path() / "ownership.json"
+        self.assertEqual(json.loads(path.read_text()), owner)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
+        self.assertEqual((path.stat().st_uid, path.stat().st_gid), (0, 0))
+        self.assertEqual(storage.observe(self.fd, self.meta, GID, owner)["status"], "applied")
+        changed = copy.deepcopy(owner)
+        changed["ownership"]["dataOwner"] = "44444444-4444-4444-8444-444444444444"
+        self.assertEqual(storage.observe(self.fd, self.meta, GID, changed)["status"], "unknown")
+        path.unlink()
+        self.assertEqual(storage.observe(self.fd, self.meta, GID, owner)["status"], "unknown")
+        self.assertEqual(self.observation()["status"], "applied")  # Old generations remain readable, without inferred ownership.
+
+    def test_invalid_ownership_is_refused_before_publication(self):
+        self.swarm_registration()
+        owner = self.ownership()
+        invalid = [dict(owner, runtime="compose"), dict(owner, secret="private")]
+        for field, value in (("dataOwner", owner["ownership"]["dataOwner"].upper()), ("dataOwner", self.meta["incarnation"]), ("app", "other"), ("dataOwner", "11111111-1111-0111-1111-111111111111")):
+            invalid.append({**owner, "ownership": {**owner["ownership"], field: value}})
+        invalid.append({**owner, "registration": self.next_metadata()})
+        for reference in invalid:
+            with self.subTest(reference=reference), self.assertRaises(storage.RegistrationError):
+                storage.publish(self.fd, self.meta, self.fixture["registration"], self.fixture["configuration"], self.fixture["secrets"], GID, ownership=reference)
+        self.assertFalse((self.root / "public").exists())
+
+    def test_ownership_publication_recovers_lost_pointer_ack_without_replacement(self):
+        self.swarm_registration()
+        request = {key: self.fixture[key] for key in ("registration", "configuration", "secrets")}
+        request["app"] = self.meta["app"]
+        generation = command.execute(self.fd, "stage", GID, request)["generation"]
+        metadata = {**self.meta, "registrationGeneration": generation}
+        owner = self.ownership(metadata)
+        replace = os.replace
+        def lost_ack(*args, **kwargs):
+            replace(*args, **kwargs)
+            raise OSError("lost pointer acknowledgement")
+        with mock.patch.object(storage.os, "replace", side_effect=lost_ack):
+            with self.assertRaises(OSError):
+                command.execute(self.fd, "publish", GID, metadata, ownership=owner)
+        path = self.path(generation=generation) / "ownership.json"
+        inode = path.stat().st_ino
+        self.assertEqual(command.execute(self.fd, "publish", GID, metadata, ownership=owner)["status"], "applied")
+        self.assertEqual(path.stat().st_ino, inode)
+        changed = {**owner, "ownership": {**owner["ownership"], "dataOwner": "44444444-4444-4444-8444-444444444444"}}
+        with self.assertRaises(storage.RegistrationError):
+            command.execute(self.fd, "publish", GID, metadata, ownership=changed)
+        self.assertEqual(path.stat().st_ino, inode)
+
+    def test_swarm_host_flow_reads_admitted_owner_before_publication(self):
+        self.swarm_registration()
+        request = {key: self.fixture[key] for key in ("registration", "configuration", "secrets")}
+        request["app"] = self.meta["app"]
+        calls = []
+        def control(operation, app, generation, *arguments):
+            calls.append(operation)
+            ticket = self.meta["actionId"]
+            if operation == "reserve":
+                return {"incarnation": self.meta["incarnation"], "ticket": ticket}
+            self.assertEqual(arguments, (ticket,))
+            if operation == "submit":
+                return {"status": "reconcile", "actionId": ticket}
+            if operation == "ownership":
+                return self.ownership({**self.meta, "registrationGeneration": generation})
+            self.assertEqual(operation, "reconcile")
+            return {"status": "verified"}
+        self.assertEqual(command.register(self.fd, GID, request, control), {"status": "verified"})
+        self.assertEqual(calls, ["reserve", "submit", "ownership", "reconcile"])
+        calls.clear()
+        self.assertEqual(command.register(self.fd, GID, request, control), {"status": "verified"})
+        self.assertEqual(calls, ["reserve", "submit", "ownership", "reconcile"])
+
     def test_swarm_payloads_are_explicit_and_publication_refuses_backend_conversion(self):
         registration = self.swarm_registration()
         self.publish()

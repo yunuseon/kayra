@@ -17,3 +17,18 @@ test("the platform publisher fixture matches the shared and legacy registration 
   const { app, incarnation, actionId, registrationGeneration } = metadata.value;
   deepStrictEqual(evidence.value, { app, incarnation, actionId, registrationGeneration, status: "applied" });
 });
+
+test("the owner-publication fixture matches the shared contract and rejects noncanonical or changed scope", async () => {
+  const { parseRegistrationOwnership } = await import("../../src/contracts/registration-ownership.ts");
+  const raw: unknown = JSON.parse(readFileSync(new URL("../../../ci/tests/registration-generation/ownership.json", import.meta.url), "utf8"));
+  const parsed = parseRegistrationOwnership(raw); ok(parsed.ok);
+  const reference = parsed.value;
+  for (const candidate of [
+    { ...reference, runtime: "compose" },
+    { ...reference, secret: "private" },
+    { ...reference, ownership: { ...reference.ownership, dataOwner: reference.ownership.dataOwner.toUpperCase() } },
+    { ...reference, ownership: { ...reference.ownership, dataOwner: reference.ownership.incarnation } },
+    { ...reference, ownership: { ...reference.ownership, app: "other" } },
+    { ...reference, ownership: { ...reference.ownership, dataOwner: "11111111-1111-0111-1111-111111111111" } },
+  ]) equal(parseRegistrationOwnership(candidate).ok, false);
+});

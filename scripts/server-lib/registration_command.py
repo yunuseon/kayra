@@ -34,25 +34,25 @@ def trusted_root(value):
         yield fd
 
 
-def execute(root, mode, gid, request):
+def execute(root, mode, gid, request, *, ownership=None):
     if mode == "stage":
         registration_request(request)
         return {"generation": storage.stage_initial_registration(root, **request)}
     if mode == "verify":
-        return storage.record_publication_evidence(root, request, gid)
+        return storage.record_publication_evidence(root, request, gid, ownership)
 
-    evidence = storage.record_publication_evidence(root, request, gid)
+    evidence = storage.record_publication_evidence(root, request, gid, ownership)
     if evidence["status"] == "applied":
         return evidence
     try:
-        storage.publish_staged_initial_registration(root, request, gid)
+        storage.publish_staged_initial_registration(root, request, gid, ownership)
     except storage.RegistrationError:
         # Publication may have completed despite a failed acknowledgement.
-        evidence = storage.record_publication_evidence(root, request, gid)
+        evidence = storage.record_publication_evidence(root, request, gid, ownership)
         if evidence["status"] == "applied":
             return evidence
         raise
-    return storage.record_publication_evidence(root, request, gid)
+    return storage.record_publication_evidence(root, request, gid, ownership)
 
 
 def registration_request(request):
@@ -127,7 +127,10 @@ def register(root, gid, request, ctl):
                                   "registrationGeneration": generation, "actionId": intent["actionId"]})
     # The platform command uses the immutable staged inputs and exclusive
     # generation creation even if the original submit acknowledgement was lost.
-    evidence = execute(root, "publish", gid, metadata)
+    ownership = None
+    if request["registration"]["runtime"] == "swarm":
+        ownership = storage._ownership(ctl("ownership", app, generation, ticket), metadata)
+    evidence = execute(root, "publish", gid, metadata, ownership=ownership)
     storage._require(evidence["status"] == "applied", "registration publication remains unresolved")
     receipt = ctl("reconcile", app, generation, ticket)
     storage._require(receipt in ({"status": "verified"}, {"status": "terminal", "outcome": "success"}),

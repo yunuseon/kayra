@@ -1671,3 +1671,25 @@ routed readiness remains a separate HTTP requirement. Group sequencing,
 compensation, cancellation and indexed ownership still must connect these slots
 before normal managed execution can be enabled. These component tests do not
 replace integrated crash-matrix or application-behavior acceptance.
+
+### Group-owned quiescence and name barriers
+
+A managed service barrier now owns durable zero-replica removal and subsequent
+scrubbing under one original 90-second deadline. It retains exact service/image
+identity, known native versions and each new CAS intent before dispatch. Draining
+tasks prevent completion; both current and previous specifications must have no
+inputs, mounts or network attachments, and the VIP must be released. Completion
+requires a newer native revision than every supplied earlier effect revision.
+The inert service name stays reserved, fencing delayed old creates. Volumes are
+not deleted and this component cannot release admission charges.
+
+Restart observes an unchanged uncertain CAS without dispatching it again. A
+freshly observed revision may allow a distinct bounded recorded attempt; it is
+never substituted into an earlier intent. After scrubbing begins, unexpected
+application writes hold the operation. Missing recorded native identities,
+foreign observations, expired authority and exhausted attempts also hold. The
+lifecycle owner still must settle migrations/competing work and authorize which
+services may quiesce; retaining a dependency during maintenance is its policy.
+
+These slots are prerequisites for group cancellation, maintenance and removal.
+They are not yet connected to indexed group execution or lifecycle completion.

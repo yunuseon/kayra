@@ -1706,3 +1706,14 @@ service-inspect JSON snapshot is missing: cleanup validation rejected truncated
 service IDs, and its shell still proceeded to stop the VM. The disk retains
 Docker state. Subsequent cleanup separates successful archive verification from
 VM stopping. No native check guarantee follows from this failed run.
+
+The next check run at `481d7c3`, VM
+`kayra-volume-lab-20261115225406948642`, found that Engine 29.9.3 reports a newly
+created exec with `Running: false` and `ExitCode: null`. The adapter incorrectly
+classified that as unavailable, and the fixture assumed Start after two ticks.
+No check started. The adapter now accepts nullable exit status, and the fixture
+waits for explicit Start intent/acknowledgement. A regression retains both null
+and zero initial-state handling without interpreting either as execution proof.
+The failed VM is stopped and preserved after separately verifying its results,
+journals/events/API, registry RAM, service/container/process snapshots and native
+initial ExecInspect response. Private evidence has a SHA-256 manifest.

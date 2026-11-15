@@ -71,3 +71,10 @@ test("mutable caller descriptions cannot change the admitted exec after asynchro
   const f = fixture(); const plan = { ...f.plan, command: [...f.plan.command] }; const pending = f.adapter.create(plan); plan.command[0] = "/foreign";
   assert.equal((await pending).status, "created"); const write = f.calls.find((call) => call.method === "POST"); assert.ok(write); assert.deepEqual(write.body, { AttachStdin: false, AttachStdout: false, AttachStderr: false, Tty: false, Privileged: false, Cmd: f.plan.command, Env: [`KAYRA_OPERATION_ID=${f.plan.run}:check:confirm`] });
 });
+
+test("Docker's initial null exit code remains an owned unstarted exec that can receive its one authorized Start", async () => {
+  const f = fixture(); f.setExec({ ...f.process, ExitCode: null });
+  assert.deepEqual(await f.adapter.observe(f.plan, f.exec), { status: "owned", id: f.exec, running: false, exitCode: null });
+  assert.equal(await f.adapter.start(f.plan, f.exec, 31000), "acknowledged");
+  assert.equal(f.calls.filter((call) => call.method === "POST").length, 1);
+});

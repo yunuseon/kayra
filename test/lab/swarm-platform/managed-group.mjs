@@ -1,4 +1,4 @@
-// Fixture-authorized retained startup + migration phase. No indexed admission or release promotion.
+// Fixture-authorized retained startup, migration and worker phases. No indexed admission or release promotion.
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -9,6 +9,7 @@ import { ownedVolume } from '../../../cli/src/contracts/owned-volume.ts';
 import { managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
 import { parseManagedApplicationPlan } from '../../../cli/src/contracts/managed-application-plan.ts';
 import { managedGroupPreparation } from '../../../cli/src/server/deployment/managed-group-preparation.ts';
+import { managedConsumerRollout } from '../../../cli/src/server/deployment/managed-consumer-rollout.ts';
 import { managedMigrationInputs } from '../../../cli/src/server/deployment/managed-migration-inputs.ts';
 import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
 import { openArtifactStore } from '../../../cli/src/server/deployment/artifact-store.ts';
@@ -34,7 +35,7 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     for (const line of lines) if (line) { try { events.push(JSON.parse(line)); } catch { eventError = 'invalid event'; } }
   }); eventExit.then(() => { if (!finished) eventError = 'event observer ended early'; });
   const transport = dockerApi(); const api = { request: async (...args) => { assert.ok(requests.length < 8192); const reply = await transport.request(...args); requests.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); return reply; } };
-  let journal;
+  let journal; let consumerJournal;
   try {
     await pause(200); const info = await api.request('GET', '/info'); assert.equal(info.status, 200); const swarm = info.value.Swarm;
     const incarnation = randomUUID(); const dataOwner = randomUUID(); const registration = { version: 1, app, incarnation, actionId: incarnation + ':1', registrationGeneration: randomUUID() };
@@ -56,7 +57,7 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     const migrateCode = `const url='http://db:8080/apply?id='+encodeURIComponent(process.env.KAYRA_OPERATION_ID);fetch(url,{signal:AbortSignal.timeout(5000)}).then(async r=>{if(!r.ok)process.exit(1);await r.text();setTimeout(()=>process.exit(0),2000)}).catch(()=>process.exit(1));`;
     const checked = parseManagedApplicationPlan({ version: 3, runtime: 'swarm', infrastructure: { version: 1, runtime: 'swarm', registration, ownership, overlay: grant }, commit: 'd'.repeat(40), artifact: 'e'.repeat(64), configurationIdentity: 'sha256:' + 'c'.repeat(64),
       host: { version: 1, node: swarm.NodeID, cluster: swarm.Cluster.ID, network: { name: 'platform-swarm', id: routing.value.Id }, profile: { enabled: true, advertise_address: swarm.NodeAddr, memory_bytes: 3221225472, cpu_millicores: 2000, platform_memory_bytes: 1073741824, platform_cpu_millicores: 500 } },
-      grants: { memory_bytes: 536870912, cpu_millicores: 1000, maintenance: false }, hosts: [], routes: [],
+      grants: { memory_bytes: 536870912, cpu_millicores: 1000, maintenance: false }, hosts: [], secrets: ['TOKEN'], routes: [],
       rollout: { strategy: 'rolling', mixed_version_compatible: true, rollback_compatible: true, services: { db: { role: 'retained-dependency', overlap: 'forbidden' }, worker: { role: 'worker', overlap: 'forbidden' } }, migrations: [{ id: 'schema', service: 'worker', command: ['--eval', migrateCode], timeout_seconds: 30, recovery: { kind: 'replay-safe' } }], checks: [] },
       policy: { version: 1, failureMonitorSeconds: 30, updateTimeoutSeconds: 90, rollbackTimeoutSeconds: 90, migrationTimeoutCeilingSeconds: 90, checkTimeoutCeilingSeconds: 90 },
       images: [...new Set([databaseImage, migrationImage])].map((image) => ({ source: image, pull: image, os: 'linux', architecture: process.arch === 'x64' ? 'amd64' : process.arch })),
@@ -65,7 +66,7 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     }); assert.ok(checked.ok, checked.ok ? '' : checked.error); const plan = checked.value;
     await writeFile(join(path, 'fixture-plan.json'), JSON.stringify(plan, null, 2), { mode: 0o600 });
     const artifacts = await openArtifactStore(join(path, 'artifacts')); const serviceRuntime = managedSwarmService(api, volumes); const jobs = oneShotJob(api); let started = false;
-    const serviceInputs = (service) => ({ environment: {}, routing: {}, volumes: service.mounts.length === 0 ? [] : [receipt] });
+    const serviceInputs = (service) => ({ environment: Object.fromEntries(Object.entries(service.inputs.environment).map(([key, binding]) => [key, binding.kind === 'literal' ? binding.value : 'synthetic-group-private-value'])), routing: {}, volumes: service.mounts.length === 0 ? [] : [receipt] });
     const ports = { ...artifacts, now: Date.now, authorize: async () => true, services: { observe: serviceRuntime.observe,
       observeDesired: (action, service) => serviceRuntime.observeDesired(action, service, serviceInputs(service)),
       apply: (action, expected, service) => serviceRuntime.apply(action, expected, service, serviceInputs(service)),
@@ -85,16 +86,27 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     const tasks = await api.request('GET', '/tasks?filters=' + encodeURIComponent(JSON.stringify({ service: [database.ready.native.id], 'desired-state': ['running'] }))); assert.equal(tasks.status, 200);
     const task = tasks.value.find((value) => value.DesiredState === 'running' && value.Status.State === 'running'); assert.ok(task);
     const ledger = JSON.parse(execFileSync('docker', ['exec', task.Status.ContainerStatus.ContainerID, 'node', '-e', `process.stdout.write(require('node:fs').readFileSync('/data/ledger.json','utf8'))`], { encoding: 'utf8', timeout: 10000 })); assert.deepEqual(ledger, [run + ':schema']);
+    const consumerPath = join(path, 'consumers'); consumerJournal = await openJournal(consumerPath);
+    const consumerPorts = { ...artifacts, now: Date.now, authorize: async () => true, services: { ...ports.services, tombstone: serviceRuntime.tombstone }, readiness: { check: async () => { throw new Error('worker must not request routed readiness'); } } };
+    let consumers = managedConsumerRollout(consumerJournal, consumerPorts); const consumerIntent = await consumers.prepare(plan, ready, null, []);
+    await wait(async () => { const state = await consumers.tick(); assert.notEqual(state.phase, 'held'); return state.nodes[0]?.execution?.phase === 'observing'; }, consumerIntent.deadline, 'worker update acknowledgement');
+    await consumerJournal.close(); consumerJournal = await openJournal(consumerPath, 'existing'); consumers = managedConsumerRollout(consumerJournal, consumerPorts);
+    const consumerReady = await wait(async () => { const state = await consumers.tick(); assert.notEqual(state.phase, 'held'); return state.phase === 'ready' ? state : false; }, consumerIntent.deadline, 'reopened consumers');
+    assert.equal(consumerReady.deadline, consumerIntent.deadline); assert.equal(JSON.stringify(await consumerJournal.read()).includes('synthetic-group-private-value'), false);
+    const worker = consumerReady.nodes.find((node) => node.name === 'worker'); assert.equal(worker.ready.kind, 'running');
+    const workerInspect = await api.request('GET', '/services/' + worker.ready.native.id); assert.equal(workerInspect.status, 200);
+    assert.deepEqual(workerInspect.value.Spec.TaskTemplate.Networks.map((network) => network.Target), [grant.id]);
     await pause(200); finished = true; eventProcess.kill('SIGTERM'); await eventExit; assert.equal(eventError, undefined); assert.equal(partial, '');
     const migrationContainer = ready.sequence.steps[0].attempts[0].execution.container;
     const migrationStarts = events.filter((event) => event.Action === 'start' && event.Actor?.ID === migrationContainer).length; assert.equal(migrationStarts, 1);
     const dependencyStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === database.ready.native.id).length; assert.equal(dependencyStarts, 1);
-    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration and preparation journal reopen; no indexed admission, SIGKILL, consumer rollout, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
-      consumerDeadline: ready.consumerDeadline, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
+    const workerStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === worker.ready.native.id).length; assert.equal(workerStarts, 1);
+    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
+      consumerDeadline: consumerReady.deadline, workerStarts, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
     await writeFile(join(path, 'result.json'), JSON.stringify(result, null, 2)); await writeFile(join(output, 'managed-group.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(path, 'failure.json'), JSON.stringify({ error: String(error), stack: error.stack }, null, 2)); throw error; }
   finally {
-    if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
+    if (consumerJournal) await consumerJournal.close(); if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
     await writeFile(join(path, 'events.json'), JSON.stringify(events, null, 2)); await writeFile(join(path, 'requests.json'), JSON.stringify(requests, null, 2));
     await writeFile(join(path, 'event-observer.json'), JSON.stringify({ complete: eventError === undefined && partial === '', error: eventError ?? null }));
   }

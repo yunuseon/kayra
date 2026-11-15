@@ -83,7 +83,7 @@ export const compileManagedApplicationPlan = (scope: Scope, artifact: HttpArtifa
   if (description.volumes.some((key) => !Object.values(description.services).some((service) => service.mounts.some((mount) => mount.volume === key)))) return err("unused managed volume declaration");
   if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(scope.domain)) return err("invalid platform domain");
   return parseManagedApplicationPlan({ version: 3, runtime: "swarm", infrastructure: scope.infrastructure, commit: artifact.sha, artifact: artifact.artifact,
-    host: scope.authority, grants: scope.app.grants, hosts: scope.app.hosts, configurationIdentity: scope.configuration.identity, rollout: rollout.value,
+    host: scope.authority, grants: scope.app.grants, hosts: scope.app.hosts, secrets: scope.app.secrets, configurationIdentity: scope.configuration.identity, rollout: rollout.value,
     policy: { version: 1, failureMonitorSeconds: 30, updateTimeoutSeconds: 90, rollbackTimeoutSeconds: 90, migrationTimeoutCeilingSeconds: scope.migrationTimeoutCeilingSeconds, checkTimeoutCeilingSeconds: 90 },
     images: scope.images, services: Object.fromEntries(services.value.map((item) => [item.name, item.spec] as const)),
     routes: artifact.routes.map((route) => Object.freeze({ host: `${route.host}.${scope.domain}`, service: route.service, port: route.port, path: route.path ?? null, check: route.check ?? route.path ?? "/", rateLimit: route.rateLimit ?? null })),

@@ -1595,9 +1595,12 @@ its retained app-owned HTTP ledger, wait for readiness, and run a declared
 one-shot migration through the private `db` DNS alias. Input materialization is
 inside the fixture composition port. Reopening the parent journal after migration
 Start must preserve deadlines, observe one execution and retain one ledger entry.
-A live container-event stream records dependency and job starts. This tests
-fixture-authorized preparation only: consumer updates, admission, SIGKILL,
-release promotion, SQL safety and full group lifecycle are not established.
+The fixture then starts its forbidden-overlap worker, reopens the consumer
+journal after update acknowledgement, preserves the original deadline and verifies
+that the worker uses only the private application overlay. A live container-event
+stream records dependency, job and worker starts. This tests fixture-authorized
+components: indexed admission, SIGKILL, HTTP continuity, release promotion, SQL
+safety and full group lifecycle are not established.
 
 The first native group-preparation run at `5c78d69`, VM
 `kayra-volume-lab-20261115150506587649`, held at its original startup deadline

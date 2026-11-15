@@ -34,7 +34,7 @@ const route = z.object({ host: hostName, path: path.nullable(), service: service
 }).strict().readonly();
 const schema = z.object({ version: z.literal(3), runtime: z.literal("swarm"), infrastructure: z.unknown(),
   commit: z.string().regex(/^[a-f0-9]{40}$/), artifact: z.string().regex(/^[a-f0-9]{64}$/), host: z.unknown(), grants: z.unknown(),
-  hosts: z.array(hostName).max(128).readonly(), configurationIdentity: z.string().regex(/^sha256:[a-f0-9]{64}$/), rollout: z.unknown(),
+  hosts: z.array(hostName).max(128).readonly(), secrets: z.array(z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/)).max(128).readonly(), configurationIdentity: z.string().regex(/^sha256:[a-f0-9]{64}$/), rollout: z.unknown(),
   policy: z.object({ version: z.literal(1), failureMonitorSeconds: z.literal(30), updateTimeoutSeconds: z.literal(90), rollbackTimeoutSeconds: z.literal(90),
     migrationTimeoutCeilingSeconds: positive.max(86400), checkTimeoutCeilingSeconds: z.literal(90),
   }).strict().readonly(),
@@ -50,7 +50,7 @@ export const parseManagedApplicationPlan = (input: unknown) => {
   const infrastructure = parseRegistrationInfrastructure(value.infrastructure); const host = parseSwarmAuthority(value.host); const grants = parseSwarmGrants(value.grants); const rollout = parseRollout(value.rollout);
   if (!infrastructure.ok || !host.ok || !grants.ok || !rollout.ok) return err("invalid managed application authority or rollout");
   const reference = infrastructure.value; const app = reference.registration.app;
-  if (!admitSwarmGrants(host.value, grants.value).ok || reference.overlay.scope.node !== host.value.node || reference.overlay.scope.cluster !== host.value.cluster || reference.overlay.id === host.value.network.id || new Set(value.hosts).size !== value.hosts.length) return err("managed application host or grants disagree");
+  if (!admitSwarmGrants(host.value, grants.value).ok || reference.overlay.scope.node !== host.value.node || reference.overlay.scope.cluster !== host.value.cluster || reference.overlay.id === host.value.network.id || new Set(value.hosts).size !== value.hosts.length || new Set(value.secrets).size !== value.secrets.length) return err("managed application host or grants disagree");
   const images = all(value.images.map((image) => parseResolvedImage(app, image)));
   const parsedServices = all(Object.entries(value.services).map(([name, spec]) => {
     const parsed = parseManagedServicePlan(spec);
@@ -71,6 +71,7 @@ export const parseManagedApplicationPlan = (input: unknown) => {
       (spec.role === "http" ? spec.host.routingNetwork !== host.value.network.id : spec.host.routingNetwork !== null) || !same(spec.privateNetwork, { id: reference.overlay.id, name: reference.overlay.scope.name }) ||
       declaration?.role !== spec.role || declaration.overlap !== spec.overlap || (declaration.handoff_check ?? null) !== spec.handoffCheck || !images.value.some((image) => image.pull === spec.image) ||
       spec.role !== "retained-dependency" && (!matchRegistrationGeneration(spec.inputs.registration, reference.registration, reference.registration).ok || spec.inputs.configurationIdentity !== value.configurationIdentity) ||
+      Object.values(spec.inputs.environment).some((binding) => binding.kind === "secret" && !value.secrets.includes(binding.key)) ||
       spec.dependencies.some((dependency) => services[dependency.service] === undefined || spec.role === "retained-dependency" && services[dependency.service]?.role !== "retained-dependency");
   })) return err("managed service scope, inputs, image or dependencies disagree");
   if (rollout.value.migrations.length > 0 && !migrationDescription(services, rollout.value.migrations,
@@ -89,7 +90,7 @@ export const parseManagedApplicationPlan = (input: unknown) => {
   if (value.routes.some((item) => !value.hosts.includes(item.host)) || new Set(value.routes.map((item) => JSON.stringify([item.host, item.path]))).size !== value.routes.length ||
     parsedServices.value.some(({ spec }) => spec.role === "http" && !value.routes.some((item) => item.service === spec.service))) return err("managed routes are missing, duplicate or outside host grants");
   return ok(Object.freeze({ ...value, infrastructure: reference, host: host.value, grants: grants.value,
-    hosts: Object.freeze(value.hosts.toSorted(lexical)), images: Object.freeze(images.value.toSorted((left, right) => lexical(left.source, right.source))),
+    hosts: Object.freeze(value.hosts.toSorted(lexical)), secrets: Object.freeze(value.secrets.toSorted(lexical)), images: Object.freeze(images.value.toSorted((left, right) => lexical(left.source, right.source))),
     services, rollout: Object.freeze({ ...rollout.value, services: Object.freeze(Object.fromEntries(Object.entries(rollout.value.services).toSorted(([left], [right]) => lexical(left, right)))) }),
     routes: Object.freeze(value.routes.toSorted((left, right) => lexical(JSON.stringify([left.host, left.path, left.service]), JSON.stringify([right.host, right.path, right.service])))),
   }));

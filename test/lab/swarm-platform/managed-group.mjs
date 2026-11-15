@@ -9,6 +9,7 @@ import { ownedVolume } from '../../../cli/src/contracts/owned-volume.ts';
 import { managedServiceDigest, managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
 import { parseManagedApplicationPlan } from '../../../cli/src/contracts/managed-application-plan.ts';
 import { managedGroupPreparation } from '../../../cli/src/server/deployment/managed-group-preparation.ts';
+import { managedGroupCompensation } from '../../../cli/src/server/deployment/managed-group-compensation.ts';
 import { managedServiceCompensation } from '../../../cli/src/server/deployment/managed-service-compensation.ts';
 import { convergedService } from '../../../cli/src/server/deployment/service-convergence.ts';
 import { managedConsumerRollout } from '../../../cli/src/server/deployment/managed-consumer-rollout.ts';
@@ -32,12 +33,12 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
   const eventProcess = spawn('docker', ['events', '--filter', 'type=container', '--format', '{{json .}}'], { stdio: ['ignore', 'pipe', 'pipe'] }); const eventExit = once(eventProcess, 'exit');
   eventProcess.on('error', () => { eventError = 'event observer failed'; }); eventProcess.stderr.on('data', () => { eventError = 'event observer stderr'; });
   eventProcess.stdout.setEncoding('utf8'); eventProcess.stdout.on('data', (value) => {
-    bytes += Buffer.byteLength(value); if (bytes > 1024 * 1024) { eventError = 'event evidence bound'; eventProcess.kill(); return; }
+    bytes += Buffer.byteLength(value); if (bytes > 8 * 1024 * 1024) { eventError = 'event evidence bound'; eventProcess.kill(); return; }
     partial += value; const lines = partial.split('\n'); partial = lines.pop();
     for (const line of lines) if (line) { try { events.push(JSON.parse(line)); } catch { eventError = 'invalid event'; } }
   }); eventExit.then(() => { if (!finished) eventError = 'event observer ended early'; });
-  const transport = dockerApi(); const api = { request: async (...args) => { assert.ok(requests.length < 8192); const reply = await transport.request(...args); requests.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); return reply; } };
-  let journal; let consumerJournal; let compensationJournal;
+  const transport = dockerApi(); const api = { request: async (...args) => { assert.ok(requests.length < 16384); const reply = await transport.request(...args); requests.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); return reply; } };
+  let journal; let consumerJournal; let compensationJournal; let groupPreparationJournal; let groupConsumerJournal; let groupRecoveryJournal;
   try {
     await pause(200); const info = await api.request('GET', '/info'); assert.equal(info.status, 200); const swarm = info.value.Swarm;
     const incarnation = randomUUID(); const dataOwner = randomUUID(); const registration = { version: 1, app, incarnation, actionId: incarnation + ':1', registrationGeneration: randomUUID() };
@@ -118,17 +119,36 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     const restored = await wait(async () => { const state = await compensation.tick(); assert.notEqual(state.phase, 'held'); return state.phase === 'complete' ? state : false; }, recovery.action.deadline, 'reopened compensation');
     assert.equal(restored.action.deadline, recovery.action.deadline); assert.equal(restored.attempts.length, 2); assert.equal(restored.fences.length, 1); assert.equal(fenceTasks.length, 1);
     assert.equal(JSON.stringify(await compensationJournal.read()).includes('synthetic-group-private-value'), false);
+    const cache = { ...plan.services.worker, service: 'cache', nativeName: managedServiceName(ownership, 'cache'), role: 'retained-dependency', inputs: inputs({}) };
+    const extra = { ...plan.services.worker, service: 'extra', nativeName: managedServiceName(ownership, 'extra'), dependencies: [{ service: 'cache', condition: 'healthy' }] };
+    const groupChecked = parseManagedApplicationPlan({ ...candidate, grants: { ...candidate.grants, memory_bytes: 1073741824, cpu_millicores: 1500 }, services: { ...candidate.services, cache, extra }, rollout: { ...candidate.rollout, migrations: [], services: { ...candidate.rollout.services, cache: { role: 'retained-dependency', overlap: 'forbidden' }, extra: { role: 'worker', overlap: 'forbidden' } } } }); assert.ok(groupChecked.ok); const groupPlan = groupChecked.value;
+    const groupPath = join(path, 'whole-group'); await mkdir(groupPath, { mode: 0o700 });
+    const preparePath = join(groupPath, 'preparation'); await mkdir(preparePath, { mode: 0o700 }); groupPreparationJournal = await openJournal(preparePath);
+    const prepareGroup = managedGroupPreparation(groupPreparationJournal, ports); const groupRun = randomUUID(); const groupIntent = await prepareGroup.prepare(groupPlan, groupRun, incarnation + ':4', [{ name: 'db', kind: 'active', action: database.ready.action, native: database.ready.native }]);
+    const groupPrefix = await wait(async () => { const value = await prepareGroup.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'ready' ? value : false; }, groupIntent.migrationDeadline, 'whole-group retained preparation');
+    const consumePath = join(groupPath, 'consumers'); await mkdir(consumePath, { mode: 0o700 }); groupConsumerJournal = await openJournal(consumePath);
+    const baseline = [{ name: 'worker', action: restored.attempts.at(-1).action, native: restored.proof.native }];
+    const consumeGroup = managedConsumerRollout(groupConsumerJournal, consumerPorts); const forwardIntent = await consumeGroup.prepare(groupPlan, groupPrefix, plan, baseline);
+    const groupForward = await wait(async () => { const value = await consumeGroup.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'ready' ? value : false; }, forwardIntent.deadline, 'whole-group consumer update');
+    const recoverPath = join(groupPath, 'recovery'); await mkdir(recoverPath, { mode: 0o700 }); groupRecoveryJournal = await openJournal(recoverPath);
+    const recoveryPorts = { ...consumerPorts, services: { ...consumerPorts.services, fence: serviceRuntime.fence } };
+    let recoverGroup = managedGroupCompensation(groupRecoveryJournal, recoveryPorts); const groupRecoveryIntent = await recoverGroup.prepare({ candidate: groupPlan, previous: plan, preparation: groupPrefix, consumers: groupForward, baselines: baseline });
+    await wait(async () => { const value = await recoverGroup.tick(); assert.notEqual(value.phase, 'held'); return value.nodes.find((node) => node.name === 'worker')?.child?.attempts.at(-1)?.phase === 'observing'; }, groupRecoveryIntent.deadline, 'whole-group restore acknowledgement');
+    await groupRecoveryJournal.close(); groupRecoveryJournal = await openJournal(recoverPath, 'existing'); recoverGroup = managedGroupCompensation(groupRecoveryJournal, recoveryPorts);
+    const recoveredGroup = await wait(async () => { const value = await recoverGroup.tick(); assert.notEqual(value.phase, 'held'); return value.phase === 'verified' ? value : false; }, groupRecoveryIntent.deadline, 'reopened whole-group recovery');
+    assert.equal(recoveredGroup.deadline, groupRecoveryIntent.deadline); assert.equal(JSON.stringify(await groupRecoveryJournal.read()).includes('synthetic-group-private-value'), false);
+    for (const name of ['cache', 'extra']) { const node = recoveredGroup.nodes.find((node) => node.name === name); assert.equal(node.child.phase, 'complete'); assert.equal(node.child.attempts.length, 0); const live = await serviceRuntime.observe({ app, service: name, incarnation, dataOwner }); assert.equal(live.status, 'owned'); assert.equal(live.replicas, 0); assert.equal(live.retainedInputsCleared, true); }
     await pause(200); finished = true; eventProcess.kill('SIGTERM'); await eventExit; assert.equal(eventError, undefined); assert.equal(partial, '');
     const migrationContainer = ready.sequence.steps[0].attempts[0].execution.container;
     const migrationStarts = events.filter((event) => event.Action === 'start' && event.Actor?.ID === migrationContainer).length; assert.equal(migrationStarts, 1);
     const dependencyStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === database.ready.native.id).length; assert.equal(dependencyStarts, 1);
-    const workerStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === worker.ready.native.id).length; assert.equal(workerStarts, 3);
-    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout, injected pre-transport restore interruption, metadata fencing and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
-      consumerDeadline: consumerReady.deadline, workerStarts, workerCandidateAndRestoreStarts: 2, compensationAttempts: restored.attempts.length, metadataFencePreservedTask: fenceTasks.length === 1, originalRecoveryDeadline: restored.action.deadline, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
+    const workerStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === worker.ready.native.id).length; assert.equal(workerStarts, 5);
+    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout, injected pre-transport restore interruption, metadata fencing, whole-group rollback and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
+      consumerDeadline: consumerReady.deadline, workerStarts, workerCandidateAndRestoreStarts: 4, wholeGroupRecovery: recoveredGroup.phase, wholeGroupOriginalDeadline: recoveredGroup.deadline, scrubbedNewOnlyServices: ['cache', 'extra'], compensationAttempts: restored.attempts.length, metadataFencePreservedTask: fenceTasks.length === 1, originalRecoveryDeadline: restored.action.deadline, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
     await writeFile(join(path, 'result.json'), JSON.stringify(result, null, 2)); await writeFile(join(output, 'managed-group.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(path, 'failure.json'), JSON.stringify({ error: String(error), stack: error.stack }, null, 2)); throw error; }
   finally {
-    if (compensationJournal) await compensationJournal.close(); if (consumerJournal) await consumerJournal.close(); if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
+    if (groupRecoveryJournal) await groupRecoveryJournal.close(); if (groupConsumerJournal) await groupConsumerJournal.close(); if (groupPreparationJournal) await groupPreparationJournal.close(); if (compensationJournal) await compensationJournal.close(); if (consumerJournal) await consumerJournal.close(); if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
     await writeFile(join(path, 'events.json'), JSON.stringify(events, null, 2)); await writeFile(join(path, 'requests.json'), JSON.stringify(requests, null, 2));
     await writeFile(join(path, 'event-observer.json'), JSON.stringify({ complete: eventError === undefined && partial === '', error: eventError ?? null }));
   }

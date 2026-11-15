@@ -1659,3 +1659,24 @@ pending versions. No materialized synthetic secret was in the journals. Private
 exact-source, API/event, clock and journal evidence has a SHA-256 manifest. This
 is a fixture-authorized injected interruption, not SIGKILL, indexed admission,
 whole-application recovery or HTTP continuity acceptance.
+
+The whole-group fixture then adds a new worker and a new retained helper under
+another recorded operation, drives retained preparation and consumer convergence,
+and compensates the group to its previous immutable plan. The group recovery
+journal reopens after restore acknowledgement. Verification requires unchanged
+recovery deadlines, restored worker convergence, unchanged existing dependency,
+and fully scrubbed zero-replica barriers for both new-only services. Fixture grants
+do not establish indexed resource admission or release promotion. HTTP continuity,
+SQL safety, SIGKILL and maintenance/check integration remain separate acceptance.
+
+Whole-group recovery at `a01a284` passed in fresh VM
+`kayra-volume-lab-20261115212423366099`, which was destroyed. After converging a
+candidate with a new worker and retained helper, reopening the recovery journal
+after restore acknowledgement preserved its deadline and reached `verified`.
+Both new-only services were fully scrubbed at zero replicas; the original
+retained dependency stayed running. Live events recorded five original-worker
+starts across both candidate/restore pairs, one dependency start and one migration
+start. Private exact-source, API/events/clock/journal evidence has a SHA-256
+manifest. This fixture-authorized component probe still does not establish indexed
+admission, active-release publication, HTTP continuity, SIGKILL, SQL safety or
+maintenance/check integration.

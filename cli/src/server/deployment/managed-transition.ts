@@ -35,6 +35,7 @@ export const prepareManagedTransition = async (previous: ManagedApplicationPlan 
   if (!next.ok || before !== null && !before.ok) return err("invalid managed transition plans");
   const old = before === null ? null : before.value; const target = next.value;
   if (old !== null && (!same(old.infrastructure.ownership, target.infrastructure.ownership) || !same(old.host, target.host) || !same(old.infrastructure.overlay, target.infrastructure.overlay))) return err("ordinary managed transitions cannot change ownership, host or private infrastructure");
+  if (old !== null && Object.values(target.services).some((service) => service.role === "retained-dependency" && old.services[service.service] !== undefined && old.services[service.service]?.role !== "retained-dependency")) return err("ordinary deployments cannot repurpose an existing consumer as a retained dependency");
   if (old !== null && target.rollout.strategy === "rolling" && target.routes.some((route) => {
     const previous = old.routes.find((before) => before.host === route.host && before.path === route.path);
     return previous !== undefined && previous.service !== route.service;
@@ -61,8 +62,8 @@ export const prepareManagedTransition = async (previous: ManagedApplicationPlan 
   const normalized = parseManagedApplicationPlan({ ...target, services }); if (!normalized.ok) return normalized;
   const plan = normalized.value; const resources = budget(old, plan);
   if (![resources.target, resources.previous ?? empty, resources.peak].every(validBudget) || resources.peak.cpu > plan.grants.cpu_millicores || resources.peak.memory > plan.grants.memory_bytes) return err("managed transition overlap, jobs and recovery exceed application grants");
-  const rollbackEligible = old !== null && plan.rollout.rollback_compatible && old.routes.every((route) => plan.hosts.includes(route.host));
-  if (plan.rollout.strategy === "rolling" && old !== null && !rollbackEligible) return err("rolling transition cannot restore its previous route grants");
+  const rollbackEligible = old !== null && plan.rollout.rollback_compatible && old.routes.every((route) => plan.hosts.includes(route.host)) && Object.values(old.services).every((service) => Object.values(service.inputs.environment).every((binding) => binding.kind !== "secret" || plan.secrets.includes(binding.key)));
+  if (plan.rollout.strategy === "rolling" && old !== null && !rollbackEligible) return err("rolling transition cannot restore its previous route or secret grants");
   const changes = Object.entries(plan.services).map(([name, service]) => Object.freeze({ name, kind: service.role === "retained-dependency" && unique.some((baseline) => baseline.service === name) ? "retained" : old?.services[name] === undefined ? "create" : managedServiceDigest(old.services[name]) === managedServiceDigest(service) && routesFor(old, name) === routesFor(plan, name) ? "unchanged" : "replace" }));
   const removed = old === null ? [] : Object.keys(old.services).filter((name) => !Object.hasOwn(plan.services, name));
   return ok(Object.freeze({ plan, previous: old, resources, rollbackEligible, changes: Object.freeze(changes), removed: Object.freeze(removed), planDigest: managedApplicationDigest(plan) }));

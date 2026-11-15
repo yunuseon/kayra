@@ -63,3 +63,20 @@ test("transitions reject authority changes, retained removal and insufficient ov
   const changed = { ...plan, host: { ...plan.host, profile: { ...plan.host.profile, platform_cpu_millicores: plan.host.profile.platform_cpu_millicores + 1 } } };
   assert.equal((await prepareManagedTransition(plan, changed, [], unchanged, clock())).ok, false);
 });
+
+test("rolling rollback respects current secret grants without treating unused old grants as required", async () => {
+  const { plan } = await managedPlanFixture(); const web = plan.services["web"]; assert.ok(web);
+  const candidate = parseManagedApplicationPlan({ ...plan, secrets: [], services: { ...plan.services, web: { ...web, inputs: { ...web.inputs, environment: Object.fromEntries(Object.entries(web.inputs.environment).filter(([key]) => key !== "TOKEN")) } } } }); assert.ok(candidate.ok);
+  const denied = await prepareManagedTransition(plan, candidate.value, [], unchanged, clock()); assert.ok(!denied.ok); assert.match(denied.error, /secret grants/);
+  const maintenance = parseManagedApplicationPlan({ ...candidate.value, grants: { ...candidate.value.grants, maintenance: true }, rollout: { ...candidate.value.rollout, strategy: "maintenance", rollback_compatible: false } }); assert.ok(maintenance.ok);
+  const forward = await prepareManagedTransition(plan, maintenance.value, [], unchanged, clock()); assert.ok(forward.ok); assert.equal(forward.value.rollbackEligible, false);
+  const unused = parseManagedApplicationPlan({ ...plan, secrets: [...plan.secrets, "UNUSED"] }); assert.ok(unused.ok);
+  assert.ok((await prepareManagedTransition(unused.value, plan, [], unchanged, clock())).ok);
+  assert.equal(parseManagedApplicationPlan({ ...plan, secrets: [] }).ok, false);
+});
+
+test("an ordinary transition cannot repurpose an existing consumer as a retained dependency", async () => {
+  const { plan } = await managedPlanFixture(); const worker = plan.services["worker"]; assert.ok(worker);
+  const candidate = parseManagedApplicationPlan({ ...plan, services: { ...plan.services, worker: { ...worker, role: "retained-dependency" } }, rollout: { ...plan.rollout, services: { ...plan.rollout.services, worker: { role: "retained-dependency", overlap: "forbidden" } } } }); assert.ok(candidate.ok);
+  const result = await prepareManagedTransition(plan, candidate.value, [], unchanged, clock()); assert.ok(!result.ok); assert.match(result.error, /repurpose an existing consumer/);
+});

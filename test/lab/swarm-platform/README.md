@@ -1595,9 +1595,12 @@ its retained app-owned HTTP ledger, wait for readiness, and run a declared
 one-shot migration through the private `db` DNS alias. Input materialization is
 inside the fixture composition port. Reopening the parent journal after migration
 Start must preserve deadlines, observe one execution and retain one ledger entry.
-A live container-event stream records dependency and job starts. This tests
-fixture-authorized preparation only: consumer updates, admission, SIGKILL,
-release promotion, SQL safety and full group lifecycle are not established.
+The fixture then starts its forbidden-overlap worker, reopens the consumer
+journal after update acknowledgement, preserves the original deadline and verifies
+that the worker uses only the private application overlay. A live container-event
+stream records dependency, job and worker starts. This tests fixture-authorized
+components: indexed admission, SIGKILL, HTTP continuity, release promotion, SQL
+safety and full group lifecycle are not established.
 
 The first native group-preparation run at `5c78d69`, VM
 `kayra-volume-lab-20261115150506587649`, held at its original startup deadline
@@ -1618,3 +1621,21 @@ journal held no materialized secret value. Successful VM
 clock, API/event, receipt and journal evidence has a SHA-256 manifest. This is
 fixture-authorized preparation with an HTTP ledger, not indexed admission,
 SIGKILL, SQL or complete group rollout acceptance.
+
+The consumer fixture's first run at `277edf3`, VM
+`kayra-volume-lab-20261115202224217427`, failed before worker intent because its
+new journal parent directory had not been created. Its native results, live event
+stream, journals, service/container snapshots and registry RAM were archived with
+a SHA-256 manifest; the VM is stopped and preserved. No worker guarantee follows
+from that failed run.
+
+After correcting the directory setup, the fresh run at imported implementation
+`5f170ca`, VM `kayra-volume-lab-20261115202625127963`, passed. Live events showed
+one retained dependency start, one migration start and one worker start. Both
+parent journals reopened without duplicate execution or deadline renewal; the
+worker joined only the private app overlay, and neither journal contained the
+materialized synthetic secret. The successful VM was destroyed. Private evidence
+includes the exact frozen file manifest and archive (including an unused work in
+progress compensation module), API requests, events, journals and clock checks,
+with a SHA-256 manifest. This establishes fixture-authorized component behavior,
+not indexed admission, SIGKILL, HTTP continuity or full application recovery.

@@ -7,6 +7,23 @@ import { parseSwarmAuthority, parseSwarmGrants, admitSwarmGrants } from "./swarm
 import { parseRollout, validateAdmission } from "./rollout.ts";
 import { matchRegistrationGeneration } from "./registration-generation.ts";
 import { all, err, ok } from "../lib/result.ts";
+import { parseMigrationSequencePlan } from "./migration-sequence.ts";
+import type { ManagedServicePlan } from "./managed-service-plan.ts";
+import type { Migration } from "./rollout.ts";
+
+const migrationDescription = (services: Readonly<Record<string, ManagedServicePlan>>, definitions: readonly Migration[], scope: { readonly app: string; readonly incarnation: string; readonly run: string }, deployment: string, ceiling: number) => {
+  const steps = all(definitions.map((definition) => {
+    const service = services[definition.service];
+    return service === undefined ? err("managed migration references a missing service") : ok(Object.freeze({ definition, template: Object.freeze({ version: 1,
+      image: service.image, entrypoint: service.entrypoint, environment: service.inputs.environment,
+      resources: Object.freeze({ memoryBytes: service.resources.memoryBytes, nanoCpus: service.resources.nanoCpus }),
+      networks: Object.freeze([service.privateNetwork.id]), stopGraceSeconds: service.stopGraceSeconds,
+    }) }));
+  }));
+  return steps.ok ? parseMigrationSequencePlan({ version: 1, deployment, scope,
+    policy: { schedulingSeconds: 90, cleanupSeconds: 30, maximumAttempts: 8, timeoutCeilingSeconds: ceiling }, steps: steps.value,
+  }) : steps;
+};
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const serviceName = z.string().max(48).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
@@ -56,6 +73,8 @@ export const parseManagedApplicationPlan = (input: unknown) => {
       spec.role !== "retained-dependency" && (!matchRegistrationGeneration(spec.inputs.registration, reference.registration, reference.registration).ok || spec.inputs.configurationIdentity !== value.configurationIdentity) ||
       spec.dependencies.some((dependency) => services[dependency.service] === undefined || spec.role === "retained-dependency" && services[dependency.service]?.role !== "retained-dependency");
   })) return err("managed service scope, inputs, image or dependencies disagree");
+  if (rollout.value.migrations.length > 0 && !migrationDescription(services, rollout.value.migrations,
+    { app, incarnation: reference.registration.incarnation, run: "00000000-0000-4000-8000-000000000001" }, "0".repeat(64), value.policy.migrationTimeoutCeilingSeconds).ok) return err("unsupported managed migration description");
   const acyclic = (remaining: readonly string[]): boolean => {
     if (remaining.length === 0) return true;
     const blocked = remaining.filter((name) => services[name]?.dependencies.some((dependency) => remaining.includes(dependency.service)) ?? true);
@@ -79,4 +98,19 @@ export type ManagedApplicationPlan = Extract<ReturnType<typeof parseManagedAppli
 export const managedApplicationDigest = (input: ManagedApplicationPlan) => {
   const checked = parseManagedApplicationPlan(input); if (!checked.ok) throw new Error(checked.error);
   return createHash("sha256").update(JSON.stringify(checked.value)).digest("hex");
+};
+
+/** Private, deterministic description for the existing one-shot sequence owner. This establishes no admission or readiness authority. */
+export const managedMigrationDescription = (input: ManagedApplicationPlan, run: string) => {
+  const checked = parseManagedApplicationPlan(input); if (!checked.ok) return checked;
+  const plan = checked.value;
+  return migrationDescription(plan.services, plan.rollout.migrations, { app: plan.infrastructure.registration.app, incarnation: plan.infrastructure.registration.incarnation, run },
+    managedApplicationDigest(plan), plan.policy.migrationTimeoutCeilingSeconds);
+};
+
+/** Original scheduling/execution/probe/cleanup windows are finite and shared by retries. */
+export const managedMigrationSeconds = (input: ManagedApplicationPlan) => {
+  const checked = parseManagedApplicationPlan(input); if (!checked.ok) throw new Error(checked.error);
+  return checked.value.rollout.migrations.reduce((total, step) => total + 90 + step.timeout_seconds + 30 * 8 +
+    (step.recovery.kind === "status-probe" ? 90 + step.recovery.timeout_seconds + 30 : 0), 0);
 };

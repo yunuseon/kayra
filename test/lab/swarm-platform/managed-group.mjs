@@ -6,9 +6,11 @@ import { once } from 'node:events';
 import { mkdir, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ownedVolume } from '../../../cli/src/contracts/owned-volume.ts';
-import { managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
+import { managedServiceDigest, managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
 import { parseManagedApplicationPlan } from '../../../cli/src/contracts/managed-application-plan.ts';
 import { managedGroupPreparation } from '../../../cli/src/server/deployment/managed-group-preparation.ts';
+import { managedServiceCompensation } from '../../../cli/src/server/deployment/managed-service-compensation.ts';
+import { convergedService } from '../../../cli/src/server/deployment/service-convergence.ts';
 import { managedConsumerRollout } from '../../../cli/src/server/deployment/managed-consumer-rollout.ts';
 import { managedMigrationInputs } from '../../../cli/src/server/deployment/managed-migration-inputs.ts';
 import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
@@ -35,7 +37,7 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     for (const line of lines) if (line) { try { events.push(JSON.parse(line)); } catch { eventError = 'invalid event'; } }
   }); eventExit.then(() => { if (!finished) eventError = 'event observer ended early'; });
   const transport = dockerApi(); const api = { request: async (...args) => { assert.ok(requests.length < 8192); const reply = await transport.request(...args); requests.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); return reply; } };
-  let journal; let consumerJournal;
+  let journal; let consumerJournal; let compensationJournal;
   try {
     await pause(200); const info = await api.request('GET', '/info'); assert.equal(info.status, 200); const swarm = info.value.Swarm;
     const incarnation = randomUUID(); const dataOwner = randomUUID(); const registration = { version: 1, app, incarnation, actionId: incarnation + ':1', registrationGeneration: randomUUID() };
@@ -96,17 +98,37 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     const worker = consumerReady.nodes.find((node) => node.name === 'worker'); assert.equal(worker.ready.kind, 'running');
     const workerInspect = await api.request('GET', '/services/' + worker.ready.native.id); assert.equal(workerInspect.status, 200);
     assert.deepEqual(workerInspect.value.Spec.TaskTemplate.Networks.map((network) => network.Target), [grant.id]);
+    const candidateChecked = parseManagedApplicationPlan({ ...plan, commit: 'f'.repeat(40), services: { ...plan.services, worker: { ...plan.services.worker, command: ['--eval', 'const release="candidate";process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000)'] } } }); assert.ok(candidateChecked.ok); const candidate = candidateChecked.value;
+    const candidateAction = { app, service: 'worker', incarnation, dataOwner, action: incarnation + ':3', effect: 'apply', plan: managedServiceDigest(candidate.services.worker), deadline: Date.now() + 90000 };
+    assert.ok(['acknowledged', 'uncertain'].includes(await serviceRuntime.apply(candidateAction, worker.ready.native, candidate.services.worker, serviceInputs(candidate.services.worker))));
+    const candidateNative = await wait(async () => { const value = await serviceRuntime.observeDesired(candidateAction, candidate.services.worker, serviceInputs(candidate.services.worker)); return convergedService(candidateAction, value) ? value : false; }, candidateAction.deadline, 'candidate worker');
+    const compensationPath = join(path, 'compensation'); await mkdir(compensationPath, { mode: 0o700 }); compensationJournal = await openJournal(compensationPath);
+    let interruptRestore = true; const fenceTasks = [];
+    const compensationPorts = { ...consumerPorts, services: { ...consumerPorts.services, apply: async (...args) => { if (interruptRestore) { interruptRestore = false; throw new Error('fixture interruption before restore transport'); } return consumerPorts.services.apply(...args); },
+      fence: async (action, expected) => {
+        const before = await serviceRuntime.observe({ app, service: 'worker', incarnation, dataOwner }); assert.equal(before.status, 'owned'); const ids = before.tasks.filter((task) => task.desired === 'running' && task.state === 'running').map((task) => task.id); assert.equal(ids.length, 1);
+        const result = await serviceRuntime.fence(action, expected);
+        const after = await wait(async () => { const value = await serviceRuntime.observe({ app, service: 'worker', incarnation, dataOwner }); return value.status === 'owned' && value.version > expected.version ? value : false; }, action.deadline, 'metadata fence');
+        assert.deepEqual(after.tasks.filter((task) => task.desired === 'running' && task.state === 'running').map((task) => task.id), ids); fenceTasks.push(ids[0]); return result;
+      } } };
+    let compensation = managedServiceCompensation(compensationJournal, compensationPorts);
+    const recovery = await compensation.prepare(candidate, plan, { ...candidateAction, plan: managedServiceDigest(plan.services.worker), effect: 'restore', deadline: Date.now() + 90000 }, worker.ready.native, [worker.ready.native, { id: candidateNative.id, version: candidateNative.version }]);
+    await compensation.tick(); await compensation.tick(); const uncertain = await compensation.read(); assert.equal(uncertain.attempts[0].phase, 'observing');
+    await compensationJournal.close(); compensationJournal = await openJournal(compensationPath, 'existing'); compensation = managedServiceCompensation(compensationJournal, compensationPorts);
+    const restored = await wait(async () => { const state = await compensation.tick(); assert.notEqual(state.phase, 'held'); return state.phase === 'complete' ? state : false; }, recovery.action.deadline, 'reopened compensation');
+    assert.equal(restored.action.deadline, recovery.action.deadline); assert.equal(restored.attempts.length, 2); assert.equal(restored.fences.length, 1); assert.equal(fenceTasks.length, 1);
+    assert.equal(JSON.stringify(await compensationJournal.read()).includes('synthetic-group-private-value'), false);
     await pause(200); finished = true; eventProcess.kill('SIGTERM'); await eventExit; assert.equal(eventError, undefined); assert.equal(partial, '');
     const migrationContainer = ready.sequence.steps[0].attempts[0].execution.container;
     const migrationStarts = events.filter((event) => event.Action === 'start' && event.Actor?.ID === migrationContainer).length; assert.equal(migrationStarts, 1);
     const dependencyStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === database.ready.native.id).length; assert.equal(dependencyStarts, 1);
-    const workerStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === worker.ready.native.id).length; assert.equal(workerStarts, 1);
-    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
-      consumerDeadline: consumerReady.deadline, workerStarts, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
+    const workerStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === worker.ready.native.id).length; assert.equal(workerStarts, 3);
+    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout, injected pre-transport restore interruption, metadata fencing and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
+      consumerDeadline: consumerReady.deadline, workerStarts, workerCandidateAndRestoreStarts: 2, compensationAttempts: restored.attempts.length, metadataFencePreservedTask: fenceTasks.length === 1, originalRecoveryDeadline: restored.action.deadline, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
     await writeFile(join(path, 'result.json'), JSON.stringify(result, null, 2)); await writeFile(join(output, 'managed-group.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(path, 'failure.json'), JSON.stringify({ error: String(error), stack: error.stack }, null, 2)); throw error; }
   finally {
-    if (consumerJournal) await consumerJournal.close(); if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
+    if (compensationJournal) await compensationJournal.close(); if (consumerJournal) await consumerJournal.close(); if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
     await writeFile(join(path, 'events.json'), JSON.stringify(events, null, 2)); await writeFile(join(path, 'requests.json'), JSON.stringify(requests, null, 2));
     await writeFile(join(path, 'event-observer.json'), JSON.stringify({ complete: eventError === undefined && partial === '', error: eventError ?? null }));
   }

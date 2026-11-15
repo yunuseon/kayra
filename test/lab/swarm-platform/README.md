@@ -1608,3 +1608,13 @@ retaining exact nonempty arrays; a regression also rejects undeclared environmen
 entries. This failed run is preserved with native service/container snapshots,
 journals, registry RAM contents and a SHA-256 manifest. The VM is stopped after
 archiving RAM state and confirming no active observer/coordinator.
+
+The corrected native group run at `2bdbcdf` passed retained startup and its
+private-DNS migration after reopening the parent journal. The live event stream
+recorded one dependency start and one migration start; the retained ledger held
+one stable operation ID. Startup/migration deadlines survived reopen, and the
+journal held no materialized secret value. Successful VM
+`kayra-volume-lab-20261115185513728940` was destroyed. Private exact-source,
+clock, API/event, receipt and journal evidence has a SHA-256 manifest. This is
+fixture-authorized preparation with an HTTP ledger, not indexed admission,
+SIGKILL, SQL or complete group rollout acceptance.

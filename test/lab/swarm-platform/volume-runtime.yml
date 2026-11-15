@@ -108,6 +108,19 @@
         flat: true
       when: volume_state_probe | default(false) | bool
 
+    - name: Verify platform-owned private app overlay provisioning
+      ansible.builtin.command:
+        argv: ["{{ volume_source.path }}/node", "{{ volume_source.path }}/test/lab/swarm-platform/app-overlay.mjs", "{{ volume_node_image }}", "{{ volume_source.path }}/results"]
+      changed_when: true
+      when: app_overlay_probe | default(false) | bool
+
+    - name: Retain native app overlay policy evidence
+      ansible.builtin.fetch:
+        src: "{{ volume_source.path }}/results/app-overlay.json"
+        dest: "{{ report_path }}.app-overlay.json"
+        flat: true
+      when: app_overlay_probe | default(false) | bool
+
     - name: Require synchronized clocks after native writes
       ansible.builtin.command:
         argv: [date, "+%s"]

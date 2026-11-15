@@ -15,7 +15,7 @@ const declaration = {
   inputs: { version: 1, registration, configurationIdentity: "sha256:" + "b".repeat(64), environment: { PASSWORD: { kind: "secret", key: "DATABASE_PASSWORD" } } },
   command: null, entrypoint: null, resources: { memoryBytes: 134217728, reserveMemoryBytes: 67108864, nanoCpus: 250000000, reserveNanoCpus: 125000000 },
   health: { command: ["/health"], intervalSeconds: 2, timeoutSeconds: 1, startPeriodSeconds: 20, retries: 2 }, stopGraceSeconds: 30,
-  host: { node: "a".repeat(25), cluster: "b".repeat(25), routingNetwork: "c".repeat(25) }, privateNetwork: { id: "d".repeat(25), name: `kayra-app-${owner.incarnation}` },
+  host: { node: "a".repeat(25), cluster: "b".repeat(25), routingNetwork: null }, privateNetwork: { id: "d".repeat(25), name: `kayra-app-${owner.incarnation}` },
   mounts: [{ volume: volume.value, createdAt: "2026-11-14T20:00:00Z", target: "/var/lib/database", readOnly: false, noCopy: true }], dependencies: [],
 };
 const checked = parseManagedServicePlan(declaration); assert.ok(checked.ok); const previous = checked.value;
@@ -31,7 +31,7 @@ test("managed service plan binds exact owner, incarnation, input generation, ima
 test("managed runtime plan rejects foreign ownership, floating images, unsupported fields and contradictory roles", () => {
   for (const changed of [
     { image: "localhost:5000/other/database@sha256:" + "a".repeat(64) }, { image: "localhost:5000/shop/database:latest" }, { resolvedSecrets: { PASSWORD: "private" } },
-    { nativeName: "existing-workload" }, { privateNetwork: { ...declaration.privateNetwork, name: "platform-swarm" } }, { privateNetwork: { ...declaration.privateNetwork, id: declaration.host.routingNetwork } },
+    { nativeName: "existing-workload" }, { privateNetwork: { ...declaration.privateNetwork, name: "platform-swarm" } }, { role: "http", overlap: "allowed", host: { ...declaration.host, routingNetwork: declaration.privateNetwork.id } },
     { inputs: { ...declaration.inputs, registration: { ...registration, app: "other" } } }, { overlap: "allowed" }, { overlap: "coordinated" }, { handoffCheck: "fake-check" },
     { resources: { ...declaration.resources, reserveMemoryBytes: 268435456 } }, { health: { ...declaration.health, timeoutSeconds: 3 } },
     { mounts: [{ ...declaration.mounts[0], createdAt: "not-a-receipt" }] }, { mounts: [{ ...declaration.mounts[0], target: "/host/../data" }] },

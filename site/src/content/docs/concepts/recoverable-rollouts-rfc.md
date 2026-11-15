@@ -1423,3 +1423,27 @@ creation authority expires. It cannot update the journal, unhold an operation,
 refresh the original deadline or issue a native effect. Group reconciliation,
 current volume checks, lifecycle fencing and indexed admission remain required
 before this primitive can enable retained application workloads.
+
+### Platform-owned private application overlay
+
+Every richer Swarm application uses a platform-selected private overlay scoped
+to its app incarnation. Apps keep the implicit Compose network and logical
+service dependencies; they cannot choose host, shared routing or foreign app
+networks. HTTP joins both its private overlay and the platform routing overlay;
+workers, singletons and retained dependencies join only the private overlay.
+Only HTTP specifications pin the routing-overlay ID. A retained dependency must
+not acquire an immutable dependency on infrastructure it does not use.
+
+Platform policy derives the overlay request from verified registration/runtime
+and host authority references, and persists the action and resulting physical
+grant before admitting workload plans. The runtime port validates single-node
+manager identity, fixed overlay policy and exact ownership labels. Duplicate
+matching names are ambiguous and block selection. The port has no network
+prune/delete operation or workload orchestration.
+
+An initial uncertain create is followed by observation rather than blind retry.
+A stored grant pins its exact network ID: absence or replacement blocks ordinary
+provisioning instead of silently recreating infrastructure for live workloads.
+These helper interfaces still require registration-publication wiring, durable
+grant storage and lifecycle cleanup before the richer workload capability can
+be enabled. They confer no app-selected infrastructure authority.

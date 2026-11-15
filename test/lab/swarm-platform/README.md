@@ -1384,3 +1384,42 @@ or permission to start workloads. The controller never deletes volumes or
 starts consumers. Post-deadline inspection is separately bounded and read-only.
 This is isolated component recovery, not indexed admission, retained dependency
 or app data-retention/rollback/removal/purge acceptance.
+
+### Platform-owned private application overlay
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --app-overlay
+```
+
+Platform policy selects an incarnation-scoped overlay from operator registration
+and host authority. A runtime port creates it under fixed overlay policy and
+normalizes observations. It refuses foreign or duplicate matching names and has
+no prune/delete or workload orchestration operation. A stored grant pins its
+physical ID; missing or replaced infrastructure is refused without recreation.
+Only HTTP service plans reference the separate routing overlay. Retained
+services therefore do not pin HTTP routing infrastructure they never use.
+
+Fresh native acceptance passed at `c1ad6e6` in
+`kayra-volume-lab-20261115013611178943`; the successful VM was destroyed. The
+probe verified distinct private/routing IDs, repeated provisioning without a
+second Create, an attachable container on the exact granted ID, missing-grant
+refusal without recreation, and foreign ownership refusal. Exact sources,
+clock gates, raw network snapshots/API identities, versions and results are in
+`.cache/lab-evidence/kayra-app-overlay-retry-20261115013611/` with a SHA-256
+manifest. Full root checks passed (767 passed, 2 skipped), as did typecheck,
+build, lint and Node/Python/Ansible/YAML checks.
+
+The first native run remains failed in stopped
+`kayra-volume-lab-20261114223125150255`, with frozen source at
+`/tmp/kayra-volume-source-2jwxx6x7` and private evidence at
+`.cache/lab-evidence/kayra-app-overlay-20261114223125/`. Its immediate read after
+Create acknowledgement did not establish a grant; later exact-scope reads were
+owned. The original transient raw response was not captured, so its exact field
+cannot be identified retrospectively. The corrected probe records raw network
+snapshots. Platform policy now reconciles post-create observations under one
+original absolute deadline and elapsed-time bound, without another Create or
+weaker ownership validation. A hung/late observer cannot renew authority.
+
+This is isolated platform-policy/runtime evidence. Registration publication,
+durable grant storage, richer service rendering, group admission and lifecycle
+cleanup are not enabled by this helper.

@@ -1562,3 +1562,11 @@ barrier run. A regression assertion now checks the exact scope keys. Raw results
 native snapshots and the fixture registry's RAM-only state are archived privately
 with source hashes and a SHA-256 manifest. The failed VM and frozen source remain
 preserved; the VM is stopped after checking for active observers/coordinators.
+
+The fresh corrected run at `64742ec` passed the managed barrier's removal,
+draining, journal reopen and scrubbing under its original deadline. The old
+service name fenced a delayed create; both fixture incarnations had one Start
+event and retained data matched its receipt. Successful VM
+`kayra-volume-lab-20261115142459792209` was destroyed. Its private source, clock,
+request/event/spec and journal evidence has a SHA-256 manifest. This remains
+fixture authorization and journal reopen, not indexed group/SIGKILL acceptance.

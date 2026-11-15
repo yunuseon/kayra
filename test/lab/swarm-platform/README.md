@@ -1717,3 +1717,17 @@ and zero initial-state handling without interpreting either as execution proof.
 The failed VM is stopped and preserved after separately verifying its results,
 journals/events/API, registry RAM, service/container/process snapshots and native
 initial ExecInspect response. Private evidence has a SHA-256 manifest.
+
+The corrected check run at `7c66556`, VM
+`kayra-volume-lab-20261115230808817172`, passed and the VM was destroyed. After
+journal reopening, the declared app inspector verified its existing read-only
+owned mount and the worker verified its inherited granted environment and stable
+check identity. Both checks retained known exit zero and their original execution
+deadlines. A fast check whose Start acknowledgement was deliberately hidden held
+as `unknown-start`; it was not repeated or misclassified as successful. The live
+event stream recorded one Start per check exec ID. Private exact-source,
+API/events/clock/journal evidence has a SHA-256 manifest. Normal check/singleton
+integration, indexed admission, active-release publication and SIGKILL acceptance
+remain pending. Unknown or running checks require the pinned container to be
+fenced before lifecycle settlement; service metadata fences alone cannot settle
+an Exec Start.

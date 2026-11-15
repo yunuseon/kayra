@@ -1450,3 +1450,24 @@ journals, request/event logs, clock checks, source hashes and summary are retain
 under `.cache/lab-evidence/kayra-volume-lab-20261115113422548241/` with a SHA-256
 manifest. Later registered-record-loss guards have local regression coverage;
 the native probe exercises the allocation component, not that registration seam.
+
+### Native adapter command acknowledgements
+
+The native adapter probe accepts `acknowledged` or `uncertain` for a dispatched
+write, then requires the exact action, effect and plan to be observed with its
+required postconditions before the original action deadline. It never retries
+the write. Stale-version rejection assertions remain strict. Request status and
+duration metadata accompany both success and failure, without request bodies or
+resolved environment values.
+
+The full upgrade attempt `kayra-infra-upgrade-20261115114517` at `f7b3149`
+passed baseline Compose upgrade, TLS/auth, caching, policy, restore, rollback,
+GC, polling and mixed discovery before its native adapter fixture failed on an
+`uncertain` removal acknowledgement. The preserved service snapshot contains the
+requested action-5 removal tombstone; Docker also logged an out-of-sequence
+update response. The original raw API response was not captured, so the exact
+client uncertainty cause is not established. This run did not reach the new
+registration handoff and is not a passing acceptance result. The VM, fleet and
+frozen source are preserved, the VM is stopped after confirming no active runs,
+and private raw evidence is under
+`.cache/lab-evidence/kayra-infra-upgrade-20261115114517/` with a SHA-256 manifest.

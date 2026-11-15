@@ -12,7 +12,15 @@ const [{ parseApplicationPlan }, { swarmRouting }, { dockerApi }, { swarmService
   import(new URL('server/runtime/docker-api.ts', sourceRoot)), import(new URL('server/runtime/swarm-service.ts', sourceRoot)),
 ]);
 
-const api = dockerApi();
+const transport = dockerApi(); const requests = []; const writes = [];
+const api = { request: async (...args) => {
+  assert.ok(requests.length < 4096, 'native adapter request evidence bound');
+  const started = Date.now();
+  try { const reply = await transport.request(...args); requests.push({ at: started, durationMs: Date.now() - started, method: args[0], path: args[1], status: reply.status }); return reply; }
+  catch (error) { requests.push({ at: started, durationMs: Date.now() - started, method: args[0], path: args[1], status: null }); throw error; }
+} };
+const acceptedWrite = (stage, answer) => { writes.push({ stage, answer }); assert.ok(answer === 'acknowledged' || answer === 'uncertain', `${stage} write refused: ${answer}`); };
+const matchesAction = (value, action) => value.status === 'owned' && value.action === action.action && value.plan === action.plan && value.effect === action.effect;
 const adapter = swarmService(api);
 const app = 'native-lab-' + randomUUID().slice(0, 8);
 const incarnation = randomUUID();
@@ -20,8 +28,7 @@ const name = `kayra-${app}--web`;
 let serviceId;
 let secondaryId;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const wait = async (predicate, description) => {
-  const deadline = Date.now() + 90_000;
+const wait = async (predicate, description, deadline = Date.now() + 90_000) => {
   while (Date.now() < deadline) {
     const value = await predicate();
     if (value) return value;
@@ -76,39 +83,38 @@ try {
   };
   const a = compile('A'); const b = compile('B');
   const initial = action(2, a);
-  assert.equal(await adapter.apply(initial, null, a, { RELEASE: 'A', TOKEN: 'fixture-private-value' }, swarmRouting(a)), 'acknowledged');
-  const before = await wait(() => healthy(initial.plan), 'healthy A');
+  acceptedWrite('initial', await adapter.apply(initial, null, a, { RELEASE: 'A', TOKEN: 'fixture-private-value' }, swarmRouting(a)));
+  const before = await wait(async () => { const value = await healthy(initial.plan); return value && matchesAction(value, initial) ? value : false; }, 'healthy A', initial.deadline);
   const verifiedA = await adapter.observeDesired(initial, a, { RELEASE: 'A', TOKEN: 'fixture-private-value' }, swarmRouting(a));
   assert.equal(verifiedA.status, 'owned'); assert.equal(verifiedA.specMatches, true);
   await wait(async () => await routed().catch(() => false) === 200, 'TLS routing A');
   const originalTasks = before.tasks.filter((task) => task.desired === 'running').map((task) => task.id);
-  assert.equal(await adapter.fence(action(3, a, "fence"), version(before)), 'acknowledged');
-  await pause(2000);
-  const fenced = await observe(); assert.equal(fenced.status, 'owned');
+  const fencing = action(3, a, "fence"); acceptedWrite('fence', await adapter.fence(fencing, version(before)));
+  const fenced = await wait(async () => { const value = await observe(); return matchesAction(value, fencing) ? value : false; }, 'metadata fence', fencing.deadline);
   assert.ok(fenced.version > before.version);
   assert.deepEqual(fenced.tasks.filter((task) => task.desired === 'running').map((task) => task.id), originalTasks);
   assert.equal(await adapter.apply(action(4, b), version(before), b, { RELEASE: 'B', TOKEN: 'fixture-private-value' }, swarmRouting(b)), 'uncertain');
   assert.equal((await observe()).taskPlan, initial.plan);
   const update = action(4, b);
-  assert.equal(await adapter.apply(update, version(fenced), b, { RELEASE: 'B', TOKEN: 'fixture-private-value' }, swarmRouting(b)), 'acknowledged');
+  acceptedWrite('replacement', await adapter.apply(update, version(fenced), b, { RELEASE: 'B', TOKEN: 'fixture-private-value' }, swarmRouting(b)));
   const replaced = await wait(async () => {
     const value = await healthy(update.plan);
-    return value && value.update === 'completed' ? value : false;
-  }, 'healthy completed B');
+    return value && matchesAction(value, update) && value.update === 'completed' ? value : false;
+  }, 'healthy completed B', update.deadline);
   assert.equal(await routed(), 200);
   const verifiedB = await adapter.observeDesired(update, b, { RELEASE: 'B', TOKEN: 'fixture-private-value' }, swarmRouting(b));
   assert.equal(verifiedB.status, 'owned'); assert.equal(verifiedB.specMatches, true);
   const tombstone = action(5, b, "remove");
-  assert.equal(await adapter.tombstone(tombstone, version(replaced), image), 'acknowledged');
+  acceptedWrite('removal', await adapter.tombstone(tombstone, version(replaced), image));
   const terminal = new Set(['shutdown', 'complete', 'failed', 'rejected', 'remove', 'orphaned']);
   const removed = await wait(async () => {
     const value = await observe();
-    return value.status === 'owned' && value.tombstone && value.replicas === 0 && value.tasks.every((task) => terminal.has(task.state)) ? value : false;
-  }, 'empty native tombstone');
+    return matchesAction(value, tombstone) && value.tombstone && value.replicas === 0 && value.tasks.every((task) => terminal.has(task.state)) ? value : false;
+  }, 'empty native tombstone', tombstone.deadline);
   let raw = (await api.request('GET', `/services/${serviceId}`)).value;
   const previousSpecRetainedInputs = JSON.stringify(raw.PreviousSpec).includes('fixture-private-value');
-  assert.equal(await adapter.tombstone({ ...tombstone, effect: "scrub" }, version(removed), image), 'acknowledged');
-  const sealed = await observe();
+  const scrubbing = { ...tombstone, effect: "scrub" }; acceptedWrite('scrub', await adapter.tombstone(scrubbing, version(removed), image));
+  const sealed = await wait(async () => { const value = await observe(); return matchesAction(value, scrubbing) && value.retainedInputsCleared ? value : false; }, 'scrubbed native tombstone', scrubbing.deadline);
   assert.equal(sealed.status, 'owned');
   assert.equal(sealed.retainedInputsCleared, true);
   raw = (await api.request('GET', `/services/${serviceId}`)).value;
@@ -118,8 +124,8 @@ try {
   assert.equal(raw.Endpoint?.VirtualIPs?.length ?? 0, 0);
   assert.equal(removed.endpoint, 'dnsrr');
   const recreate = action(6, a);
-  assert.equal(await adapter.apply(recreate, version(sealed), a, { RELEASE: 'A', TOKEN: 'fixture-private-value' }, swarmRouting(a)), 'acknowledged');
-  const restored = await wait(() => healthy(recreate.plan), 'recreated A');
+  acceptedWrite('recreation', await adapter.apply(recreate, version(sealed), a, { RELEASE: 'A', TOKEN: 'fixture-private-value' }, swarmRouting(a)));
+  const restored = await wait(async () => { const value = await healthy(recreate.plan); return value && matchesAction(value, recreate) ? value : false; }, 'recreated A', recreate.deadline);
   assert.equal(restored.id, removed.id);
   assert.equal(await adapter.tombstone(action(7, a, "remove"), version(sealed), image), 'uncertain');
   assert.equal((await observe()).taskPlan, recreate.plan);
@@ -130,8 +136,8 @@ try {
   assert.ok(pending.ok);
   const lateCreate = { ...action(8, pending.value), service: 'pending' };
   const cancelCreate = { ...lateCreate, action: `${incarnation}:9`, effect: 'remove' };
-  assert.equal(await adapter.tombstone(cancelCreate, null, image), 'acknowledged');
-  const reservedName = await adapter.observe({ ...scope, service: 'pending' });
+  acceptedWrite('pending-name', await adapter.tombstone(cancelCreate, null, image));
+  const reservedName = await wait(async () => { const value = await adapter.observe({ ...scope, service: 'pending' }); return matchesAction(value, cancelCreate) && value.replicas === 0 && value.retainedInputsCleared ? value : false; }, 'reserved pending name', cancelCreate.deadline);
   assert.equal(reservedName.status, 'owned'); secondaryId = reservedName.id;
   assert.equal(reservedName.replicas, 0);
   assert.equal(reservedName.retainedInputsCleared, true);
@@ -147,8 +153,8 @@ try {
   console.log(JSON.stringify({ app, engine: engine.Version, api: engine.ApiVersion, image,
     tlsRouting: true, exactSpecVerified: true, metadataFencePreservedTasks: true, staleReplacementRefused: true,
     completedReplacement: true, tombstoneClearedInputsAndVip: true, previousSpecRetainedInputs, tombstoneHistoryScrubbed: true, recreationKeptServiceId: true,
-    staleRemovalRefused: true, delayedFirstCreateFenced: true, observedPrivateValues: JSON.stringify(restored).includes('fixture-private-value') }));
+    staleRemovalRefused: true, delayedFirstCreateFenced: true, observedPrivateValues: JSON.stringify(restored).includes('fixture-private-value'), writes, requests }));
 } catch (error) {
-  console.error(JSON.stringify({ app, serviceId, error: String(error), cleanup: `docker service rm ${serviceId ?? name}`, extraCleanup: secondaryId === undefined ? null : `docker service rm ${secondaryId}` }));
+  console.error(JSON.stringify({ app, serviceId, error: String(error), stack: error instanceof Error ? error.stack : null, writes, requests, cleanup: `docker service rm ${serviceId ?? name}`, extraCleanup: secondaryId === undefined ? null : `docker service rm ${secondaryId}` }));
   process.exitCode = 1;
 }

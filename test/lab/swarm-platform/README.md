@@ -1639,3 +1639,23 @@ includes the exact frozen file manifest and archive (including an unused work in
 progress compensation module), API requests, events, journals and clock checks,
 with a SHA-256 manifest. This establishes fixture-authorized component behavior,
 not indexed admission, SIGKILL, HTTP continuity or full application recovery.
+
+The current managed group fixture also performs a bounded worker compensation
+probe after startup. It updates the worker to a candidate, records restore intent,
+injects interruption before that restore reaches the transport, and reopens the
+journal. Recovery must use a metadata-only CAS fence without changing the running
+task, then verify a new restore identity against the immutable previous context.
+Live events must show exactly the initial, candidate and restored worker starts;
+no capacity release, indexed admission, HTTP continuity or whole-application
+compensation is established by this component probe.
+
+The native compensation probe at `79569f6` passed in fresh VM
+`kayra-volume-lab-20261115210411279754`, which was destroyed. The live event stream
+recorded exactly three worker starts (initial, candidate, restored), one dependency
+start and one migration start. After injected interruption before restore
+transport, reopening preserved the original recovery deadline, a metadata fence
+preserved the running task identity, and restore attempt 2 converged beyond the
+pending versions. No materialized synthetic secret was in the journals. Private
+exact-source, API/event, clock and journal evidence has a SHA-256 manifest. This
+is a fixture-authorized injected interruption, not SIGKILL, indexed admission,
+whole-application recovery or HTTP continuity acceptance.

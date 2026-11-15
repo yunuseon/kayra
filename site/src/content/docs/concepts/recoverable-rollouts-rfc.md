@@ -1465,3 +1465,15 @@ command/read model instead of reading deployment files. Existing reserve replies
 remain unchanged, and the existing privileged process/control listener carries
 this additional internal read. Platform publication still needs to validate and
 persist the resulting infrastructure grant before richer plans can consume it.
+
+The initial Swarm host publisher now obtains this reference after submit and
+writes `ownership.json` into the same immutable public generation before sealing
+it and replacing the current pointer. The root observer validates its complete
+scope and permissions. A publication retry requires the same owner; missing or
+changed ownership cannot be acknowledged as that publication. Compose snapshots
+retain their previous file set. Older snapshots remain readable, while the new
+ownership reader explicitly refuses absent ownership rather than inferring it.
+The reader uses the expected immutable registration generation and never follows
+a newer current pointer. These references still confer no infrastructure or
+resource admission authority. Physical overlay grants and managed workload
+admission remain separate, pending integration work.

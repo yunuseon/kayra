@@ -206,3 +206,24 @@ lost acknowledgements, plan corruption, expired admission and SIGKILL after the
 native intent is durable. Recovery returns `reconcile` and cannot refresh the
 Docker version. These tests do not dispatch a native write or promote a release;
 those paths remain subsequent integration work.
+
+## Ownership publication
+
+On an ARM64 Multipass host with the locked npm dependencies installed:
+
+```bash
+python3 test/lab/registration-generation/ownership-lab.py [--keep]
+```
+
+The runner freezes the relevant sources, runs the root filesystem suite and the
+TypeScript ownership reader on a fresh Ubuntu 24.04 VM (2 CPUs, 4 GB RAM, 20 GB
+disk), and records exact source hashes and versions under the private
+`.cache/lab-evidence/` directory. It downloads pinned Node 24.22.1 and verifies
+the distribution checksum. It uses no Docker context. Successful VMs and frozen
+temporary sources are removed unless `--keep` is supplied. Failures preserve
+both and print a command that removes only that VM after inspection.
+
+The ownership checks cover scoped publication, unchanged retry identity, lost
+pointer acknowledgement, missing/changed owner refusal and strict root-owned
+reader permissions. They do not replace the full platform upgrade lab or
+establish volume/network admission and application rollout behavior.

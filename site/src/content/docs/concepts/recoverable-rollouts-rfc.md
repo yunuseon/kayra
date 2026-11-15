@@ -1444,9 +1444,9 @@ prune/delete operation or workload orchestration.
 An initial uncertain create is followed by observation rather than blind retry.
 A stored grant pins its exact network ID: absence or replacement blocks ordinary
 provisioning instead of silently recreating infrastructure for live workloads.
-These helper interfaces still require registration-publication wiring, durable
-grant storage and lifecycle cleanup before the richer workload capability can
-be enabled. They confer no app-selected infrastructure authority.
+Initial registration now uses these interfaces with durable grant storage and
+immutable publication. Lifecycle cleanup and managed workload admission remain
+required before the richer workload capability can be enabled. They confer no app-selected infrastructure authority.
 
 ### Initial registration ownership read model
 
@@ -1463,8 +1463,9 @@ physical allocation grants. It does not authorize network/volume creation,
 workloads or resource admission. The platform consumes the normal component
 command/read model instead of reading deployment files. Existing reserve replies
 remain unchanged, and the existing privileged process/control listener carries
-this additional internal read. Platform publication still needs to validate and
-persist the resulting infrastructure grant before richer plans can consume it.
+this additional internal read. Platform publication validates and persists the
+resulting infrastructure grant; richer-plan admission must independently verify
+its ownership and current native evidence.
 
 The initial Swarm host publisher now obtains this reference after submit and
 writes `ownership.json` into the same immutable public generation before sealing
@@ -1494,9 +1495,9 @@ Restart observes a possibly created overlay and preserves the original identity
 and deadline. An expired intent may only acquire fresh read evidence, never a new
 creation deadline. Recorded physical network IDs remain pinned: missing or
 replaced networks block provisioning. This internal command runs in the existing
-privileged process and creates no additional socket holder or listener. It is
-not yet called by the registration publisher and grants no workload admission;
-immutable infrastructure-grant publication and lifecycle cleanup remain required
+privileged process and creates no additional socket holder or listener. The initial Swarm registration publisher calls this platform command and
+publishes its physical grant before registration reconciliation. This grants no
+workload admission; lifecycle cleanup and managed-plan admission remain required
 before enabling managed service groups.
 
 The coordinator additionally publishes whether the scoped registration is still
@@ -1506,3 +1507,16 @@ Registered applications require existing allocation storage; absent storage is
 an intervention condition, including older registrations that predate this path.
 The platform obtains this state through a typed lifecycle read and never opens
 private deployment records.
+
+
+### Immutable registration infrastructure references
+
+New initial Swarm registrations publish `infrastructure.json` alongside the owner
+reference in their immutable public generation. The platform command supplies the
+physical overlay ID; app inputs cannot supply it. Publication and retry validation
+bind its app/incarnation scope and exact owner. The reader requires the expected
+registration generation, strict root-owned files, matching owner publication and
+the selected node/cluster. It refuses the shared routing network as a private
+network. Older snapshots remain readable but cannot supply inferred grants. This
+reference is metadata: admission still requires current lifecycle authority,
+resource reservations and native observations. Compose publication is unchanged.

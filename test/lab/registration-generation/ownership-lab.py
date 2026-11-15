@@ -20,7 +20,7 @@ source=pathlib.Path(tempfile.mkdtemp(prefix='kayra-ownership-source-'))
 paths=[root/'scripts/server-lib/registration_generation.py',root/'scripts/server-lib/registration_command.py',root/'package.json',root/'ci/tests/swarm-host/authority.json',pathlib.Path(__file__).resolve()]
 for directory in ['cli/src','node_modules/zod','ci/tests/registration-generation']:
     paths.extend(p for p in (root/directory).rglob('*') if p.is_file() and '__pycache__' not in p.parts)
-paths.extend(root/p for p in ['cli/test/deployment/registration-ownership-publication.test.ts'])
+paths.extend(root/p for p in ['cli/test/deployment/registration-ownership-publication.test.ts', 'cli/test/deployment/registration-infrastructure.test.ts'])
 manifest={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 archive=source/'source.tar'
 with tarfile.open(archive,'w') as tar:
@@ -42,7 +42,7 @@ try:
     run(['multipass','exec',name,'--','sudo','tar','-xf','/home/ubuntu/source.tar','-C','/opt/ownership-lab'])
     run(['multipass','exec',name,'--','sudo','python3','-B','/opt/ownership-lab/ci/tests/registration-generation/test_generation.py'])
     run(['multipass','exec',name,'--','bash','-c','cd /home/ubuntu && curl -fsSLO https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-arm64.tar.xz && curl -fsSLO https://nodejs.org/dist/v24.22.1/SHASUMS256.txt && sha256sum --check --ignore-missing SHASUMS256.txt && tar -xf node-v24.22.1-linux-arm64.tar.xz'])
-    run(['multipass','exec',name,'--','sudo','/home/ubuntu/node-v24.22.1-linux-arm64/bin/node','--test','/opt/ownership-lab/cli/test/deployment/registration-ownership-publication.test.ts'])
+    run(['multipass','exec',name,'--','sudo','/home/ubuntu/node-v24.22.1-linux-arm64/bin/node','--test','/opt/ownership-lab/cli/test/deployment/registration-ownership-publication.test.ts','/opt/ownership-lab/cli/test/deployment/registration-infrastructure.test.ts'])
     version=run(['multipass','exec',name,'--','bash','-c','cat /etc/os-release; uname -a; python3 --version; /home/ubuntu/node-v24.22.1-linux-arm64/bin/node --version'])
     (evidence/'environment.txt').write_text(version)
     run(['multipass','info',name,'--format','json'])

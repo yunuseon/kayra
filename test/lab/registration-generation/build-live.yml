@@ -94,6 +94,34 @@
           - (selected_policy.stdout | from_json).metadata == (pointer.content | b64decode | from_json)
         quiet: true
 
+    - name: Read the published private-overlay grant through the platform reader
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - deployer
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import { text } from 'node:stream/consumers';
+            import { readRegistrationInfrastructure } from '/opt/kayra/server/platform/registration-infrastructure.ts';
+            import { readSwarmAuthority } from '/opt/kayra/server/platform/swarm-authority.ts';
+            const expected = JSON.parse(await text(process.stdin));
+            const host = await readSwarmAuthority(process.env.KAYRA_SWARM_AUTHORITY);
+            if (!host.ok) throw new Error('host authority unavailable');
+            const reference = await readRegistrationInfrastructure(process.env.KAYRA_PUBLIC_REGISTRATIONS_DIR, expected, host.value);
+            if (!reference.ok) throw new Error(reference.error);
+            console.log(JSON.stringify(reference.value));
+        stdin: "{{ pointer.content | b64decode }}"
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: published_infrastructure
+      changed_when: false
+      when: build_registration.runtime == 'swarm'
+
     - name: Build and validate the bundle inside the deployer
       ansible.builtin.command:
         argv:
@@ -179,6 +207,33 @@
               - (recovered_build.stdout | from_json).artifact is match('^[0-9a-f]{64}$')
               - (recovered_build.stdout | from_json).registration == (pointer.content | b64decode | from_json)
             quiet: true
+        - name: Reconstruct the same platform grant after the real deployer restart
+          ansible.builtin.command:
+            argv:
+              - docker
+              - compose
+              - exec
+              - -T
+              - deployer
+              - kayra-deployer
+              - ctl
+              - platform
+              - app-overlay
+              - "{{ build_registration.name }}"
+              - "{{ (pointer.content | b64decode | from_json).registrationGeneration }}"
+              - "{{ (pointer.content | b64decode | from_json).actionId }}"
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          register: recovered_overlay
+          changed_when: false
+          when: build_registration.runtime == 'swarm'
+
+        - name: Require the original physical platform grant after restart
+          ansible.builtin.assert:
+            that: (recovered_overlay.stdout | from_json) == (published_infrastructure.stdout | from_json).overlay
+            quiet: true
+          when: build_registration.runtime == 'swarm'
+
         - name: Prove Swarm planning does not materialize secrets
           when: build_registration.runtime == 'swarm'
           block:

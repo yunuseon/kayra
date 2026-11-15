@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { dockerApi } from '../../../cli/src/server/runtime/docker-api.ts';
 import { registryImages } from '../../../cli/src/server/runtime/registry-images.ts';
 
-const [base, registryImage, output] = process.argv.slice(2); assert.ok(output);
+const [base, registryImage, output, managed] = process.argv.slice(2); assert.ok(output);
 assert.match(base, /^node:24\.22\.1-trixie-slim@sha256:[a-f0-9]{64}$/); assert.match(registryImage, /^registry:3\.1\.2@sha256:[a-f0-9]{64}$/);
 const label = 'image-admission-' + randomUUID(); const registry = label + '-registry'; const fixture = label + '-source';
 const app = 'image-lab'; const tagged = `localhost:5000/${app}/web:fixture`; const plain = `localhost:5000/${app}/plain:fixture`; const api = dockerApi();
@@ -71,6 +71,7 @@ try {
   const after = await identities(); assert.deepEqual(after, before);
   const result = { passed: true, scope: 'isolated real registry metadata and explicit mount coverage; not managed service rollout or volume-creation evidence', cases, inherited, noVolumes, inheritedVolumeTargets: Object.keys(inheritedVolumes), selectedNativeImages: { direct: directResolution, indexA: resolvedA, indexB: resolvedB }, registryImage, node: process.version, noContainerOrVolumeAllocationDuringAdmission: true };
   await writeFile(join(output, 'declared-images.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
+  if (managed === '--managed-service') await (await import('./managed-service.mjs')).probeManagedService(app, selectedPin, output);
   const logs = spawnSync('docker', ['logs', '--since', started, registry], { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 }); assert.equal(logs.status, 0);
   await writeFile(join(output, 'declared-images-registry.log'), logs.stdout + logs.stderr);
   docker('stop', '--time', '10', registry); docker('rm', registry);

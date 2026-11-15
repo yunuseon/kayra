@@ -1506,3 +1506,32 @@ mounts it only in the existing deployer. The lab requires that exact writable
 bind and verifies the same physical grant after replacing the deployer
 container. Platform namespace entries are synchronized before effect intent.
 The builder gets no platform-state mount, Docker access or application secrets.
+
+
+### Native managed workload storage probe
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --managed-service
+```
+
+This includes the real registry inspection fixture, then starts a retained
+service on an owned local volume and a private overlay. It verifies exact native
+specification/ownership, refuses an ordinary retained update, drains and scrubs
+the old service to an empty name barrier, and rejects a delayed old create.
+A distinct fixture incarnation then uses the same creation receipt and must read
+the retained write before incrementing its own start counter. A live Docker
+container-event stream must show one start for each service. This is fixture
+authorization/rebinding; it does not establish indexed lifecycle removal,
+recreation, resource admission or multi-service rollout correctness.
+
+
+The 2026-11-15 run at `9a60093` passed on Engine 29.9.3 / API 1.56 and Node
+24.22.1. Each fixture incarnation had one live container Start event; the old
+name barrier refused a delayed create, ordinary retained replacement performed
+no native write, and the reused volume kept its original receipt and start
+counter data. Successful VM `kayra-volume-lab-20261115132425426016` was destroyed.
+Private native specs, request/event traces, data receipt, clock checks and exact
+source/version evidence are under
+`.cache/lab-evidence/kayra-volume-lab-20261115132425426016/` with a SHA-256 manifest.
+This remains fixture authorization/rebinding rather than indexed lifecycle or
+application group rollout acceptance.

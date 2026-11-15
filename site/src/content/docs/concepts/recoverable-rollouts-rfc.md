@@ -1574,3 +1574,29 @@ builder has no mount. Composition synchronizes new allocation directory entries
 before journaling effect intent. Container replacement must retain original
 physical grants and deadlines, rather than relying on a writable container
 layer. The upgrade fixture checks the actual host bind and container recreation.
+
+
+### Native managed workload adapter
+
+The managed Swarm adapter consumes a single canonical service specification and
+persisted volume creation receipts. It reobserves the exact owned volume
+instances before a workload write and before desired-state verification. Native
+binds, driver options, privilege drift, extra mounts and unrelated ownership
+cannot satisfy that verification. Materialized values and receipt inputs are
+snapshotted before asynchronous observations and never returned in normalized
+runtime observations.
+
+Private DNS aliases use the logical service name in the incarnation-owned
+overlay. Only HTTP services join the platform routing overlay, under generated
+platform routing policy. Declared forbidden overlap maps to stop-first;
+allowed/coordinated overlap maps to start-first with the fixed 30-second monitor.
+Existing retained dependencies reject ordinary replacement through this adapter;
+initial creation and lifecycle fencing/tombstoning are distinct operations.
+
+Both HTTP and managed adapters share the runtime-internal owned-service primitive
+for ownership checks, exact version CAS, bounded effects, observations and empty
+name barriers. Public adapter ports accept validated plans, not arbitrary native
+Docker specs. The coordinator still cannot import runtime implementation modules
+or execute raw commands. This adapter remains disconnected from the normal
+application rollout path until group admission, sequencing and recovery are
+complete.

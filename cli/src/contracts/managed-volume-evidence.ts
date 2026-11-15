@@ -5,7 +5,7 @@ import { err, ok } from "../lib/result.ts";
 
 const receiptsSchema = z.array(volumeReceiptSchema).max(32).readonly();
 /** Compare execution evidence to immutable allocation identities. This is not a fresh native observation or admission grant. */
-const matchManagedVolumeReceipts = (input: unknown, evidence: unknown) => {
+export const matchManagedVolumeReceipts = (input: unknown, evidence: unknown) => {
   const plan = parseManagedServicePlan(input); const receipts = receiptsSchema.safeParse(evidence);
   if (!plan.ok || !receipts.success) return err("managed volume evidence is invalid");
   const expected = new Set(plan.value.mounts.map((mount) => mount.volume.allocation));

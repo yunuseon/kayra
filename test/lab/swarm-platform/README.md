@@ -1598,3 +1598,13 @@ Start must preserve deadlines, observe one execution and retain one ledger entry
 A live container-event stream records dependency and job starts. This tests
 fixture-authorized preparation only: consumer updates, admission, SIGKILL,
 release promotion, SQL safety and full group lifecycle are not established.
+
+The first native group-preparation run at `5c78d69`, VM
+`kayra-volume-lab-20261115150506587649`, held at its original startup deadline
+before any migration. Its retained service was healthy, but Docker omitted the
+empty environment array and the adapter's desired-spec comparison rejected that
+harmless default. The shared matcher now accepts omitted/null empty arrays while
+retaining exact nonempty arrays; a regression also rejects undeclared environment
+entries. This failed run is preserved with native service/container snapshots,
+journals, registry RAM contents and a SHA-256 manifest. The VM is stopped after
+archiving RAM state and confirming no active observer/coordinator.

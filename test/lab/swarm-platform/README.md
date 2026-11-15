@@ -1680,3 +1680,16 @@ start. Private exact-source, API/events/clock/journal evidence has a SHA-256
 manifest. This fixture-authorized component probe still does not establish indexed
 admission, active-release publication, HTTP continuity, SIGKILL, SQL safety or
 maintenance/check integration.
+
+The managed-group fixture also probes declared checks through Docker Exec inside
+its admitted database and worker containers. The database check reads the existing
+owned mount; the worker check uses its inherited granted environment. Exec receives
+only the stable check operation identity, with no privilege expansion, attachment,
+or output capture. Reopening after acknowledged Start must preserve the execution
+deadline and retain known exit status. A deliberately lost acknowledgement for a
+fast check must hold as `unknown-start`, despite stopped/exit-zero inspection, and
+the live event stream must show exactly one Start for each recorded exec ID.
+This component probe does not enable checks or singleton handoffs in normal
+managed execution; held/expired checks do not imply the process was stopped.
+
+Exec request/inspection fields follow the [Docker Engine API v1.56 reference](https://docs.docker.com/reference/api/engine/version/v1.56/).

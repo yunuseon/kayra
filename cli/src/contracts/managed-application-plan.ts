@@ -1,3 +1,4 @@
+import { parseCheckCommand } from "./container-check.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parseManagedServicePlan } from "./managed-service-plan.ts";
@@ -76,6 +77,7 @@ export const parseManagedApplicationPlan = (input: unknown) => {
   })) return err("managed service scope, inputs, image or dependencies disagree");
   if (rollout.value.migrations.length > 0 && !migrationDescription(services, rollout.value.migrations,
     { app, incarnation: reference.registration.incarnation, run: "00000000-0000-4000-8000-000000000001" }, "0".repeat(64), value.policy.migrationTimeoutCeilingSeconds).ok) return err("unsupported managed migration description");
+  if (rollout.value.checks.some((check) => { const service = services[check.service]; return service === undefined || !parseCheckCommand(check.command).ok || Object.hasOwn(service.inputs.environment, "KAYRA_OPERATION_ID"); })) return err("unsupported managed application check description");
   const acyclic = (remaining: readonly string[]): boolean => {
     if (remaining.length === 0) return true;
     const blocked = remaining.filter((name) => services[name]?.dependencies.some((dependency) => remaining.includes(dependency.service)) ?? true);

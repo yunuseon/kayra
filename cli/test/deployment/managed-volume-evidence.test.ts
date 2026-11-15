@@ -26,7 +26,7 @@ test("a volume plan is immutable before creation and execution receipts bind sep
   const { plan, receipt } = fixture(); const digest = managedServiceDigest(plan);
   assert.equal(JSON.stringify(plan).includes("createdAt"), false);
   const result = matchManagedVolumeReceipts(plan, [receipt]); assert.ok(result.ok);
-  assert.equal(result.value[0]?.createdAt, receipt.createdAt); assert.deepEqual(result.value[0]?.volume, receipt.volume);
+  assert.equal(result.value[0]?.createdAt, receipt.createdAt); assert.deepEqual(result.value[0].volume, receipt.volume);
   assert.equal(managedServiceDigest(plan), digest); assert.ok(Object.isFrozen(result.value)); assert.ok(Object.isFrozen(result.value[0]));
   assert.equal(parseManagedServicePlan({ ...plan, mounts: [{ ...plan.mounts[0], createdAt: receipt.createdAt }] }).ok, false);
 });

@@ -1731,3 +1731,14 @@ integration, indexed admission, active-release publication and SIGKILL acceptanc
 remain pending. Unknown or running checks require the pinned container to be
 fenced before lifecycle settlement; service metadata fences alone cannot settle
 an Exec Start.
+
+Managed application verification now has a separate private owner after native
+consumer convergence or group compensation. Its immutable source includes every
+consumer and retained dependency, the exact application plan, and recovery input
+when restoring a previous release. Check deadlines derive from the recorded
+convergence time; reopening cannot restart the phase window. Recovery checks use
+a distinct stable identity. Only known successful checks followed by current
+workload and routed readiness can produce a verification certificate; a check
+from a replaced task is refused. A certificate does not itself publish an active
+release or settle admission. These parent semantics currently have journal-backed
+unit coverage; indexed wiring and native parent verification remain pending.

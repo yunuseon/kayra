@@ -1471,3 +1471,11 @@ registration handoff and is not a passing acceptance result. The VM, fleet and
 frozen source are preserved, the VM is stopped after confirming no active runs,
 and private raw evidence is under
 `.cache/lab-evidence/kayra-infra-upgrade-20261115114517/` with a SHA-256 manifest.
+
+
+The `--image-admission` probe also publishes two fixture OCI indexes referring to
+one native manifest, then checks that the read-only resolver preserves distinct
+source identities while returning the same selected pull digest. These fixture
+registry writes occur outside the admission adapter. No Docker workload or
+volume may be allocated during inspection. This is registry metadata evidence,
+not acceptance of retained database rollouts.

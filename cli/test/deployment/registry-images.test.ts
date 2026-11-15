@@ -132,3 +132,29 @@ test("invalid declared mounts and foreign images refuse before reading the regis
   assert.equal(await lab.port.verifyDeclared("shop", [{ image: image.ref.replace("shop/", "other/"), kind: "service", volumeTargets: ["/data"] }]), "unsupported");
   assert.equal(lab.calls.length, 0);
 });
+
+test("resolved image identities retain source provenance while pinning the selected native manifest", async (t) => {
+  const lab = await fixture(t); const image = lab.image({ os: "linux", architecture: "arm64", config: { Env: ["TOKEN=private-image-value"] } });
+  const selected = { ...image.leaf, mediaType: oci + "manifest.v1+json", platform: { os: "linux", architecture: "arm64", variant: "v8" } };
+  const first = lab.store("manifests", { schemaVersion: 2, mediaType: oci + "index.v1+json", manifests: [selected], annotations: { build: "one" } });
+  const second = lab.store("manifests", { schemaVersion: 2, mediaType: oci + "index.v1+json", manifests: [selected], annotations: { build: "two" } });
+  const source = (digest: string) => "localhost:5000/shop/web@" + digest;
+  const one = await lab.port.resolveDeclared("shop", [{ image: source(first.digest), kind: "service", volumeTargets: [] }]);
+  const two = await lab.port.resolveDeclared("shop", [{ image: source(second.digest), kind: "service", volumeTargets: [] }]);
+  assert.equal(one.status, "accepted"); assert.equal(two.status, "accepted");
+  assert.notEqual(one.images[0]?.source, two.images[0]?.source); assert.equal(one.images[0]?.pull, image.ref); assert.equal(two.images[0]?.pull, image.ref);
+  assert.equal(one.images[0].architecture, "arm64"); assert.equal(one.images[0].os, "linux"); assert.ok(Object.isFrozen(one.images)); assert.ok(Object.isFrozen(one.images[0]));
+  assert.equal(JSON.stringify(one).includes("private-image-value"), false);
+  const direct = await lab.port.resolveDeclared("shop", [{ image: image.ref, kind: "one-shot", volumeTargets: [] }]);
+  assert.deepEqual(direct, { status: "accepted", images: [{ source: image.ref, pull: image.ref, os: "linux", architecture: "arm64" }] });
+});
+
+test("resolution enforces every usage and never returns partially verified image identities", async (t) => {
+  const lab = await fixture(t); const image = lab.image({ os: "linux", architecture: "arm64", config: { Volumes: { "/data": {} } } });
+  const allowed = await lab.port.resolveDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets: ["/data"] }]); assert.equal(allowed.status, "accepted");
+  assert.deepEqual(await lab.port.resolveDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets: ["/data"] }, { image: image.ref, kind: "one-shot", volumeTargets: [] }]), { status: "unsupported" });
+  const plain = lab.image();
+  assert.deepEqual(await lab.port.resolveDeclared("shop", [{ image: plain.ref, kind: "service", volumeTargets: [] }, { image: "localhost:5000/other/web@sha256:" + "a".repeat(64), kind: "service", volumeTargets: [] }]), { status: "unsupported" });
+  lab.override(() => ({ code: 302, redirect: "http://untrusted.invalid/metadata" }));
+  assert.deepEqual(await lab.port.resolveDeclared("shop", [{ image: plain.ref, kind: "service", volumeTargets: [] }]), { status: "unavailable" });
+});

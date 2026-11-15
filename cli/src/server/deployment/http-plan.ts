@@ -1,24 +1,13 @@
+import { environmentBindings } from "./environment-bindings.ts";
 import { matchRegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { admitSwarmGrants } from "../../contracts/swarm-authority.ts";
 import { parseRollout, validateAdmission } from "../../contracts/rollout.ts";
 import type { ComposeDescription } from "../../contracts/compose-description.ts";
-import type { ApplicationPlan, EnvironmentBinding, HttpArtifact, HttpPlanScope } from "../../contracts/http-plan.ts";
-import { all, err, ok } from "../../lib/result.ts";
+import type { ApplicationPlan, HttpArtifact, HttpPlanScope } from "../../contracts/http-plan.ts";
+import { err, ok } from "../../lib/result.ts";
 
 const variable = /^[A-Z][A-Z0-9_]{0,127}$/;
 const component = "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
-const bindings = (environment: Readonly<Record<string, string>>, configuration: readonly string[], secrets: readonly string[]) => all(Object.entries(environment).map(([name, value]) => {
-  const reference = /^\$\{([A-Z][A-Z0-9_]{0,127})(?::\?[^}]*)?\}$/.exec(value);
-  if (reference?.[1] !== undefined) {
-    const key = reference[1];
-    if (configuration.includes(key)) return ok<readonly [string, EnvironmentBinding]>([name, Object.freeze({ kind: "configuration", key })]);
-    if (secrets.includes(key)) return ok<readonly [string, EnvironmentBinding]>([name, Object.freeze({ kind: "secret", key })]);
-    return err("environment references undeclared configuration or secret input");
-  }
-  const literal = value.replaceAll("$$", "\0");
-  if (literal.includes("$")) return err("only literal environment values and exact declared input references are supported");
-  return ok<readonly [string, EnvironmentBinding]>([name, Object.freeze({ kind: "literal", value: literal.replaceAll("\0", "$") })]);
-}));
 
 /** Compile a proposal from immutable inputs. Host admission and runtime effects remain separate. */
 export const compileHttpPlan = (scope: HttpPlanScope, artifact: HttpArtifact, description: ComposeDescription) => {
@@ -58,7 +47,7 @@ export const compileHttpPlan = (scope: HttpPlanScope, artifact: HttpArtifact, de
   const resources = service.resources;
   const cpu = Math.ceil(resources.nanoCpus / 1_000_000);
   if (!Number.isSafeInteger(cpu) || resources.memoryBytes > scope.app.grants.memory_bytes || cpu > scope.app.grants.cpu_millicores) return err("service resources exceed application grants");
-  const environment = bindings(service.environment, configurationKeys, secretKeys);
+  const environment = environmentBindings(service.environment, configurationKeys, secretKeys);
   if (!environment.ok) return environment;
   return ok<ApplicationPlan>(Object.freeze({
     version: 1, runtime: "swarm", app: scope.app.name, registration: Object.freeze({ ...scope.registration }), commit: artifact.sha, artifact: artifact.artifact,

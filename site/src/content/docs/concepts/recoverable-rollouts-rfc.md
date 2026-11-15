@@ -1372,7 +1372,7 @@ services or their immutable-spec reconciliation.
 ### Immutable managed service specification
 
 A managed service records exact image digest, role/overlap, health and shutdown
-settings, budgets, dependency conditions, owned volume creation references,
+settings, budgets, dependency conditions, durable volume allocation identities,
 private network identity, host affinity and service-specific input references.
 Binding names, mounts and dependencies have deterministic ordering. It cannot
 contain resolved environment values supplied by platform materialization.
@@ -1520,3 +1520,18 @@ the selected node/cluster. It refuses the shared routing network as a private
 network. Older snapshots remain readable but cannot supply inferred grants. This
 reference is metadata: admission still requires current lifecycle authority,
 resource reservations and native observations. Compose publication is unchanged.
+
+
+### Planned volumes and creation evidence
+
+Managed service plans contain the data-owner/allocation identity, physical name
+and mount policy before resource admission. A newly allocated volume has no
+creation timestamp yet; its eventual native receipt must not mutate the plan or
+its digest. Creation receipts instead belong to durable execution evidence.
+Before a mounted workload effect, recorded receipts must match each planned
+allocation and normalized native observations must match those exact receipts,
+including creation timestamps. Missing, foreign, unavailable, duplicate, extra
+or replaced instances fail validation. The caller must still establish fresh
+observations under the current admission lease and lifecycle fence. Contract
+matching alone grants no workload authority. Existing HTTP/one-shot plans are
+unchanged; this managed-plan format is still unenabled and unpersisted.

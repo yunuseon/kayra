@@ -18,7 +18,7 @@ const resources = z.object({ memoryBytes: positive, reserveMemoryBytes: positive
 const health = z.object({ command: words, intervalSeconds: seconds, timeoutSeconds: seconds,
   startPeriodSeconds: z.number().int().min(0).max(300), retries: positive.max(100),
 }).strict().readonly().refine((value) => value.timeoutSeconds <= value.intervalSeconds);
-const mount = z.object({ volume: ownedVolumeSchema, createdAt: z.string().max(128).refine((value) => Number.isFinite(Date.parse(value))),
+const mount = z.object({ volume: ownedVolumeSchema,
   target: volumeMountTargetSchema, readOnly: z.boolean(), noCopy: z.boolean(),
 }).strict().readonly();
 const shape = z.object({ version: z.literal(1), runtime: z.literal("swarm"), owner: z.unknown(), service: serviceName, nativeName: z.string(),
@@ -51,7 +51,7 @@ export const parseManagedServicePlan = (input: unknown) => {
     new Set(value.dependencies.map((item) => item.service)).size !== value.dependencies.length || value.dependencies.some((item) => item.service === value.service)) return err("invalid managed mounts or dependencies");
   if (value.mounts.some((item, index) => value.mounts.some((other, otherIndex) => index !== otherIndex &&
     (item.target === other.target || item.target.startsWith(`${other.target}/`) || other.target.startsWith(`${item.target}/`) ||
-      item.volume.key === other.volume.key && item.volume.allocation !== other.volume.allocation || item.volume.allocation === other.volume.allocation && (item.createdAt !== other.createdAt || JSON.stringify(item.volume) !== JSON.stringify(other.volume)))))) return err("conflicting managed volume mounts");
+      item.volume.key === other.volume.key && item.volume.allocation !== other.volume.allocation || item.volume.allocation === other.volume.allocation && JSON.stringify(item.volume) !== JSON.stringify(other.volume))))) return err("conflicting managed volume mounts");
   return ok<ManagedServicePlan>(Object.freeze({ ...value, owner: owner.value,
     inputs: Object.freeze({ ...inputs.value, environment: Object.freeze(Object.fromEntries(Object.entries(inputs.value.environment).sort(([left], [right]) => lexical(left, right)))) }),
     mounts: Object.freeze(value.mounts.toSorted((left, right) => lexical(left.target, right.target))),

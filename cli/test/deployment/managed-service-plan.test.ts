@@ -16,12 +16,12 @@ const declaration = {
   command: null, entrypoint: null, resources: { memoryBytes: 134217728, reserveMemoryBytes: 67108864, nanoCpus: 250000000, reserveNanoCpus: 125000000 },
   health: { command: ["/health"], intervalSeconds: 2, timeoutSeconds: 1, startPeriodSeconds: 20, retries: 2 }, stopGraceSeconds: 30,
   host: { node: "a".repeat(25), cluster: "b".repeat(25), routingNetwork: null }, privateNetwork: { id: "d".repeat(25), name: `kayra-app-${owner.incarnation}` },
-  mounts: [{ volume: volume.value, createdAt: "2026-11-14T20:00:00Z", target: "/var/lib/database", readOnly: false, noCopy: true }], dependencies: [],
+  mounts: [{ volume: volume.value, target: "/var/lib/database", readOnly: false, noCopy: true }], dependencies: [],
 };
 const checked = parseManagedServicePlan(declaration); assert.ok(checked.ok); const previous = checked.value;
 const next = (replacement: Readonly<Record<string, unknown>>) => { const parsed = parseManagedServicePlan({ ...declaration, ...replacement }); assert.ok(parsed.ok); return parsed.value; };
 
-test("managed service plan binds exact owner, incarnation, input generation, image and volume receipt", () => {
+test("managed service plan binds exact owner, incarnation, input generation, image and durable volume allocation", () => {
   assert.ok(Object.isFrozen(previous)); assert.ok(Object.isFrozen(previous.mounts)); assert.ok(Object.isFrozen(previous.health.command)); assert.ok(Object.isFrozen(previous.inputs.environment));
   assert.match(managedServiceDigest(previous), /^[a-f0-9]{64}$/); assert.equal(managedServiceDigest(previous), managedServiceDigest(next({})));
   assert.ok(previous.nativeName.length <= 63); assert.notEqual(previous.nativeName, managedServiceName({ ...owner, incarnation: randomUUID() }, "db"));
@@ -43,7 +43,6 @@ test("volume references must match the app/data owner and cannot conflict or ove
   for (const mounts of [
     [{ ...declaration.mounts[0], volume: foreign.value }], [declaration.mounts[0], { ...declaration.mounts[0], target: "/var/lib/database/nested" }],
     [declaration.mounts[0], { ...declaration.mounts[0], target: "/other", volume: replaced.value }],
-    [declaration.mounts[0], { ...declaration.mounts[0], target: "/other", createdAt: "2026-11-14T21:00:00Z" }],
     [declaration.mounts[0], { ...declaration.mounts[0], target: "/other", volume: { ...volume.value, key: "other" } }],
   ]) assert.equal(parseManagedServicePlan({ ...declaration, mounts }).ok, false);
 });

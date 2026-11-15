@@ -86,7 +86,7 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
     const tasks = await api.request('GET', '/tasks?filters=' + encodeURIComponent(JSON.stringify({ service: [database.ready.native.id], 'desired-state': ['running'] }))); assert.equal(tasks.status, 200);
     const task = tasks.value.find((value) => value.DesiredState === 'running' && value.Status.State === 'running'); assert.ok(task);
     const ledger = JSON.parse(execFileSync('docker', ['exec', task.Status.ContainerStatus.ContainerID, 'node', '-e', `process.stdout.write(require('node:fs').readFileSync('/data/ledger.json','utf8'))`], { encoding: 'utf8', timeout: 10000 })); assert.deepEqual(ledger, [run + ':schema']);
-    const consumerPath = join(path, 'consumers'); consumerJournal = await openJournal(consumerPath);
+    const consumerPath = join(path, 'consumers'); await mkdir(consumerPath, { mode: 0o700 }); consumerJournal = await openJournal(consumerPath);
     const consumerPorts = { ...artifacts, now: Date.now, authorize: async () => true, services: { ...ports.services, tombstone: serviceRuntime.tombstone }, readiness: { check: async () => { throw new Error('worker must not request routed readiness'); } } };
     let consumers = managedConsumerRollout(consumerJournal, consumerPorts); const consumerIntent = await consumers.prepare(plan, ready, null, []);
     await wait(async () => { const state = await consumers.tick(); assert.notEqual(state.phase, 'held'); return state.nodes[0]?.execution?.phase === 'observing'; }, consumerIntent.deadline, 'worker update acknowledgement');

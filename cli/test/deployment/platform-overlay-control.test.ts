@@ -14,13 +14,13 @@ import { createLifecycleAppIndex } from "../../src/server/deployment/lifecycle-a
 const fixture = async (t: TestContext) => {
   const root = await mkdtemp(join(tmpdir(), "kayra-platform-overlay-"));
   const indexPath = join(root, "index");
-  const index = await createLifecycleAppIndex(indexPath);
+  const index = await createLifecycleAppIndex(indexPath, (metadata) => Promise.resolve({ ...metadata, status: "applied" }));
   const generation = randomUUID(); await index.prepareApp("shop"); const ticket = await index.reserveRegistration("shop", generation, "swarm");
   const raw: unknown = JSON.parse(await readFile(new URL("../../../ci/tests/swarm-host/authority.json", import.meta.url), "utf8")); const host = parseSwarmAuthority(raw); assert.ok(host.ok);
   let actual: AppOverlayGrant | null = null; let creates = 0; let enabled = true; let authorized = true;
   const native: AppOverlayPort = { observe: () => Promise.resolve(actual === null ? { status: "absent" } : { status: "owned", grant: actual }), create: (action) => { creates += 1; actual = { scope: action.scope, id: "x".repeat(25) }; return Promise.resolve("acknowledged"); } };
   const open = () => platformOverlayControl({ directory: join(root, "platform-state"), native,
-    ownership: (app, value, selected) => index.registrationOwnership(app, selected, value),
+    ownership: (app, value, selected) => index.registrationProvisioning(app, selected, value),
     host: () => Promise.resolve(enabled ? host.value : undefined), authorize: () => Promise.resolve(authorized),
   });
   const control = open();
@@ -48,4 +48,17 @@ test("operator enablement and lifecycle authorization remain required for the pl
 test("a revoked lifecycle authorization prevents creation after durable intent", async (t) => {
   const f = await fixture(t); await f.index.submitRegistration("shop", f.input.ticket, f.input.generation); f.deny();
   await assert.rejects(f.control.provision(f.input), /refused/); assert.equal(f.creates(), 0);
+});
+
+test("registered applications cannot initialize absent platform allocation records", async (t) => {
+  const f = await fixture(t); await f.index.submitRegistration("shop", f.input.ticket, f.input.generation); await f.index.reconcileRegistration("shop", f.input.ticket, f.input.generation);
+  await assert.rejects(f.control.provision(f.input), /records are missing/); assert.equal(f.creates(), 0);
+});
+
+test("loss of an established platform allocation directory blocks reinitialization after registration", async (t) => {
+  const f = await fixture(t); await f.index.submitRegistration("shop", f.input.ticket, f.input.generation); await f.control.provision(f.input);
+  await f.index.reconcileRegistration("shop", f.input.ticket, f.input.generation); await f.control.close();
+  await rm(join(f.root, "platform-state"), { recursive: true }); const reopened = f.open();
+  try { await assert.rejects(reopened.provision(f.input), /records are missing/); assert.equal(f.creates(), 1); }
+  finally { await reopened.close(); }
 });

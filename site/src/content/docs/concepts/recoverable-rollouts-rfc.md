@@ -1498,3 +1498,11 @@ privileged process and creates no additional socket holder or listener. It is
 not yet called by the registration publisher and grants no workload admission;
 immutable infrastructure-grant publication and lifecycle cleanup remain required
 before enabling managed service groups.
+
+The coordinator additionally publishes whether the scoped registration is still
+initial or already verified. This permits initial platform storage provisioning
+without treating a missing record for a registered application as a new grant.
+Registered applications require existing allocation storage; absent storage is
+an intervention condition, including older registrations that predate this path.
+The platform obtains this state through a typed lifecycle read and never opens
+private deployment records.

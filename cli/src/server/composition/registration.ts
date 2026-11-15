@@ -152,7 +152,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
   const overlays = platformOverlayControl({ directory: join(platform, "platform-state", "app-overlays"), native: appOverlays(api),
     ownership: async (app, generation, ticket) => {
       if (opening === undefined || !(await canRegister(app))) throw new Error("app is outside platform overlay scope");
-      return (await opening).registrationOwnership(app, ticket, generation);
+      return (await opening).registrationProvisioning(app, ticket, generation);
     },
     host: async () => {
       if (swarmAuthority === undefined) return undefined;

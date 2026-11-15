@@ -1,6 +1,6 @@
 /* eslint-disable functional/no-let -- composition owns the platform journal lifetimes */
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { lstat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { AppOverlayPort } from "../../contracts/app-overlay.ts";
@@ -15,7 +15,7 @@ import { openJournal } from "../deployment/journal.ts";
 const request = z.object({ app: z.string().max(48).regex(names.app.pattern), generation: z.uuid(), ticket: z.string().max(80) }).strict();
 type Ports = {
   readonly directory: string;
-  readonly ownership: (app: string, generation: string, ticket: string) => Promise<RegistrationOwnership>;
+  readonly ownership: (app: string, generation: string, ticket: string) => Promise<{ readonly reference: RegistrationOwnership; readonly initial: boolean }>;
   readonly host: () => Promise<SwarmAuthority | undefined>;
   readonly authorize: (reference: RegistrationOwnership) => Promise<boolean>;
   readonly native: AppOverlayPort;
@@ -30,7 +30,8 @@ export const platformOverlayControl = (ports: Ports) => {
     const checked = request.safeParse(input); if (!checked.success) return undefined;
     if (isClosed()) throw new Error("platform overlay owner is closed");
     const { app, generation, ticket } = checked.data;
-    const checkedOwner = parseRegistrationOwnership(await ports.ownership(app, generation, ticket));
+    const admitted = await ports.ownership(app, generation, ticket);
+    const checkedOwner = parseRegistrationOwnership(admitted.reference);
     if (!checkedOwner.ok || checkedOwner.value.registration.app !== app || checkedOwner.value.registration.registrationGeneration !== generation || checkedOwner.value.registration.actionId !== ticket) throw new Error("platform overlay ownership scope disagrees");
     const owner = checkedOwner.value; const host = await ports.host();
     if (host === undefined) throw new Error("experimental platform overlay is not enabled");
@@ -43,8 +44,10 @@ export const platformOverlayControl = (ports: Ports) => {
     if (entry === undefined) {
       // eslint-disable-next-line functional/prefer-immutable-types -- the composition owns this live journal handle
       entry = (async () => {
-        const path = join(ports.directory, key); await mkdir(path, { recursive: true, mode: 0o700 });
-        const journal = await openJournal(path);
+        const path = join(ports.directory, key);
+        if (admitted.initial) await mkdir(path, { recursive: true, mode: 0o700 });
+        else if (!(await lstat(path).catch(() => undefined))?.isDirectory()) throw new Error("registered platform overlay records are missing; intervention required");
+        const journal = await openJournal(path, admitted.initial ? "initialize" : "existing");
         const allocation = appOverlayAllocation({ storage: journal, native: ports.native, now: Date.now, newId: randomUUID,
           authorize: async (reference) => {
             const current = await ports.host();

@@ -208,6 +208,22 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return checked.value;
   };
 
+  const registrationProvisioning = (app: string, ticket: string, generation: string) => useReady(app, async (store) => {
+      const envelope = await store.read(); const allocation = envelope?.registrationAllocation; const fence = envelope?.fence;
+      if (envelope === undefined || allocation?.runtime !== "swarm" || allocation.ticket !== ticket || allocation.generation !== generation || (fence === null || fence === undefined)) throw new Error("registration ownership requires its admitted Swarm intent");
+      const lifecycle = fence.lifecycle;
+      const registeringAction = lifecycle.phase === "registering" && lifecycle.active.kind === "register" ? lifecycleActionId(fence, lifecycle.active.sequence) : undefined;
+      const metadata = lifecycle.phase === "registered" && envelope.registrationReceipt?.ticket === ticket
+        ? envelope.registrationReceipt.metadata
+        : registeringAction !== undefined && envelope.operations.some((operation) => operation.ticket === ticket && operation.action === registeringAction && operation.descriptor.kind === "register" && operation.descriptor.registrationGeneration === generation)
+          ? { version: 1, app, incarnation: envelope.tickets.incarnation, actionId: registeringAction, registrationGeneration: generation }
+          : undefined;
+      if (metadata === undefined) throw new Error("registration ownership is outside its lifecycle fence");
+      const checked = parseRegistrationOwnership({ version: 1, runtime: "swarm", registration: metadata, ownership: await ownershipReference(app, envelope.tickets.incarnation) });
+      if (!checked.ok) throw new Error(checked.error);
+      return Object.freeze({ reference: checked.value, initial: lifecycle.phase === "registering" });
+    });
+
   return {
     prepareApp: (app: string) => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
@@ -698,21 +714,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         }));
       });
     },
-    registrationOwnership: (app: string, ticket: string, generation: string) => useReady(app, async (store) => {
-      const envelope = await store.read(); const allocation = envelope?.registrationAllocation; const fence = envelope?.fence;
-      if (envelope === undefined || allocation?.runtime !== "swarm" || allocation.ticket !== ticket || allocation.generation !== generation || (fence === null || fence === undefined)) throw new Error("registration ownership requires its admitted Swarm intent");
-      const lifecycle = fence.lifecycle;
-      const registeringAction = lifecycle.phase === "registering" && lifecycle.active.kind === "register" ? lifecycleActionId(fence, lifecycle.active.sequence) : undefined;
-      const metadata = lifecycle.phase === "registered" && envelope.registrationReceipt?.ticket === ticket
-        ? envelope.registrationReceipt.metadata
-        : registeringAction !== undefined && envelope.operations.some((operation) => operation.ticket === ticket && operation.action === registeringAction && operation.descriptor.kind === "register" && operation.descriptor.registrationGeneration === generation)
-          ? { version: 1, app, incarnation: envelope.tickets.incarnation, actionId: registeringAction, registrationGeneration: generation }
-          : undefined;
-      if (metadata === undefined) throw new Error("registration ownership is outside its lifecycle fence");
-      const checked = parseRegistrationOwnership({ version: 1, runtime: "swarm", registration: metadata, ownership: await ownershipReference(app, envelope.tickets.incarnation) });
-      if (!checked.ok) throw new Error(checked.error);
-      return checked.value;
-    }),
+    registrationProvisioning,
+    registrationOwnership: async (app: string, ticket: string, generation: string) => (await registrationProvisioning(app, ticket, generation)).reference,
     reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useReady(app, (store) => store.reserveRegistration(generation, runtime)),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useReady(app, (store) => store.submitRegistration(ticket, generation)),

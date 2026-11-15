@@ -1440,3 +1440,13 @@ must block further provisioning without recreation. Raw journals, events and API
 request identities accompany the JSON summary. Lifecycle authorization is a
 fixture port; this does not establish full registration publication, workload
 admission or removal acceptance.
+
+The 2026-11-15 run at source `ade46bd` passed all three real SIGKILL cuts on
+Engine 29.9.3 / API 1.56 and Node 24.22.1. Each physical network had one live
+Create event; operation identities and absolute deadlines survived restart.
+Recorded-network deletion was refused without recreation. VM
+`kayra-volume-lab-20261115113422548241` was destroyed after success. Private raw
+journals, request/event logs, clock checks, source hashes and summary are retained
+under `.cache/lab-evidence/kayra-volume-lab-20261115113422548241/` with a SHA-256
+manifest. Later registered-record-loss guards have local regression coverage;
+the native probe exercises the allocation component, not that registration seam.

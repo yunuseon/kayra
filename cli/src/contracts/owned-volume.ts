@@ -18,7 +18,8 @@ export const parseDataOwnership = (input: unknown) => {
 export const ownedVolumeSchema = identity;
 export type OwnedVolume = z.infer<typeof identity>;
 export type VolumeAction = { readonly volume: OwnedVolume; readonly operation: string; readonly deadline: number };
-export type VolumeReceipt = { readonly volume: OwnedVolume; readonly createdAt: string };
+export const volumeReceiptSchema = z.object({ volume: ownedVolumeSchema, createdAt: z.string().max(128).refine((value) => Number.isFinite(Date.parse(value))) }).strict().readonly();
+export type VolumeReceipt = z.infer<typeof volumeReceiptSchema>;
 export type VolumeObservation = { readonly status: "absent" | "foreign" | "unavailable" } | { readonly status: "owned"; readonly receipt: VolumeReceipt };
 export type VolumeAttachments = { readonly status: "unavailable" } | { readonly status: "observed"; readonly containers: readonly string[]; readonly services: readonly string[] };
 export type VolumeWrite = "acknowledged" | "uncertain" | "conflict" | "refused" | "attached";

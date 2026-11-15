@@ -23,6 +23,7 @@ export const sequencePlan = () => {
   });
 };
 type Options = { readonly afterStart?: (plan: JobPlan, runtime: ReturnType<typeof jobRuntime>) => void;
+  readonly materialize?: (job: JobPlan) => Promise<Readonly<Record<string, string>>>;
   readonly probe?: "applied" | "not-applied" | "unknown"; readonly admitted?: boolean;
   readonly beforeEffect?: (effect: "create" | "start" | "fence", job: JobExecution) => void };
 
@@ -45,7 +46,7 @@ export const sequenceFixture = async (t: TestContext, plan = sequencePlan(), opt
   };
   const ports: Parameters<typeof migrationSequence>[1] = { ...artifacts, native, now: () => clock,
     authorize: (_state, _plan, job, effect) => { options.beforeEffect?.(effect, job); return Promise.resolve(options.admitted ?? true); },
-    materialize: () => Promise.resolve({ TOKEN: "secret-value" }) };
+    materialize: options.materialize ?? (() => Promise.resolve({ TOKEN: "secret-value" })) };
   let owner = migrationSequence(journal, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
   const drive = async (predicate: (state: MigrationSequenceState) => boolean = (state) => state.phase !== "running") => {

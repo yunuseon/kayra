@@ -1624,3 +1624,26 @@ This preparation/reservation seam is not yet connected to normal managed group
 execution. It does not establish migration sequencing, release promotion,
 compensation or cancellation guarantees for version-three plans. Group execution
 remains disabled pending those integrations and their native acceptance tests.
+
+### Managed migration sequence binding
+
+A managed plan now derives a deterministic description for the existing durable
+one-shot sequence owner. Each ordered step uses its declared app-image service's
+selected native digest, entrypoint, resource limits, shutdown grace and input
+bindings. Jobs receive only the incarnation's private application overlay; they
+receive neither the platform routing network nor service volume mounts. The
+existing stable operation identity, restart-disabled job adapter, status probes,
+fencing and original retry deadlines remain in use.
+
+Managed plan validation refuses migration commands, reserved operation-ID
+bindings and other job descriptions that the one-shot contract cannot support.
+Input reference selection checks the exact service image, bindings, private
+network and migration/probe command before returning a reference to the platform
+materializer. It returns no secret value and supplies no admission authority.
+The parent still must establish the exact run, retained artifact, prerequisite
+readiness/quiescence, lifecycle fence and synchronized reservation before effects.
+
+A journal-reopen test binds a managed description to that existing sequence owner
+and recovers a lost Start acknowledgement without duplicate execution or a new
+deadline. This is component integration with a modeled Docker API, not native
+multi-service rollout acceptance. Normal managed execution remains disabled.

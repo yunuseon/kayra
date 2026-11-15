@@ -1712,3 +1712,28 @@ owner must still authenticate admission and the retained baseline. Both ordinary
 and reactivation writes snapshot the caller's exact CAS before asynchronous reads.
 This port is a prerequisite for group cancellation/retry, not group admission or
 normal execution enablement.
+
+### Managed retained-startup and migration parent
+
+One private preparation journal now composes retained-service execution slots
+and the existing migration sequence owner. Retained dependencies start in their
+healthy-dependency order. Recorded active baselines are freshly verified and
+reused without replacement; recorded scrubbed baselines use explicit unchanged
+reactivation. Missing known instances hold rather than creating empty data.
+Migrations require healthy retained dependencies before Create/Start, and their
+input materialization remains in trusted composition ports.
+
+The parent retains the immutable group and sequence descriptions, snapshots
+proposals before writer queuing, preserves startup/migration deadlines and child
+intents across reopen, and opens one bounded consumer window after preparation.
+That window is not active-release promotion or renewable effect authority.
+Uncertain parent persistence poisons the handle. Runtime reads and dependency
+verification are bounded. Normal admission must still authenticate the accepted
+run and reserve the transition envelope under the lifecycle writer.
+
+This rolling preparation phase currently refuses maintenance and coordinated
+checks before intent; quiescence/check sequencing is subsequent integration.
+Consumer updates, compensation, cancellation, indexed lifecycle ownership and
+all public rollout paths remain work. The native group probe uses explicit
+fixture authority and an app-owned HTTP ledger on a retained volume; it does not
+establish SQL, admission, SIGKILL, worker delivery or release promotion guarantees.

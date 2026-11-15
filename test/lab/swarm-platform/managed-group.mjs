@@ -1,0 +1,101 @@
+// Fixture-authorized retained startup + migration phase. No indexed admission or release promotion.
+import { strict as assert } from 'node:assert';
+import { randomUUID } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdir, open, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { ownedVolume } from '../../../cli/src/contracts/owned-volume.ts';
+import { managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
+import { parseManagedApplicationPlan } from '../../../cli/src/contracts/managed-application-plan.ts';
+import { managedGroupPreparation } from '../../../cli/src/server/deployment/managed-group-preparation.ts';
+import { managedMigrationInputs } from '../../../cli/src/server/deployment/managed-migration-inputs.ts';
+import { openJournal } from '../../../cli/src/server/deployment/journal.ts';
+import { openArtifactStore } from '../../../cli/src/server/deployment/artifact-store.ts';
+import { managedSwarmService } from '../../../cli/src/server/runtime/managed-swarm-service.ts';
+import { oneShotJob } from '../../../cli/src/server/runtime/one-shot-job.ts';
+import { ownedVolumes } from '../../../cli/src/server/runtime/owned-volume.ts';
+import { appOverlays } from '../../../cli/src/server/runtime/app-overlay.ts';
+import { dockerApi } from '../../../cli/src/server/runtime/docker-api.ts';
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = async (check, deadline, description) => {
+  while (Date.now() < deadline) { const value = await check(); if (value) return value; await pause(100); }
+  throw new Error('managed group fixture deadline: ' + description);
+};
+export const probeManagedGroup = async (app, databaseImage, migrationImage, output) => {
+  const path = join(output, 'managed-group'); await mkdir(path, { mode: 0o700 });
+  const events = []; const requests = []; let partial = ''; let eventError; let finished = false; let bytes = 0;
+  const eventProcess = spawn('docker', ['events', '--filter', 'type=container', '--format', '{{json .}}'], { stdio: ['ignore', 'pipe', 'pipe'] }); const eventExit = once(eventProcess, 'exit');
+  eventProcess.on('error', () => { eventError = 'event observer failed'; }); eventProcess.stderr.on('data', () => { eventError = 'event observer stderr'; });
+  eventProcess.stdout.setEncoding('utf8'); eventProcess.stdout.on('data', (value) => {
+    bytes += Buffer.byteLength(value); if (bytes > 1024 * 1024) { eventError = 'event evidence bound'; eventProcess.kill(); return; }
+    partial += value; const lines = partial.split('\n'); partial = lines.pop();
+    for (const line of lines) if (line) { try { events.push(JSON.parse(line)); } catch { eventError = 'invalid event'; } }
+  }); eventExit.then(() => { if (!finished) eventError = 'event observer ended early'; });
+  const transport = dockerApi(); const api = { request: async (...args) => { assert.ok(requests.length < 8192); const reply = await transport.request(...args); requests.push({ at: Date.now(), method: args[0], path: args[1], status: reply.status }); return reply; } };
+  let journal;
+  try {
+    await pause(200); const info = await api.request('GET', '/info'); assert.equal(info.status, 200); const swarm = info.value.Swarm;
+    const incarnation = randomUUID(); const dataOwner = randomUUID(); const registration = { version: 1, app, incarnation, actionId: incarnation + ':1', registrationGeneration: randomUUID() };
+    const ownership = { version: 1, app, incarnation, dataOwner }; const scope = { version: 1, app, incarnation, node: swarm.NodeID, cluster: swarm.Cluster.ID, name: 'kayra-app-' + incarnation };
+    const deadline = Date.now() + 90000; const overlay = appOverlays(api); assert.ok(['acknowledged', 'uncertain'].includes(await overlay.create({ scope, operation: randomUUID(), deadline })));
+    const grant = await wait(async () => { const value = await overlay.observe(scope); return value.status === 'owned' ? value.grant : false; }, deadline, 'private overlay');
+    const routing = await api.request('POST', '/networks/create', { Name: 'platform-swarm', Driver: 'overlay', Attachable: true, CheckDuplicate: true }); assert.equal(routing.status, 201); assert.match(routing.value.Id, /^[a-z0-9]{25}$/);
+    const allocation = ownedVolume(app, dataOwner, randomUUID(), 'data'); assert.ok(allocation.ok); const volumes = ownedVolumes(api);
+    assert.ok(['acknowledged', 'uncertain'].includes(await volumes.create({ volume: allocation.value, operation: randomUUID(), deadline })));
+    const observedVolume = await volumes.observe(allocation.value); assert.equal(observedVolume.status, 'owned'); const receipt = observedVolume.receipt;
+    const receiptFile = await open(join(path, 'receipt.json'), 'wx', 0o600); try { await receiptFile.writeFile(JSON.stringify(receipt)); await receiptFile.sync(); } finally { await receiptFile.close(); }
+    const directory = await open(path, 'r'); try { await directory.sync(); } finally { await directory.close(); }
+    const ledgerCode = `const fs=require('node:fs'),http=require('node:http');const file='/data/ledger.json';let ledger=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):[];const save=()=>{const fd=fs.openSync(file,'w');fs.writeFileSync(fd,JSON.stringify(ledger));fs.fsyncSync(fd);fs.closeSync(fd)};save();http.createServer((req,res)=>{const u=new URL(req.url,'http://db');if(u.pathname==='/apply'){const id=u.searchParams.get('id');if(!ledger.includes(id)){ledger.push(id);save()}}res.setHeader('Content-Type','application/json');res.end(JSON.stringify({healthy:true,ledger}))}).listen(8080,'0.0.0.0');process.on('SIGTERM',()=>process.exit(0));`;
+    const health = { command: ['node', '-e', `fetch('http://127.0.0.1:8080/health',{signal:AbortSignal.timeout(750)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))`], intervalSeconds: 1, timeoutSeconds: 1, startPeriodSeconds: 1, retries: 3 };
+    const inputs = (environment) => ({ version: 1, registration, configurationIdentity: 'sha256:' + 'c'.repeat(64), environment });
+    const spec = (name, role, image, environment, mounts, command) => ({ version: 1, runtime: 'swarm', owner: ownership, service: name, nativeName: managedServiceName(ownership, name), role, overlap: 'forbidden', handoffCheck: null, image, inputs: inputs(environment), command, entrypoint: ['node'],
+      resources: { memoryBytes: 134217728, reserveMemoryBytes: 67108864, nanoCpus: 250000000, reserveNanoCpus: 125000000 }, health: role === 'worker' ? { ...health, command: ['node', '-e', 'process.exit(0)'] } : health, stopGraceSeconds: 30,
+      host: { node: swarm.NodeID, cluster: swarm.Cluster.ID, routingNetwork: null }, privateNetwork: { id: grant.id, name: grant.scope.name }, mounts, dependencies: name === 'worker' ? [{ service: 'db', condition: 'healthy' }] : [] });
+    const migrateCode = `const url='http://db:8080/apply?id='+encodeURIComponent(process.env.KAYRA_OPERATION_ID);fetch(url,{signal:AbortSignal.timeout(5000)}).then(async r=>{if(!r.ok)process.exit(1);await r.text();setTimeout(()=>process.exit(0),2000)}).catch(()=>process.exit(1));`;
+    const checked = parseManagedApplicationPlan({ version: 3, runtime: 'swarm', infrastructure: { version: 1, runtime: 'swarm', registration, ownership, overlay: grant }, commit: 'd'.repeat(40), artifact: 'e'.repeat(64), configurationIdentity: 'sha256:' + 'c'.repeat(64),
+      host: { version: 1, node: swarm.NodeID, cluster: swarm.Cluster.ID, network: { name: 'platform-swarm', id: routing.value.Id }, profile: { enabled: true, advertise_address: swarm.NodeAddr, memory_bytes: 3221225472, cpu_millicores: 2000, platform_memory_bytes: 1073741824, platform_cpu_millicores: 500 } },
+      grants: { memory_bytes: 536870912, cpu_millicores: 1000, maintenance: false }, hosts: [], routes: [],
+      rollout: { strategy: 'rolling', mixed_version_compatible: true, rollback_compatible: true, services: { db: { role: 'retained-dependency', overlap: 'forbidden' }, worker: { role: 'worker', overlap: 'forbidden' } }, migrations: [{ id: 'schema', service: 'worker', command: ['--eval', migrateCode], timeout_seconds: 30, recovery: { kind: 'replay-safe' } }], checks: [] },
+      policy: { version: 1, failureMonitorSeconds: 30, updateTimeoutSeconds: 90, rollbackTimeoutSeconds: 90, migrationTimeoutCeilingSeconds: 90, checkTimeoutCeilingSeconds: 90 },
+      images: [...new Set([databaseImage, migrationImage])].map((image) => ({ source: image, pull: image, os: 'linux', architecture: process.arch === 'x64' ? 'amd64' : process.arch })),
+      services: { db: spec('db', 'retained-dependency', databaseImage, {}, [{ volume: allocation.value, target: '/data', readOnly: false, noCopy: true }], ['--eval', ledgerCode]),
+        worker: spec('worker', 'worker', migrationImage, { TOKEN: { kind: 'secret', key: 'TOKEN' } }, [], ['--eval', 'process.on("SIGTERM",()=>process.exit(0));setInterval(()=>{},1000)']) },
+    }); assert.ok(checked.ok, checked.ok ? '' : checked.error); const plan = checked.value;
+    await writeFile(join(path, 'fixture-plan.json'), JSON.stringify(plan, null, 2), { mode: 0o600 });
+    const artifacts = await openArtifactStore(join(path, 'artifacts')); const serviceRuntime = managedSwarmService(api, volumes); const jobs = oneShotJob(api); let started = false;
+    const serviceInputs = (service) => ({ environment: {}, routing: {}, volumes: service.mounts.length === 0 ? [] : [receipt] });
+    const ports = { ...artifacts, now: Date.now, authorize: async () => true, services: { observe: serviceRuntime.observe,
+      observeDesired: (action, service) => serviceRuntime.observeDesired(action, service, serviceInputs(service)),
+      apply: (action, expected, service) => serviceRuntime.apply(action, expected, service, serviceInputs(service)),
+      reactivate: (action, expected, service) => serviceRuntime.reactivate(action, expected, service, serviceInputs(service)),
+    }, jobs: { observe: jobs.observe, fence: jobs.fence,
+      create: async (job) => { const reference = managedMigrationInputs(plan, job); assert.ok(reference.ok); const environment = Object.fromEntries(Object.entries(reference.value.environment).map(([key, binding]) => [key, binding.kind === 'literal' ? binding.value : 'synthetic-group-private-value'])); return jobs.create(job, environment); },
+      start: async (...args) => { const result = await jobs.start(...args); if (result === 'acknowledged') started = true; return result; },
+    } };
+    journal = await openJournal(path); let owner = managedGroupPreparation(journal, ports); const run = randomUUID(); const prepared = await owner.prepare(plan, run, incarnation + ':2', []);
+    await wait(async () => { const state = await owner.tick(); assert.notEqual(state.phase, 'held'); return started; }, prepared.migrationDeadline, 'migration Start');
+    const interrupted = await owner.read(); assert.ok(interrupted.sequence?.steps[0]?.attempts[0]?.execution?.container);
+    await journal.close(); journal = await openJournal(path, 'existing'); owner = managedGroupPreparation(journal, ports);
+    const ready = await wait(async () => { const state = await owner.tick(); assert.notEqual(state.phase, 'held'); return state.phase === 'ready' ? state : false; }, prepared.migrationDeadline, 'reopened preparation');
+    assert.equal(ready.startupDeadline, prepared.startupDeadline); assert.equal(ready.migrationDeadline, prepared.migrationDeadline); assert.equal(ready.sequence.steps[0].executionDeadline, interrupted.sequence.steps[0].executionDeadline);
+    assert.equal(JSON.stringify(await journal.read()).includes('synthetic-group-private-value'), false);
+    const database = ready.nodes.find((node) => node.name === 'db'); assert.ok(database.ready);
+    const tasks = await api.request('GET', '/tasks?filters=' + encodeURIComponent(JSON.stringify({ service: [database.ready.native.id], 'desired-state': ['running'] }))); assert.equal(tasks.status, 200);
+    const task = tasks.value.find((value) => value.DesiredState === 'running' && value.Status.State === 'running'); assert.ok(task);
+    const ledger = JSON.parse(execFileSync('docker', ['exec', task.Status.ContainerStatus.ContainerID, 'node', '-e', `process.stdout.write(require('node:fs').readFileSync('/data/ledger.json','utf8'))`], { encoding: 'utf8', timeout: 10000 })); assert.deepEqual(ledger, [run + ':schema']);
+    await pause(200); finished = true; eventProcess.kill('SIGTERM'); await eventExit; assert.equal(eventError, undefined); assert.equal(partial, '');
+    const migrationContainer = ready.sequence.steps[0].attempts[0].execution.container;
+    const migrationStarts = events.filter((event) => event.Action === 'start' && event.Actor?.ID === migrationContainer).length; assert.equal(migrationStarts, 1);
+    const dependencyStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === database.ready.native.id).length; assert.equal(dependencyStarts, 1);
+    const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration and preparation journal reopen; no indexed admission, SIGKILL, consumer rollout, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
+      consumerDeadline: ready.consumerDeadline, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
+    await writeFile(join(path, 'result.json'), JSON.stringify(result, null, 2)); await writeFile(join(output, 'managed-group.json'), JSON.stringify(result, null, 2)); return result;
+  } catch (error) { await writeFile(join(path, 'failure.json'), JSON.stringify({ error: String(error), stack: error.stack }, null, 2)); throw error; }
+  finally {
+    if (journal) await journal.close(); finished = true; eventProcess.kill('SIGTERM'); await eventExit;
+    await writeFile(join(path, 'events.json'), JSON.stringify(events, null, 2)); await writeFile(join(path, 'requests.json'), JSON.stringify(requests, null, 2));
+    await writeFile(join(path, 'event-observer.json'), JSON.stringify({ complete: eventError === undefined && partial === '', error: eventError ?? null }));
+  }
+};

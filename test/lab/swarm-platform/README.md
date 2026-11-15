@@ -1582,3 +1582,19 @@ Successful VM `kayra-volume-lab-20261115143520813152` was destroyed. Private raw
 source/clock/request/event/journal evidence has a SHA-256 manifest. Authorization
 and rebinding remain fixture-owned: this does not establish indexed cancellation,
 retry, migration or group rollout acceptance.
+
+### Native retained-startup and migration parent
+
+```bash
+python3 test/lab/swarm-platform/volume-lab.py --managed-group
+```
+
+This includes the managed-service/storage probes, then allocates a distinct
+fixture incarnation and owned volume. The rolling preparation parent must start
+its retained app-owned HTTP ledger, wait for readiness, and run a declared
+one-shot migration through the private `db` DNS alias. Input materialization is
+inside the fixture composition port. Reopening the parent journal after migration
+Start must preserve deadlines, observe one execution and retain one ledger entry.
+A live container-event stream records dependency and job starts. This tests
+fixture-authorized preparation only: consumer updates, admission, SIGKILL,
+release promotion, SQL safety and full group lifecycle are not established.

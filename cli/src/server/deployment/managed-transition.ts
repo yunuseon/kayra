@@ -9,6 +9,7 @@ import { retainService } from "./retained-service.ts";
 import { reserveResources } from "./resource-book.ts";
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const routesFor = (plan: ManagedApplicationPlan, service: string) => JSON.stringify(plan.routes.filter((route) => route.service === service));
 const empty = Object.freeze({ cpu: 0, memory: 0 });
 const amount = (service: ManagedServicePlan) => Object.freeze({ cpu: Math.ceil(service.resources.nanoCpus / 1_000_000), memory: service.resources.memoryBytes });
 const sum = (values: readonly ResourceBudget[]) => Object.freeze(values.reduce<ResourceBudget>((total, value) => Object.freeze({ cpu: total.cpu + value.cpu, memory: total.memory + value.memory }), empty));
@@ -34,6 +35,10 @@ export const prepareManagedTransition = async (previous: ManagedApplicationPlan 
   if (!next.ok || before !== null && !before.ok) return err("invalid managed transition plans");
   const old = before === null ? null : before.value; const target = next.value;
   if (old !== null && (!same(old.infrastructure.ownership, target.infrastructure.ownership) || !same(old.host, target.host) || !same(old.infrastructure.overlay, target.infrastructure.overlay))) return err("ordinary managed transitions cannot change ownership, host or private infrastructure");
+  if (old !== null && target.rollout.strategy === "rolling" && target.routes.some((route) => {
+    const previous = old.routes.find((before) => before.host === route.host && before.path === route.path);
+    return previous !== undefined && previous.service !== route.service;
+  })) return err("rolling transitions cannot move an existing route between services; declare granted maintenance instead");
   if (baselines.length > 32) return err("too many retained dependency baselines");
   const recorded = all(baselines.map(parseManagedServicePlan)); if (!recorded.ok) return err("invalid retained dependency baselines");
   const retained = [...(old === null ? [] : Object.values(old.services).filter((service) => service.role === "retained-dependency")), ...recorded.value];
@@ -58,7 +63,7 @@ export const prepareManagedTransition = async (previous: ManagedApplicationPlan 
   if (![resources.target, resources.previous ?? empty, resources.peak].every(validBudget) || resources.peak.cpu > plan.grants.cpu_millicores || resources.peak.memory > plan.grants.memory_bytes) return err("managed transition overlap, jobs and recovery exceed application grants");
   const rollbackEligible = old !== null && plan.rollout.rollback_compatible && old.routes.every((route) => plan.hosts.includes(route.host));
   if (plan.rollout.strategy === "rolling" && old !== null && !rollbackEligible) return err("rolling transition cannot restore its previous route grants");
-  const changes = Object.entries(plan.services).map(([name, service]) => Object.freeze({ name, kind: service.role === "retained-dependency" && unique.some((baseline) => baseline.service === name) ? "retained" : old?.services[name] === undefined ? "create" : managedServiceDigest(old.services[name]) === managedServiceDigest(service) ? "unchanged" : "replace" }));
+  const changes = Object.entries(plan.services).map(([name, service]) => Object.freeze({ name, kind: service.role === "retained-dependency" && unique.some((baseline) => baseline.service === name) ? "retained" : old?.services[name] === undefined ? "create" : managedServiceDigest(old.services[name]) === managedServiceDigest(service) && routesFor(old, name) === routesFor(plan, name) ? "unchanged" : "replace" }));
   const removed = old === null ? [] : Object.keys(old.services).filter((name) => !Object.hasOwn(plan.services, name));
   return ok(Object.freeze({ plan, previous: old, resources, rollbackEligible, changes: Object.freeze(changes), removed: Object.freeze(removed), planDigest: managedApplicationDigest(plan) }));
 };

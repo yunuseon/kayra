@@ -1659,3 +1659,12 @@ pending versions. No materialized synthetic secret was in the journals. Private
 exact-source, API/event, clock and journal evidence has a SHA-256 manifest. This
 is a fixture-authorized injected interruption, not SIGKILL, indexed admission,
 whole-application recovery or HTTP continuity acceptance.
+
+The whole-group fixture then adds a new worker and a new retained helper under
+another recorded operation, drives retained preparation and consumer convergence,
+and compensates the group to its previous immutable plan. The group recovery
+journal reopens after restore acknowledgement. Verification requires unchanged
+recovery deadlines, restored worker convergence, unchanged existing dependency,
+and fully scrubbed zero-replica barriers for both new-only services. Fixture grants
+do not establish indexed resource admission or release promotion. HTTP continuity,
+SQL safety, SIGKILL and maintenance/check integration remain separate acceptance.

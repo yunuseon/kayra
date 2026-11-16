@@ -75,7 +75,7 @@ test("authorization loss holds quiescence without stopping a consumer", async (t
 test("a changed native consumer after its barrier cannot become a maintenance completion certificate", async (t) => {
   const lab = await fixture(t); await lab.owner().prepare(lab.request);
   for (let i = 0; i < 12; i++) { const state = await lab.owner().tick(); if (state.nodes.every((node) => node.child?.phase === "complete")) break; }
-  const old = lab.observed.get("web"); assert.ok(old?.status === "owned"); lab.observed.set("web", { ...old, action: old.action + "other" });
+  const old = lab.observed.get("web"); assert.ok(old?.status === "owned"); lab.observed.set("web", { ...old, action: String(old.action) + "other" });
   const held = await lab.owner().tick(); assert.equal(held.phase, "held"); assert.equal(held.reason, "runtime"); assert.equal(held.verifiedAt, null);
 });
 

@@ -30,7 +30,7 @@ const fixture = async (t: TestContext, previous: boolean | ((plan: ManagedApplic
     return { app: service.owner.app, incarnation: service.owner.incarnation, dataOwner: service.owner.dataOwner, service: name, action: service.owner.incarnation + ":" + String(sequence), plan: managedServiceDigest(service), deadline: sequence === 1 ? 999 : 91000, effect: "apply" as const };
   };
   const observe = (action: ManagedServiceAction, version = 1) => ({ status: "owned" as const, id: action.service.padEnd(25, "s"), version, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan,
-    tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip" as const, update: monitor ? "updating" as const : "completed" as const,
+    tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip" as const, update: monitor ? "updating" as const : "completed" as const,
     tasks: [{ id: "t".repeat(25), incarnation: action.incarnation, action: action.action, effect: action.effect, plan: action.plan, desired: "running" as const, state: "running" as const, health: "healthy" as const }] });
   const baseline: ConsumerBaseline[] = old === null ? [] : Object.values(old.services).filter((service) => service.role !== "retained-dependency").map((service) => {
     const action = actionFor(service.service, old, 1); const observed = observe(action); runtime.set(service.service, observed); return { name: service.service, action, native: { id: observed.id, version: observed.version } };
@@ -53,7 +53,7 @@ const fixture = async (t: TestContext, previous: boolean | ((plan: ManagedApplic
     },
     tombstone: (action: ManagedServiceAction) => {
       writes.push(action); const current = runtime.get(action.service); if (current?.status !== "owned") throw new Error("missing baseline");
-      runtime.set(action.service, { ...current, version: current.version + 1, action: action.action, effect: action.effect, taskEffect: action.effect, tombstone: true, retainedInputsCleared: action.effect === "scrub", replicas: 0, endpoint: "dnsrr", tasks: [] });
+      runtime.set(action.service, { ...current, version: current.version + 1, action: action.action, effect: action.effect, taskEffect: action.effect, tombstone: true, containersStopped: true, retainedInputsCleared: action.effect === "scrub", replicas: 0, endpoint: "dnsrr", tasks: [] });
       return Promise.resolve("acknowledged" as const);
     },
   }, readiness: { check: (action: ManagedServiceAction) => { checks.push(action.service); return Promise.resolve({ app: action.app, service: action.service, incarnation: action.incarnation, action: action.action, plan: action.plan, checkedAt: clock, status: routesReady ? "ready" as const : "unready" as const }); } } };

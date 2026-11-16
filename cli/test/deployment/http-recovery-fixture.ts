@@ -22,7 +22,7 @@ export const recoveryFixture = async (t: TestContext, promote = true, transform:
     if (!matches(expected)) return "conflict" as const;
     writes += 1;
     current = { status: "owned", id: "s".repeat(25), version: expected === null ? 41 : expected.version + 1, action: action.action, plan: action.plan, effect: action.effect,
-      taskPlan: action.plan, taskEffect: action.effect, tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
+      taskPlan: action.plan, taskEffect: action.effect, tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
       tasks: [{ id: String(writes).padStart(25, "t"), incarnation: action.incarnation, action: action.action, plan: action.plan, effect: action.effect, state: "running", desired: "running", health: "healthy" }] };
     return "acknowledged" as const;
   };
@@ -42,7 +42,7 @@ export const recoveryFixture = async (t: TestContext, promote = true, transform:
       if (!matches(expected)) return Promise.resolve("conflict");
       writes += 1;
       current = { status: "owned", id: "s".repeat(25), version: expected === null ? 41 : expected.version + 1, action: action.action, plan: action.plan, effect: action.effect,
-        taskPlan: action.plan, taskEffect: action.effect, tombstone: true, retainedInputsCleared: current.status === "absent" || (current.status === "owned" && current.tombstone), specMatches: false, replicas: 0, endpoint: "dnsrr", update: null, tasks: [] };
+        taskPlan: action.plan, taskEffect: action.effect, tombstone: true, containersStopped: true, retainedInputsCleared: current.status === "absent" || (current.status === "owned" && current.tombstone), specMatches: false, replicas: 0, endpoint: "dnsrr", update: null, tasks: [] };
       return Promise.resolve("acknowledged");
     },
   };

@@ -1780,3 +1780,50 @@ API/events/journals/history and exact source/version evidence have a SHA-256
 manifest. This proves graceful application-owned locking in this fixture;
 indexed promotion, crash-safe leases, hard termination and exactly-once effects
 remain unproven. Normal managed V3 deployment remains disabled.
+
+The maintenance probe is included by `volume-lab.py --managed-group`. It runs a
+private worker against an app-owned schema/effect ledger, stops the old worker,
+runs a replay-safe migration, starts the new worker and verifies native readiness.
+It reopens preparation and consumer journals; live Docker events identify the
+migration container and require exactly one Start in this uninjected run.
+
+At `e9fd197`, VM `kayra-volume-lab-20261116191150950512` found a fixture command
+that repeated its declared Node entrypoint. The migration exited 1 and the
+operation held; its VM, frozen source, registry RAM and raw evidence are preserved.
+The command was corrected in `ca27f92`.
+
+The next VM, `kayra-volume-lab-20261116191818612568`, exposed a runtime ordering
+bug: Swarm's terminal task state preceded actual container cessation. The
+quiescence certificate was issued at `1794857022345` ms; migration applied at
+`1794857023567` ms; the old container stopped at `1794857024168` ms. Three old
+worker requests encountered the new schema. This is a failed maintenance case.
+Its source was `ca27f92` plus the admission changes subsequently committed in
+`d149382`; the archived source manifest identifies every staged file. This
+fixture does not exercise resource admission. All results, the diagnostic ledger,
+live events, runtime snapshots and registry RAM were archived before stopping
+and preserving the VM and disks.
+
+The fix requires a separate Docker container inventory for zero-replica barriers,
+including owned containers absent from Swarm task history. Running, paused,
+restarting, created and removing containers block certification. Retained-service
+reactivation and check-container cessation use the same barrier evidence. A
+check cessation proof establishes neither execution nor migration outcome.
+Fresh native maintenance validation is pending; normal managed V3 execution
+remains disabled. Active-service convergence also needs its separate container
+drain check before this experimental integration can be considered complete.
+
+
+The fresh drain-fix run at `b06d2de`, VM
+`kayra-volume-lab-20261116193350363165`, passed and the VM was destroyed.
+Reproduce with `python3 test/lab/swarm-platform/volume-lab.py --managed-group`.
+The app-owned ledger reached schema 2 with zero violations, no old-worker effects
+after migration, one applied operation identity and one migration Start in the
+live Docker stream. Retained native service and volume identity were unchanged.
+Preparation and consumer journal reopen preserved original phase deadlines.
+The certificate-to-final-verification interval was 3.705 seconds; this excludes
+quiescence time and is neither HTTP outage measurement nor a continuity claim.
+The singleton/check/compensation component probes in the same run also passed.
+Raw API/events/journals/ledger/source/version evidence has a private SHA-256
+manifest. This closes the reproduced zero-replica drain bug; active-service
+container convergence, indexed lifecycle integration and full acceptance remain
+required before normal managed V3 execution can be enabled.

@@ -22,7 +22,7 @@ const fixture = async (t: TestContext, absent = false) => {
   const action: ManagedServiceAction = { app: service.owner.app, service: service.service, incarnation: service.owner.incarnation, dataOwner: service.owner.dataOwner,
     action: service.owner.incarnation + ":3", plan: managedServiceDigest(service), deadline: 91000, effect: "remove" };
   const old: Extract<ServiceObservation, { readonly status: "owned" }> = { status: "owned", id, version: 5, action: service.owner.incarnation + ":2", effect: "apply", taskEffect: "apply", plan: action.plan, taskPlan: action.plan,
-    tombstone: false, retainedInputsCleared: false, specMatches: null, replicas: 1, endpoint: "vip", update: "completed", tasks: [] };
+    tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: null, replicas: 1, endpoint: "vip", update: "completed", tasks: [] };
   let observed: ServiceObservation = absent ? { status: "absent" } : old;
   const ports = { ...artifacts, now: () => clock, authorize: () => Promise.resolve(admitted), runtime: {
     observe: (scope: ManagedServiceScope) => {
@@ -35,7 +35,7 @@ const fixture = async (t: TestContext, absent = false) => {
         scrubConflict = false; observed = { ...observed, version: observed.version + 1 }; return Promise.resolve("conflict" as const);
       }
       const version = observed.status === "owned" ? observed.version + 1 : 1;
-      observed = { ...old, version, action: requested.action, effect: requested.effect, replicas: 0, endpoint: "dnsrr", tombstone: true, retainedInputsCleared: requested.effect === "scrub",
+      observed = { ...old, version, action: requested.action, effect: requested.effect, replicas: 0, endpoint: "dnsrr", tombstone: true, containersStopped: true, retainedInputsCleared: requested.effect === "scrub",
         tasks: draining ? [{ id: "t".repeat(25), incarnation: action.incarnation, effect: "apply", action: old.action, plan: old.plan, desired: "shutdown", state: "running", health: "absent" }] : [] };
       return lose ? Promise.reject(new Error("private lost acknowledgement")) : Promise.resolve("acknowledged" as const);
     },

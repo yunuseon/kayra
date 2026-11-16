@@ -60,7 +60,7 @@ export const httpExecution = (index: HttpExecutionIndex, ports: HttpExecutionPor
     }
     if (operation.phase === "admitted") {
       if (observed.status !== "absent" && observed.status !== "owned") return "runtime-unavailable";
-      if (observed.status === "owned" && (operation.previous === null ? !observed.tombstone || !observed.retainedInputsCleared || observed.replicas !== 0 : observed.id !== operation.previous.native.id)) return "runtime-conflict";
+      if (observed.status === "owned" && (operation.previous === null ? !observed.tombstone || !observed.retainedInputsCleared || !observed.containersStopped || observed.replicas !== 0 : observed.id !== operation.previous.native.id)) return "runtime-conflict";
       const previous = operation.previous;
       const baseline = previous === null ? observed : await (async () => {
         const bytes = await ports.read(previous.plan);

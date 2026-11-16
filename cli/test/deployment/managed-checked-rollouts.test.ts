@@ -37,7 +37,7 @@ const fixture = async (t: TestContext, capable = true, active = false) => {
     observeDesired: (action: ManagedServiceAction) => { const observed = services.get(action.service); return Promise.resolve(observed?.status === "owned" ? { ...observed, specMatches: observed.plan === action.plan } : observed ?? { status: "absent" as const }); },
     apply: (action: ManagedServiceAction, _expected: unknown, spec: ManagedServicePlan) => {
       assert.equal(action.plan, managedServiceDigest(spec)); effects.push(action);
-      services.set(action.service, { status: "owned", id: action.service.padEnd(25, "s"), version: 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: true, tombstone: false, retainedInputsCleared: false, replicas: 1, endpoint: "vip", update: "completed",
+      services.set(action.service, { status: "owned", id: action.service.padEnd(25, "s"), version: 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: true, tombstone: false, containersStopped: true, retainedInputsCleared: false, replicas: 1, endpoint: "vip", update: "completed",
         tasks: [{ id: action.service.padEnd(25, "t"), incarnation: action.incarnation, action: action.action, effect: action.effect, plan: action.plan, desired: "running", state: "running", health: "healthy" }] });
       return Promise.resolve("acknowledged" as const);
     },

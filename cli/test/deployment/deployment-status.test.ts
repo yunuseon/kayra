@@ -100,7 +100,7 @@ test("a failed candidate remains requested while the restored release is desired
   await index.recordHttpNativeIntent("shop", a.ticket, { effect: "apply", attempt: 1, expected: null, deadline: a.deadline, plan: a.plan });
   const incarnation = a.action.split(":")[0] ?? "";
   const observed = { status: "owned" as const, id: "s".repeat(25), version: 42, action: a.action, effect: "apply" as const, plan: a.plan,
-    taskPlan: a.plan, taskEffect: "apply" as const, specMatches: true, tombstone: false, retainedInputsCleared: false, replicas: 1, endpoint: "vip" as const, update: "completed",
+    taskPlan: a.plan, taskEffect: "apply" as const, specMatches: true, tombstone: false, containersStopped: true, retainedInputsCleared: false, replicas: 1, endpoint: "vip" as const, update: "completed",
     tasks: [{ id: "t".repeat(25), incarnation, action: a.action, effect: "apply" as const, plan: a.plan, desired: "running", state: "running", health: "healthy" as const }] };
   const routed = { app: "shop", incarnation, service: a.service, action: a.action, plan: a.plan, checkedAt: 2000, status: "ready" as const };
   await index.promoteHttpRollout("shop", a.ticket, observed, routed, 2000);

@@ -31,7 +31,7 @@ const fixture = async (t: TestContext, migrations = false) => {
       assert.equal(spec.role, "retained-dependency"); serviceCreates++;
       const nativeVersion = database.status === "owned" ? database.version + 1 : 1;
       database = { status: "owned", id: "s".repeat(25), version: nativeVersion, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan,
-        tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
+        tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
         tasks: [{ id: "t".repeat(25), incarnation: action.incarnation, effect: action.effect, plan: action.plan, action: action.action, desired: "running", state: "running", health: "healthy" }] };
       return Promise.resolve("acknowledged" as const);
   };
@@ -107,7 +107,7 @@ test("a recorded empty retained barrier selects explicit reactivation before mig
   const previous: ManagedServiceAction = { app: scope.app, service: service.service, incarnation: scope.incarnation, dataOwner: scope.dataOwner,
     action: scope.incarnation + ":1:scrub:1", plan: managedServiceDigest(service), deadline: 999, effect: "scrub" };
   lab.observe({ status: "owned", id: "s".repeat(25), version: 1, action: previous.action, effect: "scrub", taskEffect: "scrub", plan: previous.plan, taskPlan: previous.plan,
-    tombstone: true, retainedInputsCleared: true, specMatches: null, replicas: 0, endpoint: "dnsrr", update: "completed", tasks: [] });
+    tombstone: true, containersStopped: true, retainedInputsCleared: true, specMatches: null, replicas: 0, endpoint: "dnsrr", update: "completed", tasks: [] });
   await lab.owner().prepare(lab.plan, lab.run, lab.action, [{ name: "db", kind: "barrier", action: previous, native: { id: "s".repeat(25), version: 1 } }]);
   const ready = await lab.drive(); assert.equal(ready.phase, "ready"); assert.equal(ready.nodes[0]?.execution?.mode, "reactivate-retained"); assert.equal(lab.reactivations(), 1);
 });

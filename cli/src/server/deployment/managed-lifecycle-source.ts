@@ -12,6 +12,7 @@ import { parseManagedServiceBarrier } from "./managed-service-barrier.ts";
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const native = z.object({ id: z.string().regex(/^[a-z0-9]{25}$/), version: positive }).strict().readonly();
 const schema = z.object({ version: z.literal(1), run: z.uuid(), action: z.string().max(80), createdAt: positive,
+  restore: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
   candidate: z.unknown(), previous: z.unknown().nullable(),
   retained: z.array(z.object({ name: z.string(), kind: z.enum(["active", "barrier"]), action: z.unknown(), native }).strict().readonly()).max(32).readonly(),
   retired: z.array(z.object({ plan: z.unknown(), barrier: z.unknown() }).strict().readonly()).max(32).readonly(),
@@ -50,7 +51,7 @@ export const parseManagedLifecycleSource = (input: unknown) => {
     retired.some((value) => plan.services[value.plan.service] !== undefined && !retained.some((reference) => reference.name === value.plan.service && reference.kind === "barrier"))) throw new Error("managed lifecycle retained coverage disagrees");
   const deadline = raw.createdAt + duration(plan, previousPlan);
   if (!Number.isSafeInteger(deadline)) throw new Error("managed lifecycle deadline exceeds clock range");
-  return Object.freeze({ version: 1 as const, run: raw.run, action: raw.action, createdAt: raw.createdAt, candidate: plan, previous, retained, retired });
+  return Object.freeze({ version: 1 as const, run: raw.run, action: raw.action, createdAt: raw.createdAt, restore: raw.restore, candidate: plan, previous, retained, retired });
 };
 export type ManagedLifecycleSource = ReturnType<typeof parseManagedLifecycleSource>;
 export const managedLifecycleSourceDigest = (input: ManagedLifecycleSource) => createHash("sha256").update(JSON.stringify(parseManagedLifecycleSource(input))).digest("hex");

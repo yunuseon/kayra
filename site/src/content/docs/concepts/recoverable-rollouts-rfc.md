@@ -1815,3 +1815,31 @@ promotion follows from an assertion alone; normal convergence and final checks
 still apply. Cancellation resolution, native cleanup, compatibility history
 fences and the normal indexed/client dispatch remain subsequent work. The
 managed V3 entrypoint is still disabled.
+
+
+### Data compatibility history groundwork
+
+The private managed lifecycle journal now records a compatibility epoch before
+an app-declared rollback-unsafe candidate can start a migration, workload or
+completion check. The synchronized intent advances once per operation, so a
+lost acknowledgement or restart cannot erase the barrier or advance it again.
+An ambiguous effect conservatively retains that barrier. No schema, SQL or queue
+behavior is inferred by Kayra.
+
+Verified active/last-good pointers carry the epoch in which they were verified.
+Private historical restore selection is authenticated against the synchronized,
+content-addressed journal history and must match the exact candidate plan and
+current epoch. Removing the restore marker does not bypass the guard: after a
+fence, known old plans are checked against the same history. A fresh build with
+new declarations remains the application's compatibility responsibility. History
+inspection has a fixed metadata deadline; missing or corrupt history refuses
+admission before workload mutation. A stale active baseline also cannot admit a
+rolling rollout. Forward recovery needs its own admitted lifecycle operation.
+
+This uses private journal format 2. Pre-fence private V3 format 1 is refused;
+compatibility safety is not invented for those isolated experimental records.
+Legacy Compose and existing V1/V2 Swarm paths are unchanged. The epoch and
+history must survive the future managed removal/recreation tombstone and be
+respected by operator/client dispatch before normal V3 execution can be enabled.
+There is no automatic down-migration, compatibility reset or production
+conversion in this groundwork.

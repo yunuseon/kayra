@@ -20,13 +20,14 @@ import { jobName } from "../../src/contracts/one-shot-job.ts";
 import type { JobPlan } from "../../src/contracts/one-shot-job.ts";
 import { managedLifecycleOwner } from "../../src/server/deployment/managed-lifecycle-owner.ts";
 import { parseManagedLifecycleStore } from "../../src/server/deployment/managed-lifecycle-store.ts";
+import { parseManagedRelease, managedReleaseBaselines } from "../../src/server/deployment/managed-release.ts";
 import { reserveManagedTransition } from "../../src/server/deployment/managed-transition.ts";
 import { parseResourceBook, settleResources } from "../../src/server/deployment/resource-book.ts";
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 
-const fixture = async (t: TestContext, maintenance = false, migrations: boolean | "unknown" = false) => {
-  const { plan } = await managedPlanFixture(); const parsed = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance }, rollout: { ...plan.rollout, strategy: maintenance ? "maintenance" : "rolling", migrations: migrations === "unknown" ? plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["node", "status.mjs"], timeout_seconds: 10 } })) : migrations ? plan.rollout.migrations : [] } }); assert.ok(parsed.ok); const candidate = parsed.value;
+const fixture = async (t: TestContext, maintenance = false, migrations: boolean | "unknown" = false, unsafe = false) => {
+  const { plan } = await managedPlanFixture(); const parsed = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance }, rollout: { ...plan.rollout, strategy: maintenance ? "maintenance" : "rolling", rollback_compatible: !unsafe, migrations: migrations === "unknown" ? plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["node", "status.mjs"], timeout_seconds: 10 } })) : migrations ? plan.rollout.migrations : [] } }); assert.ok(parsed.ok); const candidate = parsed.value;
   const source = parseManagedLifecycleSource({ version: 1, candidate, previous: null, run: randomUUID(), action: candidate.infrastructure.ownership.incarnation + ":2", createdAt: 1000, retained: [], retired: [] });
   const path = await mkdtemp(join(tmpdir(), "kayra-managed-owner-")); const artifacts = await openArtifactStore(join(path, "artifacts")); let journal = await openJournal(path); let clock = 1000; let book: unknown = null; let binding: string | undefined; let reserveCalls = 0; let settleCalls = 0; let loseReserve = false; let loseSettle = false; let authorize = true; let loseJobStart = false;
   const native = new Map<string, ServiceObservation>(); const calls: ManagedServiceAction[] = [];
@@ -37,7 +38,8 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
       return loseReserve ? Promise.reject(new Error("lost reservation acknowledgement")) : Promise.resolve("reserved");
     },
     observe: (identity) => {
-      if (book === null) return Promise.resolve("absent"); if (binding !== JSON.stringify(identity)) return Promise.resolve("foreign"); const checked = parseResourceBook(book); assert.ok(checked.ok); const charge = checked.value.charges[0]; assert.ok(charge);
+      if (book === null) return Promise.resolve("absent"); const checked = parseResourceBook(book); assert.ok(checked.ok); const charge = checked.value.charges[0]; assert.ok(charge);
+      if (charge.sequence < Number(identity.action.split(":")[1]) && charge.result !== "pending") return Promise.resolve("absent"); if (binding !== JSON.stringify(identity)) return Promise.resolve("foreign");
       return Promise.resolve(charge.result === "pending" ? "reserved" : charge.result === "target" ? "settled-target" : charge.result === "previous" ? "settled-previous" : "settled-absent");
     },
     settle: (identity, _claim, result) => {
@@ -50,10 +52,14 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
     observeDesired: (action: ManagedServiceAction, spec: ManagedServicePlan) => { const value = native.get(action.service); return Promise.resolve(value?.status === "owned" ? { ...value, specMatches: value.plan === managedServiceDigest(spec) } : { status: "absent" as const }); },
     apply: async (action: ManagedServiceAction, expected: ServiceVersion | null, spec: ManagedServicePlan) => {
       const ledger = parseResourceBook(book); assert.ok(ledger.ok); assert.equal(ledger.value.charges[0]?.result, "pending"); const state = await owner.read(); assert.ok(state); const effect = spec.role === "retained-dependency" ? state.operation.preparation?.nodes.find((value) => value.name === spec.service)?.execution : state.operation.consumers?.nodes.find((value) => value.name === spec.service)?.execution; assert.equal(effect?.phase, "observing");
+      if (!(await owner.source()).candidate.rollout.rollback_compatible) assert.ok(state.operation.compatibilityFencedAt);
       const before = native.get(action.service); assert.equal(expected?.version ?? null, before?.status === "owned" ? before.version : null); calls.push(action);
       native.set(action.service, { status: "owned", id: action.service.padEnd(25, "s"), version: before?.status === "owned" ? before.version + 1 : 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: true, tombstone: false, retainedInputsCleared: false, containersStopped: false, containersConverged: true, replicas: 1, endpoint: "vip", update: "completed", tasks: [{ id: action.service.padEnd(25, "t"), incarnation: action.incarnation, action: action.action, effect: action.effect, plan: action.plan, desired: "running", state: "running", health: "healthy" }] }); return "acknowledged" as const;
     },
-    tombstone: () => Promise.resolve("refused" as const),
+    tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null) => {
+      const before = native.get(action.service); assert.equal(before?.status, "owned"); assert.equal(expected?.version, before.version);
+      native.set(action.service, { ...before, version: before.version + 1, action: action.action, effect: action.effect, plan: action.plan, tombstone: true, retainedInputsCleared: action.effect === "scrub", containersStopped: true, containersConverged: true, replicas: 0, endpoint: "dnsrr", tasks: [] }); return Promise.resolve("acknowledged" as const);
+    },
   };
   const nodes = new Map<string, ReturnType<typeof jobRuntime>>();
   const nodeFor = (job: JobPlan) => { const name = jobName(job.scope); let value = nodes.get(name); if (value === undefined) { value = jobRuntime(job); nodes.set(name, value); } value.now(clock); return value; };
@@ -71,7 +77,7 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
   } });
   let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
-  return { source, calls, nodes, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => book, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
+  return { source, calls, nodes, artifacts, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => book, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
     cutResolution: (where: "before" | "after") => { resolutionCut = where; },
     reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
     drive: async () => { for (let i = 0; i < 100; i++) { const value = await owner.tick(); if (value?.operation.phase === "complete" || value?.operation.phase === "held") return value; } throw new Error("managed lifecycle did not settle"); },
@@ -155,4 +161,26 @@ for (const cut of ["before", "after"] as const) test(`reopen ${cut} the resoluti
   assert.equal(restored.operation.phase, cut === "before" ? "held" : "preparing");
   const resolved = await lab.owner().resolveMigration(resolution(lab.source.run), actor); const done = await lab.drive(); assert.equal(done.operation.phase, "complete");
   assert.equal(done.operation.preparation?.sequence?.steps[0]?.resolution?.id, resolved.receipt.resolution); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 2);
+});
+
+test("an unsafe maintenance operation fences compatibility before application starts and never increments again on reopen", async (t) => {
+  const lab = await fixture(t, true, true, true); await lab.owner().begin(lab.source); lab.loseJobStart();
+  await assert.rejects(lab.drive(), /lost migration Start acknowledgement/); const before = await lab.owner().read(); assert.ok(before);
+  assert.equal(before.compatibilityEpoch, 1); assert.equal(before.operation.compatibilityEpoch, 1); assert.ok(before.operation.compatibilityFencedAt);
+  await lab.reopen(); const done = await lab.drive(); assert.equal(done.operation.phase, "complete"); assert.equal(done.compatibilityEpoch, 1); assert.equal(done.active?.epoch, 1); assert.equal(done.operation.compatibilityFencedAt, before.operation.compatibilityFencedAt);
+});
+
+for (const unsafe of [false, true]) test(`historical restore ${unsafe ? "refuses a prior data epoch even when disguised as deployment" : "accepts authenticated compatible history"}`, async (t) => {
+  const lab = await fixture(t); await lab.owner().begin(lab.source); const first = await lab.drive(); assert.ok(first.active); assert.equal(first.active.epoch, 0);
+  const releaseA = parseManagedRelease(JSON.parse(await lab.artifacts.read(first.active.record)));
+  const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40), grants: { ...lab.source.candidate.grants, maintenance: unsafe }, rollout: { ...lab.source.candidate.rollout, strategy: unsafe ? "maintenance" : "rolling", rollback_compatible: !unsafe } }); assert.ok(candidate.ok);
+  const references = (release: typeof releaseA) => managedReleaseBaselines(release).filter((value) => release.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
+  const secondSource = parseManagedLifecycleSource({ ...lab.source, candidate: candidate.value, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", previous: releaseA, retained: references(releaseA) });
+  await lab.owner().begin(secondSource); const second = await lab.drive(); assert.equal(second.operation.phase, "complete"); assert.ok(second.active); assert.equal(second.active.epoch, unsafe ? 1 : 0);
+  const releaseB = parseManagedRelease(JSON.parse(await lab.artifacts.read(second.active.record))); await lab.reopen();
+  const restore = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":4", previous: releaseB, retained: references(releaseB), restore: first.active.record });
+  if (unsafe) {
+    await assert.rejects(lab.owner().begin(restore), /compatibility fence/); await assert.rejects(lab.owner().begin({ ...restore, restore: null }), /compatibility fence/);
+    assert.deepEqual(await lab.owner().read(), second); assert.equal(lab.reserveCalls(), 2);
+  } else { const accepted = await lab.owner().begin(restore); assert.equal(accepted.compatibilityEpoch, 0); assert.equal(accepted.operation.phase, "admitting"); }
 });

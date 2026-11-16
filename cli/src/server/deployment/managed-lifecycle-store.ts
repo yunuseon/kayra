@@ -18,13 +18,14 @@ import type { OperationJournal } from "./operation.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
-const pointer = z.object({ record: digest, plan: digest, run: z.uuid(), verifiedAt: positive }).strict().readonly();
+const epoch = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const pointer = z.object({ record: digest, plan: digest, run: z.uuid(), verifiedAt: positive, epoch }).strict().readonly();
 const phase = z.enum(["admitting", "quiescing", "preparing", "updating", "verifying", "settling", "complete", "held"]);
-const schema = z.object({ version: z.literal(1), protocol: z.literal("managed-v3"), runtime: z.literal("swarm"), owner: z.unknown(), sequence: positive,
+const schema = z.object({ version: z.literal(2), protocol: z.literal("managed-v3"), runtime: z.literal("swarm"), owner: z.unknown(), sequence: positive, compatibilityEpoch: epoch,
   active: pointer.nullable(), lastGood: pointer.nullable(), history: digest.nullable(),
   operation: z.object({ run: z.uuid(), action: z.string().max(80), source: digest, plan: digest, previous: digest.nullable(), createdAt: positive, admissionDeadline: positive, deadline: positive,
     phase, enteredAt: positive, reason: z.enum(["admission", "deadline", "authorization", "quiescence", "preparation", "consumers", "verification", "cancellation"]).nullable(),
-    admitted: z.boolean(), settled: z.boolean(), cancelRequestedAt: positive.nullable(), resolutionReceipts: z.array(z.unknown()).max(128).readonly().default([]),
+    admitted: z.boolean(), settled: z.boolean(), cancelRequestedAt: positive.nullable(), compatibilityEpoch: epoch, compatibilityFencedAt: positive.nullable(), resolutionReceipts: z.array(z.unknown()).max(128).readonly().default([]),
     quiescence: z.unknown().nullable(), preparation: z.unknown().nullable(), consumers: z.unknown().nullable(), verification: z.unknown().nullable(),
   }).strict().readonly(),
 }).strict().readonly();
@@ -41,7 +42,8 @@ export const parseManagedLifecycleStore = (input: unknown) => {
     const audit = preparation?.sequence?.steps.find((step) => step.id === receipt.step)?.resolution;
     return audit === undefined || receipt.app !== owner.value.app || receipt.run !== operation.run || receipt.resolution !== audit.id || receipt.outcome !== audit.outcome || receipt.recordedAt !== audit.at || receipt.disposition === "cancelled" || receipt.disposition === "continue" && (audit.outcome !== "applied" || audit.at >= (preparation?.sequence?.deadline ?? 0) || audit.at >= operation.deadline);
   }) || preparation?.sequence?.steps.some((step) => step.resolution !== undefined && !resolutionReceipts.some((receipt) => receipt.resolution === step.resolution?.id))) throw new Error("managed migration resolution receipt disagrees");
-  if (operation.action !== `${owner.value.incarnation}:${String(raw.sequence)}` || operation.admissionDeadline !== operation.createdAt + 90_000 || operation.deadline <= operation.admissionDeadline || operation.enteredAt < operation.createdAt ||
+  if (operation.compatibilityEpoch !== raw.compatibilityEpoch || [raw.active, raw.lastGood].some((value) => value !== null && value.epoch > raw.compatibilityEpoch) || operation.compatibilityFencedAt !== null && (raw.compatibilityEpoch < 1 || operation.compatibilityFencedAt < operation.createdAt || operation.compatibilityFencedAt >= operation.deadline) ||
+    operation.action !== `${owner.value.incarnation}:${String(raw.sequence)}` || operation.admissionDeadline !== operation.createdAt + 90_000 || operation.deadline <= operation.admissionDeadline || operation.enteredAt < operation.createdAt ||
     operation.cancelRequestedAt !== null && operation.cancelRequestedAt < operation.createdAt || (operation.phase === "held") !== (operation.reason !== null) || operation.settled && operation.phase !== "complete" || operation.phase === "complete" && !operation.settled ||
     [quiescence, preparation, consumers, verification].some((child) => child !== null && (child.app !== owner.value.app || child.incarnation !== owner.value.incarnation || child.dataOwner !== owner.value.dataOwner || child.run !== operation.run || child.plan !== operation.plan)) ||
     quiescence !== null && (quiescence.action !== operation.action || quiescence.createdAt < operation.createdAt || quiescence.deadline > operation.deadline) ||
@@ -79,7 +81,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   const artifact = async (digest: string) => { const bytes = await metadata(() => ports.read(digest)); if (hash(bytes) !== digest) throw new Error("managed lifecycle artifact integrity failed"); return bytes; };
   const source = async (state: ManagedLifecycleStore) => {
     const bytes = await artifact(state.operation.source); const raw: unknown = JSON.parse(bytes); const value = parseManagedLifecycleSource(raw); const description = managedLifecycleDescription(value);
-    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline) throw new Error("managed lifecycle source disagrees"); return value;
+    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible) throw new Error("managed lifecycle source disagrees"); return value;
   };
   const views = new Map<string, OperationJournal>();
   const child = (name: Child, run: string) => {
@@ -99,7 +101,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       const now = time(operation.createdAt); const verified = release.verification.verified; if (verified === null) throw new Error("managed lifecycle final observations missing");
       if (now >= operation.deadline || now >= value.deadline) { await write({ ...current, operation: { ...operation, verification: value, phase: "held", reason: "deadline" } }); return; }
       if (now - verified.at > 2000) { await write({ ...current, operation: { ...operation, verification: { ...value, phase: "running", verified: null } } }); return; }
-      const active = Object.freeze({ record, plan: operation.plan, run: operation.run, verifiedAt: verified.at });
+      const active = Object.freeze({ record, plan: operation.plan, run: operation.run, verifiedAt: verified.at, epoch: current.compatibilityEpoch });
       await write({ ...current, active, lastGood: active, operation: { ...operation, verification: value, phase: "settling", enteredAt: now } });
     }) };
     // eslint-disable-next-line functional/immutable-data -- one claimed view per child
@@ -108,6 +110,13 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   return Object.freeze({
     read: () => serial(load),
     source: () => serial(async () => source(await required())),
+    fenceCompatibility: (run: string, expected: ManagedLifecycleStore["operation"]["phase"]) => serial(async () => {
+      const state = await required(); const operation = state.operation;
+      if (operation.run !== run || operation.phase !== expected || !["preparing", "updating", "verifying"].includes(operation.phase) || operation.cancelRequestedAt !== null || !operation.admitted || time(operation.createdAt) >= operation.deadline) return false;
+      const input = await source(state); if (input.candidate.rollout.rollback_compatible || operation.compatibilityFencedAt !== null) return true;
+      const next = state.compatibilityEpoch + 1; if (!Number.isSafeInteger(next)) throw new Error("managed compatibility epoch exhausted"); const at = time(operation.createdAt); if (at >= operation.deadline) return false;
+      await write({ ...state, compatibilityEpoch: next, operation: { ...operation, compatibilityEpoch: next, compatibilityFencedAt: at } }); return true;
+    }),
     resolveMigration: (request: MigrationResolutionRequest, actor: MigrationResolutionActor, native: Parameters<typeof resolveManagedPreparationMigration>[4]["native"]) => serial(async () => {
       const state = await required(); const operation = state.operation;
       if (request.app !== owner.app || request.run !== operation.run || operation.preparation === null || operation.cancelRequestedAt !== null || !operation.admitted) throw new Error("managed migration resolution lacks lifecycle ownership");
@@ -128,12 +137,35 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       return serial(async () => {
         const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return current; }
         if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || current.active?.record !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
+        if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
+          if (current === undefined) throw new Error("managed restore lacks verified release history");
+          const selected = await metadata(async () => {
+            const deadline = performance.now() + 10_000;
+            // eslint-disable-next-line functional/no-let -- follows only synchronized, content-addressed history under one metadata deadline
+            let cursor = current;
+            // eslint-disable-next-line functional/no-let -- remembers an old match while searching for any subsequently verified compatible copy
+            let historical: ManagedLifecycleStore["active"] = null;
+            for (;;) {
+              if (performance.now() >= deadline) throw new Error("managed release history inspection expired");
+              const release = [cursor.active, cursor.lastGood].find((item) => item !== null && (value.restore === null ? item.plan === description.admission.planDigest : item.record === value.restore));
+              if (release !== undefined && release !== null) { if (value.restore !== null || release.epoch === current.compatibilityEpoch) return release; historical = release; }
+              if (cursor.history === null) { if (value.restore !== null) throw new Error("unknown managed restore record"); return Object.freeze({ historical }); }
+              const bytes = await artifact(cursor.history); const raw: unknown = JSON.parse(bytes); const archive = z.object({ previous: digest.nullable(), state: z.unknown() }).strict().parse(raw); const prior = parseManagedLifecycleStore(archive.state);
+              if (!same(prior.owner, owner) || archive.previous !== prior.history || prior.sequence >= cursor.sequence || prior.compatibilityEpoch > cursor.compatibilityEpoch) throw new Error("managed restore history disagrees"); cursor = prior;
+            }
+          });
+          const release = "historical" in selected ? selected.historical : selected;
+          if (release !== null && release.plan !== description.admission.planDigest) throw new Error("managed restore candidate differs from its verified release");
+          if (release !== null && release.epoch !== current.compatibilityEpoch) throw new Error("managed restore crosses a data compatibility fence; forward recovery is required");
+        }
+        if (current?.active !== null && current?.active !== undefined && current.active.epoch !== current.compatibilityEpoch && value.candidate.rollout.strategy === "rolling") throw new Error("managed rolling baseline crosses a data compatibility fence");
         const at = time(value.createdAt); if (at >= description.admissionDeadline) throw new Error("managed lifecycle admission deadline expired");
         if (await retain(JSON.stringify(value)) !== identity) throw new Error("managed lifecycle source retention failed");
-        const historyBytes = current === undefined ? null : JSON.stringify({ previous: current.history, operation: current.operation });
+        const historyBytes = current === undefined ? null : JSON.stringify({ previous: current.history, state: current });
         const history = historyBytes === null ? null : await retain(historyBytes); if (historyBytes !== null && history !== hash(historyBytes)) throw new Error("managed lifecycle history retention failed");
-        const state = await write({ version: 1, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]), active: current?.active ?? null, lastGood: current?.lastGood ?? null, history,
-          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: "admitting", enteredAt: at, reason: null, admitted: false, settled: false, cancelRequestedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
+        const compatibilityEpoch = current?.compatibilityEpoch ?? 0;
+        const state = await write({ version: 2, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]), compatibilityEpoch, active: current?.active ?? null, lastGood: current?.lastGood ?? null, history,
+          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: "admitting", enteredAt: at, reason: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
         // eslint-disable-next-line functional/immutable-data -- obsolete views retain their bound run and can never write the next operation
         views.clear(); return state;
       });

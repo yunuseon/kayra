@@ -79,3 +79,8 @@ test("a newer operation requires the verified active record and rejects every ob
   const prepared = await lab.store().begin(next); assert.equal(prepared.sequence, 3); assert.equal(prepared.active?.record, state.active.record); assert.ok(prepared.history);
   await assert.rejects(old.read(), /operation ownership/); await assert.rejects(old.write(lab.verification), /operation ownership/);
 });
+
+test("private pre-fence journals cannot be silently upgraded by inventing compatible release history", async (t) => {
+  const lab = await fixture(t); await lab.store().begin(lab.source); const state = await lab.store().read(); assert.ok(state); assert.equal(state.version, 2);
+  assert.throws(() => parseManagedLifecycleStore({ ...state, version: 1 }));
+});

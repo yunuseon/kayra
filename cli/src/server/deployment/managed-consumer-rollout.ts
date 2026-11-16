@@ -1,3 +1,4 @@
+import type { ManagedChecksPort } from "../../contracts/container-check.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { managedApplicationDigest, parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
@@ -20,7 +21,7 @@ import { claimJournal } from "./journal-claim.ts";
 import type { OperationJournal } from "./operation.ts";
 
 export type ConsumerBaseline = { readonly name: string; readonly action: ManagedServiceAction; readonly native: ServiceVersion };
-type Ports = { readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
+type Ports = { readonly checks?: ManagedChecksPort | undefined; readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
   readonly services: ManagedWorkloadPort; readonly readiness: ManagedRoutedReadinessPort;
   readonly authorize: (state: ManagedConsumerState, effect: { readonly kind: "service"; readonly action: ManagedServiceAction } | { readonly kind: "verify" }) => Promise<boolean>;
 };
@@ -118,7 +119,7 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
       const prior = z.array(z.object({ name: z.string(), action: z.unknown(), native: z.object({ id: z.string(), version: z.number() }).strict() }).strict()).max(32).safeParse(references); if (!prior.success) return Promise.reject(new Error("invalid consumer baseline references"));
       const baselines = Object.freeze(prior.data.map((value) => { const action = parseManagedServiceAction(value.action); if (!action.ok) throw new Error("invalid consumer baseline action"); return Object.freeze({ ...value, native: Object.freeze(value.native), action: action.value }); }));
       return serial(async () => {
-        if (target.rollout.strategy !== "rolling" || target.rollout.checks.length !== 0 || Object.values(target.services).some((service) => service.overlap === "coordinated")) throw new Error("managed consumer capabilities are unavailable for maintenance or checks");
+        if (target.rollout.strategy !== "rolling" || ports.checks === undefined && (target.rollout.checks.length !== 0 || Object.values(target.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed consumer capabilities are unavailable for maintenance or checks");
         if (old !== null && (!same(old.infrastructure.ownership, target.infrastructure.ownership) || !same(old.host, target.host) || !same(old.infrastructure.overlay, target.infrastructure.overlay) ||
           old.routes.some((route) => !target.hosts.includes(route.host)) || Object.values(old.services).some((service) => Object.values(service.inputs.environment).some((binding) => binding.kind === "secret" && !target.secrets.includes(binding.key))) ||
           Object.values(old.services).some((service) => { const next = target.services[service.service]; return service.role === "retained-dependency" && (next === undefined || managedServiceDigest(service) !== managedServiceDigest(next)); }))) throw new Error("managed consumer previous scope or recovery grants disagree");

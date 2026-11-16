@@ -1,3 +1,4 @@
+import type { ManagedChecksPort } from "../../contracts/container-check.ts";
 import { z } from "zod";
 import { managedApplicationDigest, managedMigrationDescription, managedMigrationSeconds, parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
 import type { ManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
@@ -58,6 +59,7 @@ export const parseManagedGroupPreparation = (input: unknown) => {
 export type ManagedGroupPreparation = ReturnType<typeof parseManagedGroupPreparation>;
 type ServiceRuntime = Parameters<typeof managedServiceExecution>[1]["runtime"] & { readonly observe: (scope: ManagedServiceScope) => Promise<ServiceObservation> };
 type Ports = {
+  readonly checks?: ManagedChecksPort | undefined;
   readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
   readonly services: ServiceRuntime;
   /** Composition resolves checked input references inside Create; no materialized job environment enters this parent. */
@@ -128,7 +130,7 @@ export const managedGroupPreparation = (journal: OperationJournal, ports: Ports)
       const plan = checked.value;
       return serial(async () => {
         if (references.some((reference) => reference.kind === "barrier") && ports.services.reactivate === undefined) throw new Error("retained reactivation capability is unavailable");
-        if (plan.rollout.strategy !== "rolling" || plan.rollout.checks.length !== 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated")) throw new Error("managed preparation capabilities are not available for maintenance or coordinated checks");
+        if (plan.rollout.strategy !== "rolling" || ports.checks === undefined && (plan.rollout.checks.length !== 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed preparation capabilities are not available for maintenance or coordinated checks");
         const nodes = Object.values(plan.services).filter((service) => service.role === "retained-dependency").map((service) => {
           const prior = references.find((value) => value.name === service.service); return Object.freeze({ name: service.service, plan: managedServiceDigest(service), baseline: prior === undefined ? null : Object.freeze({ kind: prior.kind, action: prior.action, native: prior.native }), execution: null, ready: null });
         });

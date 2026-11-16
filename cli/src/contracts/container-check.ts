@@ -47,3 +47,5 @@ export type ContainerCheckPort = {
 export type CheckTargetPort = {
   readonly select: (action: ManagedServiceAction, service: ServiceVersion, task: string) => Promise<{ readonly status: "owned"; readonly target: CheckTarget } | { readonly status: "absent" | "foreign" | "unavailable" }>;
 };
+
+export type ManagedChecksPort = ContainerCheckPort & CheckTargetPort;

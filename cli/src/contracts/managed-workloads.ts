@@ -8,6 +8,8 @@ export type ManagedWorkloadPort = {
   readonly observe: (scope: ManagedServiceScope) => Promise<ServiceObservation>;
   readonly observeDesired: (action: ManagedServiceAction, service: ManagedServicePlan, context: ManagedApplicationPlan) => Promise<ServiceObservation>;
   readonly apply: (action: ManagedServiceAction, expected: ServiceVersion | null, service: ManagedServicePlan, context: ManagedApplicationPlan) => Promise<ServiceWrite>;
+  /** Explicit unchanged retained-service reactivation, under the same immutable app context. */
+  readonly reactivate?: (action: ManagedServiceAction, expected: ServiceVersion, service: ManagedServicePlan, context: ManagedApplicationPlan) => Promise<ServiceWrite>;
   /** Metadata-only CAS fence preserves the current task template. */
   readonly fence?: (action: ManagedServiceAction, expected: ServiceVersion) => Promise<ServiceWrite>;
   readonly tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null, image: string) => Promise<ServiceWrite>;

@@ -1842,3 +1842,16 @@ raw requests, events, journals, app history and exact source/version evidence ha
 a private SHA-256 manifest. These are component fixtures, not indexed admission,
 process-kill, SQL, routed HTTP or full-platform acceptance. Normal managed V3
 execution remains disabled.
+
+
+The maintenance probe now uses the connected private lifecycle owner for both
+releases, including final verification, atomic active/last-good promotion and
+resource settlement. Its isolated fixture resource book is synchronized in a
+separate locked journal; this exercises resource-book decisions, not the
+platform's shared accounting binding or current-host admission observation.
+The probe reopens the lifecycle journal after migration Start and consumer
+dispatch and requires the original deadlines, one applied migration identity,
+unchanged retained service/volume identity and no old effects after migration.
+This is graceful journal reopen, not coordinator SIGKILL acceptance. Fresh native
+validation of the connected owner is pending. Failed/unsafe recovery and normal
+managed V3 execution remain unavailable.

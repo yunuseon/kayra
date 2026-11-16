@@ -37,6 +37,14 @@ test("canonical application digests ignore mapping order while retaining ordered
   assert.ok(one.ok && two.ok); assert.notEqual(managedApplicationDigest(one.value), managedApplicationDigest(two.value));
 });
 
+test("mounted migration services are rejected before admission rather than losing their mounts", async () => {
+  const { scope, artifact, description, plan } = await fixture();
+  const migration = artifact.rollout.migrations[0]; assert.ok(migration);
+  const rollout = { ...artifact.rollout, migrations: [{ ...migration, service: "db" }] };
+  assert.equal(compileManagedApplicationPlan(scope, { ...artifact, rollout }, description).ok, false);
+  assert.equal(parseManagedApplicationPlan({ ...plan, rollout }).ok, false);
+});
+
 test("changed source indexes retain provenance without changing a retained service's selected image", async () => {
   const { scope, artifact, description, plan } = await fixture(); const changed = "localhost:5000/shop/database@sha256:" + "f".repeat(64);
   const images = scope.images.map((image) => image.source.includes("/database@") ? { ...image, source: changed } : image);

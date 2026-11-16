@@ -19,13 +19,14 @@ import { jobRuntime } from "./one-shot-fixture.ts";
 import { jobName } from "../../src/contracts/one-shot-job.ts";
 import type { JobPlan } from "../../src/contracts/one-shot-job.ts";
 import { managedLifecycleOwner } from "../../src/server/deployment/managed-lifecycle-owner.ts";
+import { parseManagedLifecycleStore } from "../../src/server/deployment/managed-lifecycle-store.ts";
 import { reserveManagedTransition } from "../../src/server/deployment/managed-transition.ts";
 import { parseResourceBook, settleResources } from "../../src/server/deployment/resource-book.ts";
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 
-const fixture = async (t: TestContext, maintenance = false, migrations = false) => {
-  const { plan } = await managedPlanFixture(); const parsed = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance }, rollout: { ...plan.rollout, strategy: maintenance ? "maintenance" : "rolling", migrations: migrations ? plan.rollout.migrations : [] } }); assert.ok(parsed.ok); const candidate = parsed.value;
+const fixture = async (t: TestContext, maintenance = false, migrations: boolean | "unknown" = false) => {
+  const { plan } = await managedPlanFixture(); const parsed = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance }, rollout: { ...plan.rollout, strategy: maintenance ? "maintenance" : "rolling", migrations: migrations === "unknown" ? plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["node", "status.mjs"], timeout_seconds: 10 } })) : migrations ? plan.rollout.migrations : [] } }); assert.ok(parsed.ok); const candidate = parsed.value;
   const source = parseManagedLifecycleSource({ version: 1, candidate, previous: null, run: randomUUID(), action: candidate.infrastructure.ownership.incarnation + ":2", createdAt: 1000, retained: [], retired: [] });
   const path = await mkdtemp(join(tmpdir(), "kayra-managed-owner-")); const artifacts = await openArtifactStore(join(path, "artifacts")); let journal = await openJournal(path); let clock = 1000; let book: unknown = null; let binding: string | undefined; let reserveCalls = 0; let settleCalls = 0; let loseReserve = false; let loseSettle = false; let authorize = true; let loseJobStart = false;
   const native = new Map<string, ServiceObservation>(); const calls: ManagedServiceAction[] = [];
@@ -57,16 +58,22 @@ const fixture = async (t: TestContext, maintenance = false, migrations = false) 
   const nodes = new Map<string, ReturnType<typeof jobRuntime>>();
   const nodeFor = (job: JobPlan) => { const name = jobName(job.scope); let value = nodes.get(name); if (value === undefined) { value = jobRuntime(job); nodes.set(name, value); } value.now(clock); return value; };
   const jobs = {
-    observe: (job: JobPlan) => nodeFor(job).native.observe(job),
+    observe: async (job: JobPlan) => { const value = await nodeFor(job).native.observe(job); return value.status === "owned" && value.state === "succeeded" && job.scope.purpose === "probe" ? { ...value, probe: "unknown" as const } : value; },
     create: (job: JobPlan) => { const database = native.get("db"); assert.equal(database?.status, "owned"); assert.equal(database.tasks[0]?.health, "healthy"); const inputs = managedMigrationInputs(candidate, job); assert.ok(inputs.ok); return nodeFor(job).native.create(job, Object.fromEntries(Object.entries(inputs.value.environment).map(([key, value]) => [key, value.kind === "literal" ? value.value : "PRIVATE_JOB_VALUE"]))); },
-    start: async (job: JobPlan, id: string, deadline?: number) => { const state = await owner.read(); assert.equal(state?.operation.preparation?.sequence?.steps[0]?.attempts.at(-1)?.execution?.phase, "start-intent"); const result = await nodeFor(job).native.start(job, id, deadline); if (loseJobStart) throw new Error("lost migration Start acknowledgement"); return result; },
+    start: async (job: JobPlan, id: string, deadline?: number) => { const state = await owner.read(); assert.equal(state?.operation.preparation?.sequence?.steps[0]?.attempts.at(-1)?.execution?.phase, "start-intent"); const result = await nodeFor(job).native.start(job, id, deadline); if (migrations === "unknown" && job.scope.purpose === "migration") nodeFor(job).state("exited", 1); if (loseJobStart) throw new Error("lost migration Start acknowledgement"); return result; },
     fence: (job: JobPlan, id: string | null, deadline: number) => nodeFor(job).native.fence(job, id, deadline),
   };
   const ports = { ...artifacts, now: () => clock, admission, services, authorize: () => Promise.resolve(authorize), jobs, readiness: { check: (action: ManagedServiceAction) => Promise.resolve({ app: action.app, incarnation: action.incarnation, service: action.service, action: action.action, plan: action.plan, checkedAt: clock, status: "ready" as const }) } };
-  let owner = managedLifecycleOwner(journal, candidate.infrastructure.ownership, ports);
+  let resolutionCut: "before" | "after" | null = null;
+  const view = () => ({ read: journal.read, write: async (raw: Parameters<typeof journal.write>[0]) => {
+    const auditing = parseManagedLifecycleStore(raw).operation.preparation?.sequence?.steps.some((step) => step.resolution !== undefined) ?? false;
+    if (auditing && resolutionCut === "before") throw new Error("injected before audit write"); await journal.write(raw); if (auditing && resolutionCut === "after") throw new Error("injected lost audit acknowledgement");
+  } });
+  let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
   return { source, calls, nodes, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => book, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
-    reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); owner = managedLifecycleOwner(journal, candidate.infrastructure.ownership, ports); },
+    cutResolution: (where: "before" | "after") => { resolutionCut = where; },
+    reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
     drive: async () => { for (let i = 0; i < 100; i++) { const value = await owner.tick(); if (value?.operation.phase === "complete" || value?.operation.phase === "held") return value; } throw new Error("managed lifecycle did not settle"); },
   };
 };
@@ -109,4 +116,43 @@ test("migration Start interruption resumes its owned outcome and original deadli
   assert.deepEqual(lab.calls.map((action) => action.service), ["db"]); await lab.reopen(); const done = await lab.drive(); assert.equal(done.operation.phase, "complete");
   assert.equal(done.operation.preparation?.migrationDeadline, deadline); assert.equal(done.operation.preparation.sequence?.steps[0]?.executionDeadline, executionDeadline); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 1);
   assert.equal(JSON.stringify(done).includes("PRIVATE_JOB_VALUE"), false); assert.equal(lab.calls.length, 3);
+});
+
+const actor = { kind: "operator-control", identity: "lab-operator" } as const;
+const resolution = (run: string, outcome: "applied" | "not-applied" = "applied") => ({ app: "shop", run, step: "schema", outcome, reason: "Operator inspected the application migration ledger" });
+
+test("audited applied resolution resumes the connected owner without replaying ambiguous migration or probe", async (t) => {
+  const lab = await fixture(t, false, "unknown"); await lab.owner().begin(lab.source); const held = await lab.drive(); assert.equal(held.operation.phase, "held"); assert.equal(held.operation.preparation?.sequence?.reason, "probe-unknown");
+  const evidence = JSON.stringify(held.operation.preparation.sequence.steps[0]?.attempts); const deadline = held.operation.deadline;
+  const resolved = await lab.owner().resolveMigration(resolution(lab.source.run), actor); assert.equal(resolved.receipt.disposition, "continue"); assert.equal(resolved.state.operation.phase, "preparing");
+  await lab.reopen(); const done = await lab.drive(); assert.equal(done.operation.phase, "complete"); assert.equal(done.operation.deadline, deadline);
+  assert.equal(JSON.stringify(done.operation.preparation?.sequence?.steps[0]?.attempts), evidence); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 2);
+  const replay = await lab.owner().resolveMigration(resolution(lab.source.run), actor); assert.deepEqual(replay.receipt, resolved.receipt); assert.deepEqual(replay.state, done);
+  await assert.rejects(lab.owner().resolveMigration(resolution(lab.source.run, "not-applied"), actor), /already resolved differently/);
+});
+
+test("not-applied and late applied assertions stay held, retain capacity and cannot promote or grant a new deadline", async (t) => {
+  for (const late of [false, true]) {
+    const lab = await fixture(t, false, "unknown"); await lab.owner().begin(lab.source); const held = await lab.drive();
+    if (late) lab.clock(held.operation.deadline + 1);
+    const resolved = await lab.owner().resolveMigration(resolution(lab.source.run, late ? "applied" : "not-applied"), actor);
+    assert.equal(resolved.receipt.disposition, "failed"); assert.equal(resolved.state.operation.phase, "held"); assert.equal(resolved.state.operation.deadline, held.operation.deadline); assert.equal(resolved.state.active, null); assert.equal(lab.settleCalls(), 0);
+    assert.deepEqual(lab.calls.map((action) => action.service), ["db"]); await lab.reopen(); assert.equal((await lab.owner().tick())?.operation.phase, "held");
+  }
+});
+
+test("migration resolution requires current authority and cannot bypass cancellation or another run", async (t) => {
+  const lab = await fixture(t, false, "unknown"); await lab.owner().begin(lab.source); const held = await lab.drive();
+  await assert.rejects(lab.owner().resolveMigration(resolution(randomUUID()), actor), /ownership/); lab.deny();
+  await assert.rejects(lab.owner().resolveMigration(resolution(lab.source.run), actor), /not authorized/); assert.deepEqual(await lab.owner().read(), held);
+  await lab.owner().cancel(); await assert.rejects(lab.owner().resolveMigration(resolution(lab.source.run), actor), /ownership/);
+});
+
+for (const cut of ["before", "after"] as const) test(`reopen ${cut} the resolution journal replacement preserves one audit and does not replay unsafe work`, async (t) => {
+  const lab = await fixture(t, false, "unknown"); await lab.owner().begin(lab.source); const held = await lab.drive(); lab.cutResolution(cut);
+  await assert.rejects(lab.owner().resolveMigration(resolution(lab.source.run), actor), /synchronization uncertain/); await lab.reopen();
+  const restored = await lab.owner().read(); assert.equal(restored?.operation.deadline, held.operation.deadline);
+  assert.equal(restored.operation.phase, cut === "before" ? "held" : "preparing");
+  const resolved = await lab.owner().resolveMigration(resolution(lab.source.run), actor); const done = await lab.drive(); assert.equal(done.operation.phase, "complete");
+  assert.equal(done.operation.preparation?.sequence?.steps[0]?.resolution?.id, resolved.receipt.resolution); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 2);
 });

@@ -1795,3 +1795,23 @@ does not renew a reservation, and stale run identities cannot settle a newer
 operation. Legacy pending charges still consume capacity. These functions do
 not authorize runtime effects or terminal outcomes; the indexed lifecycle owner
 must authenticate those and synchronize both fields under its global writer.
+
+
+### Managed migration resolution groundwork
+
+The private managed lifecycle owner can resolve a held ambiguous migration
+through the existing operator request and audit formats. Composition must
+authenticate the actor and authorize the current run. The owner requires the
+matching pending admission; resolution freshly observes every owned job fence
+and validates the retained sequence and job descriptions before recording an
+outcome. A missing or live fence cannot be replaced by an operator assertion.
+
+The audit, original execution evidence, receipt and resume/hold decision share
+one atomic parent replacement. Reopening or retrying returns the persisted
+receipt without rerunning jobs, renewing deadlines or changing the decision.
+An applied assertion resumes only within the original window. Not-applied and
+late assertions stay held and retain capacity. No image or active-release
+promotion follows from an assertion alone; normal convergence and final checks
+still apply. Cancellation resolution, native cleanup, compatibility history
+fences and the normal indexed/client dispatch remain subsequent work. The
+managed V3 entrypoint is still disabled.

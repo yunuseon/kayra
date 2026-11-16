@@ -8,6 +8,8 @@ import type { ManagedServicePlan } from "../../contracts/managed-service-plan.ts
 import type { ServiceVersion } from "../../contracts/swarm-service.ts";
 import type { ManagedServiceAction } from "../../contracts/managed-swarm-service.ts";
 import type { JobExecution } from "./one-shot-execution.ts";
+import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
+import { parseMigrationResolutionRequest, parseMigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 import { managedLifecycleStore } from "./managed-lifecycle-store.ts";
 import type { ManagedLifecycleStore } from "./managed-lifecycle-store.ts";
 import { parseManagedLifecycleSource, managedLifecycleDescription } from "./managed-lifecycle-source.ts";
@@ -21,7 +23,8 @@ import type { OperationJournal } from "./operation.ts";
 
 export type ManagedLifecycleEffect = { readonly kind: "admission" | "verify" } | { readonly kind: "service"; readonly action: ManagedServiceAction } |
   { readonly kind: "migration"; readonly job: JobExecution; readonly effect: "create" | "start" | "fence" } |
-  { readonly kind: "check"; readonly check: string; readonly effect: "create" | "start" };
+  { readonly kind: "check"; readonly check: string; readonly effect: "create" | "start" } |
+  { readonly kind: "migration-resolution"; readonly request: MigrationResolutionRequest; readonly actor: MigrationResolutionActor };
 type Ports = { readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
   readonly admission: ManagedAdmissionPort; readonly services: ManagedWorkloadPort; readonly jobs: Parameters<typeof managedGroupPreparation>[1]["jobs"];
   readonly readiness: ManagedRoutedReadinessPort; readonly checks?: ManagedChecksPort | undefined;
@@ -108,6 +111,16 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
       if (source.retained.some((value) => value.kind === "barrier") && ports.services.reactivate === undefined || ports.checks === undefined && (source.candidate.rollout.checks.length > 0 || Object.values(source.candidate.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed lifecycle capabilities unavailable");
       if (await bounded(source.createdAt + 90_000, () => ports.authorize(source, { kind: "admission" })) !== true) throw new Error("managed lifecycle source is not authorized"); return store.begin(source); },
     cancel: store.cancel,
+    resolveMigration: async (request: MigrationResolutionRequest, actor: MigrationResolutionActor) => {
+      const statement = parseMigrationResolutionRequest(request); const operator = parseMigrationResolutionActor(actor); if (!statement.ok || !operator.ok) throw new Error("invalid managed migration resolution");
+      const current = await store.read(); if (current?.operation.run !== statement.value.run || current.owner.app !== statement.value.app || current.operation.cancelRequestedAt !== null) throw new Error("managed migration resolution lacks lifecycle ownership");
+      const source = await store.source(); const deadline = ports.now() + 10_000;
+      if (await bounded(deadline, () => ports.authorize(source, { kind: "migration-resolution", request: statement.value, actor: operator.value })) !== true) throw new Error("managed migration resolution is not authorized");
+      const observed = await bounded(deadline, () => ports.admission.observe(identity(current), managedLifecycleDescription(source).admission));
+      const recorded = current.operation.preparation?.sequence?.steps.some((step) => step.id === statement.value.step && step.resolution !== undefined) ?? false;
+      if (observed !== "reserved" && !(recorded && observed === "settled-target")) throw new Error("managed migration resolution is not authorized");
+      return store.resolveMigration(statement.value, operator.value, ports.jobs);
+    },
     tick: () => { if (flight !== undefined) return flight; const result = tick(); flight = result; void result.finally(() => { flight = undefined; }).catch(() => undefined); return result; },
   });
 };

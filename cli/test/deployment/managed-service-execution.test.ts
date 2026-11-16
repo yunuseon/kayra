@@ -83,8 +83,9 @@ test("uncertain intent persistence poisons the handle and restart cannot redispa
 });
 
 test("an authorization response after timeout cannot trigger a later native write", async (t) => {
-  const lab = await fixture(t, 1020); const authorized = Promise.withResolvers<boolean>();
+  const lab = await fixture(t); const authorized = Promise.withResolvers<boolean>();
   await lab.prepare(); await lab.reopen({ authorize: () => authorized.promise });
+  lab.now(lab.action.deadline - 20);
   const held = await lab.owner().tick(); assert.equal(held.phase, "held"); assert.equal(lab.calls(), 0);
   authorized.resolve(true); await Promise.resolve(); assert.equal(lab.calls(), 0);
 });

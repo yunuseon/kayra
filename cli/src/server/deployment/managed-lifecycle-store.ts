@@ -114,7 +114,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       const preparation = operation.preparation; const recorded = preparation.sequence?.steps.find((step) => step.id === request.step)?.resolution;
       if (recorded !== undefined && (recorded.outcome !== request.outcome || recorded.reason !== request.reason || !same(recorded.actor, actor))) throw new Error("migration outcome was already resolved differently");
       if (recorded !== undefined) { const receipt = operation.resolutionReceipts.find((value) => value.resolution === recorded.id); if (receipt === undefined) throw new Error("managed migration resolution receipt is missing"); return Object.freeze({ state, receipt }); }
-      if (recorded === undefined && operation.phase !== "held") throw new Error("managed lifecycle is not held for resolution");
+      if (operation.phase !== "held") throw new Error("managed lifecycle is not held for resolution");
       const result = await metadata(async () => resolveManagedPreparationMigration(preparation, await source(state), request, actor, { read: artifact, now: ports.now, native }));
       const resumed = result.receipt.disposition === "continue" && time(operation.createdAt) < operation.deadline;
       const checked = parseMigrationResolutionReceipt({ ...result.receipt, disposition: resumed ? "continue" : "failed" }); if (!checked.ok) throw new Error("invalid managed migration resolution receipt"); const receipt = checked.value;

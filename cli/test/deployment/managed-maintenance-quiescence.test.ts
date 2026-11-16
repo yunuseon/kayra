@@ -31,14 +31,14 @@ const fixture = async (t: TestContext) => {
   const baselines = Object.values(previous.services).filter((service) => service.role !== "retained-dependency").map((service, index) => ({ name: service.service,
     action: { app: service.owner.app, service: service.service, incarnation: service.owner.incarnation, dataOwner: service.owner.dataOwner, action: service.owner.incarnation + ":2", plan: managedServiceDigest(service), deadline: 91000, effect: "apply" as const }, native: { id: String.fromCharCode(115 + index).repeat(25), version: 5 }, prior: [] }));
   const request = { candidate, previous, baselines, action: previous.infrastructure.ownership.incarnation + ":3", run: randomUUID(), startedAt: 1000 };
-  const observed = new Map<string, ServiceObservation>(baselines.map((node) => [node.name, { status: "owned", ...node.native, action: node.action.action, plan: node.action.plan, effect: "apply", taskEffect: "apply", taskPlan: node.action.plan, tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: null, replicas: 1, endpoint: "vip", update: "completed", tasks: [] }]));
+  const observed = new Map<string, ServiceObservation>(baselines.map((node) => [node.name, { status: "owned", ...node.native, action: node.action.action, plan: node.action.plan, effect: "apply", taskEffect: "apply", taskPlan: node.action.plan, tombstone: false, containersConverged: true, containersStopped: true, retainedInputsCleared: false, specMatches: null, replicas: 1, endpoint: "vip", update: "completed", tasks: [] }]));
   const path = await mkdtemp(join(tmpdir(), "kayra-maintenance-")); const artifacts = await openArtifactStore(join(path, "artifacts")); let journal = await openJournal(path); let clock = 1000; let admitted = true; let lose = false;
   const calls: ManagedServiceAction[] = []; const reads: string[] = [];
   const ports = { ...artifacts, now: () => clock, authorize: () => Promise.resolve(admitted), services: {
     observe: (scope: ManagedServiceScope) => { reads.push(scope.service); return Promise.resolve(observed.get(scope.service) ?? { status: "absent" as const }); },
     tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null) => {
       calls.push(action); const before = observed.get(action.service); assert.ok(before?.status === "owned"); assert.deepEqual(expected, { id: before.id, version: before.version });
-      observed.set(action.service, { ...before, action: action.action, plan: action.plan, effect: action.effect, version: before.version + 1, replicas: 0, endpoint: "dnsrr", tombstone: true, containersStopped: true, retainedInputsCleared: action.effect === "scrub" });
+      observed.set(action.service, { ...before, action: action.action, plan: action.plan, effect: action.effect, version: before.version + 1, replicas: 0, endpoint: "dnsrr", tombstone: true, containersConverged: true, containersStopped: true, retainedInputsCleared: action.effect === "scrub" });
       return lose ? Promise.reject(new Error("lost native reply")) : Promise.resolve("acknowledged" as const);
     },
   } };
@@ -119,7 +119,7 @@ const maintenancePreparation = async (t: TestContext, adjust?: (plan: ManagedApp
   const db = lab.request.previous.services["db"]; assert.ok(db);
   const action: ManagedServiceAction = { app: db.owner.app, incarnation: db.owner.incarnation, dataOwner: db.owner.dataOwner, service: "db", action: db.owner.incarnation + ":2", plan: managedServiceDigest(db), effect: "apply", deadline: 91000 };
   const native = { id: "d".repeat(25), version: 5 };
-  lab.observed.set("db", { status: "owned", ...native, action: action.action, plan: action.plan, effect: "apply", taskEffect: "apply", taskPlan: action.plan, tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed", tasks: [{ id: "t".repeat(25), desired: "running", state: "running", health: "healthy", effect: "apply", incarnation: db.owner.incarnation, action: action.action, plan: action.plan }] });
+  lab.observed.set("db", { status: "owned", ...native, action: action.action, plan: action.plan, effect: "apply", taskEffect: "apply", taskPlan: action.plan, tombstone: false, containersConverged: true, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed", tasks: [{ id: "t".repeat(25), desired: "running", state: "running", health: "healthy", effect: "apply", incarnation: db.owner.incarnation, action: action.action, plan: action.plan }] });
   const nodes = new Map<string, ReturnType<typeof jobRuntime>>();
   const nodeFor = (job: JobPlan) => { const key = jobName(job.scope); let node = nodes.get(key); if (node === undefined) { node = jobRuntime(job); nodes.set(key, node); } node.now(lab.now()); return node; };
   await import("node:fs/promises").then(({ mkdir }) => mkdir(join(lab.path, "preparation")));
@@ -169,7 +169,7 @@ const maintenanceConsumers = async (t: TestContext, adjust?: (plan: ManagedAppli
   const writes: ManagedServiceAction[] = [];
   const ports = { ...lab.preparationPorts, services: { ...lab.preparationPorts.services, apply: (action: ManagedServiceAction, expected: ServiceVersion | null, service: ManagedServicePlan, context: ManagedApplicationPlan) => {
     assert.deepEqual(context, lab.request.candidate); assert.equal(service.role === "retained-dependency", false); const before = lab.observed.get(action.service); assert.equal(before?.status, "owned"); assert.equal(before.replicas, 0); assert.ok(before.retainedInputsCleared); assert.deepEqual(expected, { id: before.id, version: before.version });
-    writes.push(action); lab.observed.set(action.service, { ...before, version: before.version + 1, action: action.action, effect: action.effect, taskEffect: action.effect, taskPlan: action.plan, plan: action.plan, tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", tasks: [{ id: action.service.padEnd(25, "t"), desired: "running", state: "running", health: "healthy", effect: action.effect, incarnation: action.incarnation, action: action.action, plan: action.plan }] }); return Promise.resolve("acknowledged" as const);
+    writes.push(action); lab.observed.set(action.service, { ...before, version: before.version + 1, action: action.action, effect: action.effect, taskEffect: action.effect, taskPlan: action.plan, plan: action.plan, tombstone: false, containersConverged: true, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", tasks: [{ id: action.service.padEnd(25, "t"), desired: "running", state: "running", health: "healthy", effect: action.effect, incarnation: action.incarnation, action: action.action, plan: action.plan }] }); return Promise.resolve("acknowledged" as const);
   } }, readiness: { check: (action: ManagedServiceAction) => Promise.resolve({ app: action.app, service: action.service, incarnation: action.incarnation, action: action.action, plan: action.plan, checkedAt: lab.now(), status: "ready" as const }) } };
   let owner = managedConsumerRollout(journal, ports); t.after(() => journal.close());
   const references = lab.request.baselines.map(({ name, action, native }) => ({ name, action, native }));
@@ -213,8 +213,8 @@ test("explicit maintenance may revoke an old consumer secret without reading or 
 test("terminal Swarm tasks with a still-running Docker container cannot open maintenance migrations", async (t) => {
   const lab = await fixture(t); await lab.owner().prepare(lab.request); await lab.owner().tick(); await lab.owner().tick();
   const before = lab.observed.get("web"); assert.ok(before?.status === "owned"); assert.equal(before.tasks.length, 0); assert.equal(before.replicas, 0);
-  lab.observed.set("web", { ...before, containersStopped: false }); await lab.reopen();
+  lab.observed.set("web", { ...before, containersConverged: true, containersStopped: false }); await lab.reopen();
   for (let i = 0; i < 3; i++) await lab.owner().tick();
   assert.deepEqual(lab.calls.map((action) => action.service + ":" + action.effect), ["web:remove"]); assert.equal((await lab.owner().read())?.phase, "quiescing");
-  lab.observed.set("web", { ...before, containersStopped: true }); assert.equal((await lab.finish()).phase, "complete");
+  lab.observed.set("web", { ...before, containersConverged: true, containersStopped: true }); assert.equal((await lab.finish()).phase, "complete");
 });

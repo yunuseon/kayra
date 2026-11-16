@@ -89,24 +89,33 @@ export const ownedSwarmService = <S extends ServiceScope, A extends ServiceActio
         return Object.freeze({ id: taskId, effect: effectReference(nativeField(labels, prefix + "effect")), incarnation: String(nativeField(labels, prefix + "incarnation")), desired, state, plan: planReference(nativeField(labels, prefix + "plan")), action: actionReference(nativeField(labels, prefix + "action")),
           health: typed<"healthy" | "unhealthy" | "starting" | "absent" | "unknown">(health === undefined ? "absent" : healthState === "healthy" || healthState === "unhealthy" || healthState === "starting" ? healthState : "unknown") });
       }));
-      // Swarm can report terminal tasks before Docker has stopped their containers.
-      // Include retained/orphaned containers, not only tasks still present in Swarm's bounded history.
-      const containers = replicas === 0 ? await api.request("GET", `/containers/json?all=1&filters=${encodeURIComponent(JSON.stringify({ label: [`com.docker.swarm.service.id=${id}`] }))}`) : undefined;
-      if (containers !== undefined && (containers.status !== 200 || !Array.isArray(containers.value))) return { status: "unavailable" };
-      const containersStopped = containers !== undefined && Array.isArray(containers.value) && containers.value.every((container: unknown) => {
+      // Task status can precede actual container cessation; include containers absent from task history.
+      const containers = await api.request("GET", `/containers/json?all=1&filters=${encodeURIComponent(JSON.stringify({ label: [`com.docker.swarm.service.id=${id}`] }))}`);
+      if (containers.status !== 200 || !Array.isArray(containers.value)) return { status: "unavailable" };
+      const rows = containers.value.map((container: unknown) => {
         const labels = nativeField(container, "Labels"); const containerId = nativeField(container, "Id");
         if (typeof containerId !== "string" || !/^[a-f0-9]{64}$/.test(containerId) || nativeField(labels, "com.docker.swarm.service.id") !== id || !profile.taskOwned(scope, labels)) throw new Error("invalid owned container observation");
-        return ["exited", "dead"].includes(String(nativeField(container, "State")));
+        return Object.freeze({ id: containerId, state: nativeField(container, "State"), labels });
       });
+      const running = reply.value.filter((task: unknown) => nativeField(task, "DesiredState") === "running" && nativeField(nativeField(task, "Status"), "State") === "running");
+      const matchesTask = (container: typeof rows[number], task: unknown) => {
+        const labels = nativeField(nativeField(nativeField(task, "Spec"), "ContainerSpec"), "Labels");
+        return container.state === "running" && container.id === nativeField(nativeField(nativeField(task, "Status"), "ContainerStatus"), "ContainerID") && nativeField(container.labels, "com.docker.swarm.task.id") === nativeField(task, "ID") &&
+          ["action", "plan", "effect"].every((key) => nativeField(container.labels, prefix + key) === nativeField(labels, prefix + key));
+      };
+      const stopped = (container: typeof rows[number]) => container.state === "exited" || container.state === "dead";
+      const containersStopped = replicas === 0 && rows.every(stopped);
+      const containersConverged = rows.every((container) => stopped(container) || running.some((task: unknown) => matchesTask(container, task))) && running.every((task: unknown) => rows.some((container) => matchesTask(container, task)));
       const empty = (value: unknown) => value === undefined || value === null || (Array.isArray(value) && value.length === 0);
       const noInputs = (specification: unknown) => {
         const template = nativeField(specification, "TaskTemplate");
         const container = nativeField(template, "ContainerSpec");
         return ["Env", "Secrets", "Configs", "Mounts"].every((key) => empty(nativeField(container, key))) && empty(nativeField(template, "Networks"));
       };
+      const update = nativeField(nativeField(service.value, "UpdateStatus"), "State");
       const retainedInputsCleared = nativeField(labels, prefix + "tombstone") === "true" && noInputs(spec) && noInputs(nativeField(service.value, "PreviousSpec")) && empty(nativeField(nativeField(service.value, "Endpoint"), "VirtualIPs"));
       return Object.freeze({ status: "owned", id, version, replicas, endpoint, action: actionReference(nativeField(labels, prefix + "action")), plan: planReference(nativeField(labels, prefix + "plan")), taskPlan: planReference(nativeField(taskLabels, prefix + "plan")),
-        effect: effectReference(nativeField(labels, prefix + "effect")), taskEffect: effectReference(nativeField(taskLabels, prefix + "effect")), tombstone: nativeField(labels, prefix + "tombstone") === "true", retainedInputsCleared, containersStopped, specMatches: expectedSpec === undefined ? null : profile.matchesSpec(spec, expectedSpec), update: reference(nativeField(nativeField(service.value, "UpdateStatus"), "State"), /^(?:updating|paused|completed|rollback_started|rollback_paused|rollback_completed)$/), tasks: Object.freeze(tasks) });
+        effect: effectReference(nativeField(labels, prefix + "effect")), taskEffect: effectReference(nativeField(taskLabels, prefix + "effect")), tombstone: nativeField(labels, prefix + "tombstone") === "true", retainedInputsCleared, containersStopped, containersConverged, specMatches: expectedSpec === undefined ? null : profile.matchesSpec(spec, expectedSpec), update: update === undefined || update === null ? null : reference(update, /^(?:updating|paused|completed|rollback_started|rollback_paused|rollback_completed)$/) ?? "unknown", tasks: Object.freeze(tasks) });
     } catch { return { status: "unavailable" }; }
   };
   const replace = async (action: A, expected: ServiceVersion | null, spec: unknown): Promise<ServiceWrite> => {

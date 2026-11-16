@@ -20,7 +20,7 @@ const runtime = () => {
     apply: (action) => {
       writes += 1;
       state = { status: "owned", id: "s".repeat(25), version: 42, action: action.action, plan: action.plan, effect: action.effect, taskPlan: action.plan, taskEffect: action.effect,
-        specMatches: true, tombstone: false, containersStopped: true, retainedInputsCleared: false, replicas: 1, endpoint: "vip", update: "completed",
+        specMatches: true, tombstone: false, containersConverged: true, containersStopped: true, retainedInputsCleared: false, replicas: 1, endpoint: "vip", update: "completed",
         tasks: [{ id: "t".repeat(25), incarnation: action.incarnation, action: action.action, plan: action.plan, effect: action.effect, desired: "running", state: "running", health: "healthy" }] };
       return Promise.resolve("acknowledged");
     },

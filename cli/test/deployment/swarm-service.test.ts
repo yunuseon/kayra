@@ -56,13 +56,14 @@ test("observations distinguish top-level plan from rollback task plan and omit r
   const oldLabels = { ...spec.TaskTemplate.ContainerSpec.Labels, "com.kayra.plan": "e".repeat(64) };
   const api: ReturnType<typeof dockerApi> = { request: (_method, path) => Promise.resolve({ status: 200, value: path.startsWith("/services/")
     ? { ...service, Spec: { ...spec, TaskTemplate: { ...spec.TaskTemplate, ContainerSpec: { ...spec.TaskTemplate.ContainerSpec, Labels: oldLabels } } }, UpdateStatus: { State: "rollback_completed", Message: "PRIVATE-ERROR" } }
-    : path.startsWith("/tasks?") ? [{ ID: "t".repeat(25), ServiceID: id, DesiredState: "running", Status: { State: "running", Err: "PRIVATE-ERROR", ContainerStatus: { ContainerID: "container" } }, Spec: { ContainerSpec: { Labels: oldLabels, Env: ["PRIVATE-TOKEN"] } } }]
-      : { State: { Health: { Status: "healthy", Log: ["PRIVATE-ERROR"] } }, Config: { Env: ["PRIVATE-TOKEN"] } } }) };
+    : path.startsWith("/tasks?") ? [{ ID: "t".repeat(25), ServiceID: id, DesiredState: "running", Status: { State: "running", Err: "PRIVATE-ERROR", ContainerStatus: { ContainerID: "c".repeat(64) } }, Spec: { ContainerSpec: { Labels: oldLabels, Env: ["PRIVATE-TOKEN"] } } }]
+      : path.startsWith("/containers/json?") ? [{ Id: "c".repeat(64), State: "running", Labels: { ...oldLabels, "com.docker.swarm.service.id": id, "com.docker.swarm.task.id": "t".repeat(25) } }] : { State: { Health: { Status: "healthy", Log: ["PRIVATE-ERROR"] } }, Config: { Env: ["PRIVATE-TOKEN"] } } }) };
   const observation = await swarmService(api).observe({ app: action.app, service: action.service, incarnation: action.incarnation });
   assert.equal(observation.status, "owned");
   assert.equal(observation.plan, action.plan);
   assert.equal(observation.taskPlan, "e".repeat(64));
   assert.equal(observation.tasks[0]?.health, "healthy");
+  assert.equal(observation.containersConverged, true);
   assert.equal(JSON.stringify(observation).includes("PRIVATE"), false);
 });
 

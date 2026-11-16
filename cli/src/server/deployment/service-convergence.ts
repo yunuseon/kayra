@@ -4,7 +4,7 @@ const terminal = new Set(["shutdown", "complete", "failed", "rejected", "remove"
 
 /** Historical failed tasks are evidence, not current failure; draining tasks still prevent settlement. */
 export const convergedService = (expected: ServiceAction, observed: ServiceObservation) => {
-  if (observed.status !== "owned" || observed.specMatches !== true || observed.tombstone || observed.replicas !== 1 || observed.endpoint !== "vip" ||
+  if (observed.status !== "owned" || observed.specMatches !== true || !observed.containersConverged || observed.tombstone || observed.replicas !== 1 || observed.endpoint !== "vip" ||
     observed.taskPlan !== expected.plan || observed.taskEffect !== expected.effect || ![null, "completed", "rollback_completed"].includes(observed.update)) return false;
   const current = observed.tasks.filter((task) => !terminal.has(task.state));
   const task = current[0];
@@ -13,4 +13,4 @@ export const convergedService = (expected: ServiceAction, observed: ServiceObser
 };
 
 export const clearedService = (observed: ServiceObservation) => observed.status === "owned" && observed.tombstone && observed.retainedInputsCleared &&
-  observed.containersStopped && observed.replicas === 0 && observed.endpoint === "dnsrr" && observed.tasks.every((task) => terminal.has(task.state));
+  observed.containersStopped && [null, "completed", "rollback_completed"].includes(observed.update) && observed.replicas === 0 && observed.endpoint === "dnsrr" && observed.tasks.every((task) => terminal.has(task.state));

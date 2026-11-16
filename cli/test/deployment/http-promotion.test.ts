@@ -22,7 +22,7 @@ const fakeRuntime = () => {
       assert.equal(expected?.version ?? null, current.status === "owned" ? current.version : null);
       writes += 1;
       current = { status: "owned", id: "s".repeat(25), version: 40 + writes, action: action.action, plan: action.plan, taskPlan: action.plan, effect: action.effect, taskEffect: action.effect,
-        specMatches: true, tombstone: false, containersStopped: true, retainedInputsCleared: false, replicas: 1, endpoint: "vip", update: "completed",
+        specMatches: true, tombstone: false, containersConverged: true, containersStopped: true, retainedInputsCleared: false, replicas: 1, endpoint: "vip", update: "completed",
         tasks: [{ id: String(writes).padStart(25, "t"), incarnation: action.incarnation, action: action.action, plan: action.plan, effect: action.effect, state: "running", desired: "running", health: "healthy" }] };
       return Promise.resolve("acknowledged");
     },

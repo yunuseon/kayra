@@ -189,3 +189,22 @@ test("zero replicas and terminal task history do not prove container cessation; 
   rows = [{ ...container, State: "exited", Labels: { ...container.Labels, "com.kayra.data-owner": randomUUID() } }]; assert.equal((await native.observe(scope)).status, "unavailable");
   rows = {}; assert.equal((await native.observe(scope)).status, "unavailable");
 });
+
+test("healthy current tasks do not hide old running containers or a missing current Docker container", async () => {
+  const f = fixture(); const task = { ID: "t".repeat(25), ServiceID: f.id, DesiredState: "running", Status: { State: "running", ContainerStatus: { ContainerID: "c".repeat(64) } }, Spec: { ContainerSpec: { Labels: f.spec.Labels } } };
+  const current = { Id: "c".repeat(64), State: "running", Labels: { ...f.spec.Labels, "com.docker.swarm.service.id": f.id, "com.docker.swarm.task.id": task.ID } };
+  const old = { Id: "d".repeat(64), State: "running", Labels: { ...current.Labels, "com.docker.swarm.task.id": "u".repeat(25), "com.kayra.action": f.owner.incarnation + ":1" } };
+  let rows: unknown = [current, old];
+  const api: ReturnType<typeof dockerApi> = { request: (method, path, body, options) => path.startsWith("/containers/json?") ? Promise.resolve({ status: 200, value: rows }) : path.startsWith("/tasks?") ? Promise.resolve({ status: 200, value: [task] }) : f.api.request(method, path, body, options) };
+  const native = managedSwarmService(api, f.observer, f.now); const scope = { app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" };
+  const lingering = await native.observe(scope); assert.equal(lingering.status, "owned"); assert.equal(lingering.containersConverged, false);
+  rows = [current, { ...old, State: "exited" }]; const ready = await native.observe(scope); assert.equal(ready.status, "owned"); assert.equal(ready.containersConverged, true);
+  rows = []; const missing = await native.observe(scope); assert.equal(missing.status, "owned"); assert.equal(missing.containersConverged, false);
+  rows = [{ ...current, Labels: { ...current.Labels, "com.docker.swarm.task.id": "x".repeat(25) } }]; const changed = await native.observe(scope); assert.equal(changed.status, "owned"); assert.equal(changed.containersConverged, false);
+});
+
+
+test("unrecognized native update state cannot be normalized into an absent update", async () => {
+  const f = fixture(); f.setService({ ID: f.id, Version: { Index: 100 }, Spec: f.spec, UpdateStatus: { State: "unsupported-new-state" } });
+  const value = await f.adapter.observe({ app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" }); assert.equal(value.status, "owned"); assert.equal(value.update, "unknown");
+});

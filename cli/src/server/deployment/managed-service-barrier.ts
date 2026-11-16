@@ -122,7 +122,7 @@ export const managedServiceBarrier = (journal: OperationJournal, ports: Ports) =
           if ([...state.prior, ...state.steps.flatMap((item) => item.expected === null ? Object.freeze([]) : Object.freeze([item.expected]))].some((item) => item.version >= observed.version)) return hold(state, "runtime");
           return write({ ...state, phase: "complete", proof: { native: expected, at: now } });
         }
-        if (observed.containersStopped && observed.tombstone && observed.replicas === 0 && observed.tasks.every((task) => terminal.has(task.state))) return dispatch(state, "scrub", expected, plan.image);
+        if (observed.containersStopped && [null, "completed", "rollback_completed"].includes(observed.update) && observed.tombstone && observed.replicas === 0 && observed.tasks.every((task) => terminal.has(task.state))) return dispatch(state, "scrub", expected, plan.image);
         return state;
       }
       // An unchanged version may still receive the recorded request. Wait; never redispatch that CAS intent.

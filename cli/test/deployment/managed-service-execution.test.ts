@@ -24,7 +24,7 @@ const fixture = async (t: TestContext, deadline = 91000, retained = false) => {
   const apply = () => {
       calls++;
       observed = { status: "owned", id: "s".repeat(25), version: 2, action: action.action, effect: "apply", taskEffect: "apply", plan: action.plan, taskPlan: action.plan,
-        tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
+        tombstone: false, containersConverged: true, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed",
         tasks: [{ id: "t".repeat(25), incarnation: action.incarnation, effect: "apply", plan: action.plan, action: action.action, desired: "running", state: "running", health: "healthy" }] };
       return lost ? Promise.reject(new Error("private lost acknowledgement")) : Promise.resolve("acknowledged" as const);
   };

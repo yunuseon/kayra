@@ -1827,3 +1827,18 @@ Raw API/events/journals/ledger/source/version evidence has a private SHA-256
 manifest. This closes the reproduced zero-replica drain bug; active-service
 container convergence, indexed lifecycle integration and full acceptance remain
 required before normal managed V3 execution can be enabled.
+
+
+The active-container run at `af7f4e6`, VM
+`kayra-volume-lab-20261116194316128522`, passed and the VM was destroyed.
+All active container inventories matched their current native tasks. The
+singleton application released its lock but delayed each old process's exit
+by three seconds; candidate and restoration convergence both followed the old
+process's recorded exit marker. Its A/B/A ownership and effect checks passed.
+Maintenance again reached schema 2 with zero violations, no old effects after
+migration, one applied identity and one live migration Start, preserving retained
+service/volume identity and phase deadlines. The request trace remains bounded;
+raw requests, events, journals, app history and exact source/version evidence have
+a private SHA-256 manifest. These are component fixtures, not indexed admission,
+process-kill, SQL, routed HTTP or full-platform acceptance. Normal managed V3
+execution remains disabled.

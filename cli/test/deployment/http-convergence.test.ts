@@ -8,7 +8,7 @@ const action: ServiceAction = { app: "shop", service: "web", incarnation: "11111
 const task = { id: "t".repeat(25), incarnation: action.incarnation, action: action.action, plan: action.plan, effect: action.effect, desired: "running", state: "running", health: "healthy" as const };
 const observed = {
   status: "owned" as const, id: "s".repeat(25), version: 43, action: action.action, plan: action.plan, taskPlan: action.plan, effect: action.effect, taskEffect: action.effect,
-  tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip" as const, update: "completed", tasks: [task],
+  tombstone: false, containersConverged: true, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip" as const, update: "completed", tasks: [task],
 };
 const routed: RoutedReadiness = { ...action, checkedAt: 2000, status: "ready" };
 
@@ -16,7 +16,7 @@ test("current convergence ignores historical failures but waits for old draining
   assert.equal(convergedHttp(action, { ...observed, tasks: [...observed.tasks, { ...task, id: "old", state: "failed", desired: "shutdown", health: "unhealthy" }] }), true);
   assert.equal(convergedHttp(action, { ...observed, tasks: [...observed.tasks, { ...task, id: "old", state: "running", desired: "shutdown" }] }), false);
   const failures: readonly ServiceObservation[] = [
-    { status: "absent" }, { status: "unavailable" }, { ...observed, specMatches: false }, { ...observed, tombstone: true }, { ...observed, update: "updating" },
+    { status: "absent" }, { status: "unavailable" }, { ...observed, containersConverged: false }, { ...observed, specMatches: false }, { ...observed, tombstone: true }, { ...observed, update: "updating" },
     { ...observed, taskPlan: "b".repeat(64) }, { ...observed, taskEffect: "restore" }, { ...observed, replicas: 0 }, { ...observed, endpoint: "dnsrr" },
     { ...observed, tasks: [{ ...task, health: "starting" }] }, { ...observed, tasks: [{ ...task, action: action.incarnation + ":1" }] },
     { ...observed, tasks: [{ ...task, incarnation: "other" }] }, { ...observed, tasks: [] },

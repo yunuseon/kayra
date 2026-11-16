@@ -1786,3 +1786,12 @@ are complete. The private admission port must use the existing global resource
 book shared with other Swarm operations; an independent production accounting
 book is prohibited. Migration services with volume mounts are currently rejected
 before admission because the one-shot adapter does not support those mounts.
+
+
+Managed admission accounting also has a pure binding projection for the shared
+resource book. The exact owner/run/source/plan/action/deadline is committed with
+its charge. A legacy charge with the same sequence cannot be adopted, expiry
+does not renew a reservation, and stale run identities cannot settle a newer
+operation. Legacy pending charges still consume capacity. These functions do
+not authorize runtime effects or terminal outcomes; the indexed lifecycle owner
+must authenticate those and synchronize both fields under its global writer.

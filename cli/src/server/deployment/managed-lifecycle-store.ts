@@ -14,6 +14,7 @@ import { claimJournal } from "./journal-claim.ts";
 import { resolveManagedPreparationMigration } from "./managed-migration-resolution.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import { parseMigrationResolutionReceipt } from "../../contracts/migration-resolution.ts";
+import { managedSuccessfulInventoryCarry } from "./managed-lifecycle-inventory.ts";
 import type { OperationJournal } from "./operation.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -137,6 +138,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       return serial(async () => {
         const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return current; }
         if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || current.active?.record !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
+        const carried = managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
         if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
           if (current === undefined) throw new Error("managed restore lacks verified release history");
           const selected = await metadata(async () => {

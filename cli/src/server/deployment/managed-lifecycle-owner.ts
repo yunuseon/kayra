@@ -44,7 +44,9 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
   const allowed = async (run: string, phase: ManagedLifecycleStore["operation"]["phase"], effect: ManagedLifecycleEffect) => {
     const current = await store.read(); if (current?.operation.run !== run || current.operation.phase !== phase || current.operation.cancelRequestedAt !== null || !current.operation.admitted || ports.now() >= current.operation.deadline) return false;
     const source = await store.source(); const claim = managedLifecycleDescription(source).admission;
-    return await bounded(current.operation.deadline, () => ports.admission.observe(identity(current), claim)) === "reserved" && await bounded(current.operation.deadline, () => ports.authorize(source, effect)) === true;
+    if (await bounded(current.operation.deadline, () => ports.admission.observe(identity(current), claim)) !== "reserved" || await bounded(current.operation.deadline, () => ports.authorize(source, effect)) !== true) return false;
+    const startsApplication = effect.kind === "service" && ["apply", "restore"].includes(effect.action.effect) || effect.kind === "migration" && effect.effect === "start" || effect.kind === "check" && effect.effect === "start";
+    return !startsApplication || store.fenceCompatibility(run, phase);
   };
   const components = new Map<string, { readonly quiescence: ReturnType<typeof managedMaintenanceQuiescence>; readonly preparation: ReturnType<typeof managedGroupPreparation>; readonly consumers: ReturnType<typeof managedConsumerRollout>; readonly verification: ReturnType<typeof managedGroupVerification> }>();
   const forRun = (source: ManagedLifecycleSource) => {

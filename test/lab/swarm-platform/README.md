@@ -1888,3 +1888,28 @@ after migration. This authorizes only fixture data inspection; Kayra contains
 no application ledger or schema interpretation. Fresh native validation is
 pending. This is not normal catalog/client integration or automatic recovery
 from an irreversible migration.
+
+
+The audited-resolution run at `65f5b96`, VM
+`kayra-volume-lab-20261116212922358296`, passed and was destroyed. Its migration
+applied schema 2 but exited 1; the probe returned unknown. The owner held with
+A's active record, no B consumers and a pending charge. A fixture operator
+inspected the app-owned ledger, recorded applied, reopened and replayed the
+receipt, and B completed with target settlement. There was exactly one live
+migration Start, zero schema violations, no old effects after migration and
+unchanged retained service/volume identity and deadlines. The combined trace
+contains 16,971 API requests. Engine/CLI 29.10.0/API 1.57, Compose 5.7.1,
+Node v24.22.1 and Ubuntu 24.04.5 ARM64 were recorded with raw events, journals,
+ledger and source in a private SHA-256 manifest. The certificate-to-verification
+interval was 5.976 seconds; it excludes quiescence and is not HTTP outage data.
+This does not establish normal client/index integration or automatic rollback
+of irreversible migrations.
+
+
+Both connected-owner maintenance variants now require a synchronized data
+compatibility fence before candidate service or migration Start. Final B is
+verified in epoch 1; A was verified in epoch 0. After reopening, an ordinary
+historical restore to A and the same old plan submitted without its restore
+marker must both be refused before a new admission or workload mutation. The
+private lifecycle journal is format 2; pre-fence V3 experimental journals are
+not silently upgraded. Fresh native validation of this guard is pending.

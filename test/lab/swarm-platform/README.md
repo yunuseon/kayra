@@ -1742,3 +1742,19 @@ workload and routed readiness can produce a verification certificate; a check
 from a replaced task is refused. A certificate does not itself publish an active
 release or settle admission. These parent semantics currently have journal-backed
 unit coverage; indexed wiring and native parent verification remain pending.
+
+Rolling preparation, consumer convergence and compensation accept check-bearing
+plans only when the composition supplies a concrete check runtime. A healthy
+coordinated singleton remains unverified until its app-declared completion check
+passes; native readiness is not leadership evidence. Missing capability refuses
+before intent and effects. Normal indexed managed execution remains gated.
+
+The next native component probe starts a fresh singleton scope whose application
+uses an owned-volume exclusive file lock and logs acquisition, effect, release
+and standby events. Kayra never reads or changes that lock. The probe verifies A,
+updates to a healthy B with a deliberately failed completion check, restores A,
+and runs the previous release's completion check under a distinct recovery
+identity. The app history must show A/B/A acquisition and no effects outside its
+recorded owner interval. This demonstrates graceful app-owned handoff only;
+lease expiry, hard kills, exactly-once behavior and indexed promotion are not
+established by the fixture.

@@ -1,3 +1,4 @@
+import type { ManagedChecksPort } from "../../contracts/container-check.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
@@ -34,7 +35,7 @@ export const parseManagedGroupCompensation = (input: unknown) => {
   return Object.freeze({ ...raw, nodes });
 };
 export type ManagedGroupCompensation = ReturnType<typeof parseManagedGroupCompensation>;
-type Ports = { readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
+type Ports = { readonly checks?: ManagedChecksPort | undefined; readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
   readonly services: ManagedWorkloadPort; readonly readiness: ManagedRoutedReadinessPort;
   /** Root holds the exclusive lifecycle fence, settled migration outcomes and unchanged pending peak reservation. */
   readonly authorize: (state: ManagedGroupCompensation, effect: { readonly kind: "service"; readonly action: ManagedServiceAction } | { readonly kind: "verify" }) => Promise<boolean>;
@@ -87,7 +88,7 @@ export const managedGroupCompensation = (journal: OperationJournal, ports: Ports
     prepare: (input: unknown) => {
       const snapshot = managedRecoverySnapshot(input); const description = snapshot.description; const bytes = JSON.stringify(snapshot.source);
       if (snapshot.source.previous !== null && ports.services.fence === undefined) return Promise.reject(new Error("managed group recovery requires metadata fencing capability"));
-      if ([snapshot.source.candidate, ...(snapshot.source.previous === null ? [] : [snapshot.source.previous])].some((plan) => plan.rollout.checks.length !== 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) return Promise.reject(new Error("managed group recovery checks capability unavailable"));
+      if (ports.checks === undefined && [snapshot.source.candidate, ...(snapshot.source.previous === null ? [] : [snapshot.source.previous])].some((plan) => plan.rollout.checks.length !== 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) return Promise.reject(new Error("managed group recovery checks capability unavailable"));
       return serial(async () => { const existing = await load(); if (existing !== undefined) { if (existing.description !== managedRecoveryDigest(description) || existing.source !== hash(bytes)) throw new Error("managed group recovery intent conflicts"); return existing; }
         const now = time(); const state = parseManagedGroupCompensation({ version: 1, app: description.app, incarnation: description.incarnation, dataOwner: description.dataOwner, run: description.run, action: description.action, plan: description.plan, previous: description.previous, description: managedRecoveryDigest(description), source: hash(bytes), createdAt: now, deadline: now + 90_000, cursor: 0, phase: "recovering", reason: null, verifiedAt: null, nodes: description.nodes.map((node) => Object.freeze({ ...node, child: null, routed: null })) });
         if (await bounded(state.deadline, () => ports.retain(bytes)) !== state.source) throw new Error("managed group recovery snapshot retention failed"); return write(state);

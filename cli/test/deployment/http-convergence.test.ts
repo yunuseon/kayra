@@ -8,7 +8,7 @@ const action: ServiceAction = { app: "shop", service: "web", incarnation: "11111
 const task = { id: "t".repeat(25), incarnation: action.incarnation, action: action.action, plan: action.plan, effect: action.effect, desired: "running", state: "running", health: "healthy" as const };
 const observed = {
   status: "owned" as const, id: "s".repeat(25), version: 43, action: action.action, plan: action.plan, taskPlan: action.plan, effect: action.effect, taskEffect: action.effect,
-  tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip" as const, update: "completed", tasks: [task],
+  tombstone: false, containersStopped: true, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip" as const, update: "completed", tasks: [task],
 };
 const routed: RoutedReadiness = { ...action, checkedAt: 2000, status: "ready" };
 

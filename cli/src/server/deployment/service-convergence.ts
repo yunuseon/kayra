@@ -13,4 +13,4 @@ export const convergedService = (expected: ServiceAction, observed: ServiceObser
 };
 
 export const clearedService = (observed: ServiceObservation) => observed.status === "owned" && observed.tombstone && observed.retainedInputsCleared &&
-  observed.replicas === 0 && observed.endpoint === "dnsrr" && observed.tasks.every((task) => terminal.has(task.state));
+  observed.containersStopped && observed.replicas === 0 && observed.endpoint === "dnsrr" && observed.tasks.every((task) => terminal.has(task.state));

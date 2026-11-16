@@ -174,3 +174,18 @@ for (const namespace of ["quiesce", "recover"] as const) test(`native ${namespac
   assert.equal(observed.action, action.action); assert.equal(observed.effect, "remove"); assert.equal(observed.replicas, 0);
   assert.notEqual(observed.action, f.owner.incarnation + ":3:remove:1");
 });
+
+test("zero replicas and terminal task history do not prove container cessation; retained and orphan containers are inspected separately", async () => {
+  const f = fixture(); retainedBarrier(f);
+  const container = { Id: "c".repeat(64), State: "running", Labels: { ...f.spec.Labels, "com.docker.swarm.service.id": f.id } };
+  let rows: unknown = [container];
+  const api: ReturnType<typeof dockerApi> = { request: (method, path, body, options) => path.startsWith("/containers/json?") ? Promise.resolve({ status: 200, value: rows }) : f.api.request(method, path, body, options) };
+  const native = managedSwarmService(api, f.observer, f.now);
+  const scope = { app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" };
+  const running = await native.observe(scope); assert.equal(running.status, "owned"); assert.equal(running.tasks.length, 0); assert.equal(running.containersStopped, false);
+  for (const state of ["paused", "restarting", "created", "removing"]) { rows = [{ ...container, State: state }]; const value = await native.observe(scope); assert.equal(value.status, "owned"); assert.equal(value.containersStopped, false); }
+  rows = [{ ...container, State: "exited" }]; const stopped = await native.observe(scope); assert.equal(stopped.status, "owned"); assert.equal(stopped.containersStopped, true);
+  rows = []; const absent = await native.observe(scope); assert.equal(absent.status, "owned"); assert.equal(absent.containersStopped, true);
+  rows = [{ ...container, State: "exited", Labels: { ...container.Labels, "com.kayra.data-owner": randomUUID() } }]; assert.equal((await native.observe(scope)).status, "unavailable");
+  rows = {}; assert.equal((await native.observe(scope)).status, "unavailable");
+});

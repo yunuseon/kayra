@@ -9,7 +9,7 @@ export type ServiceWrite = "acknowledged" | "uncertain" | "conflict" | "refused"
 export type ServiceObservation =
   | { readonly status: "absent" | "foreign" | "unavailable" }
   | { readonly status: "owned"; readonly id: string; readonly version: number; readonly action: string | null;
-      readonly effect: ServiceEffect | null; readonly taskEffect: ServiceEffect | null; readonly plan: string | null; readonly taskPlan: string | null; readonly tombstone: boolean; readonly retainedInputsCleared: boolean; readonly specMatches: boolean | null;
+      readonly effect: ServiceEffect | null; readonly taskEffect: ServiceEffect | null; readonly plan: string | null; readonly taskPlan: string | null; readonly tombstone: boolean; readonly retainedInputsCleared: boolean; readonly containersStopped: boolean; readonly specMatches: boolean | null;
       readonly replicas: number; readonly endpoint: "vip" | "dnsrr"; readonly update: string | null;
       readonly tasks: readonly { readonly id: string; readonly incarnation: string; readonly effect: ServiceEffect | null; readonly plan: string | null; readonly action: string | null;
         readonly desired: string; readonly state: string; readonly health: "healthy" | "unhealthy" | "starting" | "absent" | "unknown" }[] };

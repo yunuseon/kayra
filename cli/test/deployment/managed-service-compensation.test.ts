@@ -31,7 +31,7 @@ const fixture = async (t: TestContext, cleanup: boolean | "new-only" = false, qu
   let journal = await openJournal(path); let clock = 1000; let lost = false; let conflict = false; let admitted = true; let updating = false; let uncertainFenceWrite = false;
   const action: ManagedServiceAction = { app: target.owner.app, incarnation: target.owner.incarnation, dataOwner: target.owner.dataOwner, service: selected, action: target.owner.incarnation + ":2", plan: managedServiceDigest(target), effect: "restore", deadline: 91000 };
   const native = { id: "s".repeat(25), version: 2 }; const writes: ManagedServiceAction[] = [];
-  const observedFor = (action: ManagedServiceAction, version: number) => ({ status: "owned" as const, id: native.id, version, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: true, tombstone: false, retainedInputsCleared: false, replicas: 1, endpoint: "vip" as const, update: updating ? "updating" as const : "completed" as const,
+  const observedFor = (action: ManagedServiceAction, version: number) => ({ status: "owned" as const, id: native.id, version, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: true, tombstone: false, containersStopped: true, retainedInputsCleared: false, replicas: 1, endpoint: "vip" as const, update: updating ? "updating" as const : "completed" as const,
     tasks: [{ id: "t".repeat(25), incarnation: action.incarnation, action: action.action, plan: action.plan, effect: action.effect, desired: "running" as const, state: "running" as const, health: "healthy" as const }] });
   let observed: ServiceObservation = observedFor({ ...action, plan: managedServiceDigest(nextSpec), effect: "apply" }, 2);
   const ports = { ...artifacts, now: () => clock, authorize: () => Promise.resolve(admitted), services: {
@@ -49,7 +49,7 @@ const fixture = async (t: TestContext, cleanup: boolean | "new-only" = false, qu
     },
     tombstone: (request: ManagedServiceAction, expected: unknown) => {
       assert.ok(observed.status === "owned"); assert.deepEqual(expected, { id: observed.id, version: observed.version }); writes.push(request);
-      observed = { ...observed, version: observed.version + 1, action: request.action, plan: request.plan, effect: request.effect, taskEffect: request.effect, tombstone: true, retainedInputsCleared: request.effect === "scrub", replicas: 0, endpoint: "dnsrr", tasks: [] }; return Promise.resolve("acknowledged" as const);
+      observed = { ...observed, version: observed.version + 1, action: request.action, plan: request.plan, effect: request.effect, taskEffect: request.effect, tombstone: true, containersStopped: true, retainedInputsCleared: request.effect === "scrub", replicas: 0, endpoint: "dnsrr", tasks: [] }; return Promise.resolve("acknowledged" as const);
     },
   } };
   const view = () => ({ read: journal.read, write: async (value: Parameters<typeof journal.write>[0]) => { await journal.write(value);

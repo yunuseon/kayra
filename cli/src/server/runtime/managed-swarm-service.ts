@@ -133,7 +133,7 @@ export const managedSwarmService = (api = dockerApi(), volumes: Pick<OwnedVolume
         const observed = await native.observe(scopeOf(prepared.action));
         const terminal = new Set(["shutdown", "complete", "failed", "rejected", "remove", "orphaned"]);
         if (observed.status !== "owned" || observed.id !== version.id || observed.version !== version.version || observed.plan !== action.plan || observed.effect !== "scrub" ||
-          !observed.tombstone || !observed.retainedInputsCleared || ![null, "completed", "rollback_completed"].includes(observed.update) || observed.replicas !== 0 || observed.endpoint !== "dnsrr" || !observed.tasks.every((task) => terminal.has(task.state))) return "refused";
+          !observed.tombstone || !observed.retainedInputsCleared || !observed.containersStopped || ![null, "completed", "rollback_completed"].includes(observed.update) || observed.replicas !== 0 || observed.endpoint !== "dnsrr" || !observed.tasks.every((task) => terminal.has(task.state))) return "refused";
         // Re-observation never changes the caller's recorded CAS. Any later revision invalidates it.
         return await native.replace(prepared.action, version, spec);
       } catch { return "refused"; }

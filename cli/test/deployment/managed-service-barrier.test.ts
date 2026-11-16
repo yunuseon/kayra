@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { managedPlanFixture } from "./managed-plan-fixture.ts";
 import { managedServiceDigest } from "../../src/contracts/managed-service-plan.ts";
+import { parseManagedServiceAction } from "../../src/contracts/managed-swarm-service.ts";
 import type { ManagedServiceAction, ManagedServiceScope } from "../../src/contracts/managed-swarm-service.ts";
 import type { ServiceObservation, ServiceVersion } from "../../src/contracts/swarm-service.ts";
 import { managedServiceBarrier } from "../../src/server/deployment/managed-service-barrier.ts";
@@ -42,7 +43,7 @@ const fixture = async (t: TestContext, absent = false) => {
   let owner = managedServiceBarrier(journal, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
   return { service, action, old, prior, ports, owner: () => owner, journal: () => journal, calls: () => calls,
-    prepare: () => owner.prepare(service, action, prior), now: (value: number) => { clock = value; }, lose: () => { lose = true; }, conflictScrub: () => { scrubConflict = true; }, deny: () => { admitted = false; },
+    prepare: (namespace?: "quiesce" | "recover") => owner.prepare(service, action, prior, namespace), now: (value: number) => { clock = value; }, lose: () => { lose = true; }, conflictScrub: () => { scrubConflict = true; }, deny: () => { admitted = false; },
     drain: (value: boolean) => { draining = value; if (!value && observed.status === "owned") observed = { ...observed, tasks: [] }; },
     observe: (value: ServiceObservation) => { observed = value; },
     reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); owner = managedServiceBarrier(journal, ports); },
@@ -98,4 +99,17 @@ test("an unexpected application write after scrubbing starts cannot become clean
   const lab = await fixture(t); await lab.prepare(); await lab.owner().tick(); await lab.owner().tick();
   lab.observe({ ...lab.old, version: 100 });
   const held = await lab.owner().tick(); assert.equal(held.phase, "held"); assert.equal(held.reason, "runtime"); assert.equal(held.proof, null); assert.equal(lab.calls(), 2);
+});
+
+for (const namespace of ["quiesce", "recover"] as const) test(`${namespace} barriers retain distinct intent identities through a lost acknowledgement and restart`, async (t) => {
+  const lab = await fixture(t); const prepared = await lab.prepare(namespace); lab.lose();
+  await lab.owner().tick(); await lab.reopen();
+  const removing = await lab.owner().read(); assert.equal(removing?.action.action, lab.action.action + ":" + namespace);
+  await assert.rejects(lab.prepare(), /intent conflicts/);
+  const scrubbing = await lab.owner().tick(); assert.equal(scrubbing.steps.at(-1)?.effect, "scrub");
+  await lab.reopen(); const done = await lab.owner().tick(); assert.equal(done.phase, "complete");
+  assert.equal(done.proof?.native.version, 7); assert.equal(done.action.deadline, prepared.action.deadline); assert.equal(lab.calls(), 2);
+  assert.ok(parseManagedServiceAction({ ...lab.action, action: lab.action.action + ":" + namespace + ":scrub:1", effect: "scrub" }).ok);
+  assert.equal(parseManagedServiceAction({ ...lab.action, action: lab.action.action + ":" + namespace + ":apply:1", effect: "apply" }).ok, false);
+  assert.equal(parseManagedServiceAction({ ...lab.action, action: lab.action.action + ":unknown:remove:1" }).ok, false);
 });

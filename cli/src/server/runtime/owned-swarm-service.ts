@@ -21,7 +21,7 @@ export const nativeField = (value: unknown, name: string): unknown => nativeReco
 const reference = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value) ? value : null;
 const effectReference = (value: unknown) => { const parsed = effectSchema.safeParse(value); return parsed.success ? parsed.data : null; };
 const planReference = (value: unknown) => reference(value, /^[0-9a-f]{64}$/);
-const actionReference = (value: unknown) => reference(value, /^[0-9a-f-]{36}:[1-9][0-9]*(?::(?:apply|restore|fence|remove|scrub):[1-8])?$/);
+const actionReference = (value: unknown) => reference(value, /^[0-9a-f-]{36}:[1-9][0-9]*(?::(?:apply|restore|fence|remove|scrub):[1-8]|:(?:quiesce|recover):(?:remove|scrub):[1-8])?$/);
 const states = new Set(["new", "allocated", "pending", "assigned", "accepted", "preparing", "ready", "starting", "running", "complete", "shutdown", "failed", "rejected", "remove", "orphaned"]);
 // Docker omits empty arrays or returns null. Nonempty arrays and every supplied field still compare exactly.
 const matches = (observed: unknown, expected: unknown): boolean => {

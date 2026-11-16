@@ -29,6 +29,7 @@ const actionSchema = z.object({ app: z.string(), service: z.string(), incarnatio
 export const parseManagedServiceAction = (input: unknown) => {
   const parsed = actionSchema.safeParse(input);
   if (!parsed.success || !managedServiceScopeSchema.safeParse({ app: parsed.data.app, service: parsed.data.service, incarnation: parsed.data.incarnation, dataOwner: parsed.data.dataOwner }).success ||
-    !new RegExp(`^${parsed.data.incarnation}:[1-9][0-9]*(?::${parsed.data.effect}:[1-8])?$`).test(parsed.data.action) || !Number.isSafeInteger(Number(parsed.data.action.split(":")[1]))) return err("invalid managed service action");
+    !new RegExp(`^${parsed.data.incarnation}:[1-9][0-9]*(?::${parsed.data.effect}:[1-8]|:(?:quiesce|recover)(?::${parsed.data.effect}:[1-8])?)?$`).test(parsed.data.action) || !Number.isSafeInteger(Number(parsed.data.action.split(":")[1])) ||
+    /:(?:quiesce|recover)(?::|$)/.test(parsed.data.action) && parsed.data.effect !== "remove" && parsed.data.effect !== "scrub") return err("invalid managed service action");
   return ok<ManagedServiceAction>(parsed.data);
 };

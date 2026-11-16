@@ -163,3 +163,14 @@ test("Docker's omitted or null empty environment is normalized without accepting
   f.setService({ ID: f.id, Version: { Index: 100 }, Spec: { ...spec, TaskTemplate: { ...spec.TaskTemplate, ContainerSpec: { ...container, Env: ["UNDECLARED=value"] } } } });
   const unexpected = await f.adapter.observeDesired(action, parsed.value, inputs); assert.equal(unexpected.status, "owned"); assert.equal(unexpected.specMatches, false);
 });
+
+for (const namespace of ["quiesce", "recover"] as const) test(`native ${namespace} barrier labels survive observation without aliasing ordinary removal`, async () => {
+  const f = fixture(); const action = { ...f.action, action: f.owner.incarnation + ":3:" + namespace + ":remove:1", effect: "remove" as const };
+  assert.equal(await f.adapter.tombstone(action, f.version, f.plan.image), "acknowledged");
+  const body = f.calls.at(-1)?.body; assert.ok(body && typeof body === "object");
+  f.setService({ ID: f.id, Version: { Index: 43 }, Spec: body, UpdateStatus: { State: "completed" } });
+  const observed = await f.adapter.observe({ app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" });
+  assert.equal(observed.status, "owned");
+  assert.equal(observed.action, action.action); assert.equal(observed.effect, "remove"); assert.equal(observed.replicas, 0);
+  assert.notEqual(observed.action, f.owner.incarnation + ":3:remove:1");
+});

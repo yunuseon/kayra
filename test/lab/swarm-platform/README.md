@@ -1811,3 +1811,19 @@ check cessation proof establishes neither execution nor migration outcome.
 Fresh native maintenance validation is pending; normal managed V3 execution
 remains disabled. Active-service convergence also needs its separate container
 drain check before this experimental integration can be considered complete.
+
+
+The fresh drain-fix run at `b06d2de`, VM
+`kayra-volume-lab-20261116193350363165`, passed and the VM was destroyed.
+Reproduce with `python3 test/lab/swarm-platform/volume-lab.py --managed-group`.
+The app-owned ledger reached schema 2 with zero violations, no old-worker effects
+after migration, one applied operation identity and one migration Start in the
+live Docker stream. Retained native service and volume identity were unchanged.
+Preparation and consumer journal reopen preserved original phase deadlines.
+The certificate-to-final-verification interval was 3.705 seconds; this excludes
+quiescence time and is neither HTTP outage measurement nor a continuity claim.
+The singleton/check/compensation component probes in the same run also passed.
+Raw API/events/journals/ledger/source/version evidence has a private SHA-256
+manifest. This closes the reproduced zero-replica drain bug; active-service
+container convergence, indexed lifecycle integration and full acceptance remain
+required before normal managed V3 execution can be enabled.

@@ -1913,3 +1913,14 @@ historical restore to A and the same old plan submitted without its restore
 marker must both be refused before a new admission or workload mutation. The
 private lifecycle journal is format 2; pre-fence V3 experimental journals are
 not silently upgraded. Fresh native validation of this guard is pending.
+
+
+The compatibility run at `1cdfa03`, VM
+`kayra-volume-lab-20261116214230463380`, passed and was destroyed. Both maintenance
+variants observed the synchronized epoch before candidate service/migration
+Start, finalized B in epoch 1, and refused historical and disguised A restores
+from epoch 0 after reopening. Each migration started exactly once in the live
+stream; schemas, retained identities and deadlines were preserved with zero
+violations. Logs, journals, source, requests, versions and live events are
+retained privately with a SHA-256 manifest. This establishes neither normal
+indexed deployment nor compatibility preservation through managed removal.

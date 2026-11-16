@@ -1843,3 +1843,12 @@ history must survive the future managed removal/recreation tombstone and be
 respected by operator/client dispatch before normal V3 execution can be enabled.
 There is no automatic down-migration, compatibility reset or production
 conversion in this groundwork.
+
+
+Managed run sources additionally require each active retained reference to come
+from the verified previous release. Matching labels alone cannot bootstrap a
+reference into a new root. Successful runs must carry the exact recorded
+inactive dependency inventory into the next run; a reactivated dependency leaves
+that inactive set only after its containing release is verified. Recovery and
+removal must publish their own verified inactive inventory. This groundwork
+rejects unrecorded adoption and inventory loss before new workload admission.

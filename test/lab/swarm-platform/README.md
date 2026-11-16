@@ -1842,3 +1842,36 @@ raw requests, events, journals, app history and exact source/version evidence ha
 a private SHA-256 manifest. These are component fixtures, not indexed admission,
 process-kill, SQL, routed HTTP or full-platform acceptance. Normal managed V3
 execution remains disabled.
+
+
+The maintenance probe now uses the connected private lifecycle owner for both
+releases, including final verification, atomic active/last-good promotion and
+resource settlement. Its isolated fixture resource book is synchronized in a
+separate locked journal; this exercises resource-book decisions, not the
+platform's shared accounting binding or current-host admission observation.
+The probe reopens the lifecycle journal after migration Start and consumer
+dispatch and requires the original deadlines, one applied migration identity,
+unchanged retained service/volume identity and no old effects after migration.
+This is graceful journal reopen, not coordinator SIGKILL acceptance. Fresh native
+validation of the connected owner is pending. Failed/unsafe recovery and normal
+managed V3 execution remain unavailable.
+
+
+The connected-owner run at `1674079`, VM
+`kayra-volume-lab-20261116211421769730`, passed; the successful VM was destroyed.
+Both releases completed through the private lifecycle owner. B's active/last-good
+record and target resource settlement survived the journal reopens. The ledger
+reached schema 2 with zero violations, no old effects after migration, one
+applied operation identity and exactly one live migration Start. Retained service
+and owned-volume identities and original deadlines were preserved. The
+certificate-to-final-verification interval was 4.541 seconds, excluding
+quiescence; this is not an HTTP outage measurement. The delayed-exit singleton
+and component compensation/check probes also passed. The bounded trace contains
+16,438 API requests. Raw logs, journals, ledger, live events, exact source and
+versions are retained privately with a SHA-256 manifest.
+
+This run used Engine/CLI 29.10.0 (API 1.57), Compose 5.7.1, Node v24.22.1 and
+Ubuntu 24.04.5 ARM64, kernel 6.8.0-147. The exact Node and registry image digests
+are in the retained manifest. This proves fixture accounting and successful
+owner orchestration, not the shared platform index, SIGKILL, unsafe migration
+recovery or normal managed V3 acceptance. The experimental entrypoint stays off.

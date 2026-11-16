@@ -1760,3 +1760,29 @@ place of a failing route. The observation uses the oldest completion timestamp
 for freshness. These platform ports remain disconnected from normal managed
 consumer rollout until group convergence, compensation and indexed ownership
 are integrated; unit TLS evidence is not integrated Traefik continuity evidence.
+
+
+### Connected managed lifecycle owner
+
+A private managed V3 owner now composes admission, maintenance quiescence,
+retained startup, migrations, consumer replacement and final application checks.
+One synchronized app journal owns the child views. Its source fixes the run,
+action, immutable candidate, verified previous release and absolute deadlines;
+reopening cannot rebuild these from a branch or renew a phase window.
+
+Final verification and active/last-good release promotion share one atomic
+journal replacement. Resource settlement follows that replacement and can be
+reconstructed after a lost acknowledgement. A retained release record binds the
+complete native, routed and declared-check evidence; parsing a historical record
+does not establish current health. Old child views remain bound to their run and
+cannot write a subsequent operation. Cancellation can be recorded while native
+work is in flight and prevents late verification from promoting a release.
+
+This implementation covers successful rollouts. A failed or cancelled operation
+holds its resource charge: it does not yet claim complete compensation, effect
+fencing or safe removal. The normal managed V3 entrypoint remains disabled until
+recovery, shared platform accounting, operator integration and native acceptance
+are complete. The private admission port must use the existing global resource
+book shared with other Swarm operations; an independent production accounting
+book is prohibited. Migration services with volume mounts are currently rejected
+before admission because the one-shot adapter does not support those mounts.

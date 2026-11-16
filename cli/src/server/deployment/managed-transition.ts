@@ -75,12 +75,25 @@ export const prepareManagedTransition = async (previous: ManagedApplicationPlan 
 };
 export type ManagedTransition = Extract<Awaited<ReturnType<typeof prepareManagedTransition>>, { readonly ok: true }>["value"];
 
+/** Revalidates an already normalized description at the journal/admission boundary without materializing secrets. */
+export const managedAdmissionDescription = (candidate: ManagedApplicationPlan, previous: ManagedApplicationPlan | null) => {
+  const parsed = parseManagedApplicationPlan(candidate); const before = previous === null ? null : parseManagedApplicationPlan(previous);
+  if (!parsed.ok || before !== null && !before.ok) return err("invalid managed admission plans");
+  const plan = parsed.value; const old = before?.value ?? null;
+  if (old !== null && (!same(plan.infrastructure.ownership, old.infrastructure.ownership) || !same(plan.host, old.host) || !same(plan.infrastructure.overlay, old.infrastructure.overlay) ||
+    Object.values(old.services).some((service) => { const target = plan.services[service.service]; return service.role === "retained-dependency" && (target === undefined || managedServiceDigest(service) !== managedServiceDigest(target)); }) ||
+    Object.values(plan.services).some((service) => service.role === "retained-dependency" && old.services[service.service] !== undefined && old.services[service.service]?.role !== "retained-dependency") ||
+    plan.rollout.strategy === "rolling" && plan.routes.some((route) => old.routes.some((before) => before.host === route.host && before.path === route.path && before.service !== route.service)))) return err("managed admission ownership or normalized retained specification disagrees");
+  const resources = budget(old, plan); const eligible = rollbackEligible(old, plan);
+  if (plan.rollout.strategy === "rolling" && old !== null && !eligible || ![resources.target, resources.previous ?? empty, resources.peak].every(validBudget) || resources.peak.cpu > plan.grants.cpu_millicores || resources.peak.memory > plan.grants.memory_bytes) return err("managed admission grants or resource envelope disagree");
+  return ok(Object.freeze({ plan, previous: old, resources, rollbackEligible: eligible, planDigest: managedApplicationDigest(plan) }));
+};
+
 /** Caller holds the exclusive accounting owner and synchronizes the returned book before any effect. A replay is only a read, never renewed authority. */
-export const reserveManagedTransition = (book: unknown, observation: SwarmHostObservation, transition: ManagedTransition, sequence: number, deadline: number, now: number) => {
-  const candidate = parseManagedApplicationPlan(transition.plan); const previous = transition.previous === null ? null : parseManagedApplicationPlan(transition.previous);
-  if (!candidate.ok || previous !== null && !previous.ok || managedApplicationDigest(candidate.value) !== transition.planDigest) return err("managed transition admission integrity failed");
-  const plan = candidate.value; const old = previous === null ? null : previous.value; const resources = budget(old, plan);
-  if (transition.rollbackEligible !== rollbackEligible(old, plan) || !same(resources, transition.resources) || resources.peak.cpu > plan.grants.cpu_millicores || resources.peak.memory > plan.grants.memory_bytes) return err("managed transition resource envelope changed");
+export const reserveManagedTransition = (book: unknown, observation: SwarmHostObservation, transition: Pick<ManagedTransition, "plan" | "previous" | "resources" | "rollbackEligible" | "planDigest">, sequence: number, deadline: number, now: number) => {
+  const checked = managedAdmissionDescription(transition.plan, transition.previous); if (!checked.ok) return checked;
+  const { plan, previous: old, resources } = checked.value;
+  if (transition.planDigest !== checked.value.planDigest || transition.rollbackEligible !== checked.value.rollbackEligible || !same(resources, transition.resources)) return err("managed transition resource envelope changed");
   return reserveResources(book, plan.host, observation, { app: plan.infrastructure.registration.app, incarnation: plan.infrastructure.registration.incarnation, sequence,
     previous: old === null || resources.previous === null ? null : { plan: managedApplicationDigest(old), budget: resources.previous },
     target: { plan: transition.planDigest, budget: resources.target }, peak: resources.peak, deadline, result: "pending",

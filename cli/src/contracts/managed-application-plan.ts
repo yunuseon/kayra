@@ -15,7 +15,9 @@ import type { Migration } from "./rollout.ts";
 const migrationDescription = (services: Readonly<Record<string, ManagedServicePlan>>, definitions: readonly Migration[], scope: { readonly app: string; readonly incarnation: string; readonly run: string }, deployment: string, ceiling: number) => {
   const steps = all(definitions.map((definition) => {
     const service = services[definition.service];
-    return service === undefined ? err("managed migration references a missing service") : ok(Object.freeze({ definition, template: Object.freeze({ version: 1,
+    if (service === undefined) return err("managed migration references a missing service");
+    if (service.mounts.length > 0) return err("managed one-shot migrations do not support service volume mounts");
+    return ok(Object.freeze({ definition, template: Object.freeze({ version: 1,
       image: service.image, entrypoint: service.entrypoint, environment: service.inputs.environment,
       resources: Object.freeze({ memoryBytes: service.resources.memoryBytes, nanoCpus: service.resources.nanoCpus }),
       networks: Object.freeze([service.privateNetwork.id]), stopGraceSeconds: service.stopGraceSeconds,

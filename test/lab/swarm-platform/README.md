@@ -1875,3 +1875,16 @@ Ubuntu 24.04.5 ARM64, kernel 6.8.0-147. The exact Node and registry image digest
 are in the retained manifest. This proves fixture accounting and successful
 owner orchestration, not the shared platform index, SIGKILL, unsafe migration
 recovery or normal managed V3 acceptance. The experimental entrypoint stays off.
+
+
+The managed-group lab also includes an audited-resolution maintenance variant.
+Its app migration applies the schema change and deliberately exits 1; its
+app-provided probe returns `unknown`. The owner must hold with the old active
+record, no new consumers and pending capacity. The fixture operator separately
+inspects the application ledger, supplies an applied assertion, reopens the
+journal and replays the request. Final convergence must preserve one migration
+Start, original deadlines, retained identities and zero old-version effects
+after migration. This authorizes only fixture data inspection; Kayra contains
+no application ledger or schema interpretation. Fresh native validation is
+pending. This is not normal catalog/client integration or automatic recovery
+from an irreversible migration.

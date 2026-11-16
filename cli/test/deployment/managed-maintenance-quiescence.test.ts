@@ -190,10 +190,10 @@ test("maintenance restarts consumers from their verified barriers in target depe
 
 test("maintenance can remove a stopped old-only consumer without replaying its earlier barrier or changing its historical baseline", async (t) => {
   const lab = await maintenanceConsumers(t, (plan) => {
-    const { worker: _worker, ...services } = plan.services; const { worker: _role, ...roles } = plan.rollout.services; const web = services["web"]; assert.ok(web);
+    const services = Object.fromEntries(Object.entries(plan.services).filter(([name]) => name !== "worker")); const roles = Object.fromEntries(Object.entries(plan.rollout.services).filter(([name]) => name !== "worker")); const web = services["web"]; assert.ok(web);
     const checked = parseManagedApplicationPlan({ ...plan, services: { ...services, web: { ...web, dependencies: [{ service: "db", condition: "healthy" }] } }, rollout: { ...plan.rollout, services: roles } }); assert.ok(checked.ok); return checked.value;
   }); await lab.begin(); const done = await lab.finishConsumers(); assert.equal(done.phase, "ready"); assert.deepEqual(lab.writes.map((action) => action.service), ["web"]);
-  const removed = done.nodes.find((node) => node.name === "worker"); assert.equal(removed?.ready?.kind, "removed"); assert.equal(removed?.quiescence, null); assert.equal(lab.calls.length, 4);
+  const removed = done.nodes.find((node) => node.name === "worker"); assert.equal(removed?.ready?.kind, "removed"); assert.equal(removed.quiescence, null); assert.equal(lab.calls.length, 4);
 });
 
 test("a replaced external maintenance barrier holds startup before any candidate consumer effect", async (t) => {
@@ -204,7 +204,7 @@ test("a replaced external maintenance barrier holds startup before any candidate
 
 test("explicit maintenance may revoke an old consumer secret without reading or restarting its previous specification", async (t) => {
   const lab = await maintenanceConsumers(t, (plan) => {
-    const web = plan.services["web"]; assert.ok(web); const { TOKEN: _token, ...environment } = web.inputs.environment;
+    const web = plan.services["web"]; assert.ok(web); const environment = Object.fromEntries(Object.entries(web.inputs.environment).filter(([key]) => key !== "TOKEN"));
     const checked = parseManagedApplicationPlan({ ...plan, secrets: [], services: { ...plan.services, web: { ...web, inputs: { ...web.inputs, environment } } } }); assert.ok(checked.ok); return checked.value;
   }); await lab.begin(); const done = await lab.finishConsumers(); assert.equal(done.phase, "ready"); assert.equal(lab.writes.length, 2);
   assert.ok(lab.writes.every((action) => action.action === lab.request.action));

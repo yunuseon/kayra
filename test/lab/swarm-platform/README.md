@@ -1758,3 +1758,25 @@ identity. The app history must show A/B/A acquisition and no effects outside its
 recorded owner interval. This demonstrates graceful app-owned handoff only;
 lease expiry, hard kills, exactly-once behavior and indexed promotion are not
 established by the fixture.
+
+
+The first checked-singleton run at `a1ebee0`, VM
+`kayra-volume-lab-20261116001145341206`, stopped before workload creation:
+the fixture incorrectly set its health timeout above its interval. Its results,
+live events, service/container snapshots and registry RAM were archived before
+stopping the preserved VM. The fixture's health timing and JSONL newline were
+corrected; no runtime validation was relaxed.
+
+The fresh run at `0cd5c69`, VM `kayra-volume-lab-20261116003916616088`, passed
+and the VM was destroyed. Reproduce with
+`python3 test/lab/swarm-platform/volume-lab.py --managed-group`.
+The real preparation, consumer, completion-check and compensation owners drove
+an app-coordinated singleton from A to B and back to A. B became healthy on
+standby, then its declared failing completion check prevented verification.
+Recovery restored A and passed its app-declared active-owner check using a
+distinct recovery operation identity. Application history recorded acquisitions
+A/B/A and 578 effects, each inside its recorded owner's interval. Private raw
+API/events/journals/history and exact source/version evidence have a SHA-256
+manifest. This proves graceful application-owned locking in this fixture;
+indexed promotion, crash-safe leases, hard termination and exactly-once effects
+remain unproven. Normal managed V3 deployment remains disabled.

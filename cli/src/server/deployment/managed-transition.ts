@@ -15,14 +15,19 @@ const amount = (service: ManagedServicePlan) => Object.freeze({ cpu: Math.ceil(s
 const sum = (values: readonly ResourceBudget[]) => Object.freeze(values.reduce<ResourceBudget>((total, value) => Object.freeze({ cpu: total.cpu + value.cpu, memory: total.memory + value.memory }), empty));
 const maximum = (values: readonly ResourceBudget[]) => Object.freeze(values.reduce<ResourceBudget>((total, value) => Object.freeze({ cpu: Math.max(total.cpu, value.cpu), memory: Math.max(total.memory, value.memory) }), empty));
 const validBudget = (value: ResourceBudget) => Number.isSafeInteger(value.cpu) && value.cpu >= 0 && Number.isSafeInteger(value.memory) && value.memory >= 0;
+const rollbackEligible = (previous: ManagedApplicationPlan | null, candidate: ManagedApplicationPlan) => previous !== null && candidate.rollout.rollback_compatible && previous.routes.every((route) => candidate.hosts.includes(route.host)) && Object.values(previous.services).every((service) => Object.values(service.inputs.environment).every((binding) => binding.kind !== "secret" || candidate.secrets.includes(binding.key)));
 const budget = (previous: ManagedApplicationPlan | null, candidate: ManagedApplicationPlan) => {
   const consumers = (plan: ManagedApplicationPlan | null) => plan === null ? empty : sum(Object.values(plan.services).filter((service) => service.role !== "retained-dependency").map(amount));
   const retained = sum(Object.values(candidate.services).filter((service) => service.role === "retained-dependency").map(amount));
   const old = consumers(previous); const target = consumers(candidate);
   const job = maximum(candidate.rollout.migrations.map((step) => { const service = candidate.services[step.service]; return service === undefined ? empty : amount(service); }));
   // A fenced or uncertain migration may overlap its admitted probe. Rollback can overlap old, candidate and restored consumers.
-  const startup = sum([retained, old]); const migration = sum([retained, old, job, job]); const recovery = sum([retained, target, old, old]);
   const targetBudget = sum([retained, target]); const previousBudget = previous === null ? null : sum(Object.values(previous.services).map(amount));
+  const maintenance = candidate.rollout.strategy === "maintenance";
+  const startup = maintenance ? maximum([retained, previousBudget ?? empty]) : sum([retained, old]);
+  const migration = sum(maintenance ? [retained, job, job] : [retained, old, job, job]);
+  // An unsafe maintenance migration cannot restore old consumers. Compatible recovery remains conservatively charged for overlap until its fencing protocol is integrated.
+  const recovery = maintenance && !rollbackEligible(previous, candidate) ? targetBudget : sum([retained, target, old, old]);
   const peak = maximum([startup, migration, recovery, targetBudget, previousBudget ?? empty]);
   return Object.freeze({ target: targetBudget, previous: previousBudget, peak, frames: Object.freeze({ startup, migration, recovery }) });
 };
@@ -62,11 +67,11 @@ export const prepareManagedTransition = async (previous: ManagedApplicationPlan 
   const normalized = parseManagedApplicationPlan({ ...target, services }); if (!normalized.ok) return normalized;
   const plan = normalized.value; const resources = budget(old, plan);
   if (![resources.target, resources.previous ?? empty, resources.peak].every(validBudget) || resources.peak.cpu > plan.grants.cpu_millicores || resources.peak.memory > plan.grants.memory_bytes) return err("managed transition overlap, jobs and recovery exceed application grants");
-  const rollbackEligible = old !== null && plan.rollout.rollback_compatible && old.routes.every((route) => plan.hosts.includes(route.host)) && Object.values(old.services).every((service) => Object.values(service.inputs.environment).every((binding) => binding.kind !== "secret" || plan.secrets.includes(binding.key)));
-  if (plan.rollout.strategy === "rolling" && old !== null && !rollbackEligible) return err("rolling transition cannot restore its previous route or secret grants");
+  const eligible = rollbackEligible(old, plan);
+  if (plan.rollout.strategy === "rolling" && old !== null && !eligible) return err("rolling transition cannot restore its previous route or secret grants");
   const changes = Object.entries(plan.services).map(([name, service]) => Object.freeze({ name, kind: service.role === "retained-dependency" && unique.some((baseline) => baseline.service === name) ? "retained" : old?.services[name] === undefined ? "create" : managedServiceDigest(old.services[name]) === managedServiceDigest(service) && routesFor(old, name) === routesFor(plan, name) ? "unchanged" : "replace" }));
   const removed = old === null ? [] : Object.keys(old.services).filter((name) => !Object.hasOwn(plan.services, name));
-  return ok(Object.freeze({ plan, previous: old, resources, rollbackEligible, changes: Object.freeze(changes), removed: Object.freeze(removed), planDigest: managedApplicationDigest(plan) }));
+  return ok(Object.freeze({ plan, previous: old, resources, rollbackEligible: eligible, changes: Object.freeze(changes), removed: Object.freeze(removed), planDigest: managedApplicationDigest(plan) }));
 };
 export type ManagedTransition = Extract<Awaited<ReturnType<typeof prepareManagedTransition>>, { readonly ok: true }>["value"];
 
@@ -75,7 +80,7 @@ export const reserveManagedTransition = (book: unknown, observation: SwarmHostOb
   const candidate = parseManagedApplicationPlan(transition.plan); const previous = transition.previous === null ? null : parseManagedApplicationPlan(transition.previous);
   if (!candidate.ok || previous !== null && !previous.ok || managedApplicationDigest(candidate.value) !== transition.planDigest) return err("managed transition admission integrity failed");
   const plan = candidate.value; const old = previous === null ? null : previous.value; const resources = budget(old, plan);
-  if (!same(resources, transition.resources) || resources.peak.cpu > plan.grants.cpu_millicores || resources.peak.memory > plan.grants.memory_bytes) return err("managed transition resource envelope changed");
+  if (transition.rollbackEligible !== rollbackEligible(old, plan) || !same(resources, transition.resources) || resources.peak.cpu > plan.grants.cpu_millicores || resources.peak.memory > plan.grants.memory_bytes) return err("managed transition resource envelope changed");
   return reserveResources(book, plan.host, observation, { app: plan.infrastructure.registration.app, incarnation: plan.infrastructure.registration.incarnation, sequence,
     previous: old === null || resources.previous === null ? null : { plan: managedApplicationDigest(old), budget: resources.previous },
     target: { plan: transition.planDigest, budget: resources.target }, peak: resources.peak, deadline, result: "pending",

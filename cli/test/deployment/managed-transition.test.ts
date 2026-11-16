@@ -80,3 +80,18 @@ test("an ordinary transition cannot repurpose an existing consumer as a retained
   const candidate = parseManagedApplicationPlan({ ...plan, services: { ...plan.services, worker: { ...worker, role: "retained-dependency" } }, rollout: { ...plan.rollout, services: { ...plan.rollout.services, worker: { role: "retained-dependency", overlap: "forbidden" } } } }); assert.ok(candidate.ok);
   const result = await prepareManagedTransition(plan, candidate.value, [], unchanged, clock()); assert.ok(!result.ok); assert.match(result.error, /repurpose an existing consumer/);
 });
+
+
+test("maintenance admission excludes quiesced consumers from migrations and refuses invented rollback eligibility", async () => {
+  const { plan } = await managedPlanFixture(); const checked = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance: true, cpu_millicores: 300 }, rollout: { ...plan.rollout, strategy: "maintenance", mixed_version_compatible: false, rollback_compatible: false } }); assert.ok(checked.ok);
+  const transition = await prepareManagedTransition(plan, checked.value, [], unchanged, clock()); assert.ok(transition.ok); assert.equal(transition.value.rollbackEligible, false);
+  assert.deepEqual(transition.value.resources.frames.startup, { cpu: 300, memory: 3 * 33554432 });
+  assert.deepEqual(transition.value.resources.frames.migration, { cpu: 300, memory: 3 * 33554432 });
+  assert.deepEqual(transition.value.resources.frames.recovery, transition.value.resources.target);
+  assert.deepEqual(transition.value.resources.peak, transition.value.resources.target);
+  const initial = await prepareManagedTransition(null, plan, [], unchanged, clock()); assert.ok(initial.ok); const reservation = reserveManagedTransition(null, ready(plan), initial.value, 1, 91000, 1000); assert.ok(reservation.ok); const active = settleResources(reservation.value, "shop", plan.infrastructure.registration.incarnation, 1, "target"); assert.ok(active.ok);
+  assert.ok(reserveManagedTransition(active.value, ready(plan), transition.value, 2, 91000, 1000).ok);
+  assert.equal(reserveManagedTransition(active.value, ready(plan), { ...transition.value, rollbackEligible: true }, 2, 91000, 1000).ok, false);
+  const compatible = parseManagedApplicationPlan({ ...checked.value, rollout: { ...checked.value.rollout, rollback_compatible: true } }); assert.ok(compatible.ok);
+  assert.equal((await prepareManagedTransition(plan, compatible.value, [], unchanged, clock())).ok, false);
+});

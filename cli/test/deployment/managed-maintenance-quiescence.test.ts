@@ -12,6 +12,11 @@ import { managedServiceDigest } from "../../src/contracts/managed-service-plan.t
 import type { ManagedServiceAction, ManagedServiceScope } from "../../src/contracts/managed-swarm-service.ts";
 import type { ServiceObservation, ServiceVersion } from "../../src/contracts/swarm-service.ts";
 import { managedMaintenanceQuiescence, managedMaintenanceSnapshot } from "../../src/server/deployment/managed-maintenance-quiescence.ts";
+import { managedMigrationInputs } from "../../src/server/deployment/managed-migration-inputs.ts";
+import { managedGroupPreparation } from "../../src/server/deployment/managed-group-preparation.ts";
+import type { JobPlan } from "../../src/contracts/one-shot-job.ts";
+import { jobName } from "../../src/contracts/one-shot-job.ts";
+import { jobRuntime } from "./one-shot-fixture.ts";
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 
@@ -35,7 +40,7 @@ const fixture = async (t: TestContext) => {
   } };
   let owner = managedMaintenanceQuiescence(journal, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
-  return { request, calls, reads, observed, owner: () => owner, journal: () => journal, clock: (value: number) => { clock = value; }, deny: () => { admitted = false; }, lose: () => { lose = true; },
+  return { request, calls, reads, observed, ports, path, now: () => clock, owner: () => owner, journal: () => journal, clock: (value: number) => { clock = value; }, deny: () => { admitted = false; }, lose: () => { lose = true; },
     reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); owner = managedMaintenanceQuiescence(journal, ports); },
     finish: async () => { for (let i = 0; i < 20; i++) { const state = await owner.tick(); if (state.phase !== "quiescing") return state; } throw new Error("maintenance did not finish"); },
   };
@@ -102,4 +107,51 @@ test("maintenance handoff evidence is bound to its immutable source and complete
   const lab = await fixture(t); await lab.owner().prepare(lab.request); const done = await lab.finish();
   const snapshot = managedMaintenanceSnapshot({ certificate: done, source: lab.request }); assert.equal(snapshot.certificate.phase, "complete");
   for (const certificate of [{ ...done, run: randomUUID() }, { ...done, plan: "a".repeat(64) }, { ...done, nodes: [] }]) assert.throws(() => managedMaintenanceSnapshot({ certificate, source: lab.request }), /integrity/);
+});
+
+
+const maintenancePreparation = async (t: TestContext) => {
+  const lab = await fixture(t); await lab.owner().prepare(lab.request); const certificate = await lab.finish();
+  const db = lab.request.previous.services["db"]; assert.ok(db);
+  const action: ManagedServiceAction = { app: db.owner.app, incarnation: db.owner.incarnation, dataOwner: db.owner.dataOwner, service: "db", action: db.owner.incarnation + ":2", plan: managedServiceDigest(db), effect: "apply", deadline: 91000 };
+  const native = { id: "d".repeat(25), version: 5 };
+  lab.observed.set("db", { status: "owned", ...native, action: action.action, plan: action.plan, effect: "apply", taskEffect: "apply", taskPlan: action.plan, tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", update: "completed", tasks: [{ id: "t".repeat(25), desired: "running", state: "running", health: "healthy", effect: "apply", incarnation: db.owner.incarnation, action: action.action, plan: action.plan }] });
+  const nodes = new Map<string, ReturnType<typeof jobRuntime>>();
+  const nodeFor = (job: JobPlan) => { const key = jobName(job.scope); let node = nodes.get(key); if (node === undefined) { node = jobRuntime(job); nodes.set(key, node); } node.now(lab.now()); return node; };
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(join(lab.path, "preparation")));
+  let journal = await openJournal(join(lab.path, "preparation"));
+  const ports = { ...lab.ports, services: { ...lab.ports.services, observeDesired: (action: ManagedServiceAction) => Promise.resolve(lab.observed.get(action.service) ?? { status: "absent" as const }), apply: () => { throw new Error("unchanged database must not be recreated"); } }, jobs: {
+    observe: (job: JobPlan) => nodeFor(job).native.observe(job), create: (job: JobPlan) => { const inputs = managedMigrationInputs(lab.request.candidate, job); assert.ok(inputs.ok); return nodeFor(job).native.create(job, Object.fromEntries(Object.entries(inputs.value.environment).map(([key, binding]) => [key, binding.kind === "literal" ? binding.value : "PRIVATE"]))); }, start: (job: JobPlan, id: string, deadline?: number) => nodeFor(job).native.start(job, id, deadline), fence: (job: JobPlan, id: string | null, deadline: number) => nodeFor(job).native.fence(job, id, deadline),
+  } };
+  let owner = managedGroupPreparation(journal, ports); t.after(() => journal.close());
+  const proof = { certificate, source: lab.request };
+  return { ...lab, nodes, proof, prepare: () => owner.prepare(lab.request.candidate, lab.request.run, lab.request.action, [{ name: "db", kind: "active", action, native }], proof), preparation: () => owner,
+    reopenPreparation: async () => { await journal.close(); journal = await openJournal(join(lab.path, "preparation"), "existing"); owner = managedGroupPreparation(journal, ports); },
+  };
+};
+
+test("maintenance migration preparation consumes a source-bound quiescence certificate and keeps its phase deadline through reopen", async (t) => {
+  const lab = await maintenancePreparation(t); const initial = await lab.prepare(); assert.equal(initial.version, 2); assert.equal(initial.createdAt, lab.proof.certificate.verifiedAt);
+  for (let i = 0; i < 100; i++) { const state = await lab.preparation().tick(); assert.notEqual(state.phase, "held"); if (state.phase === "ready") break; }
+  assert.equal((await lab.preparation().read())?.phase, "ready"); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 1);
+  await lab.reopenPreparation(); lab.clock(999999); assert.equal((await lab.prepare()).startupDeadline, initial.startupDeadline); assert.equal((await lab.preparation().tick()).phase, "ready");
+});
+
+test("a revived consumer invalidates maintenance authority before migration Start", async (t) => {
+  const lab = await maintenancePreparation(t); await lab.prepare();
+  for (let i = 0; i < 80; i++) { const state = await lab.preparation().tick(); if ([...lab.nodes.values()].some((node) => node.raw() !== undefined)) break; assert.notEqual(state.phase, "held"); }
+  assert.equal(lab.nodes.size, 1); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 0);
+  const old = lab.observed.get("web"); assert.ok(old?.status === "owned"); lab.observed.set("web", { ...old, replicas: 1 });
+  for (let i = 0; i < 10; i++) { const state = await lab.preparation().tick(); if (state.phase === "held") break; }
+  assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 0);
+  assert.equal((await lab.preparation().read())?.phase, "held");
+});
+
+test("maintenance preparation rejects missing or mismatched quiescence before intent and cannot renew an expired handoff", async (t) => {
+  const lab = await maintenancePreparation(t);
+  await assert.rejects(lab.preparation().prepare(lab.request.candidate, lab.request.run, lab.request.action, []), /quiescence/);
+  await assert.rejects(lab.preparation().prepare(lab.request.candidate, randomUUID(), lab.request.action, [], lab.proof), /quiescence/);
+  assert.equal(await lab.preparation().read(), undefined);
+  lab.clock((lab.proof.certificate.verifiedAt ?? 0) + 90000);
+  await assert.rejects(lab.prepare(), /scheduling deadline/); assert.equal(await lab.preparation().read(), undefined); assert.equal(lab.nodes.size, 0);
 });

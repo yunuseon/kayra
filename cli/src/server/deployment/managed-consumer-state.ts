@@ -14,12 +14,13 @@ const readiness = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("running"), action: z.unknown(), native, at: positive, routed: routed.nullable() }).strict().readonly(),
   z.object({ kind: z.literal("removed"), native, at: positive }).strict().readonly(),
 ]);
-const schema = z.object({ version: z.literal(1), app: name, incarnation: z.uuid(), dataOwner: z.uuid(), run: z.uuid(), action: z.string().max(80),
+const legacySchema = z.object({ version: z.literal(1), app: name, incarnation: z.uuid(), dataOwner: z.uuid(), run: z.uuid(), action: z.string().max(80),
   plan: digest, previous: digest.nullable(), preparation: digest, createdAt: positive, deadline: positive,
   retained: z.array(z.object({ name, action: z.unknown(), native }).strict().readonly()).max(32).readonly(),
   nodes: z.array(z.object({ name, target: digest.nullable(), baseline: reference.nullable(), execution: z.unknown().nullable(), quiescence: z.unknown().nullable(), ready: readiness.nullable() }).strict().readonly()).max(32).readonly(),
   cursor: z.number().int().min(0).max(31), phase: z.enum(["updating", "ready", "held"]), reason: z.enum(["deadline", "service", "dependency", "authorization"]).nullable(), verifiedAt: positive.nullable(),
 }).strict().readonly();
+const schema = z.union([legacySchema, legacySchema.unwrap().extend({ version: z.literal(2), maintenance: digest }).strict().readonly()]);
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 
 /** Private forward reconciliation proof, not a promoted release or an admission grant. */
@@ -36,10 +37,10 @@ export const parseManagedConsumerState = (input: unknown) => {
     const execution = value.execution === null ? null : parseManagedServiceExecution(value.execution);
     const quiescence = value.quiescence === null ? null : parseManagedServiceBarrier(value.quiescence);
     const ready = value.ready?.kind === "running" ? Object.freeze({ ...value.ready, action: action(value.ready.action, value.name) }) : value.ready;
-    if (value.target === null && baseline === null || baseline !== null && (state.previous === null || Number(baseline.action.action.split(":")[1]) >= Number(state.action.split(":")[1]) || baseline.action.effect !== "apply" && baseline.action.effect !== "restore") ||
+    if (state.version === 2 && quiescence !== null || value.target === null && baseline === null || baseline !== null && (state.previous === null || Number(baseline.action.action.split(":")[1]) >= Number(state.action.split(":")[1]) || baseline.action.effect !== "apply" && baseline.action.effect !== "restore") ||
       execution !== null && (value.target === null || execution.mode !== "apply" || execution.action.action !== state.action || execution.action.effect !== "apply" || execution.action.plan !== value.target || execution.action.deadline !== state.deadline || execution.createdAt < state.createdAt || !same(action(execution.action, value.name), execution.action)) ||
       quiescence !== null && (quiescence.action.plan !== baseline?.action.plan || quiescence.action.action !== state.action || quiescence.action.deadline !== state.deadline || quiescence.createdAt < state.createdAt || !same(action(quiescence.action, value.name), quiescence.action)) ||
-      ready !== null && (ready.at < state.createdAt || ready.at >= state.deadline || (ready.kind === "removed" ? value.target !== null || quiescence?.phase !== "complete" || !same(ready.native, quiescence.proof?.native) :
+      ready !== null && (ready.at < state.createdAt || ready.at >= state.deadline || (ready.kind === "removed" ? value.target !== null || (state.version === 1 ? quiescence?.phase !== "complete" || !same(ready.native, quiescence.proof?.native) : baseline === null) :
         execution?.phase !== "converged" || execution.verified === null || !same(ready.action, execution.action) || ready.native.id !== execution.verified.native.id || ready.native.version < execution.verified.native.version ||
         ready.routed !== null && !routedHttp(ready.action, ready.routed, ready.at)))) throw new Error("managed consumer child evidence disagrees");
     return Object.freeze({ ...value, baseline, execution, quiescence, ready });

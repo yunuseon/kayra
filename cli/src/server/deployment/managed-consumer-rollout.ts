@@ -15,6 +15,7 @@ import { parseManagedConsumerState } from "./managed-consumer-state.ts";
 import type { ManagedConsumerState } from "./managed-consumer-state.ts";
 import { managedServiceExecution, parseManagedServiceExecution } from "./managed-service-execution.ts";
 import { managedServiceBarrier, parseManagedServiceBarrier } from "./managed-service-barrier.ts";
+import { managedMaintenanceSnapshot } from "./managed-maintenance-quiescence.ts";
 import { clearedService, convergedService } from "./service-convergence.ts";
 import { routedHttp } from "./http-convergence.ts";
 import { claimJournal } from "./journal-claim.ts";
@@ -62,10 +63,25 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
       state.retained.length !== Object.values(target.services).filter((service) => service.role === "retained-dependency").length || state.retained.some((value) => { const service = target.services[value.name]; return service?.role !== "retained-dependency" || value.action.plan !== managedServiceDigest(service); })) throw new Error("managed consumer scope or service set disagrees");
     return Object.freeze({ target, previous });
   };
+  const maintenance = async (state: ManagedConsumerState, target: ManagedApplicationPlan, previous: ManagedApplicationPlan | null) => {
+    if (state.version === 1) { if (target.rollout.strategy !== "rolling") throw new Error("maintenance consumer evidence is missing"); return null; }
+    const read = async (digest: string) => { const bytes = await bounded(time() + 10_000, () => ports.read(digest)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("maintenance consumer evidence unavailable"); return bytes; };
+    const bytes = await read(state.maintenance); const raw: unknown = JSON.parse(bytes); const snapshot = managedMaintenanceSnapshot(raw); const proof = snapshot.certificate;
+    const prefixBytes = await read(state.preparation); const prefix: unknown = JSON.parse(prefixBytes); const prepared = parseManagedGroupPreparation(prefix);
+    if (target.rollout.strategy !== "maintenance" || bytes !== JSON.stringify(snapshot) || proof.phase !== "complete" || proof.plan !== state.plan || proof.previous !== state.previous || proof.run !== state.run || proof.action !== state.action || proof.verifiedAt === null || proof.verifiedAt > state.createdAt ||
+      !same(snapshot.source.candidate, target) || !same(snapshot.source.previous, previous) || prepared.version !== 2 || prepared.maintenance !== state.maintenance || prepared.phase !== "ready" || prepared.plan !== state.plan || prepared.run !== state.run || prepared.action !== state.action || prepared.consumerDeadline !== state.deadline || prefixBytes !== JSON.stringify(prepared) || !same(prepared.nodes.map((node) => node.ready === null ? null : Object.freeze({ name: node.name, action: node.ready.action, native: node.ready.native })), state.retained) ||
+      snapshot.source.baselines.some((old) => { const node = state.nodes.find((node) => node.name === old.name); return !same(node?.baseline, { action: old.action, native: old.native }); }) ||
+      state.nodes.some((node) => { const barrier = proof.nodes.find((value) => value.name === node.name)?.child?.proof; return node.ready?.kind === "removed" && (node.ready.native.id !== barrier?.native.id || node.ready.native.version < barrier.native.version); })) throw new Error("maintenance consumer evidence disagrees");
+    return snapshot;
+  };
+  const externalCleared = (state: ManagedConsumerState, name: string, snapshot: NonNullable<Awaited<ReturnType<typeof maintenance>>>, observed: ServiceObservation) => {
+    const node = snapshot.certificate.nodes.find((node) => node.name === name); const proof = node?.child?.proof; const step = node?.child?.steps.at(-1);
+    return proof !== null && proof !== undefined && step?.effect === "scrub" && observed.status === "owned" && clearedService(observed) && observed.id === proof.native.id && observed.version >= proof.native.version && observed.action === state.action + ":quiesce:scrub:" + String(step.attempt) && observed.effect === "scrub" && observed.plan === node?.plan;
+  };
   const plans = async (state: ManagedConsumerState) => {
     const read = async (digest: string) => { const bytes = await bounded(time() + 10_000, () => ports.read(digest)); if (bytes === undefined) throw new Error("managed consumer plan is unavailable"); const raw: unknown = JSON.parse(bytes); const parsed = parseManagedApplicationPlan(raw); if (!parsed.ok || bytes !== JSON.stringify(parsed.value) || managedApplicationDigest(parsed.value) !== digest) throw new Error("managed consumer plan integrity failed"); return parsed.value; };
     const target = await read(state.plan); const previous = state.previous === null ? null : await read(state.previous);
-    return validatePlans(state, target, previous);
+    return Object.freeze({ ...validatePlans(state, target, previous), maintenance: await maintenance(state, target, previous) });
   };
   const desired = async (action: ManagedServiceAction, service: string, plan: ManagedApplicationPlan, deadline: number) => { const spec = plan.services[service]; return spec === undefined ? Object.freeze({ status: "unavailable" as const }) : await bounded(Math.min(deadline, time() + 10_000), () => ports.services.observeDesired(action, spec, plan)) ?? Object.freeze({ status: "unavailable" as const }); };
   const retainedHealthy = async (state: ManagedConsumerState, plan: ManagedApplicationPlan) => {
@@ -86,7 +102,7 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
       const node = state.nodes.find((value) => value.name === dependency.service); if (node === undefined) return false;
       const actions = [...(node.execution === null ? [] : [node.execution.action]), ...(node.baseline === null ? [] : [node.baseline.action])];
       if (node.execution !== null && healthy(await desired(node.execution.action, node.name, target, state.deadline), actions)) continue;
-      if (previous !== null && node.baseline !== null && node.quiescence === null && healthy(await desired(node.baseline.action, node.name, previous, state.deadline), actions)) continue;
+      if (state.version === 1 && previous !== null && node.baseline !== null && node.quiescence === null && healthy(await desired(node.baseline.action, node.name, previous, state.deadline), actions)) continue;
       return false;
     }
     return true;
@@ -119,11 +135,11 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
       const prior = z.array(z.object({ name: z.string(), action: z.unknown(), native: z.object({ id: z.string(), version: z.number() }).strict() }).strict()).max(32).safeParse(references); if (!prior.success) return Promise.reject(new Error("invalid consumer baseline references"));
       const baselines = Object.freeze(prior.data.map((value) => { const action = parseManagedServiceAction(value.action); if (!action.ok) throw new Error("invalid consumer baseline action"); return Object.freeze({ ...value, native: Object.freeze(value.native), action: action.value }); }));
       return serial(async () => {
-        if (target.rollout.strategy !== "rolling" || ports.checks === undefined && (target.rollout.checks.length !== 0 || Object.values(target.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed consumer capabilities are unavailable for maintenance or checks");
+        if ((target.rollout.strategy === "maintenance" ? preparation.version !== 2 : preparation.version !== 1) || ports.checks === undefined && (target.rollout.checks.length !== 0 || Object.values(target.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed consumer capabilities are unavailable for maintenance or checks");
         if (old !== null && (!same(old.infrastructure.ownership, target.infrastructure.ownership) || !same(old.host, target.host) || !same(old.infrastructure.overlay, target.infrastructure.overlay) ||
-          old.routes.some((route) => !target.hosts.includes(route.host)) || Object.values(old.services).some((service) => Object.values(service.inputs.environment).some((binding) => binding.kind === "secret" && !target.secrets.includes(binding.key))) ||
+          target.rollout.strategy === "rolling" && (old.routes.some((route) => !target.hosts.includes(route.host)) || Object.values(old.services).some((service) => Object.values(service.inputs.environment).some((binding) => binding.kind === "secret" && !target.secrets.includes(binding.key)))) ||
           Object.values(old.services).some((service) => { const next = target.services[service.service]; return service.role === "retained-dependency" && (next === undefined || managedServiceDigest(service) !== managedServiceDigest(next)); }))) throw new Error("managed consumer previous scope or recovery grants disagree");
-        if (old !== null && target.routes.some((route) => old.routes.some((before) => before.host === route.host && before.path === route.path && before.service !== route.service))) throw new Error("rolling consumer routes cannot move between services");
+        if (target.rollout.strategy === "rolling" && old !== null && target.routes.some((route) => old.routes.some((before) => before.host === route.host && before.path === route.path && before.service !== route.service))) throw new Error("rolling consumer routes cannot move between services");
         if (Object.values(target.services).some((service) => service.role === "retained-dependency" && old?.services[service.service] !== undefined && old.services[service.service]?.role !== "retained-dependency")) throw new Error("consumer cannot become a retained dependency");
         const names = [...new Set([...Object.values(target.services), ...Object.values(old?.services ?? {})].filter((service) => service.role !== "retained-dependency").map((service) => service.service))].toSorted();
         if (names.length > 32) throw new Error("managed consumer transition exceeds scheduling limit");
@@ -134,14 +150,15 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
           return Object.freeze({ name, target: service === undefined || service.role === "retained-dependency" ? null : managedServiceDigest(service), baseline: baseline === undefined ? null : Object.freeze({ action: baseline.action, native: baseline.native }), execution: null, quiescence: null, ready: null });
         });
         if (new Set(baselines.map((value) => value.name)).size !== baselines.length || baselines.some((value) => !names.includes(value.name))) throw new Error("managed consumer baseline set disagrees");
-        const request = parseManagedConsumerState({ version: 1, app: preparation.app, incarnation: preparation.incarnation, dataOwner: preparation.dataOwner, run: preparation.run, action: preparation.action,
+        const request = parseManagedConsumerState({ ...(preparation.version === 1 ? { version: 1 } : { version: 2, maintenance: preparation.maintenance }), app: preparation.app, incarnation: preparation.incarnation, dataOwner: preparation.dataOwner, run: preparation.run, action: preparation.action,
           plan: preparation.plan, previous: old === null ? null : managedApplicationDigest(old), preparation: hash(preparation), createdAt: consumerDeadline - 90_000, deadline: consumerDeadline,
           retained: preparation.nodes.map((node) => { if (node.ready === null) throw new Error("managed retained preparation is incomplete"); return Object.freeze({ name: node.name, action: node.ready.action, native: node.ready.native }); }),
           nodes, cursor: 0, phase: "updating", reason: null, verifiedAt: null });
         const existing = await load(); if (existing !== undefined) { if (existing.plan !== request.plan || existing.previous !== request.previous || existing.preparation !== request.preparation || !same(existing.nodes.map((node) => node.baseline), nodes.map((node) => node.baseline))) throw new Error("managed consumer intent conflicts"); await plans(existing); return existing; }
         if (time(request.createdAt) >= request.deadline) throw new Error("managed consumer window expired");
         for (const plan of [target, ...(old === null ? [] : [old])]) if (await bounded(request.deadline, () => ports.retain(JSON.stringify(plan))) !== managedApplicationDigest(plan)) throw new Error("managed consumer plan retention failed");
-        validatePlans(request, target, old); return write(request);
+        if (request.version === 2 && await bounded(request.deadline, () => ports.retain(JSON.stringify(preparation))) !== request.preparation) throw new Error("maintenance preparation retention failed");
+        validatePlans(request, target, old); await maintenance(request, target, old); return write(request);
       });
     },
     read: () => serial(load),
@@ -153,7 +170,7 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
         // eslint-disable-next-line functional/prefer-immutable-types -- local evidence collection is published only after every check succeeds
         const refreshed: ManagedConsumerState["nodes"][number][] = [];
         for (const node of state.nodes) {
-          if (node.target === null) { const observed = await bounded(Math.min(state.deadline, time() + 10_000), () => ports.services.observe(scope(state, node.name))); if (observed === undefined || !clearedService(observed) || observed.status !== "owned" || observed.id !== node.ready?.native.id || observed.version < node.ready.native.version || ![null, "completed", "rollback_completed"].includes(observed.update)) return hold(state, "service"); // eslint-disable-next-line functional/immutable-data -- collects freshly checked evidence before one journal write
+          if (node.target === null) { const observed = await bounded(Math.min(state.deadline, time() + 10_000), () => ports.services.observe(scope(state, node.name))); if (observed === undefined || !clearedService(observed) || observed.status !== "owned" || state.version === 2 && (source.maintenance === null || !externalCleared(state, node.name, source.maintenance, observed)) || observed.id !== node.ready?.native.id || observed.version < node.ready.native.version || ![null, "completed", "rollback_completed"].includes(observed.update)) return hold(state, "service"); // eslint-disable-next-line functional/immutable-data -- collects freshly checked evidence before one journal write
           refreshed.push(node); continue; }
           const spec = source.target.services[node.name]; const action = node.execution?.action; if (spec === undefined || action === undefined) throw new Error("managed candidate proof is missing");
           const observed = await bounded(Math.min(state.deadline, time() + 10_000), () => desired(action, node.name, source.target, state.deadline)); if (observed === undefined || !convergedService(action, observed) || observed.status !== "owned") return hold(state, "service");
@@ -172,7 +189,14 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
       const selected = pending.find(({ index }) => index >= state.cursor) ?? pending[0]; if (selected === undefined) throw new Error("managed consumer scheduler is inconsistent");
       const cursor = (selected.index + 1) % Math.max(1, state.nodes.length); const current = await write({ ...state, cursor }); const node = selected.node;
       const target = source.target.services[node.name]; const previous = source.previous?.services[node.name];
-      const quiesce = previous !== undefined && (target === undefined || previous.overlap === "forbidden" && target.overlap !== "forbidden");
+      const quiesce = current.version === 1 && previous !== undefined && (target === undefined || previous.overlap === "forbidden" && target.overlap !== "forbidden");
+      if (current.version === 2 && target === undefined) {
+        if (source.maintenance === null) throw new Error("maintenance barrier evidence missing");
+        const observed = await bounded(Math.min(current.deadline, time() + 10_000), () => ports.services.observe(scope(current, node.name)));
+        if (observed === undefined || observed.status === "unavailable") return current;
+        if (!externalCleared(current, node.name, source.maintenance, observed) || observed.status !== "owned") return hold(current, "service");
+        return write({ ...current, nodes: current.nodes.map((value) => value.name === node.name ? { ...value, ready: { kind: "removed", native: { id: observed.id, version: observed.version }, at: time(current.createdAt) } } : value) });
+      }
       if (quiesce) {
         if (node.quiescence === null) { if (node.baseline === null) throw new Error("managed quiescence baseline is missing"); await barrier(node.name).prepare(previous, { ...scope(current, node.name), action: current.action, plan: managedServiceDigest(previous), deadline: current.deadline, effect: "remove" }, [node.baseline.native]); return required(); }
         if (node.quiescence.phase === "held") return hold(current, "service");
@@ -192,12 +216,13 @@ export const managedConsumerRollout = (journal: OperationJournal, ports: Ports) 
         return required();
       }
       if (!await dependenciesHealthy(current, node.name, source.target, source.previous)) return current;
-      const observed = node.quiescence !== null || node.baseline === null ? await bounded(Math.min(current.deadline, time() + 10_000), () => ports.services.observe(scope(current, node.name))) : source.previous === null ? undefined : await desired(node.baseline.action, node.name, source.previous, current.deadline);
+      const observed = current.version === 2 || node.quiescence !== null || node.baseline === null ? await bounded(Math.min(current.deadline, time() + 10_000), () => ports.services.observe(scope(current, node.name))) : source.previous === null ? undefined : await desired(node.baseline.action, node.name, source.previous, current.deadline);
       if (observed === undefined || observed.status === "unavailable") return current;
       if (observed.status !== "absent" && observed.status !== "owned") return hold(current, "service");
       if (node.baseline !== null && (observed.status !== "owned" || observed.id !== node.baseline.native.id || observed.version < node.baseline.native.version) ||
-        node.quiescence === null && node.baseline !== null && observed.status === "owned" && (observed.specMatches !== true || observed.tombstone || observed.replicas !== 1) ||
+        current.version === 1 && node.quiescence === null && node.baseline !== null && observed.status === "owned" && (observed.specMatches !== true || observed.tombstone || observed.replicas !== 1) ||
         node.baseline === null && observed.status === "owned" && !clearedService(observed)) return hold(current, "service");
+      if (current.version === 2 && node.baseline !== null && (source.maintenance === null || !externalCleared(current, node.name, source.maintenance, observed))) return hold(current, "service");
       if (node.quiescence !== null && (observed.status !== "owned" || !clearedService(observed) || ![null, "completed", "rollback_completed"].includes(observed.update))) return current;
       await execution(node.name, source.target).prepare(target, { ...scope(current, node.name), action: current.action, plan: managedServiceDigest(target), deadline: current.deadline, effect: "apply" }, observed.status === "owned" ? { id: observed.id, version: observed.version } : null); return required();
     }),

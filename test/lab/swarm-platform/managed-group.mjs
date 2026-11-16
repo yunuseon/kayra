@@ -1,4 +1,5 @@
 // Fixture-authorized retained startup, migration and worker phases. No indexed admission or release promotion.
+import { probeManagedMaintenance } from './managed-maintenance.mjs';
 import { probeManagedSingleton } from './managed-singleton.mjs';
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
@@ -173,14 +174,16 @@ export const probeManagedGroup = async (app, databaseImage, migrationImage, outp
       await checkJournal.close(); checkJournal = undefined;
     }
     const singleton = await probeManagedSingleton(app, migrationImage, api, routing.value.Id, swarm, output);
+    const maintenance = await probeManagedMaintenance(app, migrationImage, api, routing.value.Id, swarm, output);
     await pause(200); finished = true; eventProcess.kill('SIGTERM'); await eventExit; assert.equal(eventError, undefined); assert.equal(partial, '');
+    const maintenanceMigrationStarts = events.filter((event) => event.Action === 'start' && event.Actor?.ID === maintenance.migrationContainer).length; assert.equal(maintenanceMigrationStarts, 1);
     for (const check of checkResults) assert.equal(events.filter((event) => String(event.Action).startsWith('exec_start') && event.Actor?.Attributes?.execID === check.id).length, 1);
     const migrationContainer = ready.sequence.steps[0].attempts[0].execution.container;
     const migrationStarts = events.filter((event) => event.Action === 'start' && event.Actor?.ID === migrationContainer).length; assert.equal(migrationStarts, 1);
     const dependencyStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === database.ready.native.id).length; assert.equal(dependencyStarts, 1);
     const workerStarts = events.filter((event) => event.Action === 'start' && event.Actor?.Attributes?.['com.docker.swarm.service.id'] === worker.ready.native.id).length; assert.equal(workerStarts, 5);
     const result = { passed: true, scope: 'fixture-authorized retained startup, private DNS migration, worker rollout, injected pre-transport restore interruption, metadata fencing, whole-group rollback, in-container checks and journal reopen; no indexed admission, SIGKILL, HTTP continuity, promotion or SQL acceptance', run, originalStartupDeadline: ready.startupDeadline, originalMigrationDeadline: ready.migrationDeadline,
-      consumerDeadline: consumerReady.deadline, coordinatedSingleton: singleton, containerChecks: checkResults, mountedInspector: true, checkExecStartsEach: 1, workerStarts, workerCandidateAndRestoreStarts: 4, wholeGroupRecovery: recoveredGroup.phase, wholeGroupOriginalDeadline: recoveredGroup.deadline, scrubbedNewOnlyServices: ['cache', 'extra'], compensationAttempts: restored.attempts.length, metadataFencePreservedTask: fenceTasks.length === 1, originalRecoveryDeadline: restored.action.deadline, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
+      consumerDeadline: consumerReady.deadline, maintenance, maintenanceMigrationStarts, coordinatedSingleton: singleton, containerChecks: checkResults, mountedInspector: true, checkExecStartsEach: 1, workerStarts, workerCandidateAndRestoreStarts: 4, wholeGroupRecovery: recoveredGroup.phase, wholeGroupOriginalDeadline: recoveredGroup.deadline, scrubbedNewOnlyServices: ['cache', 'extra'], compensationAttempts: restored.attempts.length, metadataFencePreservedTask: fenceTasks.length === 1, originalRecoveryDeadline: restored.action.deadline, workerPrivateOnly: true, dependencyStarts, migrationStarts, ledger, receipt, noSecretInJournal: true, node: process.version };
     await writeFile(join(path, 'result.json'), JSON.stringify(result, null, 2)); await writeFile(join(output, 'managed-group.json'), JSON.stringify(result, null, 2)); return result;
   } catch (error) { await writeFile(join(path, 'failure.json'), JSON.stringify({ error: String(error), stack: error.stack }, null, 2)); throw error; }
   finally {

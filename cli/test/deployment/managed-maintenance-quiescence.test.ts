@@ -7,6 +7,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { managedPlanFixture } from "./managed-plan-fixture.ts";
+import type { ManagedApplicationPlan } from "../../src/contracts/managed-application-plan.ts";
+import { managedConsumerRollout } from "../../src/server/deployment/managed-consumer-rollout.ts";
+import { managedGroupVerification } from "../../src/server/deployment/managed-group-verification.ts";
+import type { ManagedServicePlan } from "../../src/contracts/managed-service-plan.ts";
 import { parseManagedApplicationPlan } from "../../src/contracts/managed-application-plan.ts";
 import { managedServiceDigest } from "../../src/contracts/managed-service-plan.ts";
 import type { ManagedServiceAction, ManagedServiceScope } from "../../src/contracts/managed-swarm-service.ts";
@@ -110,8 +114,8 @@ test("maintenance handoff evidence is bound to its immutable source and complete
 });
 
 
-const maintenancePreparation = async (t: TestContext) => {
-  const lab = await fixture(t); await lab.owner().prepare(lab.request); const certificate = await lab.finish();
+const maintenancePreparation = async (t: TestContext, adjust?: (plan: ManagedApplicationPlan) => ManagedApplicationPlan) => {
+  const lab = await fixture(t); if (adjust !== undefined) lab.request.candidate = adjust(lab.request.candidate); await lab.owner().prepare(lab.request); const certificate = await lab.finish();
   const db = lab.request.previous.services["db"]; assert.ok(db);
   const action: ManagedServiceAction = { app: db.owner.app, incarnation: db.owner.incarnation, dataOwner: db.owner.dataOwner, service: "db", action: db.owner.incarnation + ":2", plan: managedServiceDigest(db), effect: "apply", deadline: 91000 };
   const native = { id: "d".repeat(25), version: 5 };
@@ -125,7 +129,7 @@ const maintenancePreparation = async (t: TestContext) => {
   } };
   let owner = managedGroupPreparation(journal, ports); t.after(() => journal.close());
   const proof = { certificate, source: lab.request };
-  return { ...lab, nodes, proof, prepare: () => owner.prepare(lab.request.candidate, lab.request.run, lab.request.action, [{ name: "db", kind: "active", action, native }], proof), preparation: () => owner,
+  return { ...lab, nodes, proof, preparationPorts: ports, prepare: () => owner.prepare(lab.request.candidate, lab.request.run, lab.request.action, [{ name: "db", kind: "active", action, native }], proof), preparation: () => owner,
     reopenPreparation: async () => { await journal.close(); journal = await openJournal(join(lab.path, "preparation"), "existing"); owner = managedGroupPreparation(journal, ports); },
   };
 };
@@ -154,4 +158,54 @@ test("maintenance preparation rejects missing or mismatched quiescence before in
   assert.equal(await lab.preparation().read(), undefined);
   lab.clock((lab.proof.certificate.verifiedAt ?? 0) + 90000);
   await assert.rejects(lab.prepare(), /scheduling deadline/); assert.equal(await lab.preparation().read(), undefined); assert.equal(lab.nodes.size, 0);
+});
+
+
+const maintenanceConsumers = async (t: TestContext, adjust?: (plan: ManagedApplicationPlan) => ManagedApplicationPlan) => {
+  const lab = await maintenancePreparation(t, adjust); await lab.prepare();
+  for (let i = 0; i < 100; i++) { const state = await lab.preparation().tick(); assert.notEqual(state.phase, "held"); if (state.phase === "ready") break; }
+  const prefix = await lab.preparation().read(); assert.ok(prefix?.phase === "ready");
+  const fs = await import("node:fs/promises"); await fs.mkdir(join(lab.path, "consumers")); let journal = await openJournal(join(lab.path, "consumers"));
+  const writes: ManagedServiceAction[] = [];
+  const ports = { ...lab.preparationPorts, services: { ...lab.preparationPorts.services, apply: (action: ManagedServiceAction, expected: ServiceVersion | null, service: ManagedServicePlan, context: ManagedApplicationPlan) => {
+    assert.deepEqual(context, lab.request.candidate); assert.equal(service.role === "retained-dependency", false); const before = lab.observed.get(action.service); assert.equal(before?.status, "owned"); assert.equal(before.replicas, 0); assert.ok(before.retainedInputsCleared); assert.deepEqual(expected, { id: before.id, version: before.version });
+    writes.push(action); lab.observed.set(action.service, { ...before, version: before.version + 1, action: action.action, effect: action.effect, taskEffect: action.effect, taskPlan: action.plan, plan: action.plan, tombstone: false, retainedInputsCleared: false, specMatches: true, replicas: 1, endpoint: "vip", tasks: [{ id: action.service.padEnd(25, "t"), desired: "running", state: "running", health: "healthy", effect: action.effect, incarnation: action.incarnation, action: action.action, plan: action.plan }] }); return Promise.resolve("acknowledged" as const);
+  } }, readiness: { check: (action: ManagedServiceAction) => Promise.resolve({ app: action.app, service: action.service, incarnation: action.incarnation, action: action.action, plan: action.plan, checkedAt: lab.now(), status: "ready" as const }) } };
+  let owner = managedConsumerRollout(journal, ports); t.after(() => journal.close());
+  const references = lab.request.baselines.map(({ name, action, native }) => ({ name, action, native }));
+  return { ...lab, writes, consumerPorts: ports, prefix, consumers: () => owner, begin: () => owner.prepare(lab.request.candidate, prefix, lab.request.previous, references),
+    reopenConsumers: async () => { await journal.close(); journal = await openJournal(join(lab.path, "consumers"), "existing"); owner = managedConsumerRollout(journal, ports); },
+    finishConsumers: async () => { for (let i = 0; i < 100; i++) { const state = await owner.tick(); if (state.phase !== "updating") return state; } throw new Error("maintenance consumers did not settle"); },
+  };
+};
+
+test("maintenance restarts consumers from their verified barriers in target dependency order and independently verifies the whole plan", async (t) => {
+  const lab = await maintenanceConsumers(t); const initial = await lab.begin(); assert.equal(initial.version, 2);
+  await lab.consumers().tick(); await lab.reopenConsumers(); const done = await lab.finishConsumers(); assert.equal(done.phase, "ready"); assert.deepEqual(lab.writes.map((action) => action.service), ["worker", "web"]);
+  assert.ok(done.nodes.every((node) => node.quiescence === null)); assert.ok(done.nodes.every((node) => node.baseline?.action.action.endsWith(":2"))); assert.equal(done.deadline, initial.deadline);
+  const fs = await import("node:fs/promises"); await fs.mkdir(join(lab.path, "verification")); const journal = await openJournal(join(lab.path, "verification")); t.after(() => journal.close());
+  const verify = managedGroupVerification(journal, lab.consumerPorts); await verify.prepare({ kind: "deployment", application: lab.request.candidate, certificate: done }); assert.equal((await verify.tick()).phase, "verified");
+  lab.clock(999999); await lab.reopenConsumers(); assert.deepEqual(await lab.begin(), done); assert.equal(lab.writes.length, 2);
+});
+
+test("maintenance can remove a stopped old-only consumer without replaying its earlier barrier or changing its historical baseline", async (t) => {
+  const lab = await maintenanceConsumers(t, (plan) => {
+    const services = Object.fromEntries(Object.entries(plan.services).filter(([name]) => name !== "worker")); const roles = Object.fromEntries(Object.entries(plan.rollout.services).filter(([name]) => name !== "worker")); const web = services["web"]; assert.ok(web);
+    const checked = parseManagedApplicationPlan({ ...plan, services: { ...services, web: { ...web, dependencies: [{ service: "db", condition: "healthy" }] } }, rollout: { ...plan.rollout, services: roles } }); assert.ok(checked.ok); return checked.value;
+  }); await lab.begin(); const done = await lab.finishConsumers(); assert.equal(done.phase, "ready"); assert.deepEqual(lab.writes.map((action) => action.service), ["web"]);
+  const removed = done.nodes.find((node) => node.name === "worker"); assert.equal(removed?.ready?.kind, "removed"); assert.equal(removed.quiescence, null); assert.equal(lab.calls.length, 4);
+});
+
+test("a replaced external maintenance barrier holds startup before any candidate consumer effect", async (t) => {
+  const lab = await maintenanceConsumers(t); await lab.begin(); const old = lab.observed.get("worker"); assert.ok(old?.status === "owned"); lab.observed.set("worker", { ...old, action: lab.request.action + ":scrub:1" });
+  const result = await lab.finishConsumers(); assert.equal(result.phase, "held"); assert.equal(lab.writes.length, 0);
+});
+
+
+test("explicit maintenance may revoke an old consumer secret without reading or restarting its previous specification", async (t) => {
+  const lab = await maintenanceConsumers(t, (plan) => {
+    const web = plan.services["web"]; assert.ok(web); const environment = Object.fromEntries(Object.entries(web.inputs.environment).filter(([key]) => key !== "TOKEN"));
+    const checked = parseManagedApplicationPlan({ ...plan, secrets: [], services: { ...plan.services, web: { ...web, inputs: { ...web.inputs, environment } } } }); assert.ok(checked.ok); return checked.value;
+  }); await lab.begin(); const done = await lab.finishConsumers(); assert.equal(done.phase, "ready"); assert.equal(lab.writes.length, 2);
+  assert.ok(lab.writes.every((action) => action.action === lab.request.action));
 });

@@ -22,10 +22,13 @@ import { managedGroupVerification } from "./managed-group-verification.ts";
 import type { OperationJournal } from "./operation.ts";
 import { createHash } from "node:crypto";
 import { managedGroupCompensation } from "./managed-group-compensation.ts";
+import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
+import type { ManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
+import { managedLifecycleSourceDigest } from "./managed-lifecycle-source.ts";
 import { managedUnstartedSource } from "./managed-unstarted-source.ts";
 import { managedRecoverySource, verifyManagedRecoveryJobs } from "./managed-recovery-safety.ts";
 
-export type ManagedLifecycleEffect = { readonly kind: "admission" | "verify" | "recovery" } | { readonly kind: "service"; readonly action: ManagedServiceAction } |
+export type ManagedLifecycleEffect = { readonly kind: "accepted-recovery"; readonly request: ManagedLifecycleRequest } | { readonly kind: "admission" | "verify" | "recovery" } | { readonly kind: "service"; readonly action: ManagedServiceAction } |
   { readonly kind: "migration"; readonly job: JobExecution; readonly effect: "create" | "start" | "fence" } |
   { readonly kind: "check"; readonly check: string; readonly effect: "create" | "start" } |
   { readonly kind: "migration-resolution"; readonly request: MigrationResolutionRequest; readonly actor: MigrationResolutionActor };
@@ -149,6 +152,13 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
       if (source.previous !== null && source.candidate.rollout.strategy === "rolling" && ports.services.fence === undefined) throw new Error("managed rolling recovery fencing capability unavailable");
       if (source.retained.some((value) => value.kind === "barrier") && ports.services.reactivate === undefined || ports.checks === undefined && [source.candidate, ...(source.previous === null ? [] : [source.previous.source.application])].some((plan) => plan.rollout.checks.length > 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed lifecycle capabilities unavailable");
       if (await bounded(source.createdAt + 90_000, () => ports.authorize(source, { kind: "admission" })) !== true) throw new Error("managed lifecycle source is not authorized"); return store.begin(source); },
+    /** Reconstructs only metadata for a durably accepted source that can no longer begin. The composition independently authenticates its shared lifecycle receipt; this grants no workload authority or renewed deadline. */
+    adoptAccepted: async (input: ManagedLifecycleSource, accepted: ManagedLifecycleRequest) => {
+      const source = parseManagedLifecycleSource(input); const request = parseManagedLifecycleRequest(accepted); const description = managedLifecycleDescription(source);
+      if (request.completion !== null || request.run !== source.run || request.action !== source.action || request.source !== managedLifecycleSourceDigest(source) || request.plan !== description.admission.planDigest || request.createdAt !== source.createdAt || request.admissionDeadline !== description.admissionDeadline || request.deadline !== description.deadline || JSON.stringify(request.owner) !== JSON.stringify(source.candidate.infrastructure.ownership)) throw new Error("accepted managed lifecycle source disagrees");
+      if (await bounded(ports.now() + 10_000, () => ports.authorize(source, { kind: "accepted-recovery", request })) !== true) throw new Error("accepted managed lifecycle receipt is not authorized");
+      return store.begin(source, ports.now() >= request.admissionDeadline ? "deadline" : "authorization");
+    },
     cancel: store.cancel,
     resolveMigration: async (request: MigrationResolutionRequest, actor: MigrationResolutionActor) => {
       const statement = parseMigrationResolutionRequest(request); const operator = parseMigrationResolutionActor(actor); if (!statement.ok || !operator.ok) throw new Error("invalid managed migration resolution");

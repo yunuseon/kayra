@@ -125,7 +125,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       return Object.freeze({ state: next, receipt });
     }),
     child,
-    begin: (input: ManagedLifecycleSource) => {
+    begin: (input: ManagedLifecycleSource, held?: "deadline" | "authorization") => {
       const value = parseManagedLifecycleSource(input); const description = managedLifecycleDescription(value); const identity = managedLifecycleSourceDigest(value);
       if (!same(value.candidate.infrastructure.ownership, owner)) return Promise.reject(new Error("managed lifecycle source ownership disagrees"));
       return serial(async () => {
@@ -154,13 +154,13 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
           if (release !== null && release.epoch !== current.compatibilityEpoch) throw new Error("managed restore crosses a data compatibility fence; forward recovery is required");
         }
         if (current?.active !== null && current?.active !== undefined && current.active.epoch !== current.compatibilityEpoch && value.candidate.rollout.strategy === "rolling") throw new Error("managed rolling baseline crosses a data compatibility fence");
-        const at = time(value.createdAt); if (at >= description.admissionDeadline) throw new Error("managed lifecycle admission deadline expired");
+        const at = time(value.createdAt); if (held === "deadline" && at < description.admissionDeadline) throw new Error("managed lifecycle accepted deadline has not expired"); if (at >= description.admissionDeadline && held === undefined) throw new Error("managed lifecycle admission deadline expired");
         if (await retain(JSON.stringify(value)) !== identity) throw new Error("managed lifecycle source retention failed");
         const historyBytes = current === undefined ? null : JSON.stringify({ previous: current.history, state: current });
         const history = historyBytes === null ? null : await retain(historyBytes); if (historyBytes !== null && history !== hash(historyBytes)) throw new Error("managed lifecycle history retention failed");
         const compatibilityEpoch = current?.compatibilityEpoch ?? 0;
         const state = await write({ version: 3, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]), compatibilityEpoch, active: current?.active ?? null, lastGood: current?.lastGood ?? null, history,
-          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, previousPlan: description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous), createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: "admitting", enteredAt: at, reason: null, outcome: null, settlement: null, unstartedAt: null, failure: null, recoverySource: null, recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
+          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, previousPlan: description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous), createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: held === undefined ? "admitting" : "held", enteredAt: at, reason: held ?? null, outcome: null, settlement: null, unstartedAt: null, failure: null, recoverySource: null, recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
         // eslint-disable-next-line functional/immutable-data -- obsolete views retain their bound run and can never write the next operation
         views.clear(); return state;
       });

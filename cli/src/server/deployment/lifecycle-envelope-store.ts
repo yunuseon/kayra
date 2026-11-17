@@ -1,3 +1,5 @@
+import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
+import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 import { settledMigrationPrefix } from "./migration-prefix.ts";
 /* Owns atomic app-envelope transitions and private phase journal views. The
  * indexed composition holds the exclusive writer, authenticates registration
@@ -159,6 +161,13 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
         return Object.freeze({ status: "new" as const, actionId });
       });
     },
+    /** The index authenticates ownership/registration and retains artifacts before these synchronized reference-only transitions. */
+    prepareManaged: (input: ManagedLifecycleSource, now: number) => serial(async () => {
+      const next = prepareManagedEnvelope(await required(), input, now); if (next.changed) await persist(next.state); return next.request;
+    }),
+    completeManaged: (input: unknown, record: string) => serial(async () => {
+      const next = completeManagedEnvelope(await required(), input, record); if (next.changed) await persist(next.state); return next.request;
+    }),
     /** Complete plans own the same fence as legacy HTTP work, with their own immutable identity. */
     prepareRollout: (input: RolloutPlan, request: string, now: number) => serial(async () => {
       const checked = parseRolloutPlan(input); if (!checked.ok) throw new Error(checked.error);

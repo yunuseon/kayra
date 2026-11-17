@@ -8,6 +8,7 @@ import { parseRegistrationGeneration } from "../../contracts/registration-genera
 import { httpReleasePlan, parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
+import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
 import { parseRolloutRequest } from "./rollout-request.ts";
 
 // Snapshot only narrowly defined references; the ticket module independently
@@ -33,6 +34,7 @@ const shape = z.object({
   tickets: z.unknown(),
   registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]).default("compose") }).strict().optional(),
   registrationReceipt: z.object({ ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]), metadata: z.unknown() }).strict().optional(),
+  managed: z.array(z.unknown()).max(1024).optional(),
   http: z.unknown().optional(),
   rollout: z.unknown().optional(),
   rollouts: z.array(z.unknown()).max(1024).optional(),
@@ -143,9 +145,20 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   const first = history[0];
   if (first !== undefined && http?.ok && http.value.requests.some((request) => request.deployment === undefined && Number(request.action.split(":")[1]) > Number(first.action.split(":")[1]))) return err("complete rollout ownership cannot resume ordinary HTTP requests");
   operations.forEach((operation) => { Object.freeze(operation.descriptor); Object.freeze(operation); });
+  const managed = (() => { try { return parsed.data.managed?.map(parseManagedLifecycleRequest); } catch { return null; } })();
+  if (managed === null || managed !== undefined && (receipt?.runtime !== "swarm" || http !== undefined || history.length !== 0 ||
+    new Set(managed.map((item) => item.owner.dataOwner)).size > 1 ||
+    ["run", "ticket", "action"].some((key) => new Set(managed.map((item) => key === "run" ? item.run : key === "ticket" ? item.ticket : item.action)).size !== managed.length) ||
+    managed.some((item, index) => {
+      const sequence = Number(item.action.split(":")[1]); const bound = admitTicket(tickets.value, item.ticket, { kind: "deploy", planDigest: item.plan }); const lookup = lookupTicket(tickets.value, item.ticket);
+      if (item.owner.app !== tickets.value.app || item.owner.incarnation !== tickets.value.incarnation || !new RegExp(`^${tickets.value.incarnation}:[1-9][0-9]*$`).test(item.action) || !Number.isSafeInteger(sequence) || sequence >= (fence.value?.nextAction ?? 0) || index > 0 && sequence <= Number(managed[index - 1]?.action.split(":")[1]) || !lookup.ok) return true;
+      return item.completion === null ? !bound.ok || bound.value.status !== "accepted" || !operations.some((operation) => operation.ticket === item.ticket && operation.action === item.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === item.plan) :
+        lookup.value.status !== "expired" && (!bound.ok || bound.value.status !== "terminal" || bound.value.outcome !== item.completion.disposition);
+    }) || operations.some((operation) => operation.descriptor.kind === "deploy" && !managed.some((item) => item.completion === null && item.action === operation.action && item.ticket === operation.ticket)))) return err("invalid managed lifecycle envelope");
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
+    ...(managed === undefined ? {} : { managed: Object.freeze(managed) }),
     ...(http?.ok ? { http: http.value } : {}),
     ...(rollout === undefined ? {} : { rollout }),
     ...(rollouts === undefined ? {} : { rollouts: Object.freeze(rollouts) }) }));

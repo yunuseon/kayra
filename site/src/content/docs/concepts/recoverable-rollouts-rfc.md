@@ -1942,3 +1942,24 @@ invented as retired dependencies by this path. Restoring a newer native version
 fences a delayed stop that races recovery. Unsafe pre-preparation recovery and
 audited unknown-check cleanup, removal/recreation and normal index/client
 integration remain subsequent work. Managed V3 stays disabled.
+
+
+### Shared lifecycle gate integration
+
+Managed V3 now has reference-only requests in the existing lifecycle envelope.
+Ticket admission, source identity and action allocation are synchronized in one
+replacement. Registration work cannot claim another action while that deployment
+owns the gate. The generic envelope writer delegates managed decisions to pure
+transitions; it does not gain Docker access or rollout policy.
+
+A matching settled root snapshot, retained under its content digest, is required
+before completing the ticket and releasing the gate. Root snapshots and verified
+release records have distinct references. Lost admission/completion replies replay
+the recorded request, and legacy HTTP/rollout history cannot be silently adopted.
+
+If the process dies after acceptance but before the root journal exists, separate
+current metadata authority can reconstruct a held, effect-free root from the
+accepted immutable source. Expired scheduling deadlines and revoked workload
+grants do not become fresh authority. Existing roots are never reset by this path.
+The platform-wide index/protocol binding and normal client dispatch remain pending;
+these envelope methods alone are not a production entrypoint.

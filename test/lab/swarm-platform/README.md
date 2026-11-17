@@ -1956,3 +1956,15 @@ Compose 5.7.1, Node v24.22.1 and Ubuntu 24.04.5 ARM64 plus raw source, events,
 journals, histories and versions are retained privately with a SHA-256 manifest.
 These remain isolated owner fixtures, not shared-index, SIGKILL, routed HTTP
 or full-platform acceptance. Normal managed V3 is still disabled.
+
+
+The initial-cleanup variant now starts a first app with a known irreversible
+schema migration and a deliberately failing completion check. It requires no
+verified active release, stopped/scrubbed workload evidence, absent resource
+settlement and the preserved compatibility epoch. A separate explicit deployment
+then reactivates the unchanged database and starts compatible workers without
+rerunning the migration. The app-owned ledger must retain schema 2, its one
+original operation, zero violations and the original volume receipt/native DB
+identity. This tests private cleanup/reactivation, not indexed removal/purge,
+SQL, unknown-check cleanup or SIGKILL acceptance. Fresh native validation is
+pending.

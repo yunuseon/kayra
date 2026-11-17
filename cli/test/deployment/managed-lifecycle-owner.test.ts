@@ -58,10 +58,11 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
       native.set(action.service, { status: "owned", id: action.service.padEnd(25, "s"), version: before?.status === "owned" ? before.version + 1 : 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: true, tombstone: false, retainedInputsCleared: false, containersStopped: false, containersConverged: true, replicas: 1, endpoint: "vip", update: "completed", tasks: [{ id: action.service.padEnd(25, "t"), incarnation: action.incarnation, action: action.action, effect: action.effect, plan: action.plan, desired: "running", state: "running", health: "healthy" }] }); return "acknowledged" as const;
     },
     tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null) => {
-      const before = native.get(action.service); assert.equal(before?.status, "owned"); assert.equal(expected?.version, before.version);
-      native.set(action.service, { ...before, version: before.version + 1, action: action.action, effect: action.effect, plan: action.plan, tombstone: true, retainedInputsCleared: action.effect === "scrub", containersStopped: true, containersConverged: true, replicas: 0, endpoint: "dnsrr", tasks: [] }); return Promise.resolve("acknowledged" as const);
+      const before = native.get(action.service); assert.equal(expected?.version ?? null, before?.status === "owned" ? before.version : null);
+      native.set(action.service, { status: "owned", id: before?.status === "owned" ? before.id : action.service.padEnd(25, "s"), version: before?.status === "owned" ? before.version + 1 : 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: null, tombstone: true, retainedInputsCleared: action.effect === "scrub", containersStopped: true, containersConverged: true, replicas: 0, endpoint: "dnsrr", update: "completed", tasks: [] }); return Promise.resolve("acknowledged" as const);
     },
     fence: (action: ManagedServiceAction, expected: ServiceVersion) => { const before = native.get(action.service); assert.equal(before?.status, "owned"); assert.equal(expected.version, before.version); native.set(action.service, { ...before, version: before.version + 1, action: action.action, effect: "fence" }); return Promise.resolve("acknowledged" as const); },
+    reactivate: (action: ManagedServiceAction, expected: ServiceVersion, spec: ManagedServicePlan) => { const before = native.get(action.service); assert.equal(before?.status, "owned"); assert.equal(before.tombstone, true); assert.equal(before.containersStopped, true); assert.equal(before.retainedInputsCleared, true); return services.apply(action, expected, spec); },
   };
   const nodes = new Map<string, ReturnType<typeof jobRuntime>>();
   const nodeFor = (job: JobPlan) => { const name = jobName(job.scope); let value = nodes.get(name); if (value === undefined) { value = jobRuntime(job); nodes.set(name, value); } value.now(clock); return value; };
@@ -147,13 +148,15 @@ test("audited applied resolution resumes the connected owner without replaying a
   await assert.rejects(lab.owner().resolveMigration(resolution(lab.source.run, "not-applied"), actor), /already resolved differently/);
 });
 
-test("not-applied and late applied assertions stay held, retain capacity and cannot promote or grant a new deadline", async (t) => {
+test("not-applied assertions permit cleanup while late applied assertions cannot grant another execution window", async (t) => {
   for (const late of [false, true]) {
     const lab = await fixture(t, false, "unknown"); await lab.owner().begin(lab.source); const held = await lab.drive();
     if (late) lab.clock(held.operation.deadline + 1);
     const resolved = await lab.owner().resolveMigration(resolution(lab.source.run, late ? "applied" : "not-applied"), actor);
     assert.equal(resolved.receipt.disposition, "failed"); assert.equal(resolved.state.operation.phase, "held"); assert.equal(resolved.state.operation.deadline, held.operation.deadline); assert.equal(resolved.state.active, null); assert.equal(lab.settleCalls(), 0);
-    assert.deepEqual(lab.calls.map((action) => action.service), ["db"]); await lab.reopen(); assert.equal((await lab.owner().tick())?.operation.phase, "held");
+    assert.deepEqual(lab.calls.map((action) => action.service), ["db"]); await lab.reopen();
+    if (late) assert.equal((await lab.owner().tick())?.operation.phase, "held");
+    else { const done = await lab.drive(); assert.equal(done.operation.outcome, "absent"); assert.equal(done.active, null); assert.equal(done.operation.deadline, held.operation.deadline); }
   }
 });
 
@@ -260,4 +263,21 @@ test("a new migration assertion cannot restart forward deployment after recovery
   const source = parseManagedLifecycleSource({ ...lab.source, candidate: candidate.value, previous, retained, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3" }); await lab.owner().begin(source); lab.probeOutcome("not-applied");
   assert.equal((await lab.drive()).operation.preparation?.sequence?.reason, "not-applied"); const recovery = await lab.owner().tick(); assert.equal(recovery?.operation.phase, "recovering"); await lab.owner().tick(); lab.clock(recovery.operation.recoveryDeadline ?? 0); assert.equal((await lab.owner().tick())?.operation.phase, "held");
   await assert.rejects(lab.owner().resolveMigration(resolution(source.run), actor), /superseded forward/); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 4);
+});
+
+test("a failed first release is fenced to absence, preserves its dependency data identity and can retry through explicit reactivation", async (t) => {
+  const lab = await fixture(t, false, false, false, true); await lab.owner().begin(lab.source); lab.checkMode("fail"); const failed = await lab.drive(); assert.equal(failed.active, null);
+  const done = await lab.drive(); assert.equal(done.operation.phase, "complete"); assert.equal(done.operation.outcome, "absent"); assert.equal(done.operation.settlement, "absent"); assert.equal(done.active, null); assert.equal(done.lastGood, null);
+  const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "absent"); assert.equal(lab.calls.some((action) => action.effect === "restore"), false); assert.ok(done.operation.recovery);
+  const retired = done.operation.recovery.nodes.flatMap((node) => { const spec = lab.source.candidate.services[node.name]; return spec?.role === "retained-dependency" ? [{ plan: spec, barrier: node.child?.barrier }] : []; }); assert.equal(retired.length, 1);
+  const retained = retired.map(({ plan, barrier }) => { assert.ok(barrier?.proof); const step = barrier.steps.at(-1); assert.ok(step); return { name: plan.service, kind: "barrier", native: barrier.proof.native, action: { ...barrier.action, action: barrier.action.action + ":scrub:" + String(step.attempt), effect: "scrub" } }; });
+  const next = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", retired, retained });
+  await assert.rejects(lab.owner().begin({ ...next, retired: [], retained: [] }), /preserve dependencies retired/); await lab.owner().begin(next); lab.checkMode("pass"); await lab.reopen();
+  const retried = await lab.drive(); assert.equal(retried.operation.outcome, "deployed"); assert.ok(retried.active); assert.deepEqual((await lab.owner().source()).candidate.services["db"]?.mounts, lab.source.candidate.services["db"]?.mounts);
+});
+
+test("initial cleanup after known irreversible migration preserves the compatibility floor and never restores an image", async (t) => {
+  const lab = await fixture(t, true, true, true, true); await lab.owner().begin(lab.source); lab.checkMode("fail"); const failed = await lab.drive(); assert.equal(failed.compatibilityEpoch, 1);
+  const done = await lab.drive(); assert.equal(done.operation.outcome, "absent"); assert.equal(done.compatibilityEpoch, 1); assert.equal(done.active, null); assert.equal(done.lastGood, null); assert.equal(lab.calls.some((action) => action.effect === "restore"), false);
+  assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 1); assert.equal(done.operation.recovery?.nodes.find((node) => node.name === "db")?.child?.barrier?.phase, "complete");
 });

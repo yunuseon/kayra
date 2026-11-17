@@ -17,7 +17,7 @@ export const managedSuccessfulInventoryCarry = (previous: ManagedLifecycleSource
 /** A failed new dependency stays owned and pinned after its containers are scrubbed. The restored application's verified release owns active dependencies. */
 export const managedRecoveredInventoryCarry = (input: ManagedLifecycleSource, recovered: unknown, next: ManagedLifecycleSource) => {
   const source = parseManagedLifecycleSource(input); const candidate = parseManagedLifecycleSource(next); const recovery = parseManagedGroupCompensation(recovered);
-  if (source.previous === null || recovery.phase !== "verified" || recovery.run !== source.run || recovery.action !== source.action || recovery.app !== source.candidate.infrastructure.ownership.app || recovery.incarnation !== source.candidate.infrastructure.ownership.incarnation || recovery.dataOwner !== source.candidate.infrastructure.ownership.dataOwner) return err("managed retired inventory lacks verified recovery ownership");
+  if (recovery.phase !== "verified" || recovery.run !== source.run || recovery.action !== source.action || recovery.app !== source.candidate.infrastructure.ownership.app || recovery.incarnation !== source.candidate.infrastructure.ownership.incarnation || recovery.dataOwner !== source.candidate.infrastructure.ownership.dataOwner) return err("managed retired inventory lacks verified recovery ownership");
   const inactive = recovery.nodes.flatMap((node) => {
     const spec = source.candidate.services[node.name]; const barrier = node.child?.barrier;
     return spec?.role === "retained-dependency" && source.previous?.source.application.services[node.name] === undefined && barrier?.phase === "complete" ? Object.freeze([Object.freeze({ plan: spec, barrier })]) : Object.freeze([]);

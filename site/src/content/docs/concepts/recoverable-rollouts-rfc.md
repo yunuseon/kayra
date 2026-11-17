@@ -1881,10 +1881,10 @@ retirement barriers/specifications must be carried into subsequent operations.
 
 The private journal format is now 3, with explicit deployment/recovery outcomes
 and previous-budget settlement. Pre-outcome isolated V3 records are refused;
-normal legacy paths are unaffected. Initial-deployment cleanup, unknown-check
-cleanup, compatible maintenance compensation, removal/recreation tombstones,
-shared-index binding, normal operator/client dispatch and integrated acceptance
-remain required. Normal managed V3 execution is still disabled.
+normal legacy paths are unaffected. Subsequent private owner capabilities are
+described below. Unknown-check cleanup, removal/recreation tombstones, shared-index
+binding, normal operator/client dispatch and integrated acceptance remain required.
+Normal managed V3 execution is still disabled.
 
 
 Recorded shared mounts remain valid when a failed new dependency is retired.
@@ -1911,6 +1911,29 @@ to absence preserves data and the compatibility floor, with no image restoration
 or down-migration. Unresolved migration outcomes and possibly started unknown
 checks still hold. A later explicit deployment must carry the exact retirement
 proofs and use the protected unchanged-dependency reactivation path. Missing data
-is not replaced by an empty database. Unstarted-operation settlement, audited
-unknown-check cleanup, maintenance compensation, removal/recreation and normal
-index/client integration remain subsequent work. Managed V3 stays disabled.
+is not replaced by an empty database.
+
+### Unstarted settlement and compatible maintenance recovery
+
+When no workload-effect intent exists, the root can now persist an unstarted
+terminal intent before closing its admission identity. The global accounting
+projection either preserves the exact old release budget or records absence;
+it also fences a delayed reservation racing cancellation. This metadata-only
+settlement can finish after the original deadline without granting another
+execution window. The old verified pointer remains unchanged, and inactive
+dependency inventory carries intact when a planned reactivation never ran.
+Any preparation, consumer, check or nonempty maintenance effect intent excludes
+this path. Expiry alone is never proof of workload cessation.
+
+After preparation intent, a declared-compatible maintenance failure can restore
+the previous application using the authenticated completed quiescence snapshot.
+Recovery carries every recorded quiescence CAS version, preserves its original
+90-second deadline, verifies the restored application and then settles its
+previous budget. The application must understand the resulting schema; Kayra
+performs no down-migration. Unsafe compatibility epochs and unknown outcomes
+continue to require forward recovery or intervention. Maintenance downtime is
+expected and must be measured separately from rolling continuity.
+
+Recovery during partial quiescence before preparation, audited unknown-check
+cleanup, removal/recreation and normal index/client integration remain subsequent
+work. Managed V3 stays disabled.

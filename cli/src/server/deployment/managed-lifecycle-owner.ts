@@ -55,10 +55,10 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
     return !startsApplication || store.fenceCompatibility(run, phase);
   };
   const allowedRecovery = async (run: string, phase: "recovering" | "recovery-verifying", effect: ManagedLifecycleEffect) => {
-    const current = await store.read(); if (current?.operation.run !== run || current.operation.phase !== phase || current.operation.preparation === null || !current.operation.admitted || (current.operation.previousPlan === null ? current.active !== null : current.active?.epoch !== current.compatibilityEpoch) || ports.now() >= current.operation.deadline) return false;
+    const current = await store.read(); if (current?.operation.run !== run || current.operation.phase !== phase || current.operation.preparation === null && current.operation.quiescence === null || !current.operation.admitted || (current.operation.previousPlan === null ? current.active !== null : current.active?.epoch !== current.compatibilityEpoch) || ports.now() >= current.operation.deadline) return false;
     const source = await store.source(); const prefix = current.operation.preparation;
     return await bounded(current.operation.deadline, () => ports.admission.observe(identity(current), managedLifecycleDescription(source).admission)) === "reserved" &&
-      await bounded(current.operation.deadline, async () => { await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) === true && await bounded(current.operation.deadline, () => ports.authorize(source, effect)) === true;
+      await bounded(current.operation.deadline, async () => { if (prefix !== null) await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) === true && await bounded(current.operation.deadline, () => ports.authorize(source, effect)) === true;
   };
   const components = new Map<string, { readonly quiescence: ReturnType<typeof managedMaintenanceQuiescence>; readonly preparation: ReturnType<typeof managedGroupPreparation>; readonly consumers: ReturnType<typeof managedConsumerRollout>; readonly verification: ReturnType<typeof managedGroupVerification>; readonly recovery: ReturnType<typeof managedGroupCompensation>; readonly recoveryVerification: ReturnType<typeof managedGroupVerification> }>();
   const forRun = (source: ManagedLifecycleSource) => {
@@ -97,8 +97,8 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
       if (unstarted) return store.beginUnstarted(hash(JSON.stringify(current.operation)));
       if (current.operation.recoverySource !== null || source.previous !== null && ports.services.fence === undefined) return current;
       const at = ports.now(); try { managedRecoverySource(current, source, at); } catch { return current; }
-      const prefix = current.operation.preparation; if (prefix === null) return current;
-      if (await bounded(current.operation.deadline, () => ports.admission.observe(lease, description.admission)) !== "reserved" || await bounded(current.operation.deadline, async () => { await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) !== true || await bounded(current.operation.deadline, () => ports.authorize(source, { kind: "recovery" })) !== true) return current;
+      const prefix = current.operation.preparation;
+      if (await bounded(current.operation.deadline, () => ports.admission.observe(lease, description.admission)) !== "reserved" || await bounded(current.operation.deadline, async () => { if (prefix !== null) await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) !== true || await bounded(current.operation.deadline, () => ports.authorize(source, { kind: "recovery" })) !== true) return current;
       return store.beginRecovery(hash(JSON.stringify(current.operation)), at);
     }
     if (ports.now() >= (phase === "admitting" ? current.operation.admissionDeadline : current.operation.deadline)) return store.hold("deadline");

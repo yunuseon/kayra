@@ -1995,6 +1995,18 @@ its completed maintenance quiescence certificate, carry every recorded CAS
 version, preserve the original recovery deadline across reopen, verify the old
 application and settle the previous budget. The ledger must show A/B/A effects,
 one migration Start and zero violations. Unsafe maintenance still requires
-forward recovery; no down-migration is implemented. This variant currently
-covers failures after preparation intent, not interruption during partial
-quiescence before that intent. Fresh native validation is pending.
+forward recovery; no down-migration is implemented. The fresh source `8781e91`, VM
+`kayra-volume-lab-20261117232033683861`, passed and was destroyed. The compatible
+case retained schema 2, one applied operation and the original database native
+identity, with A/B/A effects, zero violations and the original recovery deadline.
+The full group recorded 21,456 API requests. Engine/CLI 29.10.0/API 1.57,
+Compose 5.8.0, Node v24.22.1 and Ubuntu 24.04.5 ARM64 plus raw artifacts and
+SHA-256 manifests are retained privately.
+
+The next variant cancels maintenance after a recorded partial stop, before any
+preparation intent. It requires restoration of A with schema 1, no B effects,
+no fabricated migration evidence, and zero Starts across all 16 possible
+migration/probe names for that run. The same compensation implementation uses
+the immutable quiescence source and all recorded CAS versions. Unit tests also
+hold a stop request until after restoration and require its stale CAS refusal.
+Fresh native validation of this partial-quiescence variant is pending.

@@ -1934,6 +1934,11 @@ performs no down-migration. Unsafe compatibility epochs and unknown outcomes
 continue to require forward recovery or intervention. Maintenance downtime is
 expected and must be measured separately from rolling continuity.
 
-Recovery during partial quiescence before preparation, audited unknown-check
-cleanup, removal/recreation and normal index/client integration remain subsequent
-work. Managed V3 stays disabled.
+For declared-compatible maintenance cancelled during partial quiescence, the
+same recovery pipeline now uses the recorded stop intents and verified previous
+dependency references. The preparation and migration evidence remain absent;
+only old consumers are restored. Candidate-only services cannot be created or
+invented as retired dependencies by this path. Restoring a newer native version
+fences a delayed stop that races recovery. Unsafe pre-preparation recovery and
+audited unknown-check cleanup, removal/recreation and normal index/client
+integration remain subsequent work. Managed V3 stays disabled.

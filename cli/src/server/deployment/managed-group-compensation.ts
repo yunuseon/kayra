@@ -41,7 +41,7 @@ type Ports = { readonly checks?: ManagedChecksPort | undefined; readonly now: ()
   readonly authorize: (state: ManagedGroupCompensation, effect: { readonly kind: "service"; readonly action: ManagedServiceAction } | { readonly kind: "verify" }) => Promise<boolean>;
 };
 
-/** Whole rolling-group compensation certificate. The root alone settles admission, publishes outcomes and promotes releases. */
+/** Whole application compensation certificate. The root alone settles admission, publishes outcomes and promotes releases. */
 export const managedGroupCompensation = (journal: OperationJournal, ports: Ports) => {
   claimJournal(journal, "managed group recovery already has an owner");
   // eslint-disable-next-line functional/no-let -- all child views share one serialized parent writer

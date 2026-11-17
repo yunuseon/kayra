@@ -1979,5 +1979,22 @@ Engine/CLI 29.10.0/API 1.57, Compose 5.7.1, Node v24.22.1 and Ubuntu
 The singleton fixture additionally exercises unreserved and reserved cancellation
 before any workload intent, reopens across the settlement boundary and loses one
 accounting acknowledgement. It requires an unchanged verified release, native
-service version and task identities. Validation of this new cancellation variant
-is pending.
+service version and task identities. The fresh cancellation run at `ec0c5a9`, VM
+`kayra-volume-lab-20261117230954810005`, passed and was destroyed. Both cancellation
+orderings and lost-accounting-acknowledgement recovery preserved the live service
+version/tasks and verified active pointer. The complete singleton/maintenance/
+initial-cleanup group passed; singleton A/B/A recorded 678 effects. Engine/CLI
+29.10.0/API 1.57, **Compose 5.8.0**, Node v24.22.1 and Ubuntu 24.04.5 ARM64
+were recorded; raw artifacts and SHA-256 manifests remain private.
+
+
+A declared rollback-compatible maintenance variant now retains the app-owned
+schema-2 ledger while restoring an A worker whose own code understands that
+schema. B deliberately fails its completion check. The root must authenticate
+its completed maintenance quiescence certificate, carry every recorded CAS
+version, preserve the original recovery deadline across reopen, verify the old
+application and settle the previous budget. The ledger must show A/B/A effects,
+one migration Start and zero violations. Unsafe maintenance still requires
+forward recovery; no down-migration is implemented. This variant currently
+covers failures after preparation intent, not interruption during partial
+quiescence before that intent. Fresh native validation is pending.

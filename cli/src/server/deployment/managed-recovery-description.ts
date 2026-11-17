@@ -12,6 +12,7 @@ import type { ManagedConsumerState } from "./managed-consumer-state.ts";
 import type { ConsumerBaseline } from "./managed-consumer-rollout.ts";
 import { migrationSequenceDigest } from "../../contracts/migration-sequence.ts";
 import { migrationDescriptionForState, migrationAttemptBarrier } from "./migration-sequence.ts";
+import { managedMaintenanceSnapshot } from "./managed-maintenance-quiescence.ts";
 import { parseManagedServiceCompensation } from "./managed-service-compensation.ts";
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -21,16 +22,18 @@ const references = z.array(z.object({ name: z.string(), action: z.unknown(), nat
 const uniqueVersions = (values: readonly ServiceVersion[]) => Object.freeze(values.filter((value, index) => values.findIndex((other) => same(other, value)) === index).toSorted((left, right) => left.version - right.version));
 
 /** No effects or admission. The lifecycle owner must fence the source phases and migration jobs before granting recovery effects. */
-export const describeManagedRecovery = (input: ManagedApplicationPlan, previous: ManagedApplicationPlan | null, preparation: ManagedGroupPreparation, consumers: ManagedConsumerState | null, baselines: readonly ConsumerBaseline[]) => {
+export const describeManagedRecovery = (input: ManagedApplicationPlan, previous: ManagedApplicationPlan | null, preparation: ManagedGroupPreparation, consumers: ManagedConsumerState | null, baselines: readonly ConsumerBaseline[], maintenance?: unknown) => {
   const checked = parseManagedApplicationPlan(input); const old = previous === null ? null : parseManagedApplicationPlan(previous);
   if (!checked.ok || old !== null && !old.ok) throw new Error("invalid managed recovery plans"); const candidate = checked.value; const before = old === null ? null : old.value;
   const prefix = parseManagedGroupPreparation(preparation); const forward = consumers === null ? null : parseManagedConsumerState(consumers);
   const rawReferences = references.parse(baselines); const prior = Object.freeze(rawReferences.map((value) => { const action = parseManagedServiceAction(value.action); if (!action.ok) throw new Error("invalid managed recovery baseline"); return Object.freeze({ ...value, action: action.value }); }).toSorted((left, right) => left.name.localeCompare(right.name)));
   const owner = candidate.infrastructure.ownership; const plan = managedApplicationDigest(candidate); const previousDigest = before === null ? null : managedApplicationDigest(before);
-  if (before !== null && (candidate.rollout.strategy !== "rolling" || !candidate.rollout.rollback_compatible) ||
+  if (before !== null && (!candidate.rollout.rollback_compatible) ||
     prefix.plan !== plan || prefix.app !== owner.app || prefix.incarnation !== owner.incarnation || prefix.dataOwner !== owner.dataOwner ||
     before !== null && (!same(candidate.infrastructure.ownership, before.infrastructure.ownership) || !same(candidate.host, before.host) || !same(candidate.infrastructure.overlay, before.infrastructure.overlay) || before.routes.some((route) => !candidate.hosts.includes(route.host)) || Object.values(before.services).some((service) => Object.values(service.inputs.environment).some((binding) => binding.kind === "secret" && !candidate.secrets.includes(binding.key)))) ||
     forward !== null && (forward.plan !== plan || forward.previous !== previousDigest || forward.preparation !== hash(prefix) || forward.run !== prefix.run || forward.action !== prefix.action || forward.app !== owner.app || forward.incarnation !== owner.incarnation || forward.dataOwner !== owner.dataOwner)) throw new Error("managed recovery scope or rollback authority disagrees");
+  const stopped = maintenance === undefined || maintenance === null ? null : managedMaintenanceSnapshot(maintenance);
+  if (candidate.rollout.strategy === "maintenance" ? stopped === null || prefix.version !== 2 || hash(stopped) !== prefix.maintenance || stopped.certificate.phase !== "complete" || stopped.certificate.run !== prefix.run || stopped.certificate.action !== prefix.action || stopped.certificate.verifiedAt !== prefix.createdAt || !same(stopped.source.candidate, candidate) || !same(stopped.source.previous, before) || !same(stopped.source.baselines.map(({ name, action, native }) => Object.freeze({ name, action, native })).toSorted((a, b) => a.name.localeCompare(b.name)), prior) || forward !== null && (forward.version !== 2 || forward.maintenance !== prefix.maintenance) : stopped !== null || prefix.version !== 1 || forward !== null && forward.version !== 1) throw new Error("managed recovery maintenance evidence disagrees");
   const migrations = candidate.rollout.migrations.length === 0 ? null : managedMigrationDescription(candidate, prefix.run);
   if (migrations !== null && !migrations.ok || prefix.sequencePlan !== (!migrations?.ok ? null : migrationSequenceDigest(migrations.value))) throw new Error("managed recovery migration description disagrees");
   if (prefix.sequence !== null) { if (!migrations?.ok) throw new Error("unexpected managed recovery migration sequence"); migrationDescriptionForState(prefix.sequence, migrations.value); }
@@ -50,10 +53,14 @@ export const describeManagedRecovery = (input: ManagedApplicationPlan, previous:
   if (names.length > 32 || prefix.nodes.length !== Object.values(candidate.services).filter((service) => service.role === "retained-dependency").length || prefix.nodes.some((node) => { const service = candidate.services[node.name]; return service?.role !== "retained-dependency" || managedServiceDigest(service) !== node.plan; })) throw new Error("managed recovery service set disagrees");
   const nodes = Object.freeze(names.map((name) => {
     const target = candidate.services[name]; const previous = before?.services[name]; const selected = previous ?? target; if (selected === undefined) throw new Error("managed recovery service missing");
+    const quiescence = stopped?.certificate.nodes.find((node) => node.name === name)?.child;
     const reference = prior.find((value) => value.name === name); const consumer = forward?.nodes.find((node) => node.name === name); const dependency = prefix.nodes.find((node) => node.name === name);
     if (previous !== undefined && target?.role === "retained-dependency" || consumer !== undefined && consumer.target !== (target === undefined ? null : managedServiceDigest(target)) || dependency !== undefined && dependency.plan !== managedServiceDigest(selected)) throw new Error("managed recovery service role or digest disagrees");
     const versions = uniqueVersions([
-      ...(reference === undefined ? [] : [reference.native]), ...(consumer?.baseline === null || consumer?.baseline === undefined ? [] : [consumer.baseline.native]),
+      ...(reference === undefined ? [] : [reference.native]),
+      ...(quiescence?.prior ?? []),
+      ...(quiescence?.steps.flatMap((step) => step.expected === null ? Object.freeze([]) : Object.freeze([step.expected])) ?? []),
+      ...(quiescence?.proof === undefined || quiescence.proof === null ? [] : [quiescence.proof.native]), ...(consumer?.baseline === null || consumer?.baseline === undefined ? [] : [consumer.baseline.native]),
       ...(consumer?.execution?.expected === null || consumer?.execution?.expected === undefined ? [] : [consumer.execution.expected]), ...(consumer?.execution?.verified === null || consumer?.execution?.verified === undefined ? [] : [consumer.execution.verified.native]),
       ...(consumer?.quiescence?.prior ?? []), ...(consumer?.quiescence?.steps.flatMap((step) => step.expected === null ? Object.freeze([]) : Object.freeze([step.expected])) ?? []), ...(consumer?.quiescence?.proof === null || consumer?.quiescence?.proof === undefined ? [] : [consumer.quiescence.proof.native]), ...(consumer?.ready === null || consumer?.ready === undefined ? [] : [consumer.ready.native]),
       ...(dependency?.baseline === null || dependency?.baseline === undefined ? [] : [dependency.baseline.native]), ...(dependency?.execution?.expected === null || dependency?.execution?.expected === undefined ? [] : [dependency.execution.expected]), ...(dependency?.execution?.verified === null || dependency?.execution?.verified === undefined ? [] : [dependency.execution.verified.native]), ...(dependency?.ready === null || dependency?.ready === undefined ? [] : [dependency.ready.native]),
@@ -70,11 +77,12 @@ export const managedRecoveryDigest = (description: ManagedRecoveryDescription) =
 
 /** Private immutable recovery input, revalidated whenever reopened from the artifact store. */
 export const managedRecoverySnapshot = (input: unknown) => {
-  const raw = z.object({ candidate: z.unknown(), previous: z.unknown().nullable(), preparation: z.unknown(), consumers: z.unknown().nullable(), baselines: references }).strict().parse(input);
+  const raw = z.object({ candidate: z.unknown(), previous: z.unknown().nullable(), preparation: z.unknown(), consumers: z.unknown().nullable(), baselines: references, maintenance: z.unknown().nullable().default(null) }).strict().parse(input);
   const candidate = parseManagedApplicationPlan(raw.candidate); const previous = raw.previous === null ? null : parseManagedApplicationPlan(raw.previous);
   if (!candidate.ok || previous !== null && !previous.ok) throw new Error("invalid managed recovery snapshot plans");
   const preparation = parseManagedGroupPreparation(raw.preparation); const consumers = raw.consumers === null ? null : parseManagedConsumerState(raw.consumers);
   const baselines = Object.freeze(raw.baselines.map((ref) => { const action = parseManagedServiceAction(ref.action); if (!action.ok) throw new Error("invalid managed recovery snapshot baseline"); return Object.freeze({ ...ref, action: action.value }); }).toSorted((left, right) => left.name.localeCompare(right.name)));
-  const source = Object.freeze({ candidate: candidate.value, previous: previous === null ? null : previous.value, preparation, consumers, baselines });
-  return Object.freeze({ source, description: describeManagedRecovery(source.candidate, source.previous, preparation, consumers, baselines) });
+  const maintenance = raw.maintenance === null ? null : managedMaintenanceSnapshot(raw.maintenance);
+  const source = Object.freeze({ candidate: candidate.value, previous: previous === null ? null : previous.value, preparation, consumers, baselines, ...(maintenance === null ? {} : { maintenance }) });
+  return Object.freeze({ source, description: describeManagedRecovery(source.candidate, source.previous, preparation, consumers, baselines, maintenance) });
 };

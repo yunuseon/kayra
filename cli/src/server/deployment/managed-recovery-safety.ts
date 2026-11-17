@@ -13,10 +13,12 @@ export const managedRecoverySource = (input: ManagedLifecycleStore, retained: Ma
   const state = parseManagedLifecycleStore(input); const source = parseManagedLifecycleSource(retained); const description = managedLifecycleDescription(source); const operation = state.operation;
   const checkWindow = source.previous === null ? 0 : Math.max(90_000, source.previous.source.application.rollout.checks.reduce((total, check) => total + (90 + check.timeout_seconds) * 1000, 0));
   if (operation.phase !== "held" || !operation.admitted || operation.settled || source.run !== operation.run || source.action !== operation.action || managedLifecycleSourceDigest(source) !== operation.source || operation.plan !== description.admission.planDigest || operation.previous !== description.previous || operation.deadline !== description.deadline ||
-    operation.preparation === null || (source.previous === null ? state.active !== null : source.candidate.rollout.strategy !== "rolling" || !description.admission.rollbackEligible || state.active?.record !== operation.previous || state.active.epoch !== state.compatibilityEpoch || operation.compatibilityFencedAt !== null) ||
+    operation.preparation === null || (source.previous === null ? state.active !== null : !description.admission.rollbackEligible || state.active?.record !== operation.previous || state.active.epoch !== state.compatibilityEpoch || operation.compatibilityFencedAt !== null) ||
     !Number.isSafeInteger(now) || now < operation.createdAt || now + 90_000 + checkWindow > operation.deadline) throw new Error("managed recovery is not eligible under the recorded lifecycle");
   if (operation.verification?.steps.some((step) => step.execution !== null && step.execution.phase !== "complete" && step.execution.executionDeadline !== null)) throw new Error("managed recovery requires cessation of every possibly started check");
-  return managedRecoverySnapshot({ candidate: source.candidate, previous: source.previous?.source.application ?? null, preparation: operation.preparation, consumers: operation.consumers, baselines: description.baselines });
+  return managedRecoverySnapshot({ candidate: source.candidate, previous: source.previous?.source.application ?? null, preparation: operation.preparation, consumers: operation.consumers, baselines: description.baselines,
+    maintenance: operation.quiescence === null ? null : { certificate: operation.quiescence, source: { candidate: source.candidate, previous: source.previous?.source.application ?? null, baselines: description.baselines.map((value) => Object.freeze({ ...value, prior: Object.freeze([]) })), run: source.run, action: source.action, startedAt: operation.quiescence.createdAt } },
+  });
 };
 
 /** Never treats an expired/held job as stopped, or a stopped job as an applied migration. The immutable recovery description separately validates outcomes. */

@@ -67,7 +67,7 @@ export const managedServiceCompensation = (journal: OperationJournal, ports: Por
     if (selected?.owner.app !== state.action.app || selected.owner.incarnation !== state.action.incarnation || selected.owner.dataOwner !== state.action.dataOwner || managedServiceDigest(selected) !== state.action.plan ||
       (previous === null) !== (state.previous === null) || previous !== null && (!same(candidate.infrastructure.ownership, previous.infrastructure.ownership) || !same(candidate.host, previous.host) || !same(candidate.infrastructure.overlay, previous.infrastructure.overlay)) ||
       before?.role === "retained-dependency" || before !== undefined && target?.role === "retained-dependency" || (before === undefined) !== (state.baseline === null) ||
-      before !== undefined && (candidate.rollout.strategy !== "rolling" || !candidate.rollout.rollback_compatible || previous?.routes.some((route) => !candidate.hosts.includes(route.host)) || Object.values(before.inputs.environment).some((binding) => binding.kind === "secret" && !candidate.secrets.includes(binding.key)))) throw new Error("managed compensation plan scope or recovery grants disagree");
+      before !== undefined && (!candidate.rollout.rollback_compatible || previous?.routes.some((route) => !candidate.hosts.includes(route.host)) || Object.values(before.inputs.environment).some((binding) => binding.kind === "secret" && !candidate.secrets.includes(binding.key)))) throw new Error("managed compensation plan scope or recovery grants disagree");
     return Object.freeze({ candidate, previous, target, before, selected });
   };
   const plans = async (state: ManagedServiceCompensation) => {

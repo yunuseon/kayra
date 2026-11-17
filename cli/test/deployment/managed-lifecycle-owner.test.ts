@@ -19,6 +19,8 @@ import { managedMigrationInputs } from "../../src/server/deployment/managed-migr
 import { jobRuntime } from "./one-shot-fixture.ts";
 import { jobName } from "../../src/contracts/one-shot-job.ts";
 import type { JobPlan } from "../../src/contracts/one-shot-job.ts";
+import { managedRecoverySource } from "../../src/server/deployment/managed-recovery-safety.ts";
+import { managedRecoverySnapshot } from "../../src/server/deployment/managed-recovery-description.ts";
 import { managedLifecycleOwner } from "../../src/server/deployment/managed-lifecycle-owner.ts";
 import { parseManagedLifecycleStore } from "../../src/server/deployment/managed-lifecycle-store.ts";
 import { parseManagedRelease, managedReleaseBaselines } from "../../src/server/deployment/managed-release.ts";
@@ -316,4 +318,21 @@ test("an existing workload preparation intent prevents metadata-only cancellatio
   const lab = await fixture(t); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().tick(); await lab.owner().tick();
   assert.ok((await lab.owner().read())?.operation.preparation); await lab.owner().cancel(); const held = await lab.owner().tick();
   assert.equal(held?.operation.unstartedAt, null); assert.notEqual(held.operation.phase, "settling"); assert.equal(lab.settleCalls(), 0);
+});
+
+for (const unsafe of [false, true]) test(`maintenance failure ${unsafe ? "requires forward recovery after an unsafe effect" : "restores the previous compatible application"}`, async (t) => {
+  const lab = await fixture(t, true, false, false, true); await lab.owner().begin(lab.source); const initial = await lab.drive(); assert.ok(initial.active);
+  const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(initial.active.record)));
+  const retained = managedReleaseBaselines(previous).filter((value) => previous.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
+  const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40), rollout: { ...lab.source.candidate.rollout, rollback_compatible: !unsafe } }); assert.ok(candidate.ok);
+  const source = parseManagedLifecycleSource({ ...lab.source, candidate: candidate.value, previous, retained, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3" });
+  await lab.owner().begin(source); lab.checkMode("fail"); const failed = await lab.drive(); assert.equal(failed.operation.verification?.reason, "check-failed"); assert.equal(failed.operation.quiescence?.phase, "complete");
+  if (!unsafe) {
+    const snapshot = managedRecoverySource(failed, source, 1000);
+    assert.throws(() => managedRecoverySnapshot({ ...snapshot.source, maintenance: null }), /maintenance evidence/);
+    assert.throws(() => managedRecoverySnapshot({ ...snapshot.source, preparation: { ...snapshot.source.preparation, maintenance: "e".repeat(64) } }), /maintenance evidence|scope or rollback authority/);
+  }
+  await lab.reopen(); const result = await lab.drive();
+  if (unsafe) { assert.equal(result.operation.phase, "held"); assert.equal(result.operation.recoverySource, null); assert.equal(result.compatibilityEpoch, 1); assert.equal(lab.calls.some((action) => action.effect === "restore"), false); }
+  else { assert.equal(result.operation.outcome, "rolled-back"); assert.equal(result.operation.settlement, "previous"); assert.equal(result.active?.plan, initial.active.plan); assert.equal(result.operation.recoveryVerification?.phase, "verified"); assert.equal(result.compatibilityEpoch, 0); }
 });

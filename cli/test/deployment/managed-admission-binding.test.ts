@@ -95,7 +95,7 @@ test("unstarted update preserves the exact previous budget and permits only a la
   assert.equal(fenceUnstartedManagedAdmission(active.value, next, claim).ok, false);
   const closed = fenceUnstartedManagedAdmission(active.value, next, update.value); assert.ok(closed.ok);
   const charge = closed.value.resources?.charges.find((value) => value.app === identity.owner.app);
-  assert.ok(charge); assert.equal(charge.result, "previous"); assert.deepEqual(charge.previous, active.value.resources.charges[0]?.target);
+  assert.ok(charge); assert.equal(charge.result, "previous"); assert.deepEqual(charge.previous, active.value.resources?.charges[0]?.target);
   assert.equal(reserveManagedAdmission(closed.value, observation, next, update.value, 1000).ok, false);
   assert.equal(reserveManagedAdmission(closed.value, observation, { ...next, action: identity.owner.incarnation + ":4", run: randomUUID() }, update.value, 1000).ok, true);
 });

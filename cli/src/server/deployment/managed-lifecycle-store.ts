@@ -17,7 +17,7 @@ import { parseMigrationResolutionReceipt } from "../../contracts/migration-resol
 import { managedSuccessfulInventoryCarry, managedRecoveredInventoryCarry } from "./managed-lifecycle-inventory.ts";
 import { managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import { parseManagedGroupCompensation } from "./managed-group-compensation.ts";
-import { managedRollingRecoverySource } from "./managed-recovery-safety.ts";
+import { managedRecoverySource } from "./managed-recovery-safety.ts";
 import type { OperationJournal } from "./operation.ts";
 
 import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
@@ -83,12 +83,19 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
     source: () => serial(async () => source(await required())),
     beginRecovery: (expected: string, startedAt: number) => serial(async () => {
       const state = await required(); if (hash(JSON.stringify(state.operation)) !== expected || state.operation.recoverySource !== null) return state;
-      const snapshot = managedRollingRecoverySource(state, await source(state), startedAt); const bytes = JSON.stringify(snapshot.source); const identity = hash(bytes);
+      const snapshot = managedRecoverySource(state, await source(state), startedAt); const bytes = JSON.stringify(snapshot.source); const identity = hash(bytes);
       if (await retain(bytes) !== identity || time(state.operation.createdAt) >= startedAt + 90_000) throw new Error("managed recovery source retention failed");
       const reason = state.operation.reason; if (reason === null) throw new Error("managed recovery failure cause missing");
       return write({ ...state, operation: { ...state.operation, phase: "recovering", reason: null, failure: { reason, at: startedAt }, enteredAt: startedAt, recoverySource: identity, recoveryStartedAt: startedAt, recoveryDeadline: startedAt + 90_000 } });
     }),
-    verifyRecovery: () => serial(async () => { const state = await required(); if (state.operation.phase !== "recovering" || state.operation.recovery?.phase !== "verified" || state.operation.recovery.verifiedAt === null) throw new Error("managed recovery convergence missing"); return write({ ...state, operation: { ...state.operation, phase: "recovery-verifying", enteredAt: state.operation.recovery.verifiedAt } }); }),
+    verifyRecovery: () => serial(async () => {
+      const state = await required(); const operation = state.operation; const recovery = operation.recovery;
+      if (operation.phase !== "recovering" || recovery?.phase !== "verified" || recovery.verifiedAt === null) throw new Error("managed recovery convergence missing");
+      if (operation.previousPlan !== null) return write({ ...state, operation: { ...operation, phase: "recovery-verifying", enteredAt: recovery.verifiedAt } });
+      const at = time(operation.createdAt); if (at >= operation.deadline || at >= recovery.deadline) return write({ ...state, operation: { ...operation, phase: "held", reason: "deadline" } });
+      if (at - recovery.verifiedAt > 2000) return write({ ...state, operation: { ...operation, recovery: { ...recovery, phase: "recovering", verifiedAt: null, nodes: recovery.nodes.map((node) => Object.freeze({ ...node, routed: null })) } } });
+      return write({ ...state, active: null, operation: { ...operation, phase: "settling", enteredAt: at, outcome: "absent", settlement: "absent" } });
+    }),
     fenceCompatibility: (run: string, expected: ManagedLifecycleStore["operation"]["phase"]) => serial(async () => {
       const state = await required(); const operation = state.operation;
       if (operation.run !== run || operation.phase !== expected || !["preparing", "updating", "verifying"].includes(operation.phase) || operation.cancelRequestedAt !== null || !operation.admitted || time(operation.createdAt) >= operation.deadline) return false;
@@ -116,8 +123,8 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       if (!same(value.candidate.infrastructure.ownership, owner)) return Promise.reject(new Error("managed lifecycle source ownership disagrees"));
       return serial(async () => {
         const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return current; }
-        if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || current.active?.record !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
-        const carried = current?.operation.outcome === "rolled-back" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
+        if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || (current.active?.record ?? null) !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
+        const carried = current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
         if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
           if (current === undefined) throw new Error("managed restore lacks verified release history");
           const selected = await metadata(async () => {

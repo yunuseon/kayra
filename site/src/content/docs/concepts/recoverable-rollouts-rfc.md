@@ -1894,3 +1894,23 @@ or authenticated retired inventory. Fresh ownership observations and unchanged
 specification/input validation still apply. This preserves established sharing;
 it does not authorize a renamed or new service to adopt retired data or bypass
 engine-change refusal.
+
+
+### Failed first-deployment cleanup groundwork
+
+A failed first deployment with no verified previous release can now converge to
+absence under its original admitted operation. The owner fences and scrubs all
+owned candidate workloads, observes actual container cessation, retains named
+volumes and dependency specifications, commits an explicit absent outcome and
+only then settles capacity to absent. It does not invent or promote a previous
+release. A stale cleanup certificate triggers fresh observation under the same
+deadline rather than renewing authority.
+
+This also permits cleanup after a known irreversible initial migration: going
+to absence preserves data and the compatibility floor, with no image restoration
+or down-migration. Unresolved migration outcomes and possibly started unknown
+checks still hold. A later explicit deployment must carry the exact retirement
+proofs and use the protected unchanged-dependency reactivation path. Missing data
+is not replaced by an empty database. Unstarted-operation settlement, audited
+unknown-check cleanup, maintenance compensation, removal/recreation and normal
+index/client integration remain subsequent work. Managed V3 stays disabled.

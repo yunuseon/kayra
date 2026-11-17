@@ -11,6 +11,7 @@ import { prepareManagedTransition } from "./managed-transition.ts";
 import { clearedService } from "./service-convergence.ts";
 import { all, err, ok } from "../../lib/result.ts";
 import type { RetainedBaseline } from "./managed-group-preparation.ts";
+import { hasRecordedRetainedMount } from "../../contracts/managed-retained-mount.ts";
 
 export type RetiredDependency = { readonly plan: ManagedServicePlan; readonly barrier: ManagedServiceBarrier };
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -28,13 +29,14 @@ export const prepareManagedInventoryTransition = async (input: {
   const retired = (() => { try { return Object.freeze(input.retired.map((value) => { const spec = parseManagedServicePlan(value.plan); const barrier = parseManagedServiceBarrier(value.barrier); return spec.ok ? Object.freeze({ plan: spec.value, barrier }) : null; })); } catch { return null; } })();
   if (retired === null || retired.length > 32 || retired.some((value) => value === null)) return err("invalid retired dependency inventory");
   const records = Object.freeze(retired.flatMap((value) => Object.freeze(value === null ? [] : [value])));
+  const recordedMounts = [...Object.values(previous?.value.services ?? {}), ...records.map((value) => value.plan)];
   if (new Set(records.map((value) => value.plan.service)).size !== records.length || records.some(({ plan: spec, barrier }) => {
     const action = barrier.action; const step = barrier.steps.at(-1);
     return spec.role !== "retained-dependency" || !same(spec.owner, owner) || spec.host.node !== plan.host.node || spec.host.cluster !== plan.host.cluster || !same(spec.privateNetwork, { id: plan.infrastructure.overlay.id, name: plan.infrastructure.overlay.scope.name }) ||
       active.value.some((active) => active.service === spec.service) || (previous?.value.services[spec.service]) !== undefined ||
       barrier.phase !== "complete" || barrier.proof === null || step?.effect !== "scrub" || action.app !== owner.app || action.incarnation !== owner.incarnation || action.dataOwner !== owner.dataOwner || action.service !== spec.service || action.plan !== managedServiceDigest(spec) ||
       plan.services[spec.service] !== undefined && plan.services[spec.service]?.role !== "retained-dependency" ||
-      Object.values(plan.services).some((other) => other.role === "retained-dependency" && other.service !== spec.service && other.mounts.some((mount) => spec.mounts.some((old) => old.volume.allocation === mount.volume.allocation)));
+      Object.values(plan.services).some((other) => other.role === "retained-dependency" && other.service !== spec.service && other.mounts.some((mount) => spec.mounts.some((old) => old.volume.allocation === mount.volume.allocation) && !hasRecordedRetainedMount(other, mount.volume, recordedMounts)));
   })) return err("retired dependency ownership, retirement proof or active set disagrees");
   // eslint-disable-next-line functional/prefer-immutable-types -- local collection is published only as a frozen checked set
   const reactivation: RetainedBaseline[] = [];

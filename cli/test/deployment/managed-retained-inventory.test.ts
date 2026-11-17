@@ -61,3 +61,25 @@ test("retired data cannot be handed to a renamed retained service to bypass its 
   const f = await fixture(); const checked = parseManagedApplicationPlan({ ...f.input.candidate, services: { ...f.input.candidate.services, archive: { ...f.db, service: "archive", nativeName: managedServiceName(f.db.owner, "archive") } }, rollout: { ...f.input.candidate.rollout, services: { ...f.input.candidate.rollout.services, archive: { role: "retained-dependency", overlap: "forbidden" } } } }); assert.ok(checked.ok);
   assert.equal((await prepareManagedInventoryTransition({ ...f.input, candidate: checked.value }, f.ports, 91000)).ok, false);
 });
+
+test("retiring a new dependency preserves a shared mount already owned by an unchanged active dependency", async () => {
+  const f = await fixture(); const before = f.input.retired[0]; assert.ok(before);
+  const cache = { ...f.db, service: "cache", nativeName: managedServiceName(f.db.owner, "cache") }; const digest = managedServiceDigest(cache);
+  const retired = { plan: cache, barrier: { ...before.barrier, action: { ...before.barrier.action, service: "cache", plan: digest } } };
+  const ports = { ...f.ports, services: { observe: () => Promise.resolve({ ...f.observed, plan: digest, taskPlan: digest }) } };
+  const result = await prepareManagedInventoryTransition({ previous: f.plan, candidate: f.plan, active: [], retired: [retired] }, ports, 91000);
+  assert.ok(result.ok); assert.equal(result.value.retired[0]?.plan.service, "cache"); assert.equal(result.value.reactivation.length, 0); assert.deepEqual(result.value.transition.plan.services["db"], f.db);
+});
+
+test("recorded retired services may resume their existing shared volume but cannot change engines or introduce a new alias", async () => {
+  const f = await fixture(); const before = f.input.retired[0]; assert.ok(before?.barrier.proof);
+  const cache = { ...f.db, service: "cache", nativeName: managedServiceName(f.db.owner, "cache") }; const digest = managedServiceDigest(cache); const id = "c".repeat(25);
+  const barrier = { ...before.barrier, action: { ...before.barrier.action, service: "cache", plan: digest }, nativeId: id, prior: before.barrier.prior.map((value) => ({ ...value, id })), steps: before.barrier.steps.map((value) => ({ ...value, expected: value.expected === null ? null : { ...value.expected, id } })), proof: { ...before.barrier.proof, native: { ...before.barrier.proof.native, id } } };
+  const candidate = parseManagedApplicationPlan({ ...f.plan, services: { ...f.plan.services, cache }, rollout: { ...f.plan.rollout, services: { ...f.plan.rollout.services, cache: { role: "retained-dependency", overlap: "forbidden" } } } }); assert.ok(candidate.ok);
+  const ports = { ...f.ports, services: { observe: (scope: { readonly service: string }) => Promise.resolve(scope.service === "cache" ? { ...f.observed, id, plan: digest, taskPlan: digest } : f.observed) } };
+  const input = { ...f.input, candidate: candidate.value, retired: [before, { plan: cache, barrier }] };
+  const result = await prepareManagedInventoryTransition(input, ports, 91000); assert.ok(result.ok); assert.deepEqual(result.value.reactivation.map((value) => value.name).toSorted(), ["cache", "db"]);
+  const changed = { ...candidate.value, services: { ...candidate.value.services, cache: { ...cache, command: ["different-engine"] } } }; assert.equal((await prepareManagedInventoryTransition({ ...input, candidate: changed }, ports, 91000)).ok, false);
+  const alias = { ...candidate.value, services: { ...candidate.value.services, archive: { ...cache, service: "archive", nativeName: managedServiceName(cache.owner, "archive") } }, rollout: { ...candidate.value.rollout, services: { ...candidate.value.rollout.services, archive: { role: "retained-dependency", overlap: "forbidden" } } } };
+  assert.equal((await prepareManagedInventoryTransition({ ...input, candidate: alias }, ports, 91000)).ok, false);
+});

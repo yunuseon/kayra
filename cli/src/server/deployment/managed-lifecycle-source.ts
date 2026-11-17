@@ -8,6 +8,7 @@ import { serviceEffectAction } from "../../contracts/swarm-service.ts";
 import { parseManagedRelease, managedReleaseDigest, managedReleaseBaselines } from "./managed-release.ts";
 import { managedAdmissionDescription } from "./managed-transition.ts";
 import { parseManagedServiceBarrier } from "./managed-service-barrier.ts";
+import { hasRecordedRetainedMount } from "../../contracts/managed-retained-mount.ts";
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const native = z.object({ id: z.string().regex(/^[a-z0-9]{25}$/), version: positive }).strict().readonly();
@@ -28,6 +29,7 @@ export const parseManagedLifecycleSource = (input: unknown) => {
   const plan = admission.value.plan; const owner = plan.infrastructure.ownership;
   if (!new RegExp(`^${owner.incarnation}:[1-9][0-9]*$`).test(raw.action) || !Number.isSafeInteger(Number(raw.action.split(":")[1]))) throw new Error("invalid managed lifecycle action");
   const previousBaselines = previous === null ? Object.freeze([]) : managedReleaseBaselines(previous);
+  const recordedMounts = [...Object.values(previousPlan?.services ?? {}), ...raw.retired.flatMap((value) => { const spec = parseManagedServicePlan(value.plan); return Object.freeze(spec.ok ? [spec.value] : []); })];
   if (raw.createdAt < (previous?.verification.verified?.at ?? 0) || previousBaselines.some((value) => Number(value.action.action.split(":")[1]) >= Number(raw.action.split(":")[1]))) throw new Error("managed lifecycle action does not fence the previous release");
   const retired = Object.freeze(raw.retired.map((value) => {
     const spec = parseManagedServicePlan(value.plan); const barrier = parseManagedServiceBarrier(value.barrier);
@@ -35,7 +37,7 @@ export const parseManagedLifecycleSource = (input: unknown) => {
       spec.value.host.node !== plan.host.node || spec.value.host.cluster !== plan.host.cluster || !same(spec.value.privateNetwork, { id: plan.infrastructure.overlay.id, name: plan.infrastructure.overlay.scope.name }) ||
       barrier.phase !== "complete" || barrier.proof === null || barrier.steps.at(-1)?.effect !== "scrub" || barrier.action.app !== owner.app || barrier.action.incarnation !== owner.incarnation || barrier.action.dataOwner !== owner.dataOwner || barrier.action.service !== spec.value.service || barrier.action.plan !== managedServiceDigest(spec.value) ||
       Number(barrier.action.action.split(":")[1]) >= Number(raw.action.split(":")[1]) ||
-      Object.values(plan.services).some((other) => other.role === "retained-dependency" && other.service !== spec.value.service && other.mounts.some((mount) => spec.value.mounts.some((old) => old.volume.allocation === mount.volume.allocation)))) throw new Error("managed lifecycle retired inventory disagrees");
+      Object.values(plan.services).some((other) => other.role === "retained-dependency" && other.service !== spec.value.service && other.mounts.some((mount) => spec.value.mounts.some((old) => old.volume.allocation === mount.volume.allocation) && !hasRecordedRetainedMount(other, mount.volume, recordedMounts)))) throw new Error("managed lifecycle retired inventory disagrees");
     return Object.freeze({ plan: spec.value, barrier });
   }));
   const retained = Object.freeze(raw.retained.map((value) => {

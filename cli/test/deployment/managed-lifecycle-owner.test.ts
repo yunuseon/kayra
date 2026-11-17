@@ -216,9 +216,9 @@ for (const cancel of [false, true]) test(`connected rolling recovery verifies an
   }
 });
 
-const checkedCandidate = async (t: TestContext, migrations = false, dependency = false) => {
+const checkedCandidate = async (t: TestContext, migrations = false, dependency: boolean | "shared" = false) => {
   const lab = await fixture(t, false, migrations, false, true); await lab.owner().begin(lab.source); const initial = await lab.drive(); assert.ok(initial.active);
-  const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(initial.active.record))); const worker = lab.source.candidate.services["worker"]; assert.ok(worker);
+  const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(initial.active.record))); const worker = lab.source.candidate.services[dependency === "shared" ? "db" : "worker"]; assert.ok(worker);
   const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40), services: dependency ? { ...lab.source.candidate.services, cache: { ...worker, service: "cache", nativeName: managedServiceName(worker.owner, "cache"), role: "retained-dependency" } } : lab.source.candidate.services,
     rollout: { ...lab.source.candidate.rollout, services: dependency ? { ...lab.source.candidate.rollout.services, cache: { role: "retained-dependency", overlap: "forbidden" } } : lab.source.candidate.rollout.services } }); assert.ok(candidate.ok);
   const retained = managedReleaseBaselines(previous).filter((value) => previous.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
@@ -244,8 +244,8 @@ test("recorded migration fences cannot authorize recovery after their current na
   lab.foreignJobs(false); const done = await lab.drive(); assert.equal(done.operation.outcome, "rolled-back"); assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 2);
 });
 
-test("rollback preserves new-only dependency retirement proof and refuses to lose it on the next deployment", async (t) => {
-  const { lab, source } = await checkedCandidate(t, false, true); lab.checkMode("fail"); await lab.drive(); const done = await lab.drive(); assert.equal(done.operation.outcome, "rolled-back"); assert.ok(done.active);
+for (const shared of [false, true]) test(`rollback preserves new-only dependency retirement proof${shared ? " with a recorded shared volume" : ""} and refuses to lose it on the next deployment`, async (t) => {
+  const { lab, source } = await checkedCandidate(t, false, shared ? "shared" : true); lab.checkMode("fail"); await lab.drive(); const done = await lab.drive(); assert.equal(done.operation.outcome, "rolled-back"); assert.ok(done.active);
   const retirement = done.operation.recovery?.nodes.find((node) => node.name === "cache")?.child?.barrier; assert.equal(retirement?.phase, "complete");
   const cache = source.candidate.services["cache"]; assert.ok(cache); const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(done.active.record)));
   const retained = managedReleaseBaselines(previous).filter((value) => previous.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));

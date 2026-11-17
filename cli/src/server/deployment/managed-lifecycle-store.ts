@@ -14,9 +14,10 @@ import { claimJournal } from "./journal-claim.ts";
 import { resolveManagedPreparationMigration } from "./managed-migration-resolution.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import { parseMigrationResolutionReceipt } from "../../contracts/migration-resolution.ts";
-import { managedSuccessfulInventoryCarry, managedRecoveredInventoryCarry } from "./managed-lifecycle-inventory.ts";
+import { managedSuccessfulInventoryCarry, managedRecoveredInventoryCarry, managedUnstartedInventoryCarry } from "./managed-lifecycle-inventory.ts";
 import { managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import { parseManagedGroupCompensation } from "./managed-group-compensation.ts";
+import { managedUnstartedSource } from "./managed-unstarted-source.ts";
 import { managedRecoverySource } from "./managed-recovery-safety.ts";
 import type { OperationJournal } from "./operation.ts";
 
@@ -81,6 +82,12 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   return Object.freeze({
     read: () => serial(load),
     source: () => serial(async () => source(await required())),
+    beginUnstarted: (expected: string) => serial(async () => {
+      const state = await required(); if (hash(JSON.stringify(state.operation)) !== expected) return state;
+      managedUnstartedSource(state, await source(state)); const at = time(state.operation.createdAt); const reason = state.operation.reason;
+      if (reason === null) throw new Error("unstarted lifecycle failure cause missing");
+      return write({ ...state, operation: { ...state.operation, unstartedAt: at, failure: { reason, at }, reason: null, phase: "settling", enteredAt: at, outcome: state.operation.previous === null ? "absent" : "unchanged", settlement: state.operation.previous === null ? "absent" : "previous" } });
+    }),
     beginRecovery: (expected: string, startedAt: number) => serial(async () => {
       const state = await required(); if (hash(JSON.stringify(state.operation)) !== expected || state.operation.recoverySource !== null) return state;
       const snapshot = managedRecoverySource(state, await source(state), startedAt); const bytes = JSON.stringify(snapshot.source); const identity = hash(bytes);
@@ -124,7 +131,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       return serial(async () => {
         const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return current; }
         if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || (current.active?.record ?? null) !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
-        const carried = current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
+        const carried = current?.operation.unstartedAt !== null && current?.operation.unstartedAt !== undefined ? managedUnstartedInventoryCarry(await source(current), value) : current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
         if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
           if (current === undefined) throw new Error("managed restore lacks verified release history");
           const selected = await metadata(async () => {
@@ -153,7 +160,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
         const history = historyBytes === null ? null : await retain(historyBytes); if (historyBytes !== null && history !== hash(historyBytes)) throw new Error("managed lifecycle history retention failed");
         const compatibilityEpoch = current?.compatibilityEpoch ?? 0;
         const state = await write({ version: 3, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]), compatibilityEpoch, active: current?.active ?? null, lastGood: current?.lastGood ?? null, history,
-          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, previousPlan: description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous), createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: "admitting", enteredAt: at, reason: null, outcome: null, settlement: null, failure: null, recoverySource: null, recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
+          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, previousPlan: description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous), createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: "admitting", enteredAt: at, reason: null, outcome: null, settlement: null, unstartedAt: null, failure: null, recoverySource: null, recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
         // eslint-disable-next-line functional/immutable-data -- obsolete views retain their bound run and can never write the next operation
         views.clear(); return state;
       });

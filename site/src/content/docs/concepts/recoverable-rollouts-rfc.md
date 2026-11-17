@@ -1885,3 +1885,12 @@ normal legacy paths are unaffected. Initial-deployment cleanup, unknown-check
 cleanup, compatible maintenance compensation, removal/recreation tombstones,
 shared-index binding, normal operator/client dispatch and integrated acceptance
 remain required. Normal managed V3 execution is still disabled.
+
+
+Recorded shared mounts remain valid when a failed new dependency is retired.
+Another retained service may continue using that volume only when its logical
+service and exact volume identity already occur in the verified previous plan
+or authenticated retired inventory. Fresh ownership observations and unchanged
+specification/input validation still apply. This preserves established sharing;
+it does not authorize a renamed or new service to adopt retired data or bypass
+engine-change refusal.

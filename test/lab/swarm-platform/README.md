@@ -1935,3 +1935,24 @@ another reopen. Its app-owned lock/history and delayed old-process exit checks
 remain unchanged. The journal is private format 3. Fresh native validation is
 pending; this is not shared platform-index, SIGKILL, HTTP continuity or host-loss
 acceptance, and the normal managed V3 entrypoint remains off.
+
+
+The first connected-rollback run at `5ca9ffe`, VM
+`kayra-volume-lab-20261117214205898000`, completed singleton recovery (597 effects)
+but failed the later maintenance-fixture assertion because that fixture lacked
+the newly required metadata-fence port. The owner refused safely before the
+expected compatibility check. Frozen source, raw results/events, full service
+snapshots and registry RAM were archived and hashed before stopping and
+preserving the VM and disks. The fixture port was wired in `5d7ab57`.
+
+The fresh run at `5d7ab57`, VM `kayra-volume-lab-20261117220849347075`, passed and
+was destroyed. Its connected singleton recorded A/B/A ownership with 614 effects,
+reopened after restoration acknowledgement, verified A's distinct completion
+check, atomically promoted the restored record and reconstructed a lost
+previous-budget settlement acknowledgement. Both delayed process-exit checks,
+maintenance variants, migration audit/replay and old-epoch restore refusals
+passed. The trace contains 15,657 API requests. Engine/CLI 29.10.0/API 1.57,
+Compose 5.7.1, Node v24.22.1 and Ubuntu 24.04.5 ARM64 plus raw source, events,
+journals, histories and versions are retained privately with a SHA-256 manifest.
+These remain isolated owner fixtures, not shared-index, SIGKILL, routed HTTP
+or full-platform acceptance. Normal managed V3 is still disabled.

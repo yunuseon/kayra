@@ -85,13 +85,15 @@ export const managedGroupCompensation = (journal: OperationJournal, ports: Ports
     children.set(name, owner); return owner;
   };
   return Object.freeze({
-    prepare: (input: unknown) => {
+    prepare: (input: unknown, startedAt?: number) => {
       const snapshot = managedRecoverySnapshot(input); const description = snapshot.description; const bytes = JSON.stringify(snapshot.source);
+      if (startedAt !== undefined && (!Number.isSafeInteger(startedAt) || startedAt < 1)) return Promise.reject(new Error("invalid managed recovery phase entry"));
       if (snapshot.source.previous !== null && ports.services.fence === undefined) return Promise.reject(new Error("managed group recovery requires metadata fencing capability"));
       if (ports.checks === undefined && [snapshot.source.candidate, ...(snapshot.source.previous === null ? [] : [snapshot.source.previous])].some((plan) => plan.rollout.checks.length !== 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) return Promise.reject(new Error("managed group recovery checks capability unavailable"));
-      return serial(async () => { const existing = await load(); if (existing !== undefined) { if (existing.description !== managedRecoveryDigest(description) || existing.source !== hash(bytes)) throw new Error("managed group recovery intent conflicts"); return existing; }
-        const now = time(); const state = parseManagedGroupCompensation({ version: 1, app: description.app, incarnation: description.incarnation, dataOwner: description.dataOwner, run: description.run, action: description.action, plan: description.plan, previous: description.previous, description: managedRecoveryDigest(description), source: hash(bytes), createdAt: now, deadline: now + 90_000, cursor: 0, phase: "recovering", reason: null, verifiedAt: null, nodes: description.nodes.map((node) => Object.freeze({ ...node, child: null, routed: null })) });
-        if (await bounded(state.deadline, () => ports.retain(bytes)) !== state.source) throw new Error("managed group recovery snapshot retention failed"); return write(state);
+      return serial(async () => { const existing = await load(); if (existing !== undefined) { if (existing.description !== managedRecoveryDigest(description) || existing.source !== hash(bytes) || startedAt !== undefined && existing.createdAt !== startedAt) throw new Error("managed group recovery intent conflicts"); return existing; }
+        const now = time(); const at = startedAt ?? now; if (at > now || now >= at + 90_000) throw new Error("managed recovery phase entry is future or expired");
+        const state = parseManagedGroupCompensation({ version: 1, app: description.app, incarnation: description.incarnation, dataOwner: description.dataOwner, run: description.run, action: description.action, plan: description.plan, previous: description.previous, description: managedRecoveryDigest(description), source: hash(bytes), createdAt: at, deadline: at + 90_000, cursor: 0, phase: "recovering", reason: null, verifiedAt: null, nodes: description.nodes.map((node) => Object.freeze({ ...node, child: null, routed: null })) });
+        if (await bounded(state.deadline, () => ports.retain(bytes)) !== state.source || time(state.createdAt) >= state.deadline) throw new Error("managed group recovery snapshot retention failed"); return write(state);
       });
     },
     read: () => serial(load),

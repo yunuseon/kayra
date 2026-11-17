@@ -14,52 +14,21 @@ import { claimJournal } from "./journal-claim.ts";
 import { resolveManagedPreparationMigration } from "./managed-migration-resolution.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import { parseMigrationResolutionReceipt } from "../../contracts/migration-resolution.ts";
-import { managedSuccessfulInventoryCarry } from "./managed-lifecycle-inventory.ts";
+import { managedSuccessfulInventoryCarry, managedRecoveredInventoryCarry } from "./managed-lifecycle-inventory.ts";
+import { managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
+import { parseManagedGroupCompensation } from "./managed-group-compensation.ts";
+import { managedRollingRecoverySource } from "./managed-recovery-safety.ts";
 import type { OperationJournal } from "./operation.ts";
 
-const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
+import type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
+export { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
+export type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
-const epoch = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-const pointer = z.object({ record: digest, plan: digest, run: z.uuid(), verifiedAt: positive, epoch }).strict().readonly();
-const phase = z.enum(["admitting", "quiescing", "preparing", "updating", "verifying", "settling", "complete", "held"]);
-const schema = z.object({ version: z.literal(2), protocol: z.literal("managed-v3"), runtime: z.literal("swarm"), owner: z.unknown(), sequence: positive, compatibilityEpoch: epoch,
-  active: pointer.nullable(), lastGood: pointer.nullable(), history: digest.nullable(),
-  operation: z.object({ run: z.uuid(), action: z.string().max(80), source: digest, plan: digest, previous: digest.nullable(), createdAt: positive, admissionDeadline: positive, deadline: positive,
-    phase, enteredAt: positive, reason: z.enum(["admission", "deadline", "authorization", "quiescence", "preparation", "consumers", "verification", "cancellation"]).nullable(),
-    admitted: z.boolean(), settled: z.boolean(), cancelRequestedAt: positive.nullable(), compatibilityEpoch: epoch, compatibilityFencedAt: positive.nullable(), resolutionReceipts: z.array(z.unknown()).max(128).readonly().default([]),
-    quiescence: z.unknown().nullable(), preparation: z.unknown().nullable(), consumers: z.unknown().nullable(), verification: z.unknown().nullable(),
-  }).strict().readonly(),
-}).strict().readonly();
 const hash = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
-export const parseManagedLifecycleStore = (input: unknown) => {
-  const raw = schema.parse(input); const owner = parseDataOwnership(raw.owner); if (!owner.ok) throw new Error("invalid managed lifecycle ownership"); const operation = raw.operation;
-  const quiescence = operation.quiescence === null ? null : parseManagedMaintenanceQuiescence(operation.quiescence);
-  const preparation = operation.preparation === null ? null : parseManagedGroupPreparation(operation.preparation);
-  const consumers = operation.consumers === null ? null : parseManagedConsumerState(operation.consumers);
-  const verification = operation.verification === null ? null : parseManagedGroupVerification(operation.verification);
-  const resolutionReceipts = Object.freeze(operation.resolutionReceipts.map((raw) => { const receipt = parseMigrationResolutionReceipt(raw); if (!receipt.ok) throw new Error("invalid managed migration resolution receipt"); return receipt.value; }));
-  if (new Set(resolutionReceipts.map((receipt) => receipt.step)).size !== resolutionReceipts.length || resolutionReceipts.some((receipt) => {
-    const audit = preparation?.sequence?.steps.find((step) => step.id === receipt.step)?.resolution;
-    return audit === undefined || receipt.app !== owner.value.app || receipt.run !== operation.run || receipt.resolution !== audit.id || receipt.outcome !== audit.outcome || receipt.recordedAt !== audit.at || receipt.disposition === "cancelled" || receipt.disposition === "continue" && (audit.outcome !== "applied" || audit.at >= (preparation?.sequence?.deadline ?? 0) || audit.at >= operation.deadline);
-  }) || preparation?.sequence?.steps.some((step) => step.resolution !== undefined && !resolutionReceipts.some((receipt) => receipt.resolution === step.resolution?.id))) throw new Error("managed migration resolution receipt disagrees");
-  if (operation.compatibilityEpoch !== raw.compatibilityEpoch || [raw.active, raw.lastGood].some((value) => value !== null && value.epoch > raw.compatibilityEpoch) || operation.compatibilityFencedAt !== null && (raw.compatibilityEpoch < 1 || operation.compatibilityFencedAt < operation.createdAt || operation.compatibilityFencedAt >= operation.deadline) ||
-    operation.action !== `${owner.value.incarnation}:${String(raw.sequence)}` || operation.admissionDeadline !== operation.createdAt + 90_000 || operation.deadline <= operation.admissionDeadline || operation.enteredAt < operation.createdAt ||
-    operation.cancelRequestedAt !== null && operation.cancelRequestedAt < operation.createdAt || (operation.phase === "held") !== (operation.reason !== null) || operation.settled && operation.phase !== "complete" || operation.phase === "complete" && !operation.settled ||
-    [quiescence, preparation, consumers, verification].some((child) => child !== null && (child.app !== owner.value.app || child.incarnation !== owner.value.incarnation || child.dataOwner !== owner.value.dataOwner || child.run !== operation.run || child.plan !== operation.plan)) ||
-    quiescence !== null && (quiescence.action !== operation.action || quiescence.createdAt < operation.createdAt || quiescence.deadline > operation.deadline) ||
-    preparation !== null && (preparation.action !== operation.action || preparation.createdAt < operation.createdAt || preparation.migrationDeadline > operation.deadline) ||
-    consumers !== null && (preparation?.phase !== "ready" || consumers.action !== operation.action || consumers.deadline !== preparation.consumerDeadline || consumers.preparation !== hash(JSON.stringify(preparation))) ||
-    verification !== null && (consumers?.phase !== "ready" || verification.deadline > operation.deadline) ||
-    ["quiescing", "preparing", "updating", "verifying", "settling", "complete"].includes(operation.phase) && !operation.admitted ||
-    ["updating", "verifying", "settling", "complete"].includes(operation.phase) && preparation?.phase !== "ready" ||
-    ["verifying", "settling", "complete"].includes(operation.phase) && consumers?.phase !== "ready" ||
-    ["settling", "complete"].includes(operation.phase) && (verification?.phase !== "verified" || raw.active?.plan !== operation.plan || raw.active.run !== operation.run || raw.active.verifiedAt !== verification.verified?.at || !same(raw.active, raw.lastGood))) throw new Error("inconsistent managed lifecycle store");
-  return Object.freeze({ ...raw, owner: owner.value, operation: Object.freeze({ ...operation, resolutionReceipts, quiescence, preparation, consumers, verification }) });
-};
-export type ManagedLifecycleStore = ReturnType<typeof parseManagedLifecycleStore>;
 type Ports = { readonly now: () => number; readonly retain: (bytes: string) => Promise<string>; readonly read: (digest: string) => Promise<string> };
-type Child = "quiescence" | "preparation" | "consumers" | "verification";
+type Child = "quiescence" | "preparation" | "consumers" | "verification" | "recovery" | "recoveryVerification";
 
 /** One app writer and private child views. Promotion and the final verification become one synchronized replacement; capacity settlement follows separately. */
 export const managedLifecycleStore = (journal: OperationJournal, requested: DataOwnership, ports: Ports) => {
@@ -82,28 +51,29 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   const artifact = async (digest: string) => { const bytes = await metadata(() => ports.read(digest)); if (hash(bytes) !== digest) throw new Error("managed lifecycle artifact integrity failed"); return bytes; };
   const source = async (state: ManagedLifecycleStore) => {
     const bytes = await artifact(state.operation.source); const raw: unknown = JSON.parse(bytes); const value = parseManagedLifecycleSource(raw); const description = managedLifecycleDescription(value);
-    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible) throw new Error("managed lifecycle source disagrees"); return value;
+    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || state.operation.previousPlan !== (description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous)) || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible) throw new Error("managed lifecycle source disagrees"); return value;
   };
   const views = new Map<string, OperationJournal>();
   const child = (name: Child, run: string) => {
     if (!z.uuid().safeParse(run).success) throw new Error("invalid managed lifecycle child run");
     const key = `${run}:${name}`; const existing = views.get(key); if (existing !== undefined) return existing;
     const view: OperationJournal = { read: () => serial(async () => { const state = await required(); if (state.operation.run !== run) throw new Error("managed lifecycle child lost operation ownership"); return state.operation[name] ?? undefined; }), write: (raw) => serial(async () => {
-      const current = await required(); const operation = current.operation; if (operation.run !== run) throw new Error("managed lifecycle child lost operation ownership"); const value = name === "quiescence" ? parseManagedMaintenanceQuiescence(raw) : name === "preparation" ? parseManagedGroupPreparation(raw) : name === "consumers" ? parseManagedConsumerState(raw) : parseManagedGroupVerification(raw);
-      const expected = name === "quiescence" ? "quiescing" : name === "preparation" ? "preparing" : name === "consumers" ? "updating" : "verifying";
+      const current = await required(); const operation = current.operation; if (operation.run !== run) throw new Error("managed lifecycle child lost operation ownership"); const value = name === "quiescence" ? parseManagedMaintenanceQuiescence(raw) : name === "preparation" ? parseManagedGroupPreparation(raw) : name === "consumers" ? parseManagedConsumerState(raw) : name === "recovery" ? parseManagedGroupCompensation(raw) : parseManagedGroupVerification(raw);
+      const expected = name === "quiescence" ? "quiescing" : name === "preparation" ? "preparing" : name === "consumers" ? "updating" : name === "recovery" ? "recovering" : name === "recoveryVerification" ? "recovery-verifying" : "verifying";
       if (operation.phase !== expected && !(operation.phase === "held" && operation.cancelRequestedAt !== null)) throw new Error("managed lifecycle child lost ownership");
-      if (name !== "verification" || value.phase !== "verified" || !("verified" in value) || value.verified === null || operation.phase !== "verifying" || operation.cancelRequestedAt !== null) {
+      if (name !== "verification" && name !== "recoveryVerification" || value.phase !== "verified" || !("verified" in value) || value.verified === null || operation.phase !== expected || name === "verification" && operation.cancelRequestedAt !== null) {
         await write({ ...current, operation: { ...operation, [name]: value } }); return;
       }
-      const runSource = await source(current); if (operation.consumers === null) throw new Error("managed lifecycle convergence missing");
-      const snapshot = managedVerificationSnapshot({ kind: "deployment", application: runSource.candidate, certificate: operation.consumers });
+      const runSource = await source(current);
+      const recoveryInput: unknown = name === "recoveryVerification" ? JSON.parse(await artifact(operation.recoverySource ?? "")) : undefined;
+      const snapshot = name === "verification" ? managedVerificationSnapshot({ kind: "deployment", application: runSource.candidate, certificate: operation.consumers }) : managedVerificationSnapshot({ kind: "recovery", application: runSource.previous?.source.application, certificate: operation.recovery, recoverySource: recoveryInput });
       const release = parseManagedRelease({ version: 1, source: snapshot.source, verification: value }); const record = managedReleaseDigest(release);
       if (await retain(JSON.stringify(release)) !== record) throw new Error("managed lifecycle release retention failed");
       const now = time(operation.createdAt); const verified = release.verification.verified; if (verified === null) throw new Error("managed lifecycle final observations missing");
-      if (now >= operation.deadline || now >= value.deadline) { await write({ ...current, operation: { ...operation, verification: value, phase: "held", reason: "deadline" } }); return; }
-      if (now - verified.at > 2000) { await write({ ...current, operation: { ...operation, verification: { ...value, phase: "running", verified: null } } }); return; }
-      const active = Object.freeze({ record, plan: operation.plan, run: operation.run, verifiedAt: verified.at, epoch: current.compatibilityEpoch });
-      await write({ ...current, active, lastGood: active, operation: { ...operation, verification: value, phase: "settling", enteredAt: now } });
+      if (now >= operation.deadline || now >= value.deadline) { await write({ ...current, operation: { ...operation, [name]: value, phase: "held", reason: "deadline" } }); return; }
+      if (now - verified.at > 2000) { await write({ ...current, operation: { ...operation, [name]: { ...value, phase: "running", verified: null } } }); return; }
+      const active = Object.freeze({ record, plan: snapshot.plan, run: operation.run, verifiedAt: verified.at, epoch: current.compatibilityEpoch });
+      await write({ ...current, active, lastGood: active, operation: { ...operation, [name]: value, outcome: name === "verification" ? "deployed" : "rolled-back", settlement: name === "verification" ? "target" : "previous", phase: "settling", enteredAt: now } });
     }) };
     // eslint-disable-next-line functional/immutable-data -- one claimed view per child
     views.set(key, view); return view;
@@ -111,6 +81,14 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   return Object.freeze({
     read: () => serial(load),
     source: () => serial(async () => source(await required())),
+    beginRecovery: (expected: string, startedAt: number) => serial(async () => {
+      const state = await required(); if (hash(JSON.stringify(state.operation)) !== expected || state.operation.recoverySource !== null) return state;
+      const snapshot = managedRollingRecoverySource(state, await source(state), startedAt); const bytes = JSON.stringify(snapshot.source); const identity = hash(bytes);
+      if (await retain(bytes) !== identity || time(state.operation.createdAt) >= startedAt + 90_000) throw new Error("managed recovery source retention failed");
+      const reason = state.operation.reason; if (reason === null) throw new Error("managed recovery failure cause missing");
+      return write({ ...state, operation: { ...state.operation, phase: "recovering", reason: null, failure: { reason, at: startedAt }, enteredAt: startedAt, recoverySource: identity, recoveryStartedAt: startedAt, recoveryDeadline: startedAt + 90_000 } });
+    }),
+    verifyRecovery: () => serial(async () => { const state = await required(); if (state.operation.phase !== "recovering" || state.operation.recovery?.phase !== "verified" || state.operation.recovery.verifiedAt === null) throw new Error("managed recovery convergence missing"); return write({ ...state, operation: { ...state.operation, phase: "recovery-verifying", enteredAt: state.operation.recovery.verifiedAt } }); }),
     fenceCompatibility: (run: string, expected: ManagedLifecycleStore["operation"]["phase"]) => serial(async () => {
       const state = await required(); const operation = state.operation;
       if (operation.run !== run || operation.phase !== expected || !["preparing", "updating", "verifying"].includes(operation.phase) || operation.cancelRequestedAt !== null || !operation.admitted || time(operation.createdAt) >= operation.deadline) return false;
@@ -124,6 +102,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       const preparation = operation.preparation; const recorded = preparation.sequence?.steps.find((step) => step.id === request.step)?.resolution;
       if (recorded !== undefined && (recorded.outcome !== request.outcome || recorded.reason !== request.reason || !same(recorded.actor, actor))) throw new Error("migration outcome was already resolved differently");
       if (recorded !== undefined) { const receipt = operation.resolutionReceipts.find((value) => value.resolution === recorded.id); if (receipt === undefined) throw new Error("managed migration resolution receipt is missing"); return Object.freeze({ state, receipt }); }
+      if (operation.recoverySource !== null) throw new Error("migration resolution cannot resume a superseded forward rollout");
       if (operation.phase !== "held") throw new Error("managed lifecycle is not held for resolution");
       const result = await metadata(async () => resolveManagedPreparationMigration(preparation, await source(state), request, actor, { read: artifact, now: ports.now, native }));
       const resumed = result.receipt.disposition === "continue" && time(operation.createdAt) < operation.deadline;
@@ -138,7 +117,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       return serial(async () => {
         const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return current; }
         if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || current.active?.record !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
-        const carried = managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
+        const carried = current?.operation.outcome === "rolled-back" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
         if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
           if (current === undefined) throw new Error("managed restore lacks verified release history");
           const selected = await metadata(async () => {
@@ -166,8 +145,8 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
         const historyBytes = current === undefined ? null : JSON.stringify({ previous: current.history, state: current });
         const history = historyBytes === null ? null : await retain(historyBytes); if (historyBytes !== null && history !== hash(historyBytes)) throw new Error("managed lifecycle history retention failed");
         const compatibilityEpoch = current?.compatibilityEpoch ?? 0;
-        const state = await write({ version: 2, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]), compatibilityEpoch, active: current?.active ?? null, lastGood: current?.lastGood ?? null, history,
-          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: "admitting", enteredAt: at, reason: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
+        const state = await write({ version: 3, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]), compatibilityEpoch, active: current?.active ?? null, lastGood: current?.lastGood ?? null, history,
+          operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, previousPlan: description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous), createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: "admitting", enteredAt: at, reason: null, outcome: null, settlement: null, failure: null, recoverySource: null, recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
         // eslint-disable-next-line functional/immutable-data -- obsolete views retain their bound run and can never write the next operation
         views.clear(); return state;
       });
@@ -178,7 +157,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       if (!transition) throw new Error("managed lifecycle handoff disagrees"); return write({ ...state, operation: { ...state.operation, phase: next, enteredAt: at } });
     }),
     hold: (reason: NonNullable<ManagedLifecycleStore["operation"]["reason"]>) => serial(async () => { const state = await required(); return ["complete", "settling", "held"].includes(state.operation.phase) ? state : write({ ...state, operation: { ...state.operation, phase: "held", reason } }); }),
-    cancel: () => serial(async () => { const state = await required(); if (["complete", "settling"].includes(state.operation.phase) || state.operation.cancelRequestedAt !== null) return state; const at = time(state.operation.createdAt); return write({ ...state, operation: { ...state.operation, cancelRequestedAt: at, phase: "held", reason: "cancellation" } }); }),
+    cancel: () => serial(async () => { const state = await required(); if (["complete", "settling"].includes(state.operation.phase) || state.operation.cancelRequestedAt !== null) return state; const at = time(state.operation.createdAt); return write({ ...state, operation: { ...state.operation, cancelRequestedAt: at, ...(["recovering", "recovery-verifying"].includes(state.operation.phase) ? {} : { phase: "held", reason: "cancellation" }) } }); }),
     settle: () => serial(async () => { const state = await required(); if (state.operation.phase !== "settling") return state; return write({ ...state, operation: { ...state.operation, phase: "complete", settled: true } }); }),
   });
 };

@@ -34,7 +34,7 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
   const { plan } = await managedPlanFixture(); const parsed = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance }, rollout: { ...plan.rollout, checks: checked ? [{ id: "verify", service: "worker", command: ["node", "verify.mjs"], timeout_seconds: 2 }] : [], strategy: maintenance ? "maintenance" : "rolling", rollback_compatible: !unsafe, migrations: migrations === "unknown" ? plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["node", "status.mjs"], timeout_seconds: 10 } })) : migrations ? plan.rollout.migrations : [] } }); assert.ok(parsed.ok); const candidate = parsed.value;
   const source = parseManagedLifecycleSource({ version: 1, candidate, previous: null, run: randomUUID(), action: candidate.infrastructure.ownership.incarnation + ":2", createdAt: 1000, retained: [], retired: [] });
   const path = await mkdtemp(join(tmpdir(), "kayra-managed-owner-")); const artifacts = await openArtifactStore(join(path, "artifacts")); let journal = await openJournal(path); let clock = 1000; let accounting: ManagedAdmissionAccounting = { resources: null, bindings: [] }; let reserveCalls = 0; let settleCalls = 0; let loseReserve = false; let loseSettle = false; let authorize = true; let loseJobStart = false;
-  const native = new Map<string, ServiceObservation>(); const calls: ManagedServiceAction[] = []; let routes = true;
+  const native = new Map<string, ServiceObservation>(); const calls: ManagedServiceAction[] = []; let routes = true; let deferQuiescence = false; const delayedTombstones: (() => "acknowledged" | "refused")[] = [];
   const observation = { status: "ready", engine: "29.9.3", api: "1.56", node: candidate.host.node, cluster: candidate.host.cluster, network: candidate.host.network.id, capacity: { cpu: candidate.host.profile.cpu_millicores, memory: candidate.host.profile.memory_bytes }, standing: { cpu: candidate.host.profile.platform_cpu_millicores, memory: candidate.host.profile.platform_memory_bytes } } as const;
   const admission: ManagedAdmissionPort = {
     reserve: (identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim) => {
@@ -62,7 +62,12 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
     },
     tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null) => {
       const before = native.get(action.service); assert.equal(expected?.version ?? null, before?.status === "owned" ? before.version : null);
-      native.set(action.service, { status: "owned", id: before?.status === "owned" ? before.id : action.service.padEnd(25, "s"), version: before?.status === "owned" ? before.version + 1 : 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: null, tombstone: true, retainedInputsCleared: action.effect === "scrub", containersStopped: true, containersConverged: true, replicas: 0, endpoint: "dnsrr", update: "completed", tasks: [] }); return Promise.resolve("acknowledged" as const);
+      const apply = () => {
+        const current = native.get(action.service); if ((expected?.version ?? null) !== (current?.status === "owned" ? current.version : null) || expected !== null && current?.status === "owned" && expected.id !== current.id) return "refused" as const;
+        native.set(action.service, { status: "owned", id: before?.status === "owned" ? before.id : action.service.padEnd(25, "s"), version: before?.status === "owned" ? before.version + 1 : 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: null, tombstone: true, retainedInputsCleared: action.effect === "scrub", containersStopped: true, containersConverged: true, replicas: 0, endpoint: "dnsrr", update: "completed", tasks: [] }); return "acknowledged" as const;
+      };
+      if (deferQuiescence && action.action.includes(":quiesce")) { delayedTombstones.push(apply); return Promise.resolve("uncertain" as const); }
+      return Promise.resolve(apply());
     },
     fence: (action: ManagedServiceAction, expected: ServiceVersion) => { const before = native.get(action.service); assert.equal(before?.status, "owned"); assert.equal(expected.version, before.version); native.set(action.service, { ...before, version: before.version + 1, action: action.action, effect: "fence" }); return Promise.resolve("acknowledged" as const); },
     reactivate: (action: ManagedServiceAction, expected: ServiceVersion, spec: ManagedServicePlan) => { const before = native.get(action.service); assert.equal(before?.status, "owned"); assert.equal(before.tombstone, true); assert.equal(before.containersStopped, true); assert.equal(before.retainedInputsCleared, true); return services.apply(action, expected, spec); },
@@ -94,7 +99,7 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
   } });
   let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
-  return { source, calls, nodes, artifacts, checkStarts, probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
+  return { source, calls, nodes, artifacts, checkStarts, deferQuiescence: () => { deferQuiescence = true; }, releaseDelayedTombstones: () => delayedTombstones.map((apply) => apply()), probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
     cutUnstarted: (where: "before" | "after") => { unstartedCut = where; },
     cutResolution: (where: "before" | "after") => { resolutionCut = where; },
     reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; unstartedCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
@@ -335,4 +340,23 @@ for (const unsafe of [false, true]) test(`maintenance failure ${unsafe ? "requir
   await lab.reopen(); const result = await lab.drive();
   if (unsafe) { assert.equal(result.operation.phase, "held"); assert.equal(result.operation.recoverySource, null); assert.equal(result.compatibilityEpoch, 1); assert.equal(lab.calls.some((action) => action.effect === "restore"), false); }
   else { assert.equal(result.operation.outcome, "rolled-back"); assert.equal(result.operation.settlement, "previous"); assert.equal(result.active?.plan, initial.active.plan); assert.equal(result.operation.recoveryVerification?.phase, "verified"); assert.equal(result.compatibilityEpoch, 0); }
+});
+
+for (const cut of ["quiescence-intent", "barrier-intent", "barrier-ack", "delayed-stop", "quiescence-complete"] as const) test(`maintenance cancellation at ${cut} restores A without inventing migration preparation`, async (t) => {
+  const lab = await fixture(t, true, true); await lab.owner().begin(lab.source); const initial = await lab.drive(); assert.ok(initial.active); const jobs = lab.nodes.size;
+  const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(initial.active.record)));
+  const retained = managedReleaseBaselines(previous).filter((value) => previous.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
+  const old = lab.source.candidate.services["db"]; assert.ok(old);
+  const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40), services: { ...lab.source.candidate.services, cache: { ...old, service: "cache", nativeName: managedServiceName(old.owner, "cache") } }, rollout: { ...lab.source.candidate.rollout, services: { ...lab.source.candidate.rollout.services, cache: { role: "retained-dependency", overlap: "forbidden" } } } }); assert.ok(candidate.ok);
+  const source = parseManagedLifecycleSource({ ...lab.source, candidate: candidate.value, previous, retained, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3" }); if (cut === "delayed-stop") lab.deferQuiescence(); await lab.owner().begin(source);
+  for (let count = 0; count < 100; count++) {
+    const state = await lab.owner().tick(); const q = state?.operation.quiescence;
+    if (q !== null && q !== undefined && (cut === "quiescence-intent" ? q.nodes.every((node) => node.child === null) : cut === "barrier-intent" ? q.nodes.some((node) => node.child !== null && node.child.steps.length === 0) : (cut === "barrier-ack" || cut === "delayed-stop") ? q.nodes.some((node) => (node.child?.steps.length ?? 0) > 0) : q.phase === "complete")) break;
+  }
+  const stopped = await lab.owner().read(); assert.ok(stopped?.operation.quiescence); assert.equal(stopped.operation.preparation, null); await lab.owner().cancel(); await lab.reopen();
+  const recovering = await lab.owner().tick(); assert.equal(recovering?.operation.phase, "recovering"); const deadline = recovering.operation.recoveryDeadline; assert.ok(deadline);
+  const raw = await lab.artifacts.read(recovering.operation.recoverySource ?? ""); const snapshot = managedRecoverySnapshot(JSON.parse(raw)); assert.equal(snapshot.source.preparation, null); assert.equal(snapshot.description.preparation, null); assert.deepEqual(snapshot.description.nodes.map((node) => node.name), ["web", "worker"]);
+  assert.throws(() => managedRecoverySnapshot({ ...snapshot.source, retained: [] }), /retained/);
+  await lab.reopen(); const done = await lab.drive(); assert.equal(done.operation.outcome, "rolled-back"); assert.equal(done.operation.recoveryDeadline, deadline); assert.equal(done.operation.preparation, null); assert.equal(done.active?.plan, initial.active.plan); assert.equal(lab.nodes.size, jobs); assert.equal(lab.calls.length, 5); assert.equal(lab.calls.some((action) => action.service === "cache"), false); if (cut === "delayed-stop") assert.deepEqual(lab.releaseDelayedTombstones(), ["refused"]);
+  const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "previous");
 });

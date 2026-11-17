@@ -1852,3 +1852,36 @@ inactive dependency inventory into the next run; a reactivated dependency leaves
 that inactive set only after its containing release is verified. Recovery and
 removal must publish their own verified inactive inventory. This groundwork
 rejects unrecorded adoption and inventory loss before new workload admission.
+
+
+### Connected rolling recovery groundwork
+
+The private owner now restores a compatible rolling application's complete
+previous plan after a failed candidate, then runs that previous release's
+checks with a distinct recovery identity. It commits the restored verified
+active/last-good record before settling the pending reservation to the previous
+budget. Requested candidate identity, original failure, recovery observations
+and verified active release remain separate. A lost settlement acknowledgement
+is reconstructed from the bound resource book without another workload update.
+
+Recovery's 90-second deadline is persisted before the first child intent and
+survives reopening. Every recovery effect requires the matching reservation,
+current operator authority and fresh native migration-container fences. Recorded
+fences alone are insufficient; stopped containers do not establish migration
+outcomes. Every ambiguous migration needs its declared probe or audit outcome.
+A possibly started unknown completion check prevents restoration until its
+pinned container's cessation is established. Unsafe data epochs do not permit
+this automatic rolling recovery.
+
+Cancellation during recovery preserves its deadline and completes restoration
+before reporting a terminal outcome. A later migration assertion cannot resume
+a forward rollout that recovery has superseded. Dependencies introduced only by
+the failed candidate are scrubbed without deleting their data; their exact
+retirement barriers/specifications must be carried into subsequent operations.
+
+The private journal format is now 3, with explicit deployment/recovery outcomes
+and previous-budget settlement. Pre-outcome isolated V3 records are refused;
+normal legacy paths are unaffected. Initial-deployment cleanup, unknown-check
+cleanup, compatible maintenance compensation, removal/recreation tombstones,
+shared-index binding, normal operator/client dispatch and integrated acceptance
+remain required. Normal managed V3 execution is still disabled.

@@ -1924,3 +1924,14 @@ stream; schemas, retained identities and deadlines were preserved with zero
 violations. Logs, journals, source, requests, versions and live events are
 retained privately with a SHA-256 manifest. This establishes neither normal
 indexed deployment nor compatibility preservation through managed removal.
+
+
+The singleton fixture now runs A, failed B and restored A through the connected
+private lifecycle owner, including bound fixture resource accounting. It reopens
+after recovery intent and native restoration acknowledgement, requires the
+previous release's distinct completion check before atomic promotion, loses a
+previous-budget settlement acknowledgement, then reconstructs settlement after
+another reopen. Its app-owned lock/history and delayed old-process exit checks
+remain unchanged. The journal is private format 3. Fresh native validation is
+pending; this is not shared platform-index, SIGKILL, HTTP continuity or host-loss
+acceptance, and the normal managed V3 entrypoint remains off.

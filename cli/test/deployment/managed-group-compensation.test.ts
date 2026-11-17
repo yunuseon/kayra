@@ -101,3 +101,13 @@ test("an uncertain group write poisons the live owner and restart reconciles pen
   await lab.reopen(); const done = await lab.drive(); assert.equal(done.phase, "verified"); assert.equal(done.deadline, initial.deadline);
   assert.equal(lab.effects.filter((action) => action.service === "web" && action.effect === "restore").length, 1);
 });
+
+test("a persisted parent phase entry fixes recovery's deadline before its first child intent", async (t) => {
+  const lab = await fixture(t); lab.now(2000); const intent = await lab.owner().prepare(lab.input, 1000); assert.equal(intent.createdAt, 1000); assert.equal(intent.deadline, 91000);
+  await lab.reopen(); assert.deepEqual(await lab.owner().prepare(lab.input, 1000), intent); await assert.rejects(lab.owner().prepare(lab.input, 2000), /conflicts/);
+  lab.now(91000); assert.equal((await lab.owner().tick()).phase, "held"); assert.equal(lab.effects.length, 0);
+});
+
+test("a restart gap cannot create a fresh recovery window from an already expired phase entry", async (t) => {
+  const lab = await fixture(t); lab.now(91000); await assert.rejects(lab.owner().prepare(lab.input, 1000), /expired/); assert.equal(await lab.journal().read(), undefined); assert.equal(lab.effects.length, 0);
+});

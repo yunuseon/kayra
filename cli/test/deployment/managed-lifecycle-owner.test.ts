@@ -22,37 +22,38 @@ import type { JobPlan } from "../../src/contracts/one-shot-job.ts";
 import { managedLifecycleOwner } from "../../src/server/deployment/managed-lifecycle-owner.ts";
 import { parseManagedLifecycleStore } from "../../src/server/deployment/managed-lifecycle-store.ts";
 import { parseManagedRelease, managedReleaseBaselines } from "../../src/server/deployment/managed-release.ts";
-import { reserveManagedTransition } from "../../src/server/deployment/managed-transition.ts";
-import { parseResourceBook, settleResources } from "../../src/server/deployment/resource-book.ts";
+import { fenceUnstartedManagedAdmission, observeManagedAdmission, reserveManagedAdmission, settleManagedAdmission } from "../../src/server/deployment/managed-admission-binding.ts";
+import type { ManagedAdmissionAccounting } from "../../src/server/deployment/managed-admission-binding.ts";
+import { parseResourceBook } from "../../src/server/deployment/resource-book.ts";
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 
 const fixture = async (t: TestContext, maintenance = false, migrations: boolean | "unknown" = false, unsafe = false, checked = false) => {
   const { plan } = await managedPlanFixture(); const parsed = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance }, rollout: { ...plan.rollout, checks: checked ? [{ id: "verify", service: "worker", command: ["node", "verify.mjs"], timeout_seconds: 2 }] : [], strategy: maintenance ? "maintenance" : "rolling", rollback_compatible: !unsafe, migrations: migrations === "unknown" ? plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["node", "status.mjs"], timeout_seconds: 10 } })) : migrations ? plan.rollout.migrations : [] } }); assert.ok(parsed.ok); const candidate = parsed.value;
   const source = parseManagedLifecycleSource({ version: 1, candidate, previous: null, run: randomUUID(), action: candidate.infrastructure.ownership.incarnation + ":2", createdAt: 1000, retained: [], retired: [] });
-  const path = await mkdtemp(join(tmpdir(), "kayra-managed-owner-")); const artifacts = await openArtifactStore(join(path, "artifacts")); let journal = await openJournal(path); let clock = 1000; let book: unknown = null; let binding: string | undefined; let reserveCalls = 0; let settleCalls = 0; let loseReserve = false; let loseSettle = false; let authorize = true; let loseJobStart = false;
+  const path = await mkdtemp(join(tmpdir(), "kayra-managed-owner-")); const artifacts = await openArtifactStore(join(path, "artifacts")); let journal = await openJournal(path); let clock = 1000; let accounting: ManagedAdmissionAccounting = { resources: null, bindings: [] }; let reserveCalls = 0; let settleCalls = 0; let loseReserve = false; let loseSettle = false; let authorize = true; let loseJobStart = false;
   const native = new Map<string, ServiceObservation>(); const calls: ManagedServiceAction[] = []; let routes = true;
   const observation = { status: "ready", engine: "29.9.3", api: "1.56", node: candidate.host.node, cluster: candidate.host.cluster, network: candidate.host.network.id, capacity: { cpu: candidate.host.profile.cpu_millicores, memory: candidate.host.profile.memory_bytes }, standing: { cpu: candidate.host.profile.platform_cpu_millicores, memory: candidate.host.profile.platform_memory_bytes } } as const;
   const admission: ManagedAdmissionPort = {
     reserve: (identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim) => {
-      reserveCalls++; const result = reserveManagedTransition(book, observation, claim, Number(identity.action.split(":")[1]), identity.deadline, clock); if (!result.ok) return Promise.resolve("refused"); book = result.value; binding = JSON.stringify(identity);
+      reserveCalls++; const result = reserveManagedAdmission(accounting, observation, identity, claim, clock); if (!result.ok) return Promise.resolve("refused"); accounting = result.value;
       return loseReserve ? Promise.reject(new Error("lost reservation acknowledgement")) : Promise.resolve("reserved");
     },
-    observe: (identity) => {
-      if (book === null) return Promise.resolve("absent"); const checked = parseResourceBook(book); assert.ok(checked.ok); const charge = checked.value.charges[0]; assert.ok(charge);
-      if (charge.sequence < Number(identity.action.split(":")[1]) && charge.result !== "pending") return Promise.resolve("absent"); if (binding !== JSON.stringify(identity)) return Promise.resolve("foreign");
-      return Promise.resolve(charge.result === "pending" ? "reserved" : charge.result === "target" ? "settled-target" : charge.result === "previous" ? "settled-previous" : "settled-absent");
-    },
-    settle: (identity, _claim, result) => {
-      settleCalls++; const next = settleResources(book, identity.owner.app, identity.owner.incarnation, Number(identity.action.split(":")[1]), result); assert.ok(next.ok); book = next.value;
+    observe: (identity, claim) => { const result = observeManagedAdmission(accounting, identity, claim); return Promise.resolve(result.ok ? result.value : "unavailable"); },
+    settle: (identity, claim, result) => {
+      settleCalls++; const next = settleManagedAdmission(accounting, identity, claim, result); assert.ok(next.ok); accounting = next.value;
       return loseSettle ? Promise.reject(new Error("lost settlement acknowledgement")) : Promise.resolve("settled");
+    },
+    settleUnstarted: (identity, claim) => {
+      settleCalls++; const next = fenceUnstartedManagedAdmission(accounting, identity, claim); if (!next.ok) return Promise.resolve("refused"); accounting = next.value;
+      return loseSettle ? Promise.reject(new Error("lost unstarted settlement acknowledgement")) : Promise.resolve("settled");
     },
   };
   const services = {
     observe: (scope: ManagedServiceScope) => Promise.resolve(native.get(scope.service) ?? { status: "absent" as const }),
     observeDesired: (action: ManagedServiceAction, spec: ManagedServicePlan) => { const value = native.get(action.service); return Promise.resolve(value?.status === "owned" ? { ...value, specMatches: value.plan === managedServiceDigest(spec) } : { status: "absent" as const }); },
     apply: async (action: ManagedServiceAction, expected: ServiceVersion | null, spec: ManagedServicePlan) => {
-      const ledger = parseResourceBook(book); assert.ok(ledger.ok); assert.equal(ledger.value.charges[0]?.result, "pending"); const state = await owner.read(); assert.ok(state); const effect = action.effect === "restore" ? state.operation.recovery?.nodes.find((value) => value.name === spec.service)?.child?.attempts.at(-1) : spec.role === "retained-dependency" ? state.operation.preparation?.nodes.find((value) => value.name === spec.service)?.execution : state.operation.consumers?.nodes.find((value) => value.name === spec.service)?.execution; assert.equal(effect?.phase, "observing");
+      const ledger = parseResourceBook(accounting.resources); assert.ok(ledger.ok); assert.equal(ledger.value.charges[0]?.result, "pending"); const state = await owner.read(); assert.ok(state); const effect = action.effect === "restore" ? state.operation.recovery?.nodes.find((value) => value.name === spec.service)?.child?.attempts.at(-1) : spec.role === "retained-dependency" ? state.operation.preparation?.nodes.find((value) => value.name === spec.service)?.execution : state.operation.consumers?.nodes.find((value) => value.name === spec.service)?.execution; assert.equal(effect?.phase, "observing");
       if (!(await owner.source()).candidate.rollout.rollback_compatible) assert.ok(state.operation.compatibilityFencedAt);
       const before = native.get(action.service); assert.equal(expected?.version ?? null, before?.status === "owned" ? before.version : null); calls.push(action);
       native.set(action.service, { status: "owned", id: action.service.padEnd(25, "s"), version: before?.status === "owned" ? before.version + 1 : 1, action: action.action, effect: action.effect, taskEffect: action.effect, plan: action.plan, taskPlan: action.plan, specMatches: true, tombstone: false, retainedInputsCleared: false, containersStopped: false, containersConverged: true, replicas: 1, endpoint: "vip", update: "completed", tasks: [{ id: action.service.padEnd(25, "t"), incarnation: action.incarnation, action: action.action, effect: action.effect, plan: action.plan, desired: "running", state: "running", health: "healthy" }] }); return "acknowledged" as const;
@@ -81,16 +82,20 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
     observe: (_plan, id) => Promise.resolve(execs.has(id) ? { status: "owned", id, running: false, exitCode: execs.get(id)?.code ?? null } : { status: "absent" }),
   };
   const ports = { ...artifacts, now: () => clock, admission, services, checks: checked ? checks : undefined, authorize: () => Promise.resolve(authorize), jobs, readiness: { check: (action: ManagedServiceAction) => Promise.resolve({ app: action.app, incarnation: action.incarnation, service: action.service, action: action.action, plan: action.plan, checkedAt: clock, status: routes || action.effect === "restore" ? "ready" as const : "unready" as const }) } };
+  let unstartedCut: "before" | "after" | null = null;
   let resolutionCut: "before" | "after" | null = null;
   const view = () => ({ read: journal.read, write: async (raw: Parameters<typeof journal.write>[0]) => {
+    const unstarted = parseManagedLifecycleStore(raw).operation.unstartedAt !== null;
+    if (unstarted && unstartedCut === "before") throw new Error("injected before unstarted write");
     const auditing = parseManagedLifecycleStore(raw).operation.preparation?.sequence?.steps.some((step) => step.resolution !== undefined) ?? false;
-    if (auditing && resolutionCut === "before") throw new Error("injected before audit write"); await journal.write(raw); if (auditing && resolutionCut === "after") throw new Error("injected lost audit acknowledgement");
+    if (auditing && resolutionCut === "before") throw new Error("injected before audit write"); await journal.write(raw); if (unstarted && unstartedCut === "after") throw new Error("injected lost unstarted acknowledgement"); if (auditing && resolutionCut === "after") throw new Error("injected lost audit acknowledgement");
   } });
   let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
-  return { source, calls, nodes, artifacts, checkStarts, probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => book, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
+  return { source, calls, nodes, artifacts, checkStarts, probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
+    cutUnstarted: (where: "before" | "after") => { unstartedCut = where; },
     cutResolution: (where: "before" | "after") => { resolutionCut = where; },
-    reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
+    reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; unstartedCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
     drive: async () => { for (let i = 0; i < 100; i++) { const value = await owner.tick(); if (value?.operation.phase === "complete" || value?.operation.phase === "held") return value; } throw new Error("managed lifecycle did not settle"); },
   };
 };
@@ -116,8 +121,8 @@ test("interruption between phase handoff and preparation intent cannot mint a fr
   await lab.reopen(); lab.clock(admitted.operation.enteredAt + 90000); const held = await lab.owner().tick(); assert.equal(held?.operation.phase, "held"); assert.equal(held.operation.reason, "deadline"); assert.equal(lab.calls.length, 0);
 });
 
-test("cancellation before native effects holds the operation and its pending resource charge rather than inventing cleanup", async (t) => {
-  const lab = await fixture(t); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().cancel(); const held = await lab.owner().tick(); assert.equal(held?.operation.phase, "held"); assert.equal(held.operation.reason, "cancellation"); assert.equal(held.active, null); assert.equal(lab.settleCalls(), 0); assert.equal(lab.calls.length, 0);
+test("cancellation before native effects durably fences a pending reservation without inventing cleanup", async (t) => {
+  const lab = await fixture(t); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().cancel(); const intent = await lab.owner().tick(); assert.equal(intent?.operation.phase, "settling"); assert.equal(intent.operation.failure?.reason, "cancellation"); assert.equal(intent.active, null); await lab.reopen(); const done = await lab.drive(); assert.equal(done.operation.phase, "complete"); assert.equal(done.operation.outcome, "absent"); assert.equal(lab.settleCalls(), 1); assert.equal(lab.calls.length, 0);
 });
 
 test("revoking operator authority after admission prevents retained startup and preserves the pending charge", async (t) => {
@@ -280,4 +285,35 @@ test("initial cleanup after known irreversible migration preserves the compatibi
   const lab = await fixture(t, true, true, true, true); await lab.owner().begin(lab.source); lab.checkMode("fail"); const failed = await lab.drive(); assert.equal(failed.compatibilityEpoch, 1);
   const done = await lab.drive(); assert.equal(done.operation.outcome, "absent"); assert.equal(done.compatibilityEpoch, 1); assert.equal(done.active, null); assert.equal(done.lastGood, null); assert.equal(lab.calls.some((action) => action.effect === "restore"), false);
   assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), 1); assert.equal(done.operation.recovery?.nodes.find((node) => node.name === "db")?.child?.barrier?.phase, "complete");
+});
+
+for (const reserve of [false, true]) test(`unstarted cancellation survives lost accounting ACK after expiry (reserved=${String(reserve)})`, async (t) => {
+  const lab = await fixture(t); await lab.owner().begin(lab.source); if (reserve) await lab.owner().tick();
+  await lab.owner().cancel(); lab.clock(999999); const intent = await lab.owner().tick(); assert.equal(intent?.operation.phase, "settling"); assert.equal(intent.operation.admitted, false);
+  const deadline = intent.operation.deadline; lab.loseSettle(); await lab.owner().tick(); assert.equal((await lab.owner().read())?.operation.phase, "settling");
+  await lab.reopen(); const done = await lab.owner().tick(); assert.equal(done?.operation.phase, "complete"); assert.equal(done.operation.deadline, deadline); assert.equal(done.operation.recovery, null); assert.equal(done.active, null); assert.equal(lab.calls.length, 0); assert.equal(lab.settleCalls(), 1);
+  const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "absent");
+});
+
+test("cancelled unstarted replacement preserves the old verified pointer without promoting a release", async (t) => {
+  const lab = await fixture(t); await lab.owner().begin(lab.source); const first = await lab.drive(); assert.ok(first.active);
+  const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(first.active.record)));
+  const retained = managedReleaseBaselines(previous).filter((value) => previous.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
+  const source = parseManagedLifecycleSource({ ...lab.source, previous, retained, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3" });
+  await lab.owner().begin(source); await lab.owner().cancel(); await lab.owner().tick(); await lab.reopen(); const done = await lab.drive();
+  assert.equal(done.operation.outcome, "unchanged"); assert.equal(done.operation.settlement, "previous"); assert.deepEqual(done.active, first.active); assert.deepEqual(done.lastGood, first.lastGood); assert.equal(lab.calls.length, 3);
+  assert.equal((await lab.owner().begin({ ...source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":4" })).operation.phase, "admitting");
+});
+
+for (const cut of ["before", "after"] as const) test(`unstarted intent survives interruption ${cut} journal replacement before capacity is released`, async (t) => {
+  const lab = await fixture(t); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().cancel(); lab.cutUnstarted(cut);
+  await assert.rejects(lab.owner().tick(), /synchronization uncertain/); assert.equal(lab.settleCalls(), 0);
+  const pending = parseResourceBook(lab.book()); assert.ok(pending.ok); assert.equal(pending.value.charges[0]?.result, "pending");
+  await lab.reopen(); lab.clock(999999); const done = await lab.drive(); assert.equal(done.operation.phase, "complete"); assert.equal(done.operation.outcome, "absent"); assert.equal(lab.calls.length, 0); assert.equal(lab.settleCalls(), 1);
+});
+
+test("an existing workload preparation intent prevents metadata-only cancellation settlement", async (t) => {
+  const lab = await fixture(t); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().tick(); await lab.owner().tick();
+  assert.ok((await lab.owner().read())?.operation.preparation); await lab.owner().cancel(); const held = await lab.owner().tick();
+  assert.equal(held?.operation.unstartedAt, null); assert.notEqual(held.operation.phase, "settling"); assert.equal(lab.settleCalls(), 0);
 });

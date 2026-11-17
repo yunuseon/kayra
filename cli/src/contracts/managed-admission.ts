@@ -25,5 +25,7 @@ export type ManagedAdmissionPort = {
   readonly reserve: (identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim) => Promise<"reserved" | "refused" | "uncertain">;
   readonly observe: (identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim) => Promise<"reserved" | "settled-target" | "settled-previous" | "settled-absent" | "absent" | "foreign" | "unavailable">;
   /** A pending/expired lease stays charged until the owning lifecycle supplies complete effect-fencing evidence. */
+  /** Requires a synchronized root proof that no workload effect intent exists; closes late reservation races in the same accounting writer. */
+  readonly settleUnstarted: (identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim) => Promise<"settled" | "uncertain" | "refused">;
   readonly settle: (identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim, result: "target" | "previous" | "absent") => Promise<"settled" | "uncertain" | "refused">;
 };

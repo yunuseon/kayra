@@ -62,3 +62,24 @@ export const settleManagedAdmission = (input: unknown, requested: ManagedAdmissi
   const identity = checked.value.identity; const next = settleResources(state.value.resources, identity.owner.app, identity.owner.incarnation, sequence(identity), result);
   return next.ok ? parseManagedAdmissionAccounting({ ...state.value, resources: next.value }) : next;
 };
+
+/** Metadata-only terminal fence. The caller must first durably prove that no workload effect has an intent. This also closes a delayed reservation racing cancellation, without requiring candidate capacity or a renewed deadline. */
+export const fenceUnstartedManagedAdmission = (input: unknown, requested: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim) => {
+  const state = parseManagedAdmissionAccounting(input); const checked = claimFor(requested, claim); const observed = observeManagedAdmission(input, requested, claim);
+  if (!state.ok || !checked.ok || !observed.ok) return err("invalid unstarted managed admission");
+  const result = checked.value.claim.previous === null ? "absent" : "previous";
+  if (observed.value === "reserved" || observed.value === `settled-${result}`) return settleManagedAdmission(input, requested, claim, result);
+  if (observed.value !== "absent") return err("unstarted managed admission conflicts");
+  const identity = checked.value.identity; const expected = checked.value.claim;
+  const book = state.value.resources ?? { version: 1, host: expected.plan.host, charges: [] };
+  if (!same(book.host, expected.plan.host)) return err("unstarted managed admission host changed");
+  const old = book.charges.find((value) => value.app === identity.owner.app);
+  const active = old?.result === "target" ? old.target : old?.result === "previous" ? old.previous : null;
+  const previous = expected.previous === null || expected.resources.previous === null ? null : { plan: managedApplicationDigest(expected.previous), budget: expected.resources.previous };
+  if (old?.result === "pending" || !same(active, previous)) return err("unstarted managed admission previous charge changed");
+  const resources = { ...book, charges: [...book.charges.filter((value) => value.app !== identity.owner.app), {
+    app: identity.owner.app, incarnation: identity.owner.incarnation, sequence: sequence(identity), previous,
+    target: { plan: expected.planDigest, budget: expected.resources.target }, peak: expected.resources.peak, deadline: identity.deadline, result,
+  }] };
+  return parseManagedAdmissionAccounting({ resources, bindings: [...state.value.bindings.filter((value) => value.owner.app !== identity.owner.app), identity] });
+};

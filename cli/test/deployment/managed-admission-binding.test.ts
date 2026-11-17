@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { managedPlanFixture } from "./managed-plan-fixture.ts";
 import { managedAdmissionDescription } from "../../src/server/deployment/managed-transition.ts";
 import { parseManagedAdmissionIdentity } from "../../src/contracts/managed-admission.ts";
-import { observeManagedAdmission, parseManagedAdmissionAccounting, reserveManagedAdmission, settleManagedAdmission } from "../../src/server/deployment/managed-admission-binding.ts";
+import { fenceUnstartedManagedAdmission, observeManagedAdmission, parseManagedAdmissionAccounting, reserveManagedAdmission, settleManagedAdmission } from "../../src/server/deployment/managed-admission-binding.ts";
 import { reserveResources } from "../../src/server/deployment/resource-book.ts";
 
 const fixture = async () => {
@@ -73,4 +73,42 @@ test("missing or corrupted charge bindings fail closed without reconstructing ow
     assert.equal(parseManagedAdmissionAccounting(input).ok, false); assert.equal(observeManagedAdmission(input, identity, claim).ok, false);
     assert.equal(reserveManagedAdmission(input, observation, identity, claim, 1000).ok, false); assert.equal(settleManagedAdmission(input, identity, claim, "absent").ok, false);
   }
+});
+
+for (const reserveFirst of [false, true]) test(`unstarted terminal fence closes either reservation race ordering (${String(reserveFirst)})`, async () => {
+  const { empty, identity, claim, observation } = await fixture();
+  const before = reserveFirst ? reserveManagedAdmission(empty, observation, identity, claim, 1000) : parseManagedAdmissionAccounting(empty); assert.ok(before.ok);
+  const closed = fenceUnstartedManagedAdmission(before.value, identity, claim); assert.ok(closed.ok);
+  assert.deepEqual(observeManagedAdmission(closed.value, identity, claim), { ok: true, value: "settled-absent" });
+  assert.deepEqual(fenceUnstartedManagedAdmission(closed.value, identity, claim), closed);
+  assert.equal(reserveManagedAdmission(closed.value, observation, identity, claim, 1000).ok, false);
+  assert.equal(reserveManagedAdmission(closed.value, observation, identity, claim, 999999).ok, false);
+  assert.equal(fenceUnstartedManagedAdmission(closed.value, { ...identity, source: "f".repeat(64) }, claim).ok, false);
+});
+
+test("unstarted update preserves the exact previous budget and permits only a later run to reserve", async () => {
+  const { empty, identity, claim, observation, plan } = await fixture();
+  const reserved = reserveManagedAdmission(empty, observation, identity, claim, 1000); assert.ok(reserved.ok);
+  const active = settleManagedAdmission(reserved.value, identity, claim, "target"); assert.ok(active.ok);
+  const update = managedAdmissionDescription(plan, plan); assert.ok(update.ok);
+  const next = { ...identity, run: randomUUID(), action: identity.owner.incarnation + ":3" };
+  assert.equal(fenceUnstartedManagedAdmission(active.value, next, claim).ok, false);
+  const closed = fenceUnstartedManagedAdmission(active.value, next, update.value); assert.ok(closed.ok);
+  const charge = closed.value.resources?.charges.find((value) => value.app === identity.owner.app);
+  assert.ok(charge); assert.equal(charge.result, "previous"); assert.deepEqual(charge.previous, active.value.resources.charges[0]?.target);
+  assert.equal(reserveManagedAdmission(closed.value, observation, next, update.value, 1000).ok, false);
+  assert.equal(reserveManagedAdmission(closed.value, observation, { ...next, action: identity.owner.incarnation + ":4", run: randomUUID() }, update.value, 1000).ok, true);
+});
+
+test("unstarted fencing needs no candidate capacity and cannot adopt legacy or foreign pending actions", async () => {
+  const { plan, empty, identity, claim, observation } = await fixture();
+  const budget = { cpu: plan.host.profile.cpu_millicores - plan.host.profile.platform_cpu_millicores, memory: claim.resources.peak.memory };
+  const legacy = reserveResources(null, plan.host, observation, { app: "legacy", incarnation: randomUUID(), sequence: 1, target: { plan: "b".repeat(64), budget }, previous: null, peak: budget, deadline: 91000, result: "pending" }, 1000); assert.ok(legacy.ok);
+  const closed = fenceUnstartedManagedAdmission({ ...empty, resources: legacy.value }, identity, claim); assert.ok(closed.ok);
+  assert.deepEqual(closed.value.resources?.charges[0], legacy.value.charges[0]);
+  const reserved = reserveManagedAdmission(empty, observation, identity, claim, 1000); assert.ok(reserved.ok);
+  assert.equal(fenceUnstartedManagedAdmission({ resources: reserved.value.resources, bindings: [] }, identity, claim).ok, false);
+  assert.equal(fenceUnstartedManagedAdmission(reserved.value, { ...identity, run: randomUUID() }, claim).ok, false);
+  assert.equal(fenceUnstartedManagedAdmission(reserved.value, { ...identity, action: identity.owner.incarnation + ":3" }, claim).ok, false);
+  assert.equal(fenceUnstartedManagedAdmission(closed.value, { ...identity, action: identity.owner.incarnation + ":1" }, claim).ok, false);
 });

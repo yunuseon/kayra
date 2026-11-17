@@ -25,3 +25,9 @@ export const managedRecoveredInventoryCarry = (input: ManagedLifecycleSource, re
   const retained = [...source.retired.filter((item) => !inactive.some((value) => value.plan.service === item.plan.service) && source.previous?.source.application.services[item.plan.service] === undefined), ...inactive];
   return canonical(retained) === canonical(candidate.retired) ? ok(undefined) : err("managed lifecycle must preserve dependencies retired by verified recovery");
 };
+
+/** An unstarted candidate never reactivated or retired a dependency. Preserve the entire authenticated inactive inventory. */
+export const managedUnstartedInventoryCarry = (previous: ManagedLifecycleSource, next: ManagedLifecycleSource) => {
+  const before = parseManagedLifecycleSource(previous); const after = parseManagedLifecycleSource(next);
+  return canonical(before.retired) === canonical(after.retired) ? ok(undefined) : err("unstarted lifecycle must preserve its inactive dependency inventory");
+};

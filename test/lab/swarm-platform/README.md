@@ -1966,5 +1966,18 @@ then reactivates the unchanged database and starts compatible workers without
 rerunning the migration. The app-owned ledger must retain schema 2, its one
 original operation, zero violations and the original volume receipt/native DB
 identity. This tests private cleanup/reactivation, not indexed removal/purge,
-SQL, unknown-check cleanup or SIGKILL acceptance. Fresh native validation is
-pending.
+SQL, unknown-check cleanup or SIGKILL acceptance.
+
+The fresh run at `2a6b995`, VM `kayra-volume-lab-20261117224831800875`,
+passed and was destroyed. The initial unsafe migration applied schema 2 once;
+cleanup and explicit retry preserved the database native identity, volume receipt
+and original migration operation with zero app-ledger violations. The complete
+singleton/maintenance/audited-recovery group also passed (16,833 API requests).
+Engine/CLI 29.10.0/API 1.57, Compose 5.7.1, Node v24.22.1 and Ubuntu
+24.04.5 ARM64 were recorded with private raw artifacts and SHA-256 manifests.
+
+The singleton fixture additionally exercises unreserved and reserved cancellation
+before any workload intent, reopens across the settlement boundary and loses one
+accounting acknowledgement. It requires an unchanged verified release, native
+service version and task identities. Validation of this new cancellation variant
+is pending.

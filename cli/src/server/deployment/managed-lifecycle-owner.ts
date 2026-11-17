@@ -22,6 +22,7 @@ import { managedGroupVerification } from "./managed-group-verification.ts";
 import type { OperationJournal } from "./operation.ts";
 import { createHash } from "node:crypto";
 import { managedGroupCompensation } from "./managed-group-compensation.ts";
+import { managedUnstartedSource } from "./managed-unstarted-source.ts";
 import { managedRecoverySource, verifyManagedRecoveryJobs } from "./managed-recovery-safety.ts";
 
 export type ManagedLifecycleEffect = { readonly kind: "admission" | "verify" | "recovery" } | { readonly kind: "service"; readonly action: ManagedServiceAction } |
@@ -84,10 +85,16 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
       const result = current.operation.settlement; if (result === null) throw new Error("managed lifecycle settlement outcome missing");
       const observed = await bounded(ports.now() + 10_000, () => ports.admission.observe(lease, description.admission));
       if (observed === `settled-${result}`) return store.settle();
+      if (current.operation.unstartedAt !== null) {
+        if (await bounded(ports.now() + 10_000, () => ports.admission.settleUnstarted(lease, description.admission)) === "settled") return store.settle();
+        return store.read();
+      }
       if (observed !== "reserved") return current;
       if (await bounded(ports.now() + 10_000, () => ports.admission.settle(lease, description.admission, result)) === "settled") return store.settle(); return store.read();
     }
     if (phase === "held") {
+      const unstarted = (() => { try { managedUnstartedSource(current, source); return true; } catch { return false; } })();
+      if (unstarted) return store.beginUnstarted(hash(JSON.stringify(current.operation)));
       if (current.operation.recoverySource !== null || source.previous !== null && ports.services.fence === undefined) return current;
       const at = ports.now(); try { managedRecoverySource(current, source, at); } catch { return current; }
       const prefix = current.operation.preparation; if (prefix === null) return current;

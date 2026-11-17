@@ -80,6 +80,6 @@ test("recorded retired services may resume their existing shared volume but cann
   const input = { ...f.input, candidate: candidate.value, retired: [before, { plan: cache, barrier }] };
   const result = await prepareManagedInventoryTransition(input, ports, 91000); assert.ok(result.ok); assert.deepEqual(result.value.reactivation.map((value) => value.name).toSorted(), ["cache", "db"]);
   const changed = { ...candidate.value, services: { ...candidate.value.services, cache: { ...cache, command: ["different-engine"] } } }; assert.equal((await prepareManagedInventoryTransition({ ...input, candidate: changed }, ports, 91000)).ok, false);
-  const alias = { ...candidate.value, services: { ...candidate.value.services, archive: { ...cache, service: "archive", nativeName: managedServiceName(cache.owner, "archive") } }, rollout: { ...candidate.value.rollout, services: { ...candidate.value.rollout.services, archive: { role: "retained-dependency", overlap: "forbidden" } } } };
-  assert.equal((await prepareManagedInventoryTransition({ ...input, candidate: alias }, ports, 91000)).ok, false);
+  const alias = parseManagedApplicationPlan({ ...candidate.value, services: { ...candidate.value.services, archive: { ...cache, service: "archive", nativeName: managedServiceName(cache.owner, "archive") } }, rollout: { ...candidate.value.rollout, services: { ...candidate.value.rollout.services, archive: { role: "retained-dependency", overlap: "forbidden" } } } }); assert.ok(alias.ok);
+  assert.equal((await prepareManagedInventoryTransition({ ...input, candidate: alias.value }, ports, 91000)).ok, false);
 });

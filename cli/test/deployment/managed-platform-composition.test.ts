@@ -30,6 +30,15 @@ test("empty managed health snapshots do not inspect Docker or borrow unregistere
   assert.deepEqual(await snapshot.services.observe({ app: "other", incarnation: randomUUID(), dataOwner: randomUUID(), service: "worker" }), { status: "unavailable" });
 });
 
+test("managed health composes Docker's 404 service absence response through read-only native ports", async (t) => {
+  const lab = await managedIndexFixture(t); const context = managedSourceContext(lab.source); const methods: string[] = [];
+  const owner = managedPlatform({ ...lab.index(), managedHealthContexts: () => Promise.resolve([context]) }, { publicRegistrations: "missing", privateRegistrations: "missing", swarmAuthority: "missing", migrationPolicy: "missing", domain: "lab.test" }, {
+    api: { request: (method) => { methods.push(method); return Promise.resolve({ status: 404, value: null }); } }, builds: { ...lab.artifacts, now: lab.runtime.now, prepare: () => Promise.reject(new Error("unexpected build")), images: () => [] }, canAccess: () => Promise.resolve(true),
+  });
+  const health = await owner.healthSnapshot(); assert.deepEqual(methods, []);
+  assert.deepEqual(await health.services.observe({ app: lab.ownership.app, incarnation: lab.ownership.incarnation, dataOwner: lab.ownership.dataOwner, service: "worker" }), { status: "absent" }); assert.deepEqual(methods, ["GET"]);
+});
+
 test("the configured deployer starts and closes managed recovery without enabling mutations or requiring a Docker daemon for empty work", async (t) => {
   const path = await mkdtemp(join(tmpdir(), "kayra-managed-bootstrap-")); await mkdir(join(path, "managed-apps")); await mkdir(join(path, "lifecycle"));
   const control = await startRegistrationControl({ platformDirectory: path, registrationObservations: join(path, "observations"), publicRegistrations: join(path, "public"), privateRegistrations: join(path, "private"), swarmAuthority: join(path, "host.json"), migrationPolicy: join(path, "policy.json"), domain: "lab.test" });

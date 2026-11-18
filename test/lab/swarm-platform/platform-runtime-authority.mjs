@@ -57,7 +57,7 @@ export const observePlatformRuntimeAuthority = async (output) => {
   const index = { managedHealthContexts: async () => [context], recordedManagedVolumes: async () => [], managedRequestSource: unexpected, prepareBuild: unexpected, registrationPolicy: unexpected, reserveDataVolumeIdentities: unexpected, proposeManagedDeployment: unexpected, requestManagedDeployment: unexpected };
   const assembled = managedPlatform(index, { publicRegistrations: join(root, 'public'), privateRegistrations: join(root, 'private'), swarmAuthority: join(root, 'host.json'), migrationPolicy: join(root, 'migration-policy.json'), domain: 'lab.test' }, {
     canAccess: async () => true, builds: { now: Date.now, read: async () => bytes, retain: unexpected, prepare: unexpected, images: () => [] },
-    api: { request: async (method) => { assert.equal(method, 'GET'); nativeReads.push(method); return { status: 200, value: [] }; } },
+    api: { request: async (method) => { assert.equal(method, 'GET'); nativeReads.push(method); return { status: 404, value: null }; } },
   });
   await assembled.work.forRun(context); assert.deepEqual(nativeReads, []);
   const health = await assembled.healthSnapshot(); assert.deepEqual(nativeReads, []); const observed = await health.services.observe({ app: context.owner.app, incarnation: context.owner.incarnation, dataOwner: context.owner.dataOwner, service: 'worker' }); assert.equal(observed.status, 'absent'); assert.ok(nativeReads.length > 0);

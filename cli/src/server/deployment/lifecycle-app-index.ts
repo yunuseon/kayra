@@ -283,6 +283,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),
     resolveManagedMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.resolve(request, actor)),
+    managedDeploymentImagePins: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.imagePins()),
     managedDeploymentHealth: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.health()),
     managedDeploymentStatus: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.status()),
     managedState: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.read()),

@@ -2027,3 +2027,20 @@ failed may still be available while status identifies the held deployment and
 previous verified active release. Availability neither certifies a new release
 nor establishes routed readiness. The host snapshot requires explicit managed
 observation ports and refuses their absence; normal managed dispatch stays off.
+
+### Managed deployment image pins
+
+The deployment owner publishes immutable application-plan and bundle identities
+with active, last-known-good, candidate, rollback and unresolved roles. It also
+exports images from retained retirement specifications so that scrubbed native
+workloads do not erase the last coordinator reference. Candidate images remain
+pinned after failure/cancellation as a conservative description of potentially
+retained native history.
+
+Status, health and pins share source/release evidence validation. Pin reads have
+no runtime effects or resolved inputs. They explicitly report `gcSafe: false`
+and `attachments: not-observed`; they are input for a later pin-aware collector,
+not permission to collect. Legacy destructive registry GC remains refused while
+coordinator-managed ownership records exist. Historical retention policy, live
+attachments, unresolved runtime references and platform image pins still require
+separate reconciliation before any collector can safely delete images.

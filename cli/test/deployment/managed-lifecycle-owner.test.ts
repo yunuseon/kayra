@@ -1,4 +1,5 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- models native effects, accounting and coordinator interruption */
+import { managedImagePins } from "../../src/server/deployment/managed-image-pins.ts";
 import { strict as assert } from "node:assert";
 import { createHash, randomUUID } from "node:crypto";
 import type { ManagedChecksPort, ContainerCheckPlan } from "../../src/contracts/container-check.ts";
@@ -284,7 +285,7 @@ test("a failed first release is fenced to absence, preserves its dependency data
   const retired = done.operation.recovery.nodes.flatMap((node) => { const spec = lab.source.candidate.services[node.name]; return spec?.role === "retained-dependency" ? [{ plan: spec, barrier: node.child?.barrier }] : []; }); assert.equal(retired.length, 1);
   const retained = retired.map(({ plan, barrier }) => { assert.ok(barrier?.proof); const step = barrier.steps.at(-1); assert.ok(step); return { name: plan.service, kind: "barrier", native: barrier.proof.native, action: { ...barrier.action, action: barrier.action.action + ":scrub:" + String(step.attempt), effect: "scrub" } }; });
   const next = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", retired, retained });
-  await assert.rejects(lab.owner().begin({ ...next, retired: [], retained: [] }), /preserve dependencies retired/); await lab.owner().begin(next); lab.checkMode("pass"); await lab.reopen();
+  await assert.rejects(lab.owner().begin({ ...next, retired: [], retained: [] }), /preserve dependencies retired/); await lab.owner().begin(next); const pinned = await managedImagePins(await lab.owner().read(), next, lab.artifacts); assert.equal(pinned.retired[0]?.service, "db"); assert.equal(pinned.retired[0].image, next.retired[0]?.plan.image); lab.checkMode("pass"); await lab.reopen();
   const retried = await lab.drive(); assert.equal(retried.operation.outcome, "deployed"); assert.ok(retried.active); assert.deepEqual((await lab.owner().source()).candidate.services["db"]?.mounts, lab.source.candidate.services["db"]?.mounts);
 });
 

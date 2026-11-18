@@ -42,7 +42,7 @@ paths = ['cli/src/contracts', 'cli/src/lib', 'cli/src/server/runtime/owned-volum
          'package.json', 'test/lab/stage-source.yml', 'test/lab/swarm-platform/volume-runtime.mjs',
          'test/lab/swarm-platform/volume-runtime.yml', 'ansible/roles/docker', 'ansible/ansible.cfg', 'ansible/callback_plugins', 'node_modules/zod']
 if args.platform_inputs:
-    paths += ['cli/src/server/platform', 'test/lab/swarm-platform/platform-inputs.mjs', 'test/lab/swarm-platform/platform-runtime-authority.mjs']
+    paths += ['cli/src/server/platform', 'cli/src/server/composition/managed-plans.ts', 'cli/src/server/deployment/managed-application-plan.ts', 'cli/src/server/deployment/environment-bindings.ts', 'cli/src/server/runtime/compose-description.ts', 'cli/src/server/runtime/managed-compose-description.ts', 'cli/src/deployer/brand.ts', 'cli/src/deployer/app.ts', 'cli/src/deployer/build/bundle.ts', 'cli/src/deployer/build/routes.ts', 'node_modules/yaml', 'test/lab/swarm-platform/platform-inputs.mjs', 'test/lab/swarm-platform/platform-runtime-authority.mjs']
 if args.image_admission:
     paths += ['cli/src/server/runtime/registry-images.ts', 'cli/src/server/runtime/image-json.ts', 'test/lab/swarm-platform/declared-images.mjs']
 if args.volume_state:

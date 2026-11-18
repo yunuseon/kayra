@@ -7,6 +7,7 @@ import { parseManagedApplicationPlan } from '../../../cli/src/contracts/managed-
 import { parseManagedExecutionContext } from '../../../cli/src/contracts/managed-execution-context.ts';
 import { managedServiceDigest, managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
 import { platformManagedRuntimeAuthority } from '../../../cli/src/server/platform/managed-runtime-authority.ts';
+import { platformManagedPlans } from '../../../cli/src/server/composition/managed-plans.ts';
 
 export const preparePlatformRuntimeAuthority = async (output, references) => {
   assert.equal(process.getuid(), 0); const root = join(output, 'input-fixtures'); const reference = references.baseline; const registration = reference.registration;
@@ -29,6 +30,9 @@ export const preparePlatformRuntimeAuthority = async (output, references) => {
     hosts: [], secrets: ['PASSWORD', 'UNUSED_TOKEN'], routes: [], images: [{ source: image, pull: image, os: 'linux', architecture: process.arch === 'x64' ? 'amd64' : process.arch }],
     rollout: { strategy: 'rolling', mixed_version_compatible: true, rollback_compatible: true, services: { worker: { role: 'worker', overlap: 'forbidden' } }, migrations: [], checks: [] }, policy: { version: 1, failureMonitorSeconds: 30, updateTimeoutSeconds: 90, rollbackTimeoutSeconds: 90, migrationTimeoutCeilingSeconds: 300, checkTimeoutCeilingSeconds: 90 }, services: { worker: service } }); assert.ok(application.ok, application.ok ? '' : application.error);
   const now = Date.now(); const context = parseManagedExecutionContext({ version: 1, protocol: 'managed-v3', runtime: 'swarm', owner, run: randomUUID(), action: incarnation + ':2', source: 'e'.repeat(64), application: application.value, previous: null, allocationRequired: true, createdAt: now, admissionDeadline: now + 90000, deadline: now + 900000 }); assert.ok(context.ok); await file(join(root, 'authority-context.json'), context.value);
+  const compose = { services: { worker: { image: '${WORKER_IMAGE}', command: ['/worker'], deploy: { resources: { limits: { memory: '32m', cpus: '0.1' }, reservations: { memory: '16m', cpus: '0.05' } } }, healthcheck: { test: ['CMD', '/health'], interval: '2s', timeout: '1s', start_period: '5s', retries: 2 }, stop_grace_period: '30s' } } };
+  const bundle = { sha: application.value.commit, registration, rollout: application.value.rollout, images: [{ variable: 'WORKER_IMAGE', ref: image }], compose: [{ path: 'compose.yml', content: JSON.stringify(compose) }], routes: [] };
+  await file(join(root, 'compiler-bundle.json'), bundle);
 };
 
 export const observePlatformRuntimeAuthority = async (output) => {
@@ -40,5 +44,13 @@ export const observePlatformRuntimeAuthority = async (output) => {
   const cleanupWithoutStartGrant = await port('public', 'unreadable-host.json').allowed(context, { kind: 'migration', effect: 'fence' }); assert.equal(cleanupWithoutStartGrant, true); assert.equal(await port('unreadable-owner').allowed(context, { kind: 'migration', effect: 'fence' }), false);
   const action = { app: context.owner.app, incarnation: context.owner.incarnation, dataOwner: context.owner.dataOwner, service: 'worker', action: context.action, effect: 'remove', plan: managedServiceDigest(context.application.services.worker), deadline: Date.now() + 90000 };
   assert.equal(await port('public', 'unreadable-host.json').allowed(context, { kind: 'service', purpose: 'deployment', action }), false); assert.equal(await port('public', 'unreadable-host.json').allowed(context, { kind: 'service', purpose: 'cleanup', action }), true);
-  return { accepted, refused, cleanupWithoutStartGrant, deploymentStopRefusedWithoutStartGrant: true, readerUid: process.getuid(), metadataOnly: true, scope: 'synthetic platform publication permission checks; no runtime effects, admission, deployment journal, image existence or live overlay proof' };
+  const bytes = await readFile(join(root, 'compiler-bundle.json'), 'utf8'); const artifact = createHash('sha256').update(bytes).digest('hex'); const registryUsages = [];
+  const compiler = (publicName = 'public', read = async () => bytes) => platformManagedPlans({ publicRegistrations: join(root, publicName), privateRegistrations: join(root, 'private'), swarmAuthority: join(root, 'host.json'), migrationPolicy: join(root, 'migration-policy.json'), domain: 'lab.test' }, { read, images: { resolveDeclared: async (app, usages) => {
+    assert.equal(app, context.owner.app); registryUsages.push(usages); return { status: 'accepted', images: context.application.images };
+  } } });
+  const args = [context.application.infrastructure.registration, context.application.commit, artifact];
+  assert.deepEqual(await compiler().volumeKeys(...args), []); assert.equal(registryUsages.length, 0);
+  const plan = await compiler().preview(...args, []); assert.equal(plan.commit, context.application.commit); assert.equal(plan.artifact, artifact); assert.equal(plan.configurationIdentity, context.application.configurationIdentity); assert.deepEqual(plan.infrastructure, context.application.infrastructure); assert.equal(plan.services.worker.inputs.registration.registrationGeneration, context.application.infrastructure.registration.registrationGeneration); assert.equal(registryUsages.length, 1);
+  await assert.rejects(compiler('wrong-current').volumeKeys(...args), /registration unavailable/); await assert.rejects(compiler('public', async () => '{}').volumeKeys(...args), /integrity/); await assert.rejects(compiler().volumeKeys(args[0], 'b'.repeat(40), artifact), /bundle unavailable/);
+  return { accepted, refused, cleanupWithoutStartGrant, deploymentStopRefusedWithoutStartGrant: true, platformCompiler: { passed: true, exactBundleIdentity: true, staleRegistrationRefused: true, corruptBundleRefused: true, wrongCommitRefused: true, declaredRegistryContexts: registryUsages.length, registryResolverSynthetic: true }, readerUid: process.getuid(), metadataOnly: true, scope: 'synthetic platform publication permission and compilation checks; no runtime effects, admission, deployment journal, image existence or live overlay proof' };
 };

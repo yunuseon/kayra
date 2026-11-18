@@ -2349,3 +2349,22 @@ an established root is opened strictly as existing. The normal proposal path
 refuses private allocation-protocol conversion rather than adopting pre-existing
 storage. Replays return their accepted source, and acceptance still revalidates
 scope, capability, history and admission independently.
+
+#### Immutable managed request preparation
+
+The deployment owner connects exact-commit build preparation, logical volume
+identity reservation, platform compilation and source-v2 acceptance through typed
+ports. An accepted run identity is looked up before building or compiling again;
+its original source and absolute deadlines survive lost acknowledgements. A
+completed retry returns its recorded receipt without composing runtime effects.
+Pending retries reconstruct runtime inputs from the owner's shared execution
+context. Compiler and runtime-factory waits are bounded to ten seconds; a late
+factory result cannot accept an operation. Acceptance independently checks the
+current registration, immutable build receipt and registered volumes.
+
+The native singleton fixture exercises this internal preparation path with a
+fixture compiler. The platform compiler adapter now reads exact immutable publications, validates
+bundle hashes and builder contracts, derives supported Compose descriptions and
+resolves registry image metadata separately for services and jobs. It opens no
+secret files. Normal public mutation dispatch remains integration work; this does not enable managed deployments for existing
+apps or convert their runtime.

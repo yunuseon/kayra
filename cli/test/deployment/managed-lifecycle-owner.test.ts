@@ -299,7 +299,8 @@ test("a failed first release is fenced to absence, preserves its dependency data
   const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "absent"); assert.equal(lab.calls.some((action) => action.effect === "restore"), false); assert.ok(done.operation.recovery);
   const retired = done.operation.recovery.nodes.flatMap((node) => { const spec = lab.source.candidate.services[node.name]; return spec?.role === "retained-dependency" ? [{ plan: spec, barrier: node.child?.barrier }] : []; }); assert.equal(retired.length, 1);
   const retained = retired.map(({ plan, barrier }) => { assert.ok(barrier?.proof); const step = barrier.steps.at(-1); assert.ok(step); return { name: plan.service, kind: "barrier", native: barrier.proof.native, action: { ...barrier.action, action: barrier.action.action + ":scrub:" + String(step.attempt), effect: "scrub" } }; });
-  const next = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", retired, retained });
+  const expected = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", retired, retained });
+  const next = await lab.owner().propose(lab.source.candidate, { version: 1, run: expected.run, action: expected.action, createdAt: expected.createdAt }, { compare: () => Promise.resolve("unchanged") }); assert.deepEqual(next, expected);
   await assert.rejects(lab.owner().begin({ ...next, retired: [], retained: [] }), /preserve dependencies retired/); await lab.owner().begin(next); const pinned = await managedImagePins(await lab.owner().read(), next, lab.artifacts); assert.equal(pinned.retired[0]?.service, "db"); assert.equal(pinned.retired[0].image, next.retired[0]?.plan.image); lab.checkMode("pass"); await lab.reopen();
   const retried = await lab.drive(); assert.equal(retried.operation.outcome, "deployed"); assert.ok(retried.active); assert.deepEqual((await lab.owner().source()).candidate.services["db"]?.mounts, lab.source.candidate.services["db"]?.mounts);
 });
@@ -402,4 +403,24 @@ test("allocation permission resolving after cancellation cannot create storage",
   const lab = await fixture(t, false, false, false, false, true); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().tick();
   const gate = lab.pauseAllocation(); const tick = lab.owner().tick(); await gate.entered; await lab.owner().cancel(); gate.release();
   assert.equal((await tick)?.operation.reason, "cancellation"); assert.equal(lab.volumeCalls.length, 0); assert.equal(lab.calls.length, 0);
+});
+
+test("the owning coordinator builds proposals from verified release evidence without writes or admission", async (t) => {
+  const lab = await fixture(t); const inputs = { compare: () => Promise.resolve("unchanged" as const) };
+  const first = await lab.owner().propose(lab.source.candidate, { version: 1, run: lab.source.run, action: lab.source.action, createdAt: lab.source.createdAt }, inputs); assert.deepEqual(first, lab.source);
+  assert.equal(await lab.owner().read(), undefined); assert.equal(lab.reserveCalls(), 0); assert.equal(lab.calls.length, 0);
+  await lab.owner().begin(first); const active = await lab.drive(); assert.equal(active.operation.phase, "complete");
+  const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40) }); assert.ok(candidate.ok); const request = { version: 1 as const, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", createdAt: 1000 };
+  const before = JSON.stringify(active); const calls = lab.calls.length; const book = JSON.stringify(lab.book()); const next = await lab.owner().propose(candidate.value, request, inputs);
+  assert.ok(next.previous); assert.equal(next.previous.verification.run, active.active?.run); assert.equal(next.retained.length, 1); assert.equal(next.retained[0]?.kind, "active"); assert.equal(JSON.stringify(await lab.owner().read()), before); assert.equal(JSON.stringify(lab.book()), book); assert.equal(lab.calls.length, calls);
+  await lab.owner().begin(next); lab.clock(999999); assert.deepEqual(await lab.owner().propose(candidate.value, { ...request, createdAt: 999999 }, inputs), next);
+  await assert.rejects(lab.owner().propose(candidate.value, { ...request, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":4", createdAt: 999999 }, inputs), /unresolved/);
+});
+
+test("proposal normalization refuses changed retained data specifications and foreign owners before runtime effects", async (t) => {
+  const lab = await fixture(t); await lab.owner().begin(lab.source); await lab.drive(); const before = await lab.owner().read(); const db = lab.source.candidate.services["db"]; assert.ok(db);
+  const changed = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40), services: { ...lab.source.candidate.services, db: { ...db, command: ["/other-engine"] } } }); assert.ok(changed.ok);
+  const request = { version: 1 as const, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", createdAt: 1000 };
+  let reads = 0; await assert.rejects(lab.owner().propose({ ...lab.source.candidate, infrastructure: { ...lab.source.candidate.infrastructure, ownership: { ...lab.source.candidate.infrastructure.ownership, dataOwner: randomUUID() } } }, request, { compare: () => { reads++; return Promise.resolve("unchanged"); } }), /ownership/); assert.equal(reads, 0);
+  await assert.rejects(lab.owner().propose(changed.value, request, { compare: () => Promise.resolve("unchanged") }), /retained|dependency/); assert.deepEqual(await lab.owner().read(), before); assert.equal(lab.reserveCalls(), 1);
 });

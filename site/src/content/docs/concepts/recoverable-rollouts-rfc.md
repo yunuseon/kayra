@@ -2317,3 +2317,35 @@ commit. Such a request is refused before admission and requires a new app releas
 or an explicitly supported audited forward-recovery path. History inspection
 retains its existing bounded metadata deadline. Unavailable/corrupt evidence
 never grants permission, and no database state is inferred from commit identity.
+
+### Deployment-owned proposal construction
+
+The owning coordinator can now construct a proposal from a validated candidate
+and its own verified release/history evidence. It derives the previous release,
+active retained dependencies, and inactive dependency barriers from recorded
+successful, recovered or unstarted outcomes. Platform code supplies immutable
+candidate data and an input-comparison port, not private root records or claimed
+native baselines. Retained specifications are normalized through the existing
+transition checks, including unchanged private inputs and resource envelopes.
+
+Proposal construction has no writer, native or admission port. It cannot reserve
+capacity, create volumes, start jobs or promote a release. The owning lifecycle
+writer validates the result again before acceptance; indexed acceptance must
+still bind the exact build receipt, registered volumes, action and current grants.
+Replaying an existing request returns its original source and deadlines; another
+request cannot displace an unresolved operation. New proposals default to private
+source version 2; version 1 remains an explicit internal compatibility path for
+older fixtures and does not acquire the new allocation guarantees.
+
+Normal builder/compiler/control orchestration remains subsequent integration.
+The native maintenance and dependency-reactivation probes use owner-built
+proposals while retaining explicit fixture input/accounting policy.
+
+The app index now binds proposal construction to its verified registration,
+registered volume identities and exact immutable build receipt. It selects the
+next action from the existing lifecycle fence and loads completed root evidence
+under the app writer. A new app's proposal does not initialize its root journal;
+an established root is opened strictly as existing. The normal proposal path
+refuses private allocation-protocol conversion rather than adopting pre-existing
+storage. Replays return their accepted source, and acceptance still revalidates
+scope, capability, history and admission independently.

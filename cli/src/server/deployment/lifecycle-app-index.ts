@@ -1,3 +1,7 @@
+import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
+import { parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
+import type { ManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
+import type { RetainedInputsPort } from "../../contracts/service-inputs.ts";
 import { parseManagedExecutionContext } from "../../contracts/managed-execution-context.ts";
 import { managedVolumePreparation } from "./managed-volume-preparation.ts";
 import { parseVolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
@@ -341,6 +345,32 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
+    proposeManagedDeployment: (app: string, candidateInput: ManagedApplicationPlan, run: string, ports: ManagedDeploymentReadPort & RetainedInputsPort) => useIndexed(app, async (store, indexed) => {
+      const checked = parseManagedApplicationPlan(candidateInput); const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner }); const envelope = await store.read();
+      if (!checked.ok || !ownership.ok || !z.uuid().safeParse(run).success || indexed.protocol !== "managed-v3" || indexed.managedVolumes !== 1 || indexed.managedRoot === undefined || envelope === undefined) throw new Error("managed proposal scope unavailable");
+      const candidate = checked.value; if (JSON.stringify(candidate.infrastructure.ownership) !== JSON.stringify(ownership.value)) throw new Error("managed proposal candidate lacks indexed ownership"); const existing = envelope.managed?.find((item) => item.run === run);
+      const readSource = async (digest: string) => { const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(digest)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed proposal source unavailable"); const source = parseManagedLifecycleSource(JSON.parse(bytes)); if (bytes !== JSON.stringify(source)) throw new Error("managed proposal source is not canonical"); return source; };
+      if (existing !== undefined) { const source = await readSource(existing.source); const gate = managedIndexGate({ owner: indexed, envelope, source }); if (!gate.ok || source.candidate.commit !== candidate.commit || source.candidate.artifact !== candidate.artifact) throw new Error("managed proposal request identity conflicts"); return source; }
+      const registration = verifiedRegistration(app, envelope);
+      if (JSON.stringify(candidate.infrastructure.registration) !== JSON.stringify(registration) || JSON.stringify(candidate.infrastructure.ownership) !== JSON.stringify(ownership.value) || Object.values(candidate.services).some((service) => service.mounts.some((mount) => !indexed.volumes.some((volume) => JSON.stringify(volume) === JSON.stringify(mount.volume))))) throw new Error("managed proposal candidate lacks indexed ownership");
+      const index = await serialIndex(readIndex); const build = index.builds.find((item) => item.commit === candidate.commit && item.artifact === candidate.artifact && JSON.stringify(item.registration) === JSON.stringify(registration));
+      if (build === undefined) throw new Error("managed proposal requires its immutable build receipt");
+      const artifact = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(candidate.artifact)); if (artifact === undefined || createHash("sha256").update(artifact).digest("hex") !== candidate.artifact) throw new Error("managed proposal build evidence unavailable");
+      const fence = envelope.fence; if (fence?.lifecycle.phase !== "registered") throw new Error("managed proposal lifecycle is not registered");
+      const request = { run, action: indexed.incarnation + ":" + String(fence.nextAction), createdAt: ports.now() };
+      const path = join(appDirectory(app), "managed"); await requireDirectory(path); const accepted = envelope.managed?.at(-1);
+      if (indexed.managedRoot === "empty") {
+        if (accepted !== undefined || await stat(join(path, "state.json")) !== undefined) throw new Error("managed proposal is awaiting root reconstruction");
+        return managedDeploymentProposal(candidate, ownership.value, request, null, ports);
+      }
+      if (accepted?.completion === null || accepted === undefined) throw new Error("managed proposal has an unresolved request");
+      const root = await journals(path, "existing");
+      try { const state = parseManagedLifecycleStore(await root.read()); const source = await readSource(state.operation.source); const gate = managedIndexGate({ owner: indexed, envelope, source });
+        if (!gate.ok || state.operation.run !== accepted.run || state.operation.phase !== "complete" || accepted.completion.rootSnapshot !== createHash("sha256").update(JSON.stringify(state)).digest("hex")) throw new Error("managed proposal baseline lacks its completed request");
+        if (source.version !== 2) throw new Error("managed allocation protocol conversion requires an explicit operation");
+        return await managedDeploymentProposal(candidate, ownership.value, request, { state, source }, ports);
+      } finally { await root.close(); }
+    }),
     managedExecutionContext: (app: string, run: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
       if (indexed.protocol !== "managed-v3" || !z.uuid().safeParse(run).success) throw new Error("managed execution scope unavailable");
       const envelope = await store.read(); const request = envelope?.managed?.find((item) => item.run === run); if (request?.completion !== null) return undefined;

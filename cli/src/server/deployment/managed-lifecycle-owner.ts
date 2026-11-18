@@ -1,3 +1,4 @@
+import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
 import type { ManagedVolumePreparationPort } from "../../contracts/managed-volume-preparation.ts";
 import type { DataOwnership } from "../../contracts/owned-volume.ts";
 import type { ManagedAdmissionPort, ManagedAdmissionIdentity } from "../../contracts/managed-admission.ts";
@@ -162,6 +163,10 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
   };
   return Object.freeze({
     read: store.read, source: store.source,
+    propose: async (candidate: Parameters<typeof managedDeploymentProposal>[0], request: Parameters<typeof managedDeploymentProposal>[2], inputs: Pick<Parameters<typeof managedDeploymentProposal>[4], "compare">) => {
+      const current = await store.read(); const baseline = current === undefined ? null : Object.freeze({ state: current, source: await store.source() });
+      const source = await managedDeploymentProposal(candidate, owner, request, baseline, { compare: inputs.compare, now: ports.now, read: ports.read }); await store.validate(source); return source;
+    },
     validate: (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input); capabilities(source); return store.validate(source); },
     begin: async (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input);
       const existing = await store.read(); if (existing?.operation.run === source.run) return store.begin(source);

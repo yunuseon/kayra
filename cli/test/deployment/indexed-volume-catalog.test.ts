@@ -3,11 +3,12 @@ import { createLifecycleAppIndex, openLifecycleAppIndex } from "../../src/server
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- models native volume state and index restart */
 import { strict as assert } from "node:assert";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { managedIndexRuntimeFixture } from "./managed-index-runtime-fixture.ts";
 import { managedIndexFixture } from "./managed-index-fixture.ts";
+import { parseManagedApplicationPlan } from "../../src/contracts/managed-application-plan.ts";
 import { parseManagedLifecycleSource } from "../../src/server/deployment/managed-lifecycle-source.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
@@ -24,13 +25,20 @@ test("the index owns catalog storage and supplies receipts without recursive app
     workloads: (receipts) => ({ ...lab.runtime.services, apply: async (action, expected, spec, application) => { const result = await receipts.read(spec.mounts.map((mount) => mount.volume)); assert.ok(result); if (spec.mounts.length > 0) receiptInputs++; return lab.runtime.services.apply(action, expected, spec, application); } }),
   } });
   await assert.rejects(lab.index().requestManagedDeployment("shop", lab.source, runtime), /version 2/); assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
-  const source = parseManagedLifecycleSource({ ...lab.source, version: 2 }); await lab.index().requestManagedDeployment("shop", source, runtime); assert.equal(calls.length, 0);
+  const proposalPorts = { ...lab.runtime, compare: () => Promise.resolve("unchanged" as const) }; const before = await readFile(join(lab.directory, "state.json"), "utf8");
+  const source = await lab.index().proposeManagedDeployment("shop", lab.source.candidate, lab.source.run, proposalPorts); assert.equal(source.version, 2); assert.equal(source.action, lab.source.action); assert.equal(await readFile(join(lab.directory, "state.json"), "utf8"), before); await assert.rejects(stat(join(appPath(lab.directory), "managed", "state.json")), { code: "ENOENT" });
+  await lab.index().requestManagedDeployment("shop", source, runtime); assert.equal(calls.length, 0);
   await lab.index().tickManagedDeployment("shop", source.run, runtime); const intent = await lab.index().tickManagedDeployment("shop", source.run, runtime); assert.equal(intent?.operation.phase, "allocating");
   await lab.index().tickManagedDeployment("shop", source.run, runtime); assert.equal(calls.length, 1); await lab.reopen();
   for (let i = 0; i < 120; i++) { const state = await lab.index().tickManagedDeployment("shop", source.run, runtime); assert.notEqual(state?.operation.phase, "held"); if (state?.operation.phase === "complete") break; }
   const complete = await lab.index().managedState("shop", runtime); assert.equal(complete?.operation.phase, "complete"); assert.equal(complete.operation.allocation?.deadline, intent.operation.allocation?.deadline); assert.equal(calls.length, 1); assert.ok(receiptInputs > 0);
   assert.deepEqual(await lab.index().recordedManagedVolumes("shop", lab.volumes), lab.volumes.map((volume) => ({ volume, createdAt: new Date(1000).toISOString() })));
   await lab.reopen(); assert.equal((await lab.index().recordedManagedVolumes("shop", lab.volumes))?.length, 1); assert.equal(calls.length, 1);
+  const sha = "b".repeat(40); const build = await lab.index().prepareBuild("shop", sha, { ...lab.artifacts, now: lab.runtime.now, prepare: () => Promise.resolve(JSON.stringify({ commit: sha })), images: () => lab.plan.images.map((image) => image.pull) });
+  const candidate = parseManagedApplicationPlan({ ...lab.plan, commit: sha, artifact: build.artifact }); assert.ok(candidate.ok); const next = await lab.index().proposeManagedDeployment("shop", candidate.value, randomUUID(), proposalPorts); assert.ok(next.previous); assert.equal(next.previous.verification.run, source.run); assert.equal(next.retained[0]?.kind, "active"); assert.equal(calls.length, 1);
+  assert.deepEqual(await lab.index().proposeManagedDeployment("shop", lab.source.candidate, source.run, proposalPorts), source);
+  await assert.rejects(lab.index().proposeManagedDeployment("shop", { ...candidate.value, artifact: "f".repeat(64) }, randomUUID(), proposalPorts), /build receipt/);
+
 });
 
 test("missing known catalogs are refused while foreign receipt requests fail before opening storage", async (t) => {

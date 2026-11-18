@@ -2387,3 +2387,10 @@ race reports unavailable rather than borrowing a different plan's authority.
 Normal public managed mutation dispatch remains disabled. This composition does
 not create or convert managed registrations; operator/client integration,
 removal/purge and the remaining acceptance matrix are still required.
+
+While a managed operation is unresolved, every build entrypoint refuses another
+build before retaining a build intent or invoking the builder. This prevents the
+legacy build endpoint from holding the application writer for a long build while
+reconciliation needs that writer. Accepted-run replay does not rebuild; building
+is available again after the operation has durably settled. Compose build
+behavior is unchanged.

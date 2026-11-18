@@ -1,6 +1,8 @@
 /* eslint-disable functional/no-let, functional/prefer-immutable-types, functional/immutable-data -- accepts test context, counts fixture boundary calls and injects lost acknowledgements */
 import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { managedIndexRuntimeFixture } from "./managed-index-runtime-fixture.ts";
@@ -80,4 +82,16 @@ test("concurrent preparations with different proposal timestamps return the one 
   } });
   const receipts = await Promise.all([owner.prepare("shop", run, commit), owner.prepare("shop", run, commit)]);
   assert.equal(contexts.length, 2); assert.notEqual(contexts[0]?.createdAt, contexts[1]?.createdAt); assert.deepEqual(receipts[0], receipts[1]); assert.equal((await lab.index().pendingManagedDeployments()).length, 1);
+});
+
+test("a pending managed operation refuses legacy build entrypoints before creating another build intent or invoking the builder", async (t) => {
+  const lab = await fixture(t); const run = randomUUID();
+  const receipt = await managedPreparation(lab.index(), lab.ports).prepare("shop", run, "b".repeat(40)); lab.calls.length = 0;
+  const before = await readFile(join(lab.directory, "state.json"), "utf8");
+  await assert.rejects(lab.index().prepareBuild("shop", "c".repeat(40), lab.ports.builds), /managed build.*unresolved/); assert.deepEqual(lab.calls, []); assert.equal(await readFile(join(lab.directory, "state.json"), "utf8"), before);
+  assert.deepEqual(await managedPreparation(lab.index(), lab.ports).prepare("shop", run, "b".repeat(40)), receipt); assert.deepEqual(lab.calls, ["runtime"]);
+  lab.clock(receipt.admissionDeadline + 1);
+  for (let i = 0; i < 12; i++) { const state = await lab.index().tickManagedDeployment("shop", run, lab.runtime); if (state?.operation.phase === "complete") break; }
+  const complete = await lab.index().managedRequestSource("shop", run, "b".repeat(40), lab.runtime); assert.ok(complete?.request.completion); lab.calls.length = 0;
+  const build = await lab.index().prepareBuild("shop", "c".repeat(40), lab.ports.builds); assert.equal(build.commit, "c".repeat(40)); assert.deepEqual(lab.calls, ["builder"]);
 });

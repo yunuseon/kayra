@@ -2214,3 +2214,18 @@ failed before VM creation because the Multipass release catalog was briefly
 unreachable; its launch-only evidence is preserved separately. No registry,
 workloads or observer started in that attempt. The successful retry used the
 same source and `--volume-state --managed-group --egress-mtu 1280`.
+
+`--platform-inputs` also runs the platform permission provider as UID 1000.
+Synthetic root-owned publications grant one valid plan, then reject stale current
+pointers, changed ownership/host data, unreadable files and missing namespace
+permission. Owned cleanup remains separately authorized without startup grants;
+a deployment stop does not. Synthetic image/overlay/host references in this probe
+are metadata only: no native workload, admission or deployment journal is used.
+
+Runtime-factory source `20edf77` passed in fresh VM
+`kayra-volume-lab-20261118155452575780` on 2026-11-18. The observer rebuilt its
+runtime 26 times from accepted context, recorded one volume Create and 684
+singleton effects across A/B/A and cancellation; the group recorded 21,209
+observations. The successful VM was destroyed and raw source/results/events have
+verified SHA256SUMS. Its grants and build inputs still used fixture callbacks;
+the filesystem permission provider is the subsequent revision above.

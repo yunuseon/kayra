@@ -2120,3 +2120,19 @@ destroyed after collection; raw evidence/source and verified SHA256SUMS are
 retained. Exact versions stayed Engine/CLI 29.10.0, API 1.57, Compose 5.8.0,
 Node 24.22.1, Ubuntu 24.04.5 ARM64 and kernel 6.8.0-147-generic. The logical
 clock scope above still applies; this is not full indexed allocation acceptance.
+
+Source `5c3815b` passed `--volume-state --managed-group --egress-mtu 1280`
+in fresh VM `kayra-volume-lab-20261118140349392676` on 2026-11-18. The actual
+index singleton consumed the deployment-owned recorded receipt reader after
+reopening its creation journal, recording 647 A/B/A effects; the group recorded
+21,112 observations. Volume-state assertions also passed. The successful VM
+was destroyed; archived raw evidence and frozen source have verified SHA256SUMS.
+Versions and image pins were unchanged from the preceding run. Volume creation
+remained explicitly authorized fixture preparation before indexed admission.
+
+The singleton now uses the allocation catalog rather than an individual creator.
+It checks one native Create across A/B/A replacement, recovery and cancellation,
+then prepares another operation against the same registered allocation and
+requires the original birth and unchanged catalog. Receipt availability is
+checked independently by the runtime. This is still fixture-authorized creation,
+not acceptance of the normal coordinator's admitted allocation lifecycle.

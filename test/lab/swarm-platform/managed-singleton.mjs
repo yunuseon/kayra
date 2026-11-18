@@ -73,7 +73,7 @@ export const probeManagedSingleton = async (app, image, api, routingNetwork, swa
         },
       }, runtime: async (context) => { ports = runtimeFor(context); return ports; } });
       await prepare.prepare(app, source.run, source.candidate.commit); preparationCalls++; currentRun = source.run;
-      const actual = await index.managedRequestSource(app, currentRun, source.candidate.commit, artifacts); assert.ok(actual); assert.deepEqual(actual.source.previous, source.previous); assert.equal(actual.source.action, source.action);
+      const actual = await index.managedRequestSource(app, currentRun, source.candidate.commit, { ...artifacts, now: Date.now }); assert.ok(actual); assert.deepEqual(actual.source.previous, source.previous); assert.equal(actual.source.action, source.action);
       return index.managedState(app, ports);
     }, tick: () => index.tickManagedDeployment(app, currentRun, ports) };
     const reopen = async () => { await index.close(); index = await openLifecycleAppIndex(indexDirectory, observer, journals); const pending = await index.pendingManagedDeployments(); if (pending.length > 0) { assert.equal(pending.length, 1); assert.equal(pending[0].run, currentRun); } };

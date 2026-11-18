@@ -2245,3 +2245,27 @@ without current startup grants. The group recorded 19,097 observations and the
 singleton recorded 607 effects with one Create. The successful VM was destroyed;
 raw source/results/events have verified SHA256SUMS. The metadata-only scope of
 that permission probe remains separate from workload admission evidence.
+
+Maintenance and initial-cleanup reactivation can now obtain their next proposal
+from the deployment owner. The probes compare its automatically selected verified
+previous release, retained witnesses and inactive barriers with the expected
+fixture evidence before acceptance. Proposal construction itself has no runtime,
+writer or admission effects. These private version-1 maintenance fixtures keep
+their existing accounting/allocation scope; ordinary version-2 indexed proposal
+and public compiler/control integration remain separate acceptance work.
+
+The indexed singleton also obtains A, B and cancellation proposals through the
+app index after preparing the exact build receipts. It asserts the selected
+previous release and action sequence before acceptance, while retaining its
+catalog, observer reconstruction and A/B/A checks. This connects internal build
+receipts to proposal ownership; public builder/CLI dispatch is still pending.
+
+Epoch-guard source `98642aa` passed in fresh VM
+`kayra-volume-lab-20261118202434154916` on 2026-11-18. Both unsafe-maintenance
+and audited-resolution variants refused the metadata-rewritten historical commit,
+retained schema 2 and recorded zero schema violations. The group recorded 18,619
+observations; the singleton recorded 717 effects. Successful cleanup destroyed
+the VM and archived raw source/results/events with verified SHA256SUMS. The prior
+`95c681b` attempt hit a fixture ReferenceError before that check could run; its VM
+is stopped and preserved after raw results and registry RAM were archived and
+verified. The retry used a fresh VM with the assertion in the completed branch.

@@ -1,3 +1,6 @@
+import type { OwnedVolumePort } from "../../contracts/owned-volume.ts";
+import type { RecordedVolumeReceiptsPort } from "../../contracts/recorded-volume-receipts.ts";
+import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { createHash } from "node:crypto";
 import type { ManagedAdmissionPort } from "../../contracts/managed-admission.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
@@ -17,6 +20,7 @@ import type { IndexEntry } from "./lifecycle-app-index-state.ts";
 
 export type IndexedManagedRuntime = Omit<Parameters<typeof managedLifecycleOwner>[2], "admission"> & HostObserver & {
   /** Current fleet grants, feature enablement and independently validated compiler/build inputs. No shared gate or workload authority is granted by this preflight. */
+  readonly managedData?: { readonly native: Readonly<Pick<OwnedVolumePort, "observe" | "create">>; readonly workloads: (receipts: RecordedVolumeReceiptsPort) => ManagedWorkloadPort } | undefined;
   readonly requestAllowed: (source: ManagedLifecycleSource) => Promise<boolean>;
 };
 type Envelope = Readonly<ReturnType<typeof openLifecycleEnvelopeStore>>;
@@ -67,6 +71,7 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
     prepare: async (input: ManagedLifecycleSource) => {
       const source = parseManagedLifecycleSource(input); const existing = (await context.envelope.read())?.managed?.find((item) => item.run === source.run);
       if (existing !== undefined) { if (existing.source !== managedLifecycleSourceDigest(source)) throw new Error("managed indexed request conflicts"); if (existing.completion === null) await resume(source, existing); return existing; }
+      if (ports.managedData !== undefined && source.version !== 2) throw new Error("new indexed catalog deployments require allocation source version 2");
       const deadline = source.createdAt + 90_000; const checked = managedIndexScope(await scope(source));
       if (!checked.ok || await bounded(deadline, () => ports.requestAllowed(source)) !== true || await bounded(deadline, () => context.preparedBuild(source)) !== true || await bounded(deadline, () => owner.validate(source)) === undefined) throw new Error("managed indexed request preflight refused");
       if (await bounded(deadline, () => ports.retain(JSON.stringify(source))) !== managedLifecycleSourceDigest(source)) throw new Error("managed indexed source retention failed");

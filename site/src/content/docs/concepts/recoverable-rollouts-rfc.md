@@ -2183,3 +2183,27 @@ catalog. Removal and purge must retain and consult that inventory, including
 uncertain creations. Disk reclamation is never implied by resource settlement.
 The native fixture owns the catalog journal and current build/grant inputs;
 normal platform catalog storage, tombstones and public dispatch remain pending.
+
+### Index-owned catalog storage and input capability
+
+New managed applications now initialize an empty, owner-bound catalog under the
+existing deployment index before becoming ready. A persisted capability marker
+records this ownership. Interrupted initialization resumes its original catalog;
+a ready application's missing catalog is an intervention condition. Historical
+managed records without the marker remain readable and cannot silently adopt
+catalog-backed storage.
+
+The existing app writer opens the catalog, binds preparation to the root owner,
+and supplies its read-only receipt port to a workload factory. That factory
+materializes private inputs without recursively acquiring the application writer.
+New catalog-backed requests require private source version 2. Supplying an
+independent preparation controller alongside this capability is refused.
+External read models may obtain recorded receipts through the deployment
+component; they do not open private files or acquire mutation capability. The
+receipt reader validates registered scope before storage access and never holds
+the global accounting queue while waiting for the catalog lock.
+
+This moves journal ownership out of the native fixture. Public builder-to-plan
+compilation, current platform grant/input wiring, lifecycle removal and guarded
+purge remain separate acceptance work. The normal experimental mutation entrypoint
+remains disabled.

@@ -2154,3 +2154,19 @@ passed. Successful cleanup destroyed the VM; raw source/results/events are
 archived with verified SHA256SUMS. Exact versions remained Engine/CLI 29.10.0,
 API 1.57, Compose 5.8.0, Node 24.22.1, Ubuntu 24.04.5 ARM64 and kernel
 6.8.0-147-generic. This source preceded the admitted allocation phase above.
+
+The singleton can now use the index-owned catalog capability and workload factory.
+The index creates storage during new application initialization, opens it strictly
+as existing during deployment, and gives materialization a receipt-only port.
+The fixture supplies native volume effects and platform input/grant callbacks;
+it no longer opens or repairs the catalog journal itself. The same lost-Create
+acknowledgement and A/B/A assertions remain required.
+
+Admitted-allocation source `3e1cd6b` passed `--volume-state --managed-group
+--egress-mtu 1280` in fresh VM `kayra-volume-lab-20261118150412049672` on
+2026-11-18. The singleton reopened after the lost Create acknowledgement,
+retained the original allocation deadline and recorded one Create across 681
+A/B/A effects; the group recorded 19,931 observations. The successful VM was
+destroyed and raw source/results/events have verified SHA256SUMS. Versions and
+image pins stayed unchanged. This source still used a fixture-owned catalog
+journal; index-owned storage is the subsequent revision above.

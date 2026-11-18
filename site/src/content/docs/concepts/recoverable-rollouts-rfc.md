@@ -1961,8 +1961,9 @@ If the process dies after acceptance but before the root journal exists, separat
 current metadata authority can reconstruct a held, effect-free root from the
 accepted immutable source. Expired scheduling deadlines and revoked workload
 grants do not become fresh authority. Existing roots are never reset by this path.
-The platform-wide index/protocol binding and normal client dispatch remain pending;
-these envelope methods alone are not a production entrypoint.
+The platform-wide index/protocol binding is described below. Normal client
+dispatch remains pending; these envelope methods alone are not a production
+entrypoint.
 
 
 ### Indexed managed ownership and admission
@@ -1992,3 +1993,20 @@ health projection is integrated, the legacy host-health path explicitly refuses 
 host containing these internal protocol records. Normal builder/platform wiring,
 operator projections, removal/purge, unknown-check cleanup, unsafe forward recovery
 and the complete integrated acceptance matrix remain required.
+
+### Managed deployment status projection
+
+The deployment owner publishes a separate validated Managed V3 status contract.
+Requested and desired plans, verified active and last known good releases, the
+data compatibility epoch, rollback eligibility, original deadlines, migration
+step/reason and audited resolution references are distinct fields. A held operation
+requires inspection and resolution. A cancelled unstarted replacement retains
+the previous verified release without attributing it to the newer run.
+
+The projection validates immutable source bindings and reads certified release
+records by digest, checking ownership, plan, run and verification time. Missing
+or corrupt evidence refuses the projection. Reading status performs no workload
+observation or release promotion; `runtimeObservation: not-observed` is explicit.
+It exposes no private journal paths, resolved environment or command payloads.
+This internal index method does not yet enable normal managed registration or
+client dispatch; runtime health and client integration remain separate work.

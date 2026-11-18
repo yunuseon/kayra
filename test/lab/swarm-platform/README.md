@@ -2136,3 +2136,21 @@ then prepares another operation against the same registered allocation and
 requires the original birth and unchanged catalog. Receipt availability is
 checked independently by the runtime. This is still fixture-authorized creation,
 not acceptance of the normal coordinator's admitted allocation lifecycle.
+
+The singleton's next integration uses private lifecycle source version 2 and the
+coordinator's `allocating` phase. No volume Create occurs during fixture setup.
+After shared admission, the catalog receives the parent's fresh permission;
+the first native Create deliberately loses its acknowledgement. The observer
+reopens both journals while allocation is pending, retains the original deadline
+and requires exactly one Create through A/B/A and cancellation. Platform inputs
+and catalog-journal storage still use fixture wiring; this does not establish
+normal public registration/deployment/removal integration.
+
+Catalog source `540c6d5` passed `--volume-state --managed-group --egress-mtu
+1280` in fresh VM `kayra-volume-lab-20261118145213186061` on 2026-11-18.
+The group recorded 21,699 observations and its singleton recorded 696 A/B/A
+effects with exactly one Create. Catalog birth reuse and journal reopen checks
+passed. Successful cleanup destroyed the VM; raw source/results/events are
+archived with verified SHA256SUMS. Exact versions remained Engine/CLI 29.10.0,
+API 1.57, Compose 5.8.0, Node 24.22.1, Ubuntu 24.04.5 ARM64 and kernel
+6.8.0-147-generic. This source preceded the admitted allocation phase above.

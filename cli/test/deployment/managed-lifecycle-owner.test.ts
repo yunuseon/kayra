@@ -1,9 +1,11 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- models native effects, accounting and coordinator interruption */
+import { managedVolumePreparation } from "../../src/server/deployment/managed-volume-preparation.ts";
+import type { VolumeAction, VolumeObservation } from "../../src/contracts/owned-volume.ts";
 import { managedImagePins } from "../../src/server/deployment/managed-image-pins.ts";
 import { strict as assert } from "node:assert";
 import { createHash, randomUUID } from "node:crypto";
 import type { ManagedChecksPort, ContainerCheckPlan } from "../../src/contracts/container-check.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -31,9 +33,9 @@ import { parseResourceBook } from "../../src/server/deployment/resource-book.ts"
 import { openArtifactStore } from "../../src/server/deployment/artifact-store.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 
-const fixture = async (t: TestContext, maintenance = false, migrations: boolean | "unknown" = false, unsafe = false, checked = false) => {
+const fixture = async (t: TestContext, maintenance = false, migrations: boolean | "unknown" = false, unsafe = false, checked = false, allocate = false) => {
   const { plan } = await managedPlanFixture(); const parsed = parseManagedApplicationPlan({ ...plan, grants: { ...plan.grants, maintenance }, rollout: { ...plan.rollout, checks: checked ? [{ id: "verify", service: "worker", command: ["node", "verify.mjs"], timeout_seconds: 2 }] : [], strategy: maintenance ? "maintenance" : "rolling", rollback_compatible: !unsafe, migrations: migrations === "unknown" ? plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["node", "status.mjs"], timeout_seconds: 10 } })) : migrations ? plan.rollout.migrations : [] } }); assert.ok(parsed.ok); const candidate = parsed.value;
-  const source = parseManagedLifecycleSource({ version: 1, candidate, previous: null, run: randomUUID(), action: candidate.infrastructure.ownership.incarnation + ":2", createdAt: 1000, retained: [], retired: [] });
+  const source = parseManagedLifecycleSource({ version: allocate ? 2 : 1, candidate, previous: null, run: randomUUID(), action: candidate.infrastructure.ownership.incarnation + ":2", createdAt: 1000, retained: [], retired: [] });
   const path = await mkdtemp(join(tmpdir(), "kayra-managed-owner-")); const artifacts = await openArtifactStore(join(path, "artifacts")); let journal = await openJournal(path); let clock = 1000; let accounting: ManagedAdmissionAccounting = { resources: null, bindings: [] }; let reserveCalls = 0; let settleCalls = 0; let loseReserve = false; let loseSettle = false; let authorize = true; let loseJobStart = false;
   const native = new Map<string, ServiceObservation>(); const calls: ManagedServiceAction[] = []; let routes = true; let deferQuiescence = false; const delayedTombstones: (() => "acknowledged" | "refused")[] = [];
   const observation = { status: "ready", engine: "29.9.3", api: "1.56", node: candidate.host.node, cluster: candidate.host.cluster, network: candidate.host.network.id, capacity: { cpu: candidate.host.profile.cpu_millicores, memory: candidate.host.profile.memory_bytes }, standing: { cpu: candidate.host.profile.platform_cpu_millicores, memory: candidate.host.profile.platform_memory_bytes } } as const;
@@ -89,7 +91,14 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
     start: (plan, id) => { checkStarts.push(plan); execs.set(id, { code: plan.target.action.effect === "restore" || checkMode !== "fail" ? 0 : 7 }); return Promise.resolve(checkMode === "unknown" ? "uncertain" : "acknowledged"); },
     observe: (_plan, id) => Promise.resolve(execs.has(id) ? { status: "owned", id, running: false, exitCode: execs.get(id)?.code ?? null } : { status: "absent" }),
   };
-  const ports = { ...artifacts, now: () => clock, admission, services, checks: checked ? checks : undefined, authorize: () => Promise.resolve(authorize), jobs, readiness: { check: (action: ManagedServiceAction) => Promise.resolve({ app: action.app, incarnation: action.incarnation, service: action.service, action: action.action, plan: action.plan, checkedAt: clock, status: routes || action.effect === "restore" ? "ready" as const : "unready" as const }) } };
+  const volumePath = join(path, "volumes"); await mkdir(volumePath); let volumeJournal = await openJournal(volumePath); await volumeJournal.write({ version: 1, sequence: 1, owner: candidate.infrastructure.ownership, allocations: [] }); const volumeBirths = new Map<string, VolumeObservation>(); const volumeCalls: VolumeAction[] = []; let loseVolume = false;
+  const volumeNative = { observe: (volume: VolumeAction["volume"]) => Promise.resolve(volumeBirths.get(volume.allocation) ?? { status: "absent" as const }), create: async (action: VolumeAction) => {
+    const state = await owner.read(); assert.equal(state?.operation.phase, "allocating"); assert.equal(state.operation.admitted, true); const ledger = parseResourceBook(accounting.resources); assert.ok(ledger.ok); assert.equal(ledger.value.charges[0]?.result, "pending");
+    volumeCalls.push(action); volumeBirths.set(action.volume.allocation, { status: "owned", receipt: { volume: action.volume, createdAt: new Date(Math.floor(clock / 1000) * 1000).toISOString() } }); if (loseVolume) throw new Error("lost volume acknowledgement"); return "acknowledged" as const;
+  } };
+  let allocations = managedVolumePreparation(volumeJournal, candidate.infrastructure.ownership, { native: volumeNative, now: () => clock });
+  let allocationPermission: { readonly entered: PromiseWithResolvers<undefined>; readonly release: PromiseWithResolvers<undefined> } | undefined;
+  const ports = { ...artifacts, allocations: allocate ? { reconcile: (...args: Parameters<typeof allocations.reconcile>) => allocations.reconcile(...args) } : undefined, now: () => clock, admission, services, checks: checked ? checks : undefined, authorize: async (_source: Parameters<Parameters<typeof managedLifecycleOwner>[2]["authorize"]>[0], effect: Parameters<Parameters<typeof managedLifecycleOwner>[2]["authorize"]>[1]) => { if (effect.kind === "allocation" && allocationPermission !== undefined) { allocationPermission.entered.resolve(undefined); await allocationPermission.release.promise; } return authorize; }, jobs, readiness: { check: (action: ManagedServiceAction) => Promise.resolve({ app: action.app, incarnation: action.incarnation, service: action.service, action: action.action, plan: action.plan, checkedAt: clock, status: routes || action.effect === "restore" ? "ready" as const : "unready" as const }) } };
   let unstartedCut: "before" | "after" | null = null;
   let resolutionCut: "before" | "after" | null = null;
   const view = () => ({ read: journal.read, write: async (raw: Parameters<typeof journal.write>[0]) => {
@@ -99,11 +108,11 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
     if (auditing && resolutionCut === "before") throw new Error("injected before audit write"); await journal.write(raw); if (unstarted && unstartedCut === "after") throw new Error("injected lost unstarted acknowledgement"); if (auditing && resolutionCut === "after") throw new Error("injected lost audit acknowledgement");
   } });
   let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports);
-  t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
-  return { source, calls, nodes, artifacts, checkStarts, deferQuiescence: () => { deferQuiescence = true; }, releaseDelayedTombstones: () => delayedTombstones.map((apply) => apply()), probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
+  t.after(async () => { await journal.close(); await volumeJournal.close(); await rm(path, { recursive: true, force: true }); });
+  return { source, calls, nodes, artifacts, pauseAllocation: () => { const gate = { entered: Promise.withResolvers<undefined>(), release: Promise.withResolvers<undefined>() }; allocationPermission = gate; return { entered: gate.entered.promise, release: () => { gate.release.resolve(undefined); } }; }, volumeCalls, loseVolume: () => { loseVolume = true; }, volumeReceipts: () => allocations.receipts, checkStarts, deferQuiescence: () => { deferQuiescence = true; }, releaseDelayedTombstones: () => delayedTombstones.map((apply) => apply()), probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
     cutUnstarted: (where: "before" | "after") => { unstartedCut = where; },
     cutResolution: (where: "before" | "after") => { resolutionCut = where; },
-    reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; unstartedCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
+    reopen: async () => { await volumeJournal.close(); volumeJournal = await openJournal(volumePath, "existing"); allocations = managedVolumePreparation(volumeJournal, candidate.infrastructure.ownership, { native: volumeNative, now: () => clock }); await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; unstartedCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
     drive: async () => { for (let i = 0; i < 100; i++) { const value = await owner.tick(); if (value?.operation.phase === "complete" || value?.operation.phase === "held") return value; } throw new Error("managed lifecycle did not settle"); },
   };
 };
@@ -360,4 +369,31 @@ for (const cut of ["quiescence-intent", "barrier-intent", "barrier-ack", "delaye
   assert.throws(() => managedRecoverySnapshot({ ...snapshot.source, retained: [] }), /retained/);
   await lab.reopen(); const done = await lab.drive(); assert.equal(done.operation.outcome, "rolled-back"); assert.equal(done.operation.recoveryDeadline, deadline); assert.equal(done.operation.preparation, null); assert.equal(done.active?.plan, initial.active.plan); assert.equal(lab.nodes.size, jobs); assert.equal(lab.calls.length, 5); assert.equal(lab.calls.some((action) => action.service === "cache"), false); if (cut === "delayed-stop") assert.deepEqual(lab.releaseDelayedTombstones(), ["refused"]);
   const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "previous");
+});
+
+test("admitted allocation precedes workloads and survives lost Create acknowledgement and coordinator restart", async (t) => {
+  const lab = await fixture(t, false, false, false, false, true); await lab.owner().begin(lab.source); assert.equal(lab.volumeCalls.length, 0);
+  await lab.owner().tick(); const intent = await lab.owner().tick(); assert.equal(intent?.operation.phase, "allocating"); assert.ok(intent.operation.allocation); lab.loseVolume();
+  await lab.owner().tick(); assert.equal(lab.volumeCalls.length, 1); assert.equal(lab.calls.length, 0); await lab.reopen();
+  const done = await lab.drive(); assert.equal(done.operation.phase, "complete"); assert.equal(lab.volumeCalls.length, 1); assert.equal(done.operation.allocation?.deadline, intent.operation.allocation.deadline); assert.ok(done.operation.allocation.readyAt);
+});
+
+test("allocation restart preserves the original window and cancellation revokes creation authority", async (t) => {
+  for (const cancelled of [false, true]) {
+    const lab = await fixture(t, false, false, false, false, true); await lab.owner().begin(lab.source); await lab.owner().tick(); const state = await lab.owner().tick(); assert.ok(state?.operation.allocation);
+    await lab.reopen(); if (cancelled) await lab.owner().cancel(); else lab.clock(state.operation.allocation.deadline);
+    const result = await lab.owner().tick(); assert.ok(result); assert.equal(lab.calls.length, 0); assert.equal(lab.volumeCalls.length, 0); assert.equal(result.operation.allocation?.deadline, state.operation.allocation.deadline);
+    for (let i = 0; i < 3; i++) await lab.owner().tick(); assert.equal((await lab.owner().read())?.operation.phase, "complete");
+  }
+});
+
+test("current operator denial after admission prevents volume creation", async (t) => {
+  const lab = await fixture(t, false, false, false, false, true); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().tick(); lab.deny();
+  assert.equal((await lab.owner().tick())?.operation.reason, "allocation"); assert.equal(lab.volumeCalls.length, 0); assert.equal(lab.calls.length, 0);
+});
+
+test("allocation permission resolving after cancellation cannot create storage", async (t) => {
+  const lab = await fixture(t, false, false, false, false, true); await lab.owner().begin(lab.source); await lab.owner().tick(); await lab.owner().tick();
+  const gate = lab.pauseAllocation(); const tick = lab.owner().tick(); await gate.entered; await lab.owner().cancel(); gate.release();
+  assert.equal((await tick)?.operation.reason, "cancellation"); assert.equal(lab.volumeCalls.length, 0); assert.equal(lab.calls.length, 0);
 });

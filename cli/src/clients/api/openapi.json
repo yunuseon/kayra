@@ -6001,6 +6001,7 @@
                                   "type": "string",
                                   "enum": [
                                     "admitting",
+                                    "allocating",
                                     "quiescing",
                                     "preparing",
                                     "updating",
@@ -6018,6 +6019,7 @@
                                       "type": "string",
                                       "enum": [
                                         "admission",
+                                        "allocation",
                                         "deadline",
                                         "authorization",
                                         "quiescence",
@@ -11772,6 +11774,7 @@
                         "type": "string",
                         "enum": [
                           "admitting",
+                          "allocating",
                           "quiescing",
                           "preparing",
                           "updating",
@@ -11789,6 +11792,7 @@
                             "type": "string",
                             "enum": [
                               "admission",
+                              "allocation",
                               "deadline",
                               "authorization",
                               "quiescence",

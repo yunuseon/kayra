@@ -5,10 +5,8 @@ import type { ManagedApplicationPlan } from "../../contracts/managed-application
 import type { ManagedServiceAction } from "../../contracts/managed-swarm-service.ts";
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import type { ServiceObservation, ServiceVersion } from "../../contracts/swarm-service.ts";
-import { managedDeploymentStatus } from "./managed-deployment-status.ts";
-import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
-import { parseManagedLifecycleSource } from "./managed-lifecycle-source.ts";
-import { managedReleaseBaselines, parseManagedRelease } from "./managed-release.ts";
+import { managedDeploymentEvidence } from "./managed-deployment-evidence.ts";
+import { managedReleaseBaselines } from "./managed-release.ts";
 
 type Reference = { readonly application: ManagedApplicationPlan; readonly action: ManagedServiceAction; readonly native: ServiceVersion | null };
 type Ports = Pick<BuildPorts, "read" | "now"> & { readonly services: Pick<ManagedWorkloadPort, "observe" | "observeDesired"> };
@@ -32,10 +30,7 @@ const summarize = (name: string, observation: ServiceObservation, references: re
 
 /** Fresh, read-only native availability; release certification and routed readiness are deliberately separate observations. */
 export const managedDeploymentHealth = async (input: unknown, sourceInput: unknown, ports: Ports) => {
-  const root = parseManagedLifecycleStore(input); const source = parseManagedLifecycleSource(sourceInput);
-  const activeBytes = root.active === null ? null : await ports.read(root.active.record);
-  await managedDeploymentStatus(root, source, { read: (digest) => root.active !== null && digest === root.active.record && activeBytes !== null ? Promise.resolve(activeBytes) : ports.read(digest) });
-  const active = activeBytes === null ? null : parseManagedRelease(JSON.parse(activeBytes));
+  const evidence = await managedDeploymentEvidence(input, sourceInput, ports); const root = evidence.state; const source = evidence.source; const active = evidence.active?.release ?? null;
   const certified = (release: typeof active) => release === null ? Object.freeze([]) : Object.freeze(managedReleaseBaselines(release).map((value) => Object.freeze({ application: release.source.application, action: value.action, native: value.native })));
   const operation = root.operation;
   const references: readonly Reference[] = Object.freeze([...certified(active), ...certified(source.previous),

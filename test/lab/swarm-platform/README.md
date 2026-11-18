@@ -2052,3 +2052,30 @@ sets only the disposable VM's default-route interface MTU. The requested value i
 recorded in `context.json`. The Docker role, daemon TLS defaults, host network,
 other VMs and host Docker context are unchanged. This is a lab network parameter,
 not a Kayra fleet setting or an application rollout retry.
+
+On 2026-11-18, source `f83c107` passed the managed-group lab in fresh VM
+`kayra-volume-lab-20261118114837348248`, created with `--managed-group
+--egress-mtu 1280`. The harness destroyed it after fetching the results. The
+local evidence directory contains raw events/API observations, source manifests,
+results and a verified SHA256SUMS file. Engine/CLI 29.10.0, API 1.57, Compose
+5.8.0, Node 24.22.1, Ubuntu 24.04.5 ARM64 and kernel 6.8.0-147-generic were
+recorded. The pinned Node and registry images remain the harness constants.
+
+The group recorded 22,030 observation requests. Its singleton probe used the
+actual filesystem app index and shared accounting writer, prepared fixture build
+receipts and grant callbacks. It recorded 683 A/B/A effects with app-owned
+leadership checks, automatic compensation, lost settlement acknowledgements and
+unchanged native tasks/versions for reserved and unreserved cancellation.
+Status and fresh health projections passed after initial deployment, a failed
+candidate check, restored release promotion and later unstarted cancellations.
+A healthy failed-check candidate remained distinct from the historically
+certified active release. Other group probes retain their explicitly private
+component scope; this is not public builder/CLI, HTTP continuity, TLS/Authelia,
+SIGKILL or full platform acceptance.
+
+Three earlier bootstrap attempts were preserved after registry network timeouts,
+before any workload started. In the last disposable failed VM, reducing its
+default-route interface MTU to 1280 permitted the same pinned download after
+restoring Docker TLS defaults. That diagnostic VM was stopped after evidence
+was archived and hashed. The fresh passing VM used the explicit MTU option from
+creation; this did not change host/other-VM networking or rollout criteria.

@@ -55,7 +55,7 @@ if args.managed_service:
     paths += ['cli/src/server/runtime/managed-swarm-service.ts', 'cli/src/server/runtime/owned-swarm-service.ts', 'cli/src/server/runtime/app-overlay.ts', 'test/lab/swarm-platform/managed-service.mjs', 'cli/src/server/deployment/managed-service-execution.ts', 'cli/src/server/deployment/managed-service-barrier.ts', 'cli/src/server/deployment/service-convergence.ts', 'cli/src/server/deployment/journal.ts', 'cli/src/server/deployment/journal-claim.ts', 'cli/src/server/deployment/artifact-store.ts']
 if args.managed_group:
     paths = [path for path in paths if not path.startswith('cli/src/server/deployment/')]
-    paths += ['cli/src/server/deployment', 'cli/src/server/runtime/swarm-host.ts', 'cli/src/server/runtime/one-shot-job.ts', 'cli/src/server/runtime/migration-probe-output.ts', 'cli/src/server/runtime/container-check.ts', 'test/lab/swarm-platform/managed-group.mjs', 'test/lab/swarm-platform/managed-singleton.mjs', 'test/lab/swarm-platform/managed-maintenance.mjs']
+    paths += ['cli/src/server/deployment', 'cli/src/server/composition/managed-workloads.ts', 'cli/src/server/platform', 'cli/src/server/runtime/swarm-host.ts', 'cli/src/server/runtime/one-shot-job.ts', 'cli/src/server/runtime/migration-probe-output.ts', 'cli/src/server/runtime/container-check.ts', 'test/lab/swarm-platform/managed-group.mjs', 'test/lab/swarm-platform/managed-singleton.mjs', 'test/lab/swarm-platform/managed-maintenance.mjs']
 paths = list(dict.fromkeys(paths))
 for relative in paths:
     origin, target = source / relative, frozen / relative

@@ -2076,3 +2076,21 @@ managed strategy, phase, requested/desired/certified releases, rollback eligibil
 migration step and current health separately. It omits legacy mutation controls
 for managed reports. Normal managed registration/deployment compilation, mutation
 operations, health composition and complete integrated acceptance remain pending.
+
+### Managed workload input composition
+
+A trusted composition factory connects managed workload ports to platform input
+materialization, platform-generated routing and a read-only recorded-volume
+receipt provider. It validates application/service/action membership before
+private reads, checks current permission both before and after materialization,
+and passes resolved values only to the native adapter. Failed private reads,
+missing receipts or changed permission refuse the call without exposing values.
+The native adapter retains independent ownership, full-specification, deadline
+and fresh volume-creation checks.
+
+Health can construct only the observation facade from native read ports; it does
+not receive an apply, reactivation, fence or tombstone method. The factory does
+not create or infer volumes. A deployment-owned receipt catalog and ordinary
+platform policy wiring are still required before normal managed execution can
+be enabled. The native singleton fixture supplies its explicitly recorded
+creation receipt and fixture permission callback to exercise this composition.

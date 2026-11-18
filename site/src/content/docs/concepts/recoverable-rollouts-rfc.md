@@ -2010,3 +2010,20 @@ observation or release promotion; `runtimeObservation: not-observed` is explicit
 It exposes no private journal paths, resolved environment or command payloads.
 This internal index method does not yet enable normal managed registration or
 client dispatch; runtime health and client integration remain separate work.
+
+### Managed runtime health projection
+
+The deployment owner can publish the existing runtime-services health contract
+for managed apps. It validates source and certified release evidence, then makes
+fresh owned service/specification observations. Current desired tasks determine
+availability; historical failed tasks are counted separately. Task action/plan
+identity, recorded native IDs and versions, actual container convergence and
+paused updates are checked. Missing or foreign workloads cannot appear healthy.
+
+During replacement the observation can recognize recorded previous and candidate
+workload intents. Terminal recovery observes the verified effective release,
+excluding retired candidate-only services. A healthy candidate whose app check
+failed may still be available while status identifies the held deployment and
+previous verified active release. Availability neither certifies a new release
+nor establishes routed readiness. The host snapshot requires explicit managed
+observation ports and refuses their absence; normal managed dispatch stays off.

@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[3])
 parser.add_argument('--output', type=Path)
 parser.add_argument('--keep', action='store_true')
+parser.add_argument('--egress-mtu', type=int, choices=range(1280, 1501), metavar='1280..1500', help='set only the disposable VM default-route interface MTU for constrained network paths')
 parser.add_argument('--platform-inputs', action='store_true', help='also verify exact platform input generations and permissions as deployer UID 1000')
 parser.add_argument('--image-admission', action='store_true', help='also verify real registry metadata against declared service and one-shot mounts')
 parser.add_argument('--volume-state', action='store_true', help='also kill and recover the volume-creation coordinator against native volumes')
@@ -70,7 +71,7 @@ with tarfile.open(report / 'source.tar', 'w') as archive:
     archive.add(frozen, arcname='source')
 image = 'node:24.22.1-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea'
 commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-context = {'sourceCommit': commit, 'sourceManifest': 'source-files.json', 'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'runtime adapters and optional isolated platform/creation fixtures; no indexed application rollout admission', 'platformInputs': args.platform_inputs, 'declaredImages': args.image_admission, 'volumeState': args.volume_state, 'appOverlay': args.app_overlay, 'appOverlayState': args.app_overlay_state, 'managedService': args.managed_service, 'managedGroup': args.managed_group}
+context = {'sourceCommit': commit, 'sourceManifest': 'source-files.json', 'vm': vm, 'source': str(source), 'frozen': str(frozen), 'workspace': str(work), 'output': str(report), 'nodeImage': image, 'scope': 'isolated runtime fixtures; managed-group includes internal indexed lifecycle with prepared build receipts and fixture grants, not normal public deployment dispatch', 'platformInputs': args.platform_inputs, 'declaredImages': args.image_admission, 'volumeState': args.volume_state, 'appOverlay': args.app_overlay, 'appOverlayState': args.app_overlay_state, 'managedService': args.managed_service, 'managedGroup': args.managed_group, 'egressMtu': args.egress_mtu}
 (report / 'context.json').write_text(json.dumps(context, indent=2))
 log = (report / 'lab.log').open('w')
 awake = subprocess.Popen(['caffeinate', '-i', '-s'])
@@ -93,7 +94,7 @@ try:
     inventory = work / 'inventory.ini'
     inventory.write_text('[servers]\nvolume-lab ansible_host=' + address + ' ansible_user=deploy ansible_ssh_private_key_file=' + str(key) + ' ansible_ssh_common_args="-o IdentitiesOnly=yes"\n')
     env = {**os.environ, 'ANSIBLE_CONFIG': str(frozen / 'ansible/ansible.cfg'), 'PYTHONDONTWRITEBYTECODE': '1'}
-    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json'), '-e', 'platform_input_probe=' + ('true' if args.platform_inputs else 'false'), '-e', 'declared_image_probe=' + ('true' if args.image_admission else 'false'), '-e', 'volume_state_probe=' + ('true' if args.volume_state else 'false'), '-e', 'app_overlay_probe=' + ('true' if args.app_overlay else 'false'), '-e', 'app_overlay_state_probe=' + ('true' if args.app_overlay_state else 'false'), '-e', 'managed_service_probe=' + ('true' if args.managed_service else 'false'), '-e', 'managed_group_probe=' + ('true' if args.managed_group else 'false')], env=env)
+    run(['ansible-playbook', '-i', str(inventory), str(frozen / 'test/lab/swarm-platform/volume-runtime.yml'), '-e', 'kayra_root=' + str(frozen), '-e', 'volume_egress_mtu=' + str(args.egress_mtu or 0), '-e', 'volume_node_image=' + image, '-e', 'report_path=' + str(report / 'result.json'), '-e', 'platform_input_probe=' + ('true' if args.platform_inputs else 'false'), '-e', 'declared_image_probe=' + ('true' if args.image_admission else 'false'), '-e', 'volume_state_probe=' + ('true' if args.volume_state else 'false'), '-e', 'app_overlay_probe=' + ('true' if args.app_overlay else 'false'), '-e', 'app_overlay_state_probe=' + ('true' if args.app_overlay_state else 'false'), '-e', 'managed_service_probe=' + ('true' if args.managed_service else 'false'), '-e', 'managed_group_probe=' + ('true' if args.managed_group else 'false')], env=env)
     if not args.keep:
         run(['multipass', 'delete', '--purge', vm])
         shutil.rmtree(work)

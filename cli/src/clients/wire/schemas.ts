@@ -1,3 +1,5 @@
+import { managedDeploymentStatusSchema } from "../../contracts/managed-deployment-status.ts";
+import { managedImagePinsSchema } from "../../contracts/managed-image-pins.ts";
 import { deploymentStatusSchema } from "../../contracts/deployment-status.ts";
 import { deploymentHealthSchema } from "../../contracts/deployment-health.ts";
 import { deploymentImagePinsSchema } from "../../contracts/deployment-image-pins.ts";
@@ -68,7 +70,7 @@ export const schemas = {
   })) }),
   Validation: z.object({ result: verdict, servers: z.array(z.object({ name: z.string(), kind: z.string(), target: z.string(), result: verdict, findings: z.array(z.object({ result: verdict, text: z.string(), hint: z.string().nullable() })) })) }),
   AppValues: valuesReportSchema,
-  DeploymentStatus: deploymentStatusSchema, DeploymentHealth: deploymentHealthSchema, DeploymentImagePins: deploymentImagePinsSchema,
+  DeploymentStatus: z.union([deploymentStatusSchema, managedDeploymentStatusSchema]).nullable(), DeploymentHealth: deploymentHealthSchema.nullable(), DeploymentImagePins: z.union([deploymentImagePinsSchema, managedImagePinsSchema]).nullable(),
   AppRuns: runsSchema, AppReleases: releasesSchema,
   OperationInfo: z.object({ name: z.enum(operationNames), summary: z.string(), scope: z.enum(scopes), effect: z.enum(effects), kind: z.enum(kinds), local: z.boolean(), input: z.record(z.string(), z.unknown()) }),
 } as const;

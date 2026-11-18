@@ -9,7 +9,7 @@ import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { parseMigrationResolutionQuery, parseMigrationResolutionRequest, parseMigrationResolutionReport } from "../../contracts/migration-resolution.ts";
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareRollout" | "httpOperation" | "prepareHttpRollout" | "deploymentStatus" | "deploymentImagePins" | "deploymentHealth" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit" | "rolloutOperation" | "cancelManagedRollout">>;
+type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareRollout" | "httpOperation" | "prepareHttpRollout" | "publishedDeploymentStatus" | "publishedDeploymentImagePins" | "publishedDeploymentHealth" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit" | "rolloutOperation" | "cancelManagedRollout">>;
 type Ports = {
   readonly index: Index;
   readonly canAccess: (app: string) => Promise<boolean>;
@@ -17,7 +17,8 @@ type Ports = {
   readonly enabled: () => Promise<boolean>;
   readonly plans?: (HttpPlanPort & Pick<BuildPorts, "now" | "retain">) | undefined;
   readonly rollouts?: (RolloutPlanPort & Pick<BuildPorts, "now" | "retain">) | undefined;
-  readonly observations?: Parameters<Index["deploymentHealth"]>[1] | undefined;
+  readonly observations?: Parameters<Index["publishedDeploymentHealth"]>[1] | undefined;
+  readonly managedObservations?: Parameters<Index["publishedDeploymentHealth"]>[2] | undefined;
   readonly artifacts?: Pick<BuildPorts, "read"> | undefined;
   readonly recovery?: Readonly<{ actor: MigrationResolutionActor; ports: Parameters<Index["resolveMigration"]>[3] }> | undefined;
 };
@@ -40,7 +41,7 @@ const completeReceipt = (app: string, root: RolloutRequest, http?: HttpOperation
 };
 
 /** Local lifecycle interface. Callers cannot supply native authority, private inputs or effect decisions. */
-export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, now, recovery, artifacts, observations }: Ports) => async (path: string, input: unknown) => {
+export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, now, recovery, artifacts, observations, managedObservations }: Ports) => async (path: string, input: unknown) => {
   if (path === "/deployment/migration-cleanup-audit") {
     const query = parseMigrationResolutionQuery(input); if (!query.ok) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
@@ -66,20 +67,20 @@ export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, 
     return index.resolveMigration(requested.value.app, requested.value, recovery.actor, recovery.ports);
   }
   if (path === "/deployment/health") {
-    const query = parseDeploymentQuery(input); if (!query.ok || observations === undefined) return undefined;
+    const query = parseDeploymentQuery(input); if (!query.ok || observations === undefined && managedObservations === undefined) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
-    return index.deploymentHealth(query.value.app, observations);
+    return index.publishedDeploymentHealth(query.value.app, observations, managedObservations);
   }
   if (path === "/deployment/pins") {
     const query = parseDeploymentQuery(input); if (!query.ok || artifacts === undefined) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
-    return index.deploymentImagePins(query.value.app, artifacts);
+    return index.publishedDeploymentImagePins(query.value.app, { read: artifacts.read, now });
   }
   if (path === "/deployment/status") {
     const query = parseDeploymentQuery(input);
     if (!query.ok) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
-    return index.deploymentStatus(query.value.app);
+    return index.publishedDeploymentStatus(query.value.app, artifacts === undefined ? undefined : { read: artifacts.read, now });
   }
   if (path === "/deployment/cancel") {
     const requested = parseDeploymentCancellation(input);

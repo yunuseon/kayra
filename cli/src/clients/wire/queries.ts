@@ -16,9 +16,9 @@ const data = <T>(schema: z.ZodType<T>, text: Result<string, string>) => {
   return value === undefined ? err("the deployer returned an unreadable answer") : ok<T>(value);
 };
 // eslint-disable-next-line functional/prefer-immutable-types -- the read-only Zod contract validates external data
-const scopedData = <T extends { readonly app: string }>(schema: z.ZodType<T>, text: Result<string, string>, app: string) => {
+const scopedData = <T extends { readonly app: string } | null>(schema: z.ZodType<T>, text: Result<string, string>, app: string) => {
   const result = data(schema, text);
-  return !result.ok || result.value.app === app ? result : err("the deployer returned another application's projection");
+  return !result.ok || result.value === null || result.value.app === app ? result : err("the deployer returned another application's projection");
 };
 const queries: Queries = {
   "app.values": (context, input) => query(context, "app.values", input),

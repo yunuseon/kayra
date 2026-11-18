@@ -46,3 +46,13 @@ test("cancellation is offered for pending work and removed once the request is r
   expect(deploymentView(pending).cancelRequest).toBe(status.operation.request);
   expect(deploymentView({ ...pending, operation: { ...status.operation, phase: "recovering", cancelRequestedAt: 1500 } }).cancelRequest).toBeNull();
 });
+
+test("managed restoration reports the requested failure separately from the active release and health", () => {
+  const managed: DeploymentStatus = { version: 3, protocol: "managed-v3", runtime: "swarm", app: "shop", incarnation: status.incarnation,
+    requested: b, desired: a, verifiedActive: { ...a, run: "23456789-1234-4234-8234-123456789abc", verifiedAt: 1000, compatibilityEpoch: 0 }, lastKnownGood: { ...a, run: "23456789-1234-4234-8234-123456789abc", verifiedAt: 1000, compatibilityEpoch: 0 },
+    compatibilityEpoch: 0, rollback: "eligible", operation: { run: "23456789-1234-4234-8234-123456789abc", strategy: "rolling", phase: "complete", reason: null, outcome: "rolled-back", admissionDeadline: 90000, deadline: 900000, recoveryDeadline: 180000, cancelRequestedAt: null, admitted: true, settled: true },
+    migrations: { phase: "succeeded", reason: null, step: null, resolutions: [] }, requiredAction: "none", runtimeObservation: "not-observed" };
+  const view = deploymentView(managed, health); expect(view.active).toBe(a.commit); expect(view.requested).toBe(b.commit); expect(view.recovery).toBe("Previous release restored"); expect(view.phaseTone).toBe("warn"); expect(view.runtimeTone).toBe("ok"); expect(view.cancelRequest).toBeNull();
+  expect(deploymentView({ ...managed, rollback: "data-fenced", operation: { ...managed.operation, phase: "held", reason: "verification", outcome: null, settled: false }, requiredAction: "inspect-and-resolve" }, null).rollback).toContain("forward recovery required");
+  expect(deploymentView(managed, null).runtime).toBe("Not observed");
+});

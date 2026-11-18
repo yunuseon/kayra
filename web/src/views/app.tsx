@@ -119,7 +119,8 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
   if (answer === undefined) return <Waiting what="Reading deployment state" />;
   if (!answer.ok) return <Problem failure={answer.failure} />;
   const state = answer.value;
-  const preparation = state.preparation;
+  if (state === null) return <><p class="tone-muted">No deployment has been requested.</p><button class="button small" onClick={refresh}>Refresh deployment</button></>;
+  const preparation = state.version === 1 ? state.preparation : null;
   const view = deploymentView(state, health?.ok === true ? health.value : undefined);
   const cancelRequest = view.cancelRequest;
   const resolution = preparation?.step === null || preparation?.step === undefined ? null : { run: preparation.request, step: preparation.step };
@@ -127,18 +128,19 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
     <div class="actions"><button class="button small" onClick={() => { refresh(); refreshHealth(); }}>Refresh deployment</button></div>
     <dl class="facts deployment-facts">
       <div class="fact"><dt>Runtime</dt><dd>{state.runtime}{state.runtime === "swarm" ? <> <Pill tone="warn">experimental</Pill></> : null}</dd></div>
-      <div class="fact"><dt>Lifecycle</dt><dd>{state.lifecycle}</dd></div>
+      {state.version === 1 ? <div class="fact"><dt>Lifecycle</dt><dd>{state.lifecycle}</dd></div> : <div class="fact"><dt>Deployment strategy</dt><dd>{state.operation.strategy}</dd></div>}
       <div class="fact"><dt>Rollout phase</dt><dd><Pill tone={view.phaseTone}>{view.phase}</Pill></dd></div>
       <div class="fact"><dt>Certified active release</dt><dd><Release commit={view.active} /></dd></div>
       <div class="fact"><dt>Last known good</dt><dd><Release commit={view.lastKnownGood} /></dd></div>
       <div class="fact"><dt>Requested release</dt><dd><Release commit={view.requested} /></dd></div>
       <div class="fact"><dt>Desired release</dt><dd><Release commit={view.desired} /></dd></div>
+      {state.version === 3 ? <><div class="fact"><dt>Rollback eligibility</dt><dd>{view.rollback}</dd></div><div class="fact"><dt>Migration step</dt><dd>{state.migrations.step ?? "None pending"}{state.migrations.reason === null ? null : <> · {state.migrations.reason}</>}</dd></div></> : null}
       <div class="fact"><dt>Recovery outcome</dt><dd>{view.recovery}</dd></div>
       <div class="fact"><dt>Required action</dt><dd class={state.requiredAction === "none" ? "" : "tone-bad"}>{view.action}</dd></div>
       <div class="fact"><dt>Current service health</dt><dd><Pill tone={view.runtimeTone}>{view.runtime}</Pill></dd></div>
       {view.observedAt === null ? null : <div class="fact"><dt>Observed at</dt><dd>{new Date(view.observedAt).toISOString()}</dd></div>}
     </dl>
-    {state.verification === "legacy-unverified" ? <p class="tone-muted">Legacy Compose history has no certified active release.</p> : null}
+    {state.version === 1 && state.verification === "legacy-unverified" ? <p class="tone-muted">Legacy Compose history has no certified active release.</p> : null}
     {state.verifiedActive === null ? null : <p class="tone-muted small">Release certified at {new Date(state.verifiedActive.verifiedAt).toISOString()}. Current service health is observed separately.</p>}
     {health === undefined ? <Waiting what="Observing current services" /> : !health.ok ? <Problem failure={health.failure} /> : null}
     {view.services.length === 0 ? null : <table class="table"><thead><tr><th>Service</th><th>State</th><th>Healthy / current</th><th>Historical tasks ignored</th></tr></thead><tbody>

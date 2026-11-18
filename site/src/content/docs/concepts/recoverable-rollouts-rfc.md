@@ -2044,3 +2044,19 @@ not permission to collect. Legacy destructive registry GC remains refused while
 coordinator-managed ownership records exist. Historical retention policy, live
 attachments, unresolved runtime references and platform image pins still require
 separate reconciliation before any collector can safely delete images.
+
+### Reporting capabilities and interrupted acceptance
+
+Published managed status and image pins require only an artifact reader and
+clock. Runtime health adds only owned service/specification observation ports.
+The reporting path holds the application's journal ownership but does not
+instantiate the execution coordinator, authorize workloads, initialize operation
+state, settle admission or synchronize release promotion. Execution ports remain
+inside lifecycle composition.
+
+A registered app with no accepted deployment returns no managed deployment
+projection and creates no root journal. An accepted request whose root is missing,
+or a newer accepted request whose root still describes its predecessor, refuses
+reporting until lifecycle reconciliation reconstructs the operation. Reports do
+not silently present the predecessor as the latest request. Existing initialized
+journals are opened strictly; missing records are never replaced by a reader.

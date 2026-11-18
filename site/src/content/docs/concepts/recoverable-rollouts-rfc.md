@@ -2231,3 +2231,25 @@ is observer reconstruction within the lab process, not a claim of full public
 pipeline integration or coordinator SIGKILL acceptance. Wiring the factory to
 normal current platform grants, private input generations and job materialization
 remains required before enabling ordinary mutation dispatch.
+
+### Per-run migration input composition
+
+The job composition boundary binds the validated execution context before the
+app writer runs. It checks run ownership, declared migration/probe commands,
+image, resources, network and input references before private materialization.
+Create resolves current platform inputs, rechecks permission and the original
+scheduling window, then passes values directly to the native adapter. Permission and materialization
+waits are bounded to ten seconds within the original scheduling window; late
+responses cannot dispatch Create. Values and
+private errors never enter deployment records or reporting. Start never resolves
+a fresh environment and never adds retries. A lost native Create acknowledgement
+remains uncertain and is observed through its stable runtime identity.
+
+Observation and fencing have distinct current cleanup permission, so revoking
+creation or startup need not strand an owned job. Existing native cleanup
+deadlines remain binding; this port cannot mint another cleanup window. This
+grants no applied/not-applied
+migration outcome; the existing sequence owner still authenticates intent,
+admission, deadlines and recovery semantics. The native maintenance fixtures bind
+this composition when opening or recovering each source. Their grants and input
+snapshots remain fixture callbacks; normal platform factory wiring is pending.

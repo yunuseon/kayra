@@ -2,7 +2,7 @@ import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
 import { parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
 import type { ManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
 import type { RetainedInputsPort } from "../../contracts/service-inputs.ts";
-import { parseManagedExecutionContext } from "../../contracts/managed-execution-context.ts";
+import { managedSourceContext } from "./managed-source-context.ts";
 import { managedVolumePreparation } from "./managed-volume-preparation.ts";
 import { parseVolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
 import { volumeCatalogReceipts } from "./volume-catalog-receipts.ts";
@@ -345,6 +345,20 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
+    managedRequestSource: (app: string, run: string, commit: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
+      const envelope = await store.read();
+      if (indexed.protocol !== "managed-v3" || indexed.managedVolumes !== 1 || !z.uuid().safeParse(run).success || !/^[a-f0-9]{40}$/.test(commit) || envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("managed preparation scope unavailable");
+      const request = envelope.managed?.find((item) => item.run === run);
+      if (request === undefined) {
+        if (envelope.fence?.lifecycle.phase !== "registered" || envelope.managed?.some((item) => item.completion === null)) throw new Error("managed preparation has an unresolved lifecycle operation");
+        return undefined;
+      }
+      const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(request.source));
+      if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== request.source) throw new Error("managed preparation source unavailable");
+      const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
+      if (bytes !== JSON.stringify(source) || !gate.ok || source.candidate.commit !== commit || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed preparation request identity conflicts");
+      return Object.freeze({ source, request });
+    }),
     proposeManagedDeployment: (app: string, candidateInput: ManagedApplicationPlan, run: string, ports: ManagedDeploymentReadPort & RetainedInputsPort) => useIndexed(app, async (store, indexed) => {
       const checked = parseManagedApplicationPlan(candidateInput); const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner }); const envelope = await store.read();
       if (!checked.ok || !ownership.ok || !z.uuid().safeParse(run).success || indexed.protocol !== "managed-v3" || indexed.managedVolumes !== 1 || indexed.managedRoot === undefined || envelope === undefined) throw new Error("managed proposal scope unavailable");
@@ -378,9 +392,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== request.source) throw new Error("managed execution source unavailable");
       const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
       if (bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed execution source binding disagrees");
-      const context = parseManagedExecutionContext({ version: 1, protocol: "managed-v3", runtime: "swarm", owner: gate.value.owner, run, action: source.action, source: request.source,
-        application: source.candidate, previous: source.previous?.source.application ?? null, allocationRequired: source.version === 2, createdAt: source.createdAt, admissionDeadline: request.admissionDeadline, deadline: request.deadline });
-      if (!context.ok) throw new Error(context.error); return context.value;
+      return managedSourceContext(source);
     }),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),

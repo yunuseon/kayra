@@ -2269,3 +2269,20 @@ the VM and archived raw source/results/events with verified SHA256SUMS. The prio
 `95c681b` attempt hit a fixture ReferenceError before that check could run; its VM
 is stopped and preserved after raw results and registry RAM were archived and
 verified. The retry used a fresh VM with the assertion in the completed branch.
+
+The indexed singleton fixture uses `managedPreparation` for build-to-acceptance
+sequencing. It checks the owner-published execution context and compiled build
+identity before acceptance, then reconstructs the same accepted operation after
+observer recreation. Its compiler callback and grants remain synthetic; this is
+not evidence for normal public deployment dispatch.
+
+Proposal snapshot `cf7aaa3` passed in VM
+`kayra-volume-lab-20261118204233154186` (destroyed): 18,083 group observations,
+735 singleton effects and one volume Create across lost acknowledgement and
+reopening; maintenance schema 2 with zero application fixture violations. Private
+raw evidence and source snapshots have verified SHA-256 manifests.
+
+The unprivileged platform-input probe also exercises the filesystem-backed
+managed compiler with a synthetic registry resolver. It requires exact bundle
+hash/commit/registration and rejects stale publications and corrupt bytes. This
+establishes publication-reader behavior, not native image or overlay existence.

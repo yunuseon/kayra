@@ -2009,4 +2009,18 @@ no fabricated migration evidence, and zero Starts across all 16 possible
 migration/probe names for that run. The same compensation implementation uses
 the immutable quiescence source and all recorded CAS versions. Unit tests also
 hold a stop request until after restoration and require its stale CAS refusal.
-Fresh native validation of this partial-quiescence variant is pending.
+Fresh source `dbe7482`, VM
+`kayra-volume-lab-20261117233826746281`, passed and was destroyed. Partial-stop
+cancellation restored A under the original recovery deadline, with schema 1,
+no applied operations, no B effects and zero migration/probe Starts. The full
+group recorded 22,792 API requests. Engine/CLI 29.10.0/API 1.57, Compose 5.8.0,
+Node v24.22.1 and Ubuntu 24.04.5 ARM64 plus raw artifacts and SHA-256 manifests
+are retained privately.
+
+The connected singleton now also owns the existing lifecycle envelope: each
+run references a retained immutable source and the shared deployment ticket,
+and only its synchronized complete root snapshot releases that gate. Reopening
+includes both journals. Runs 2–5 must remain bound to that one action sequence,
+including rollback and both unstarted cancellations. Accounting remains an
+isolated fixture book; this is not the platform-wide index binding or normal
+operator dispatch. Fresh native validation of this gate integration is pending.

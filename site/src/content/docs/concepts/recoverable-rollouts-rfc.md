@@ -2129,3 +2129,28 @@ fixture now creates through the durable creator and reopens its journal across
 rollout recovery before consuming this read port. Its volume creation still uses
 explicit fixture authority before indexed workload admission; ordinary admitted
 allocation and receipt-catalog lifecycle wiring remain pending.
+
+### Allocation catalog and immutable volume births
+
+The deployment owner now has a single-writer allocation catalog. Registration
+is append-only: a logical volume key and allocation identity cannot be rebound.
+Each explicit creation operation retains its original deployment identity,
+intent time, deadline and creation evidence. Replaying that operation cannot
+renew its deadline. A later explicitly authorized operation may retry an absent,
+never-recorded allocation only after the old window expires and a bounded
+observation settles its current absence. An uncertain existing creation must
+first be observed and sealed under current metadata authority.
+
+Once any operation records a birth, every operation for that allocation uses
+that historical receipt. Missing or replaced storage requires recovery rather
+than another Create. Contradictory births and foreign ownership are refused.
+The catalog supplies only the read-only receipt port to workload input
+materialization; the runtime still independently verifies physical ownership
+and birth. Histories are bounded and exhaustion holds for operator action.
+
+The native fixture reopens this catalog alongside its application index and
+counts Create calls across replacement, rollback and cancellation. Creation
+still uses explicit fixture authority before indexed workload admission. The
+normal coordinator's admitted allocation phase, removal retention and explicit
+cross-incarnation delegation remain integration work; this catalog does not
+establish those guarantees by itself.

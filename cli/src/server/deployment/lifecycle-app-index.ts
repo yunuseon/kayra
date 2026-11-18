@@ -1,3 +1,10 @@
+import type { ManagedDeploymentReadPort, ManagedHealthReadPort } from "../../contracts/managed-deployment-read.ts";
+import { managedDeploymentStatus } from "./managed-deployment-status.ts";
+import { managedDeploymentHealth } from "./managed-deployment-health.ts";
+import { managedImagePins } from "./managed-image-pins.ts";
+import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
+import type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
+import { parseManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 import { indexedManagedLifecycle } from "./indexed-managed-lifecycle.ts";
 import type { IndexedManagedRuntime, IndexedManagedContext } from "./indexed-managed-lifecycle.ts";
 import { managedIndexGate, observeManagedIndexAdmission, reserveManagedIndexAdmission, settleManagedIndexAdmission } from "./managed-index-admission.ts";
@@ -145,6 +152,29 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, left);
     try { return await Promise.race([Promise.resolve().then(call).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
   };
+  /** Published read models hold only journal ownership and read capabilities. They never initialize/resume a deployment or acquire effect authority. */
+  const useManagedRead = <T>(app: string, ports: ManagedDeploymentReadPort, project: (state: ManagedLifecycleStore, source: ManagedLifecycleSource) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+    const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
+    if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
+    const path = join(appDirectory(app), "managed"); await requireDirectory(path); const envelope = await store.read(); const request = envelope?.managed?.at(-1);
+    if (request === undefined) {
+      if (indexed.managedRoot !== "empty" || await stat(join(path, "state.json")) !== undefined) throw new Error("managed reporting lacks its accepted request"); return null;
+    }
+    // An accepted intent without a complete root journal needs the lifecycle owner, never initialization by a reporting reader.
+    const rootJournal = await journals(path, "existing");
+    try {
+      const state = parseManagedLifecycleStore(await rootJournal.read());
+      if (JSON.stringify(state.owner) !== JSON.stringify(ownership.value) || state.operation.run !== request.run) throw new Error("managed reporting is awaiting lifecycle reconciliation");
+      const value = await boundedManagedRead(ports.now() + 10_000, ports.now, async () => {
+        const bytes = await ports.read(state.operation.source); const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
+        if (createHash("sha256").update(bytes).digest("hex") !== state.operation.source || bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request) ||
+          request.completion !== null && (state.operation.phase !== "complete" || request.completion.outcome !== state.operation.outcome || request.completion.rootSnapshot !== createHash("sha256").update(JSON.stringify(state)).digest("hex"))) throw new Error("managed reporting lacks its shared request binding");
+        return project(state, source);
+      });
+      if (value === undefined) throw new Error("managed reporting evidence is unavailable"); return value;
+    } finally { await rootJournal.close(); }
+  });
+
   const useManaged = <T>(app: string, ports: IndexedManagedRuntime, use: (controller: ReturnType<typeof indexedManagedLifecycle>) => Promise<T>) => useIndexed(app, async (store, indexed) => {
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
@@ -283,9 +313,9 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),
     resolveManagedMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.resolve(request, actor)),
-    managedDeploymentImagePins: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.imagePins()),
-    managedDeploymentHealth: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.health()),
-    managedDeploymentStatus: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.status()),
+    managedDeploymentImagePins: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedImagePins(state, source, ports)),
+    managedDeploymentHealth: (app: string, ports: ManagedHealthReadPort) => useManagedRead(app, ports, (state, source) => managedDeploymentHealth(state, source, ports)),
+    managedDeploymentStatus: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedDeploymentStatus(state, source, ports)),
     managedState: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.read()),
     pendingManagedDeployments: async () => {
       if (closed) throw new Error("lifecycle app index is closed"); const snapshot = await serialIndex(readIndex);
@@ -680,11 +710,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return verified;
     }),
     reconcileHttpResources: (app: string, ticket: string) => useReady(app, (store) => reconcileHttpResources(app, store, ticket)),
-    runtimeHealthSnapshot: async (ports: Parameters<typeof deploymentHealth>[2] | undefined, managedPorts?: IndexedManagedRuntime) => {
+    runtimeHealthSnapshot: async (ports: Parameters<typeof deploymentHealth>[2] | undefined, managedPorts?: ManagedHealthReadPort) => {
       if (closed) throw new Error("lifecycle app index is closed");
       const snapshot = await serialIndex(readIndex);
       if (snapshot.apps.some((app) => app.protocol === "managed-v3") && managedPorts === undefined) throw new Error("managed-v3 runtime health observations are unavailable; normal managed integration remains disabled");
-      const managed = managedPorts === undefined ? [] : await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useManaged(app.app, managedPorts, (controller) => controller.health())));
+      const managed = managedPorts === undefined ? [] : await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useManagedRead(app.app, managedPorts, (state, source) => managedDeploymentHealth(state, source, managedPorts))));
       const observations = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol !== "managed-v3").map((app) => useReady(app.app, async (store) => {
         const envelope = await store.read();
         // Unverified registrations cannot own Swarm workloads. Compose retains its existing observations.

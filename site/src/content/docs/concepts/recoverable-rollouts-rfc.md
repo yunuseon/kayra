@@ -2253,3 +2253,25 @@ migration outcome; the existing sequence owner still authenticates intent,
 admission, deadlines and recovery semantics. The native maintenance fixtures bind
 this composition when opening or recovering each source. Their grants and input
 snapshots remain fixture callbacks; normal platform factory wiring is pending.
+
+### Trusted managed-runtime assembly
+
+A single composition factory now assembles the coordinator-facing workload, job,
+check, readiness, host-observation and catalog capabilities. It accepts typed
+adapters and platform input/authority ports in the existing privileged process.
+Construction performs no runtime effects or private reads. Candidate and previous
+plans remain immutable; another accepted source, action sequence or application
+cannot borrow this instance's authority or private materialization.
+
+Platform permission requests use shared contracts rather than private root or
+job journal structures. The factory maps coordinator effect requests into these
+permissions and separately authorizes private service/job inputs and cleanup.
+Admission and durable intent checks remain with the coordinator and index. The
+factory supplies the index's workload callback with its already-owned receipt
+port; external health views use the deployment component's published reader.
+Authority and private-input waits are bounded and private errors stay internal.
+
+The singleton fixture constructs this factory from preloaded context, including
+when reconstructing its observer. Fixture build, grant and configuration callbacks
+remain explicit. The factory alone does not wire normal registration/deployment
+commands, establish safe unknown-Exec rollback or complete lifecycle removal.

@@ -2196,3 +2196,21 @@ fresh VM `kayra-volume-lab-20261118152539312639`: 25 reconstructed input loads,
 destroyed. Raw source/results/events have verified SHA256SUMS. CLI 29.10.0,
 Compose 5.8.0, Node 24.22.1 and pinned images were unchanged. The distinct scope
 limitations for catalog ownership and same-process observer restart above apply.
+
+The singleton's subsequent revision assembles workload, job, check, readiness,
+host and allocation ports through the managed-runtime composition factory.
+Its observer constructs a fresh factory from each validated execution context.
+The existing A/B/A, cancellation, Create-count and receipt assertions remain;
+current platform input and grant policy still use explicit fixture callbacks.
+
+Job-input source `c28f7b6` passed the fresh native run in VM
+`kayra-volume-lab-20261118154107261474` on 2026-11-18. All five maintenance,
+resolution, recovery, initial-cleanup and quiescence-abort results reported bound
+job composition and zero schema violations; non-abort cases retained schema 2,
+and the pre-migration abort retained schema 1. The group recorded 19,264
+observations and the singleton recorded 592 effects. The successful VM was
+destroyed; raw source/results/events have verified SHA256SUMS. An earlier attempt
+failed before VM creation because the Multipass release catalog was briefly
+unreachable; its launch-only evidence is preserved separately. No registry,
+workloads or observer started in that attempt. The successful retry used the
+same source and `--volume-state --managed-group --egress-mtu 1280`.

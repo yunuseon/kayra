@@ -30,6 +30,8 @@ import { registrationObservation } from "../platform/registration-observation.ts
 import { createLifecycleAppIndex, openLifecycleAppIndex } from "../deployment/lifecycle-app-index.ts";
 import { deploymentControl } from "../deployment/deployment-control.ts";
 import { registrationControl } from "../deployment/registration-control.ts";
+import { managedPlatform } from "./managed-platform.ts";
+import { startManagedController } from "./managed-controller.ts";
 
 const missing = (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 
@@ -124,6 +126,10 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     },
   });
   const api = dockerApi();
+  const canRegister = async (app: string) => {
+    const claim = await lstat(join(platform, "managed-apps", app + ".json"));
+    return claim.isFile() && claim.uid === 0 && claim.gid === 0 && (claim.mode & 0o7777) === 0o444 && claim.nlink === 1;
+  };
   const executionPorts = artifacts === undefined || publicRegistrations === undefined || privateRegistrations === undefined || swarmAuthority === undefined ? undefined : Object.freeze({
     ...artifacts, ...httpEnvironment(publicRegistrations, privateRegistrations, 1000), now: Date.now,
     observeHost: (host: Parameters<typeof observeSwarmHost>[0]) => observeSwarmHost(host, api),
@@ -132,9 +138,15 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
   const healthPorts = artifacts === undefined ? undefined : Object.freeze({ read: artifacts.read, now: Date.now, observe: swarmService(api).observe });
   let controller: ReturnType<typeof startHttpController> | undefined;
   let rolloutController: ReturnType<typeof startRolloutController> | undefined;
+  let managed: ReturnType<typeof managedPlatform> | undefined;
+  let managedController: ReturnType<typeof startManagedController> | undefined;
   let lastReport = "";
-  const startController = (index: Parameters<typeof startHttpController>[0] & Parameters<typeof startRolloutController>[0]) => {
+  const startController = (index: Readonly<Awaited<ReturnType<typeof openLifecycleAppIndex>>>) => {
     if (controller !== undefined || executionPorts === undefined) return;
+    if (builds !== undefined && publicRegistrations !== undefined && privateRegistrations !== undefined && swarmAuthority !== undefined && migrationPolicy !== undefined) {
+      managed = managedPlatform(index, { publicRegistrations, privateRegistrations, swarmAuthority, migrationPolicy, domain }, { builds, api, canAccess: canRegister });
+      managedController = startManagedController(index, managed.work, (result) => { if (result.status !== "ready" || result.work.length > 0) console.log("managed-coordinator: " + JSON.stringify(result)); });
+    }
     rolloutController = startRolloutController(index, { ...executionPorts, jobs: oneShotJob(api), cleanup: oneShotCleanup(api) }, (result) => {
       if (result.status !== "ready" || result.work.length > 0) console.log("rollout-coordinator: " + JSON.stringify(result));
     });
@@ -145,10 +157,6 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     });
   };
   if (opening !== undefined) startController(await opening);
-  const canRegister = async (app: string) => {
-    const claim = await lstat(join(platform, "managed-apps", app + ".json"));
-    return claim.isFile() && claim.uid === 0 && claim.gid === 0 && (claim.mode & 0o7777) === 0o444 && claim.nlink === 1;
-  };
   const overlays = platformOverlayControl({ directory: join(platform, "platform-state", "app-overlays"), native: appOverlays(api),
     ownership: async (app, generation, ticket) => {
       if (opening === undefined || !(await canRegister(app))) throw new Error("app is outside platform overlay scope");
@@ -172,7 +180,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         if (claims.length !== 0) throw new Error("managed ownership exists without a health owner");
         return Object.freeze([]);
       }
-      return (await opening).runtimeHealthSnapshot(healthPorts);
+      return (await opening).runtimeHealthSnapshot(healthPorts, await managed?.healthSnapshot());
     },
     handle: async (route: string, input: unknown) => {
       if (route === "/platform/app-overlay") return overlays.provision(input);
@@ -189,7 +197,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
-      if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
+      if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, managedObservations: route === "/deployment/health" ? await managed?.healthSnapshot() : undefined, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
         rollouts: rollouts === undefined || artifacts === undefined ? undefined : { ...rollouts, now: Date.now, retain: artifacts.retain },
@@ -204,6 +212,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
       await overlays.close();
       await controller?.close();
       await rolloutController?.close();
+      await managedController?.close();
       const index = await opening;
       await index?.close();
     },

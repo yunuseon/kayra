@@ -8,6 +8,7 @@ import { parseManagedExecutionContext } from '../../../cli/src/contracts/managed
 import { managedServiceDigest, managedServiceName } from '../../../cli/src/contracts/managed-service-plan.ts';
 import { platformManagedRuntimeAuthority } from '../../../cli/src/server/platform/managed-runtime-authority.ts';
 import { platformManagedPlans } from '../../../cli/src/server/composition/managed-plans.ts';
+import { managedPlatform } from '../../../cli/src/server/composition/managed-platform.ts';
 
 export const preparePlatformRuntimeAuthority = async (output, references) => {
   assert.equal(process.getuid(), 0); const root = join(output, 'input-fixtures'); const reference = references.baseline; const registration = reference.registration;
@@ -52,5 +53,13 @@ export const observePlatformRuntimeAuthority = async (output) => {
   assert.deepEqual(await compiler().volumeKeys(...args), []); assert.equal(registryUsages.length, 0);
   const plan = await compiler().preview(...args, []); assert.equal(plan.commit, context.application.commit); assert.equal(plan.artifact, artifact); assert.equal(plan.configurationIdentity, context.application.configurationIdentity); assert.deepEqual(plan.infrastructure, context.application.infrastructure); assert.equal(plan.services.worker.inputs.registration.registrationGeneration, context.application.infrastructure.registration.registrationGeneration); assert.equal(registryUsages.length, 1);
   await assert.rejects(compiler('wrong-current').volumeKeys(...args), /registration unavailable/); await assert.rejects(compiler('public', async () => '{}').volumeKeys(...args), /integrity/); await assert.rejects(compiler().volumeKeys(args[0], 'b'.repeat(40), artifact), /bundle unavailable/);
-  return { accepted, refused, cleanupWithoutStartGrant, deploymentStopRefusedWithoutStartGrant: true, platformCompiler: { passed: true, exactBundleIdentity: true, staleRegistrationRefused: true, corruptBundleRefused: true, wrongCommitRefused: true, declaredRegistryContexts: registryUsages.length, registryResolverSynthetic: true }, readerUid: process.getuid(), metadataOnly: true, scope: 'synthetic platform publication permission and compilation checks; no runtime effects, admission, deployment journal, image existence or live overlay proof' };
+  const nativeReads = []; const unexpected = async () => { throw new Error('unexpected lifecycle mutation in publication probe'); };
+  const index = { managedHealthContexts: async () => [context], recordedManagedVolumes: async () => [], managedRequestSource: unexpected, prepareBuild: unexpected, registrationPolicy: unexpected, reserveDataVolumeIdentities: unexpected, proposeManagedDeployment: unexpected, requestManagedDeployment: unexpected };
+  const assembled = managedPlatform(index, { publicRegistrations: join(root, 'public'), privateRegistrations: join(root, 'private'), swarmAuthority: join(root, 'host.json'), migrationPolicy: join(root, 'migration-policy.json'), domain: 'lab.test' }, {
+    canAccess: async () => true, builds: { now: Date.now, read: async () => bytes, retain: unexpected, prepare: unexpected, images: () => [] },
+    api: { request: async (method) => { assert.equal(method, 'GET'); nativeReads.push(method); return { status: 200, value: [] }; } },
+  });
+  await assembled.work.forRun(context); assert.deepEqual(nativeReads, []);
+  const health = await assembled.healthSnapshot(); assert.deepEqual(nativeReads, []); const observed = await health.services.observe({ app: context.owner.app, incarnation: context.owner.incarnation, dataOwner: context.owner.dataOwner, service: 'worker' }); assert.equal(observed.status, 'absent'); assert.ok(nativeReads.length > 0);
+  return { accepted, refused, cleanupWithoutStartGrant, deploymentStopRefusedWithoutStartGrant: true, platformRuntimeComposition: { constructedWithoutNativeAccess: true, healthUsesOnlyNativeReads: true, noLifecycleMutation: true }, platformCompiler: { passed: true, exactBundleIdentity: true, staleRegistrationRefused: true, corruptBundleRefused: true, wrongCommitRefused: true, declaredRegistryContexts: registryUsages.length, registryResolverSynthetic: true }, readerUid: process.getuid(), metadataOnly: true, scope: 'synthetic platform publication permission, compilation and composition checks; no runtime effects, admission, deployment journal, image existence or live overlay proof' };
 };

@@ -2368,3 +2368,22 @@ bundle hashes and builder contracts, derives supported Compose descriptions and
 resolves registry image metadata separately for services and jobs. It opens no
 secret files. Normal public mutation dispatch remains integration work; this does not enable managed deployments for existing
 apps or convert their runtime.
+
+#### Privileged-process managed composition
+
+The existing registration composition now assembles managed platform inputs,
+image compilation, native adapters and coordinator ports through one composition
+factory. It starts an independent reconciliation loop for already accepted
+`managed-v3` operations, using the existing Docker transport and indexed writer.
+Shutdown awaits that loop before closing the owner. No additional socket holder,
+RPC service or app-selected runtime is introduced.
+
+Health readers load authenticated owner-published execution contexts before
+entering application read transactions. This includes completed operations for
+current availability observations; completed operations stay excluded from work
+reconciliation. Read capabilities expose no effect methods. A source/context
+race reports unavailable rather than borrowing a different plan's authority.
+
+Normal public managed mutation dispatch remains disabled. This composition does
+not create or convert managed registrations; operator/client integration,
+removal/purge and the remaining acceptance matrix are still required.

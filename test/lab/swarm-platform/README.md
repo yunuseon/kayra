@@ -2286,3 +2286,16 @@ The unprivileged platform-input probe also exercises the filesystem-backed
 managed compiler with a synthetic registry resolver. It requires exact bundle
 hash/commit/registration and rejects stale publications and corrupt bytes. This
 establishes publication-reader behavior, not native image or overlay existence.
+
+The UID-1000 platform probe constructs the same `managedPlatform` factory used
+by the deployer process. A synthetic API accepts read requests only and checks
+that construction and health-reader assembly perform no native access. This is
+composition evidence with synthetic metadata, not a workload rollout claim.
+
+Snapshot `afbf97b` reached safe migration holding when a ten-second maintenance
+fixture step exhausted its window: the retained DB recorded schema 2 and the
+stable operation identity after the retry deadline, with zero worker violations.
+This failed run is preserved as negative recovery evidence. Nominal maintenance
+fixtures now declare a 30-second migration step and a 10-second HTTP timeout;
+job logs are retained before cleanup. Production deadlines and HTTP continuity
+load-generator timeouts are unchanged.

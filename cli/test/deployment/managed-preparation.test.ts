@@ -31,6 +31,7 @@ test("managed preparation connects immutable build, compilation and indexed acce
   assert.equal(receipt.run, run); assert.equal(receipt.completion, null); assert.deepEqual(lab.calls, ["builder", "keys", "compiler", "runtime"]);
   assert.equal(lab.hostCalls(), 0); assert.equal(lab.services.size, 0); assert.equal(lab.jobs.size, 0);
   const context = await lab.index().managedExecutionContext("shop", run, lab.runtime); assert.ok(context); assert.equal(context.application.commit, commit); assert.equal(context.action, lab.incarnation + ":2");
+  assert.deepEqual(await lab.index().managedHealthContexts(lab.runtime), [context]);
   await assert.rejects(managedPreparation(lab.index(), lab.ports).prepare("shop", randomUUID(), "c".repeat(40)), /unresolved/); assert.equal(lab.calls.length, 4);
 });
 
@@ -68,6 +69,7 @@ test("completed retries return their original receipt without starting runtime c
   const receipt = await managedPreparation(lab.index(), lab.ports).prepare("shop", run, commit); lab.clock(receipt.admissionDeadline + 1);
   for (let i = 0; i < 12; i++) { const state = await lab.index().tickManagedDeployment("shop", run, lab.runtime); if (state?.operation.phase === "complete") break; }
   const completed = await lab.index().managedRequestSource("shop", run, commit, lab.runtime); assert.ok(completed?.request.completion); await lab.reopen(); lab.calls.length = 0;
+  assert.equal(await lab.index().managedExecutionContext("shop", run, lab.runtime), undefined); assert.equal((await lab.index().managedHealthContexts(lab.runtime))[0]?.run, run);
   assert.deepEqual(await managedPreparation(lab.index(), lab.ports).prepare("shop", run, commit), completed.request); assert.deepEqual(lab.calls, []);
 });
 

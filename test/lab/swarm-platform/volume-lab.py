@@ -43,6 +43,7 @@ paths = ['cli/src/contracts', 'cli/src/lib', 'cli/src/server/runtime/owned-volum
          'test/lab/swarm-platform/volume-runtime.yml', 'ansible/roles/docker', 'ansible/ansible.cfg', 'ansible/callback_plugins', 'node_modules/zod']
 if args.platform_inputs:
     paths += ['cli/src/server/platform', 'cli/src/server/composition/managed-plans.ts', 'cli/src/server/deployment/managed-application-plan.ts', 'cli/src/server/deployment/environment-bindings.ts', 'cli/src/server/runtime/compose-description.ts', 'cli/src/server/runtime/managed-compose-description.ts', 'cli/src/deployer/brand.ts', 'cli/src/deployer/app.ts', 'cli/src/deployer/build/bundle.ts', 'cli/src/deployer/build/routes.ts', 'node_modules/yaml', 'test/lab/swarm-platform/platform-inputs.mjs', 'test/lab/swarm-platform/platform-runtime-authority.mjs']
+    paths += ['cli/src/server/runtime', 'cli/src/server/deployment', 'cli/src/server/composition/managed-platform.ts', 'cli/src/server/composition/managed-runtime.ts', 'cli/src/server/composition/managed-jobs.ts', 'cli/src/server/composition/managed-workloads.ts']
 if args.image_admission:
     paths += ['cli/src/server/runtime/registry-images.ts', 'cli/src/server/runtime/image-json.ts', 'test/lab/swarm-platform/declared-images.mjs']
 if args.volume_state:
@@ -57,6 +58,7 @@ if args.managed_group:
     paths = [path for path in paths if not path.startswith('cli/src/server/deployment/')]
     paths += ['cli/src/server/deployment', 'cli/src/server/composition/managed-workloads.ts', 'cli/src/server/composition/managed-runtime.ts', 'cli/src/server/composition/managed-jobs.ts', 'cli/src/server/composition/managed-controller.ts', 'cli/src/server/platform', 'cli/src/server/runtime/swarm-host.ts', 'cli/src/server/runtime/one-shot-job.ts', 'cli/src/server/runtime/migration-probe-output.ts', 'cli/src/server/runtime/container-check.ts', 'test/lab/swarm-platform/managed-group.mjs', 'test/lab/swarm-platform/managed-singleton.mjs', 'test/lab/swarm-platform/managed-maintenance.mjs']
 paths = list(dict.fromkeys(paths))
+paths = [relative for relative in paths if not any(other != relative and relative.startswith(other + '/') and (source / other).is_dir() for other in paths)]
 for relative in paths:
     origin, target = source / relative, frozen / relative
     target.parent.mkdir(parents=True, exist_ok=True)

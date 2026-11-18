@@ -13,9 +13,10 @@ export const lifecycleIndexEntry = z.object({
   dataOwner: z.uuid().exactOptional(),
   volumes: z.array(ownedVolumeSchema).max(32).default([]).readonly(),
   protocol: z.literal("managed-v3").exactOptional(),
+  managedVolumes: z.literal(1).exactOptional(),
   managedRoot: z.enum(["empty", "ready"]).exactOptional(),
   phase: z.enum(["initializing", "ready"]),
-}).strict().refine((owner) => (owner.protocol === "managed-v3") === (owner.managedRoot !== undefined) && (owner.protocol !== "managed-v3" || parseDataOwnership({ version: 1, app: owner.app, incarnation: owner.incarnation, dataOwner: owner.dataOwner }).ok) && owner.volumes.every((volume) => volume.app === owner.app && volume.dataOwner === owner.dataOwner) &&
+}).strict().refine((owner) => (owner.protocol === "managed-v3") === (owner.managedRoot !== undefined) && (owner.protocol !== "managed-v3" || parseDataOwnership({ version: 1, app: owner.app, incarnation: owner.incarnation, dataOwner: owner.dataOwner }).ok) && (owner.managedVolumes === undefined || owner.protocol === "managed-v3") && owner.volumes.every((volume) => volume.app === owner.app && volume.dataOwner === owner.dataOwner) &&
   new Set(owner.volumes.map((volume) => volume.key)).size === owner.volumes.length &&
   new Set(owner.volumes.map((volume) => volume.allocation)).size === owner.volumes.length).readonly();
 export const lifecycleIndexBuild = z.object({

@@ -1,3 +1,7 @@
+import { managedVolumePreparation } from "./managed-volume-preparation.ts";
+import { parseVolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
+import { volumeCatalogReceipts } from "./volume-catalog-receipts.ts";
+import type { OwnedVolume } from "../../contracts/owned-volume.ts";
 import type { ManagedDeploymentReadPort, ManagedHealthReadPort } from "../../contracts/managed-deployment-read.ts";
 import { managedDeploymentStatus } from "./managed-deployment-status.ts";
 import { managedDeploymentHealth } from "./managed-deployment-health.ts";
@@ -13,7 +17,7 @@ import type { ManagedAdmissionIdentity, ManagedAdmissionClaim } from "../../cont
 import { parseLifecycleAppIndex, lifecycleIndexEntry, lifecycleIndexBuild } from "./lifecycle-app-index-state.ts";
 import type { IndexEntry } from "./lifecycle-app-index-state.ts";
 import { parseRegistrationOwnership } from "../../contracts/registration-ownership.ts";
-import { ownedVolume, ownedVolumeKeySchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
+import { ownedVolume, ownedVolumeSchema, ownedVolumeKeySchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
 import { deploymentHealth } from "./deployment-health.ts";
 import { deploymentImagePins } from "./deployment-image-pins.ts";
 import type { RolloutRequest } from "./rollout-request.ts";
@@ -179,6 +183,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
     const path = join(appDirectory(app), "managed"); await requireDirectory(path); const rootJournal = await journals(path, indexed.managedRoot === "ready" ? "existing" : "initialize");
+    let volumeJournal: Awaited<ReturnType<typeof journals>> | undefined;
     try {
       const indexedOwner = async () => { const value = (await readIndex()).apps.find((entry) => entry.app === app); if (value?.phase !== "ready" || value.protocol !== "managed-v3" || value.incarnation !== indexed.incarnation || value.dataOwner !== indexed.dataOwner) throw new Error("managed indexed ownership changed"); return value; };
       const context: IndexedManagedContext = {
@@ -218,8 +223,16 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           };
         },
       };
-      const controller = indexedManagedLifecycle(context, ports); await controller.synchronize(); return await use(controller);
-    } finally { await rootJournal.close(); }
+      const bound = await (async () => {
+        const data = ports.managedData; if (data === undefined) return ports;
+        if (indexed.managedVolumes !== 1 || ports.allocations !== undefined) throw new Error("indexed volume catalog capability unavailable or conflicting");
+        const volumePath = join(path, "volumes"); await requireDirectory(volumePath); volumeJournal = await journals(volumePath, "existing");
+        volumeCatalogReceipts(await volumeJournal.read(), ownership.value, indexed.volumes);
+        const allocation = managedVolumePreparation(volumeJournal, ownership.value, { native: data.native, now: ports.now });
+        return Object.freeze({ ...ports, allocations: allocation, services: data.workloads(allocation.receipts) });
+      })();
+      const controller = indexedManagedLifecycle(context, bound); await controller.synchronize(); return await use(controller);
+    } finally { try { if (volumeJournal !== undefined) await volumeJournal.close(); } finally { await rootJournal.close(); } }
   });
 
   const reconcileHttpResources = async (app: string, store: EnvelopeStore, ticket: string) => {
@@ -303,9 +316,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (existing?.phase === "ready") {
         await withEnvelope(path, existing, () => undefined);
         if (existing.protocol === "managed-v3") await requireDirectory(join(path, "managed"));
+        if (existing.managedVolumes === 1) { const catalog = await journals(join(path, "managed", "volumes"), "existing"); try { const state = parseVolumeCreationCatalog(await catalog.read()); if (state.owner.incarnation !== existing.incarnation || state.owner.dataOwner !== existing.dataOwner || state.owner.app !== app) throw new Error("volume catalog ownership disagrees"); } finally { await catalog.close(); } }
         return existing.incarnation;
       }
-      const ownership = existing ?? lifecycleIndexEntry.parse({ app, incarnation: randomUUID(), dataOwner: randomUUID(), ...(protocol === undefined ? {} : { protocol, managedRoot: "empty" }), phase: "initializing" });
+      const ownership = existing ?? lifecycleIndexEntry.parse({ app, incarnation: randomUUID(), dataOwner: randomUUID(), ...(protocol === undefined ? {} : { protocol, managedRoot: "empty", managedVolumes: 1 }), phase: "initializing" });
       if (existing === undefined) {
         if (await stat(path)) throw new Error("unindexed lifecycle directory exists; intervention required");
         if (index.apps.some((item) => item.incarnation === ownership.incarnation)) throw new Error("lifecycle incarnation collision");
@@ -316,6 +330,13 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await syncDirectory(directory);
       await withEnvelope(path, ownership, () => undefined);
       if (ownership.protocol === "managed-v3") { const root = join(path, "managed"); if (await stat(root) === undefined) await mkdir(root, { mode: 0o700 }); await requireDirectory(root); await syncDirectory(path); }
+      if (ownership.managedVolumes === 1) {
+        const volumePath = join(path, "managed", "volumes"); if (await stat(volumePath) === undefined) await mkdir(volumePath, { mode: 0o700 }); await requireDirectory(volumePath); await syncDirectory(join(path, "managed"));
+        const catalog = await journals(volumePath, "initialize");
+        try { const raw = await catalog.read(); if (raw === undefined) await catalog.write({ version: 1, sequence: 1, owner: { version: 1, app, incarnation: ownership.incarnation, dataOwner: ownership.dataOwner ?? "" }, allocations: [] });
+          else { const state = parseVolumeCreationCatalog(raw); if (state.owner.app !== app || state.owner.incarnation !== ownership.incarnation || state.owner.dataOwner !== ownership.dataOwner || state.allocations.length !== 0) throw new Error("initial volume catalog ownership disagrees"); }
+        } finally { await catalog.close(); }
+      }
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
@@ -331,6 +352,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (closed) throw new Error("lifecycle app index is closed"); const snapshot = await serialIndex(readIndex);
       const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useIndexed(app.app, async (store) => Object.freeze(((await store.read())?.managed ?? []).filter((item) => item.completion === null).map((item) => Object.freeze({ app: app.app, run: item.run }))))));
       return Object.freeze(work.flat());
+    },
+    recordedManagedVolumes: async (app: string, volumes: readonly OwnedVolume[]) => {
+      if (closed || !appName.safeParse(app).success) throw new Error("volume receipt reader is unavailable");
+      const requested = z.array(ownedVolumeSchema).max(32).readonly().safeParse(volumes); if (!requested.success || new Set(requested.data.map((volume) => volume.allocation)).size !== requested.data.length) return undefined;
+      const entry = (await serialIndex(readIndex)).apps.find((item) => item.app === app); const owner = entry === undefined ? undefined : parseDataOwnership({ version: 1, app, incarnation: entry.incarnation, dataOwner: entry.dataOwner });
+      if (entry?.phase !== "ready" || entry.managedVolumes !== 1 || owner === undefined || !owner.ok || volumes.some((volume) => !entry.volumes.some((known) => JSON.stringify(known) === JSON.stringify(volume)))) return undefined;
+      const path = join(appDirectory(app), "managed", "volumes"); await requireDirectory(path); const catalog = await journals(path, "existing");
+      try { return await volumeCatalogReceipts(await catalog.read(), owner.value, entry.volumes).read(volumes); } finally { await catalog.close(); }
     },
     dataOwnership: (app: string) => useIndexed(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);

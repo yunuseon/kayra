@@ -7,7 +7,7 @@ import type { DataVolumeCreation } from "./data-volume-creation.ts";
 import { parseVolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
 import type { VolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
 import type { OperationJournal } from "./operation.ts";
-import { recordedVolumeReceipts } from "./recorded-volume-receipts.ts";
+import { volumeCatalogReceipts } from "./volume-catalog-receipts.ts";
 import { claimJournal } from "./journal-claim.ts";
 import { typed } from "../../lib/typed.ts";
 import { z } from "zod";
@@ -47,7 +47,7 @@ export const volumeCreationCatalog = (journal: OperationJournal, input: DataOwne
     // eslint-disable-next-line functional/immutable-data -- one controller for each immutable creation identity
     children.set(key, controller); return controller;
   };
-  const receipts = typed<RecordedVolumeReceiptsPort>(Object.freeze({ read: (volumes) => serial(async () => { const state = await required(); return recordedVolumeReceipts(owner, state.allocations.map((value) => value.volume), (allocation) => Promise.resolve(state.allocations.find((value) => value.volume.allocation === allocation)?.creations.find((value) => birth(value) !== undefined))).read(volumes); }) }));
+  const receipts = typed<RecordedVolumeReceiptsPort>(Object.freeze({ read: (volumes) => serial(async () => { const state = await required(); return volumeCatalogReceipts(state, owner, state.allocations.map((value) => value.volume)).read(volumes); }) }));
   return Object.freeze({
     receipts,
     register: (input: readonly OwnedVolume[]) => serial(async () => {

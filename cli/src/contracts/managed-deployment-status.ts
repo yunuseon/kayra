@@ -1,0 +1,42 @@
+import { z } from "zod";
+import { err, ok } from "../lib/result.ts";
+
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const time = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const epoch = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const target = z.object({ plan: digest, commit: z.string().regex(/^[a-f0-9]{40}$/) }).strict();
+const verified = target.extend({ run: z.uuid(), verifiedAt: time, compatibilityEpoch: epoch }).strict().readonly();
+const schema = z.object({
+  version: z.literal(3), protocol: z.literal("managed-v3"), runtime: z.literal("swarm"),
+  app: z.string().max(48).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), incarnation: z.uuid(),
+  requested: target.readonly(), desired: target.readonly().nullable(), verifiedActive: verified.nullable(), lastKnownGood: verified.nullable(),
+  compatibilityEpoch: epoch, rollback: z.enum(["eligible", "no-previous-release", "application-incompatible", "data-fenced"]),
+  operation: z.object({ run: z.uuid(), strategy: z.enum(["rolling", "maintenance"]),
+    phase: z.enum(["admitting", "quiescing", "preparing", "updating", "verifying", "recovering", "recovery-verifying", "settling", "complete", "held"]),
+    reason: z.enum(["admission", "deadline", "authorization", "quiescence", "preparation", "consumers", "verification", "recovery", "recovery-verification", "cancellation"]).nullable(),
+    outcome: z.enum(["deployed", "rolled-back", "absent", "unchanged"]).nullable(),
+    admissionDeadline: time, deadline: time, recoveryDeadline: time.nullable(), cancelRequestedAt: time.nullable(),
+    admitted: z.boolean(), settled: z.boolean(),
+  }).strict().readonly(),
+  migrations: z.object({ phase: z.enum(["not-started", "running", "held", "succeeded"]),
+    reason: z.enum(["deadline", "runtime", "unsafe-outcome", "probe-unknown", "not-applied", "attempts-exhausted", "cancelled"]).nullable(),
+    step: z.string().max(128).nullable(),
+    resolutions: z.array(z.object({ step: z.string().max(128), id: digest, outcome: z.enum(["applied", "not-applied"]), at: time }).strict().readonly()).max(128).readonly(),
+  }).strict().readonly(),
+  requiredAction: z.enum(["none", "inspect-and-resolve"]), runtimeObservation: z.literal("not-observed"),
+}).strict().readonly().superRefine((value, context) => {
+  if (value.requiredAction !== (value.operation.phase === "held" ? "inspect-and-resolve" : "none") ||
+    (value.operation.phase === "held") !== (value.operation.reason !== null) ||
+    value.operation.settled !== (value.operation.phase === "complete") ||
+    (value.operation.outcome !== null) !== ["settling", "complete"].includes(value.operation.phase) ||
+    value.operation.admissionDeadline >= value.operation.deadline || value.operation.recoveryDeadline !== null && value.operation.recoveryDeadline > value.operation.deadline ||
+    [value.verifiedActive, value.lastKnownGood].some((item) => item !== null && item.compatibilityEpoch > value.compatibilityEpoch)) context.addIssue({ code: "custom", message: "inconsistent managed deployment status" });
+});
+
+export type ManagedDeploymentStatus = z.infer<typeof schema>;
+/** Published reporting data. This contract contains no runtime authority or private journal layout. */
+export const parseManagedDeploymentStatus = (input: unknown) => {
+  const result = schema.safeParse(input);
+  return result.success ? ok<ManagedDeploymentStatus>(result.data) : err("invalid managed deployment status");
+};
+export const managedDeploymentStatusSchema = schema;

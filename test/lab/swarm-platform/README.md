@@ -2109,3 +2109,14 @@ issues no further Create, checked in both live volume events and raw API request
 counts. Reproduce with `volume-lab.py --volume-state --managed-group
 --egress-mtu 1280`. This metadata probe does not establish application-job or
 normal indexed volume-catalog acceptance.
+
+Source `f07528b` passed `--volume-state --managed-group --egress-mtu 1280`
+on 2026-11-18 in fresh VM `kayra-volume-lab-20261118135124619060`. The
+late-receipt case survived real SIGKILL after metadata replacement, retained
+its held state and original deadline, and recorded exactly one native creation.
+Five total Create API requests matched the probe's expected total. The group
+recorded 20,645 observations and 639 singleton effects. The successful VM was
+destroyed after collection; raw evidence/source and verified SHA256SUMS are
+retained. Exact versions stayed Engine/CLI 29.10.0, API 1.57, Compose 5.8.0,
+Node 24.22.1, Ubuntu 24.04.5 ARM64 and kernel 6.8.0-147-generic. The logical
+clock scope above still applies; this is not full indexed allocation acceptance.

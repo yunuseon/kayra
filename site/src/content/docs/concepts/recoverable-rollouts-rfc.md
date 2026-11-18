@@ -2112,3 +2112,20 @@ that creation time; absence or a replacement is never permission to recreate.
 Replay after lost journal acknowledgements retains the same receipt and original
 creation deadline. The deployment-owned receipt catalog and normal lifecycle
 wiring remain separate work.
+
+### Recorded creation evidence as a runtime input
+
+The deployment owner publishes a read-only volume receipt port from registered
+allocation identities and validated creator records. Only a persisted original
+receipt or separately recovered creation receipt supplies the birth time. A raw
+native observation, unresolved attempt, foreign creator or unknown allocation
+cannot mint that evidence; mixed requests fail without a partial receipt set.
+
+The projection exposes no creator action, journal layout or mutable lifecycle
+state to platform input materialization. A recorded receipt remains a historical
+identity even when its volume is missing: the native adapter must independently
+verify current ownership and creation time before use. The native singleton
+fixture now creates through the durable creator and reopens its journal across
+rollout recovery before consuming this read port. Its volume creation still uses
+explicit fixture authority before indexed workload admission; ordinary admitted
+allocation and receipt-catalog lifecycle wiring remain pending.

@@ -145,12 +145,16 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
     if (current.operation.verification === null) { if (current.operation.consumers === null) throw new Error("managed lifecycle consumers missing"); if (ports.now() >= managedVerificationSnapshot({ kind: "deployment", application: source.candidate, certificate: current.operation.consumers }).deadline) return store.hold("deadline"); await child.verification.prepare({ kind: "deployment", application: source.candidate, certificate: current.operation.consumers }); return store.read(); }
     const result = await child.verification.tick(); return result.phase === "held" ? store.hold("verification") : store.read();
   };
+  const capabilities = (source: ManagedLifecycleSource) => {
+    if (source.previous !== null && source.candidate.rollout.rollback_compatible && ports.services.fence === undefined) throw new Error("managed recovery fencing capability unavailable");
+    if (source.retained.some((value) => value.kind === "barrier") && ports.services.reactivate === undefined || ports.checks === undefined && [source.candidate, ...(source.previous === null ? [] : [source.previous.source.application])].some((plan) => plan.rollout.checks.length > 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed lifecycle capabilities unavailable");
+  };
   return Object.freeze({
     read: store.read, source: store.source,
+    validate: (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input); capabilities(source); return store.validate(source); },
     begin: async (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input);
       const existing = await store.read(); if (existing?.operation.run === source.run) return store.begin(source);
-      if (source.previous !== null && source.candidate.rollout.strategy === "rolling" && ports.services.fence === undefined) throw new Error("managed rolling recovery fencing capability unavailable");
-      if (source.retained.some((value) => value.kind === "barrier") && ports.services.reactivate === undefined || ports.checks === undefined && [source.candidate, ...(source.previous === null ? [] : [source.previous.source.application])].some((plan) => plan.rollout.checks.length > 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed lifecycle capabilities unavailable");
+      capabilities(source);
       if (await bounded(source.createdAt + 90_000, () => ports.authorize(source, { kind: "admission" })) !== true) throw new Error("managed lifecycle source is not authorized"); return store.begin(source); },
     /** Reconstructs only metadata for a durably accepted source that can no longer begin. The composition independently authenticates its shared lifecycle receipt; this grants no workload authority or renewed deadline. */
     adoptAccepted: async (input: ManagedLifecycleSource, accepted: ManagedLifecycleRequest) => {

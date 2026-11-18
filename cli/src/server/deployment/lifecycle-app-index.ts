@@ -1,5 +1,12 @@
+import { indexedManagedLifecycle } from "./indexed-managed-lifecycle.ts";
+import type { IndexedManagedRuntime, IndexedManagedContext } from "./indexed-managed-lifecycle.ts";
+import { managedIndexGate, observeManagedIndexAdmission, reserveManagedIndexAdmission, settleManagedIndexAdmission } from "./managed-index-admission.ts";
+import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
+import type { ManagedAdmissionIdentity, ManagedAdmissionClaim } from "../../contracts/managed-admission.ts";
+import { parseLifecycleAppIndex, lifecycleIndexEntry, lifecycleIndexBuild } from "./lifecycle-app-index-state.ts";
+import type { IndexEntry } from "./lifecycle-app-index-state.ts";
 import { parseRegistrationOwnership } from "../../contracts/registration-ownership.ts";
-import { ownedVolume, ownedVolumeKeySchema, ownedVolumeSchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
+import { ownedVolume, ownedVolumeKeySchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
 import { deploymentHealth } from "./deployment-health.ts";
 import { deploymentImagePins } from "./deployment-image-pins.ts";
 import type { RolloutRequest } from "./rollout-request.ts";
@@ -19,7 +26,7 @@ import type { rolloutPreparation } from "./rollout-preparation.ts";
 import type { resolveRolloutMigration } from "./rollout-resolution.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
-import { parseResourceBook, reserveResources, resourceHostReady, settleResources } from "./resource-book.ts";
+import { reserveResources, resourceHostReady, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
 import { httpReleasePlan, terminalHttp } from "./http-state.ts";
 import { httpAdmissionDeadline } from "./http-resource-binding.ts";
@@ -33,7 +40,7 @@ import type { ResourceCharge } from "./resource-book.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { Runtime } from "../../contracts/rollout.ts";
 import { names } from "../../lib/names.ts";
-import { parseRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
+import type { RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { typed } from "../../lib/typed.ts";
 import type { BuildImagePins, BuildPorts } from "../../contracts/build-artifact.ts";
 import { verifiedRegistration } from "./verified-registration.ts";
@@ -41,34 +48,6 @@ import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
 
 const appName = z.string().regex(names.app.pattern);
-const entry = z.object({
-  app: appName,
-  incarnation: z.uuid(),
-  dataOwner: z.uuid().exactOptional(),
-  volumes: z.array(ownedVolumeSchema).max(32).default([]),
-  phase: z.enum(["initializing", "ready"]),
-}).strict().refine((owner) => owner.volumes.every((volume) => volume.app === owner.app && volume.dataOwner === owner.dataOwner) &&
-  new Set(owner.volumes.map((volume) => volume.key)).size === owner.volumes.length &&
-  new Set(owner.volumes.map((volume) => volume.allocation)).size === owner.volumes.length);
-const build = z.object({
-  id: z.string().regex(/^[0-9a-f]{64}$/),
-  registration: z.object({ version: z.literal(1), app: appName, incarnation: z.uuid(), actionId: z.string(), registrationGeneration: z.uuid() }).strict(),
-  commit: z.string().regex(/^[0-9a-f]{40}$/),
-  deadline: z.number().int().positive(),
-  artifact: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
-}).strict();
-const schema = z.object({ version: z.literal(1), resources: z.unknown().default(null), builds: z.array(build).default([]), apps: z.array(entry) }).strict().refine(({ apps, builds }) =>
-  new Set(apps.map((app) => app.app)).size === apps.length &&
-  new Set(apps.map((app) => app.incarnation)).size === apps.length &&
-  new Set(apps.flatMap((app) => app.dataOwner === undefined ? [] : [app.dataOwner])).size === apps.filter((app) => app.dataOwner !== undefined).length &&
-  apps.every((app) => app.dataOwner === undefined || app.dataOwner !== app.incarnation) &&
-  new Set(apps.flatMap((app) => app.volumes.map((volume) => volume.allocation))).size === apps.reduce((total, app) => total + app.volumes.length, 0) &&
-  new Set(builds.map((item) => item.id)).size === builds.length &&
-  builds.every((item) => parseRegistrationGeneration(item.registration).ok &&
-    apps.some((app) => app.app === item.registration.app && app.incarnation === item.registration.incarnation) &&
-    item.id === createHash("sha256").update(JSON.stringify({ registration: item.registration, commit: item.commit })).digest("hex")),
-);
-type IndexEntry = z.infer<typeof entry>;
 type EnvelopeStore = ReturnType<typeof openLifecycleEnvelopeStore>;
 
 const missing = (error: unknown) => error && typeof error === "object" && "code" in error && error.code === "ENOENT";
@@ -99,14 +78,7 @@ const prepareBeforeDeadline = async (ports: BuildPorts, registration: Registrati
 const openIndex = async (directory: string, mode: "initialize" | "existing", observer?: RegistrationObserver, journals = openJournal) => {
   await requireDirectory(directory);
   const journal = await journals(directory, mode);
-  const readIndex = async () => {
-    const checked = schema.safeParse(await journal.read());
-    if (!checked.success) throw new Error("lifecycle app index is invalid; intervention required");
-    const resources = checked.data.resources === null ? null : parseResourceBook(checked.data.resources);
-    if (resources !== null && !resources.ok) throw new Error("lifecycle resource accounting is invalid; intervention required");
-    if (resources?.value.charges.some((charge) => !checked.data.apps.some((app) => app.app === charge.app && app.incarnation === charge.incarnation))) throw new Error("resource ownership disagrees with app index");
-    return { ...checked.data, resources: resources === null ? null : resources.value };
-  };
+  const readIndex = async () => parseLifecycleAppIndex(await journal.read());
   try {
     if (mode === "initialize") await journal.write({ version: 1, apps: [] });
     else await readIndex();
@@ -155,11 +127,69 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await appJournal.close();
     }
   };
-  const useReady = <T>(app: string, use: (store: EnvelopeStore) => Promise<T>) => serialApp(app, async () => {
+  const useIndexed = <T>(app: string, use: (store: EnvelopeStore, owner: IndexEntry) => Promise<T>) => serialApp(app, async () => {
     const index = await readIndex();
     const ownership = index.apps.find((item) => item.app === app);
     if (ownership?.phase !== "ready") throw new Error("lifecycle app is not ready in the index");
-    return withEnvelope(appDirectory(app), ownership, use);
+    return withEnvelope(appDirectory(app), ownership, (store) => use(store, ownership));
+  });
+
+  /** Legacy deployment implementations never interpret a managed app's private records or mutate its workload/book. Registration and ownership queries use the shared indexed path. */
+  const useReady = <T>(app: string, use: (store: EnvelopeStore) => Promise<T>) => useIndexed(app, (store, owner) => {
+    if (owner.protocol === "managed-v3") throw new Error("application belongs to the managed-v3 lifecycle; legacy deployment commands are refused");
+    return use(store);
+  });
+
+  const boundedManagedRead = async <T>(deadline: number, now: () => number, call: () => Promise<T>) => {
+    const left = Math.min(10_000, deadline - now()); if (!Number.isFinite(left) || left <= 0) return undefined;
+    const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, left);
+    try { return await Promise.race([Promise.resolve().then(call).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
+  };
+  const useManaged = <T>(app: string, ports: IndexedManagedRuntime, use: (controller: ReturnType<typeof indexedManagedLifecycle>) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+    const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
+    if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
+    const path = join(appDirectory(app), "managed"); await requireDirectory(path); const rootJournal = await journals(path, indexed.managedRoot === "ready" ? "existing" : "initialize");
+    try {
+      const indexedOwner = async () => { const value = (await readIndex()).apps.find((entry) => entry.app === app); if (value?.phase !== "ready" || value.protocol !== "managed-v3" || value.incarnation !== indexed.incarnation || value.dataOwner !== indexed.dataOwner) throw new Error("managed indexed ownership changed"); return value; };
+      const context: IndexedManagedContext = {
+        ownership: ownership.value, envelope: store, journal: rootJournal, indexedOwner,
+        preparedBuild: async (source) => {
+          const state = await serialIndex(readIndex); const plan = source.candidate;
+          if (!state.builds.some((build) => build.artifact === plan.artifact && build.commit === plan.commit && JSON.stringify(build.registration) === JSON.stringify(plan.infrastructure.registration))) return false;
+          const bytes = await ports.read(plan.artifact); return createHash("sha256").update(bytes).digest("hex") === plan.artifact;
+        },
+        ready: (root, source) => serialIndex(async () => {
+          const state = await readIndex(); const entry = state.apps.find((item) => item.app === app); const gate = managedIndexGate({ owner: entry, envelope: await store.read(), source });
+          if (!gate.ok || root.operation.source !== gate.value.request.source || root.owner.dataOwner !== ownership.value.dataOwner) throw new Error("managed root initialization lacks indexed ownership");
+          if (entry?.managedRoot === "ready") return;
+          await journal.write({ ...state, apps: state.apps.map((item) => item.app === app ? { ...item, managedRoot: "ready" } : item) });
+        }),
+        admission: (read) => {
+          const accounting = (state: Awaited<ReturnType<typeof readIndex>>) => ({ resources: state.resources, bindings: state.managedBindings ?? [] });
+          const current = (state: Awaited<ReturnType<typeof readIndex>>) => boundedManagedRead(ports.now() + 10_000, ports.now, async () => ({ owner: state.apps.find((item) => item.app === app), envelope: await store.read(), ...await read() }));
+          const settle = (identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim, result: "target" | "previous" | "absent", unstarted: boolean) => serialIndex(async () => {
+            const state = await readIndex(); const bound = await current(state); if (bound === undefined) return "uncertain" as const;
+            const next = settleManagedIndexAdmission(accounting(state), bound, identity, claim, result, unstarted); if (!next.ok) return "refused" as const;
+            await journal.write({ ...state, resources: next.value.resources, managedBindings: next.value.bindings }); return "settled" as const;
+          });
+          return {
+            reserve: async (identity, claim) => {
+              const observation = await boundedManagedRead(identity.deadline, ports.now, () => ports.observeHost(claim.plan.host)); if (observation === undefined) return "uncertain";
+              return serialIndex(async () => {
+                const state = await readIndex(); const bound = await current(state);
+                if (bound === undefined || await boundedManagedRead(identity.deadline, ports.now, () => ports.requestAllowed(bound.source)) !== true) return "refused" as const;
+                const next = reserveManagedIndexAdmission(accounting(state), bound, observation, identity, claim, ports.now()); if (!next.ok) return "refused" as const;
+                await journal.write({ ...state, resources: next.value.resources, managedBindings: next.value.bindings }); return "reserved" as const;
+              });
+            },
+            observe: (identity, claim) => serialIndex(async () => { const state = await readIndex(); const bound = await current(state); if (bound === undefined) return "unavailable" as const; const value = observeManagedIndexAdmission(accounting(state), bound, identity, claim); return value.ok ? value.value : "unavailable"; }),
+            settle: (identity, claim, result) => settle(identity, claim, result, false),
+            settleUnstarted: (identity, claim) => settle(identity, claim, claim.previous === null ? "absent" : "previous", true),
+          };
+        },
+      };
+      const controller = indexedManagedLifecycle(context, ports); await controller.synchronize(); return await use(controller);
+    } finally { await rootJournal.close(); }
   });
 
   const reconcileHttpResources = async (app: string, store: EnvelopeStore, ticket: string) => {
@@ -208,7 +238,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return checked.value;
   };
 
-  const registrationProvisioning = (app: string, ticket: string, generation: string) => useReady(app, async (store) => {
+  const registrationProvisioning = (app: string, ticket: string, generation: string) => useIndexed(app, async (store) => {
       const envelope = await store.read(); const allocation = envelope?.registrationAllocation; const fence = envelope?.fence;
       if (envelope === undefined || allocation?.runtime !== "swarm" || allocation.ticket !== ticket || allocation.generation !== generation || (fence === null || fence === undefined)) throw new Error("registration ownership requires its admitted Swarm intent");
       const lifecycle = fence.lifecycle;
@@ -225,15 +255,17 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     });
 
   return {
-    prepareApp: (app: string) => serialApp(app, () => serialIndex(async () => {
+    prepareApp: (app: string, protocol?: "managed-v3") => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
       const path = appDirectory(app);
       const existing = index.apps.find((item) => item.app === app);
+      if (protocol === "managed-v3" && existing !== undefined && existing.protocol !== "managed-v3") throw new Error("existing application protocol conversion is unsupported");
       if (existing?.phase === "ready") {
         await withEnvelope(path, existing, () => undefined);
+        if (existing.protocol === "managed-v3") await requireDirectory(join(path, "managed"));
         return existing.incarnation;
       }
-      const ownership = existing ?? entry.parse({ app, incarnation: randomUUID(), dataOwner: randomUUID(), phase: "initializing" });
+      const ownership = existing ?? lifecycleIndexEntry.parse({ app, incarnation: randomUUID(), dataOwner: randomUUID(), ...(protocol === undefined ? {} : { protocol, managedRoot: "empty" }), phase: "initializing" });
       if (existing === undefined) {
         if (await stat(path)) throw new Error("unindexed lifecycle directory exists; intervention required");
         if (index.apps.some((item) => item.incarnation === ownership.incarnation)) throw new Error("lifecycle incarnation collision");
@@ -243,14 +275,25 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (await stat(path) === undefined) await mkdir(path, { mode: 0o700 });
       await syncDirectory(directory);
       await withEnvelope(path, ownership, () => undefined);
+      if (ownership.protocol === "managed-v3") { const root = join(path, "managed"); if (await stat(root) === undefined) await mkdir(root, { mode: 0o700 }); await requireDirectory(root); await syncDirectory(path); }
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
-    dataOwnership: (app: string) => useReady(app, async (store) => {
+    requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
+    tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
+    cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),
+    resolveManagedMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.resolve(request, actor)),
+    managedState: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.read()),
+    pendingManagedDeployments: async () => {
+      if (closed) throw new Error("lifecycle app index is closed"); const snapshot = await serialIndex(readIndex);
+      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useIndexed(app.app, async (store) => Object.freeze(((await store.read())?.managed ?? []).filter((item) => item.completion === null).map((item) => Object.freeze({ app: app.app, run: item.run }))))));
+      return Object.freeze(work.flat());
+    },
+    dataOwnership: (app: string) => useIndexed(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       return ownershipReference(app, registration.incarnation);
     }),
-    reserveDataVolumeIdentities: (app: string, requested: readonly string[]) => useReady(app, async (store) => {
+    reserveDataVolumeIdentities: (app: string, requested: readonly string[]) => useIndexed(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       if (envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("managed volume identities require an explicitly registered Swarm application");
       const keys = z.array(ownedVolumeKeySchema).max(32).safeParse(requested);
@@ -264,23 +307,23 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           if (!volume.ok) throw new Error(volume.error);
           return volume.value;
         });
-        const updated = entry.parse({ ...owner, volumes: [...owner.volumes, ...additions] });
+        const updated = lifecycleIndexEntry.parse({ ...owner, volumes: [...owner.volumes, ...additions] });
         if (additions.some((volume) => index.apps.some((item) => item.volumes.some((existing) => existing.allocation === volume.allocation)))) throw new Error("volume allocation collision");
         if (additions.length > 0) await journal.write({ ...index, apps: index.apps.map((item) => item.app === app ? updated : item) });
         return Object.freeze(updated.volumes.filter((volume) => keys.data.includes(volume.key)).sort((first, second) => first.key.localeCompare(second.key)));
       });
     }),
-    verifiedRegistration: (app: string) => useReady(app, async (store) => {
+    verifiedRegistration: (app: string) => useIndexed(app, async (store) => {
       return verifiedRegistration(app, await store.read());
     }),
-    registrationPolicy: (app: string) => useReady(app, async (store) => {
+    registrationPolicy: (app: string) => useIndexed(app, async (store) => {
       const envelope = await store.read();
       const metadata = verifiedRegistration(app, envelope);
       const runtime = envelope?.registrationAllocation?.runtime;
       if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
       return Object.freeze({ metadata, runtime });
     }),
-    prepareBuild: (app: string, commit: string, ports: BuildPorts) => useReady(app, async (store) => {
+    prepareBuild: (app: string, commit: string, ports: BuildPorts) => useIndexed(app, async (store) => {
       if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("build requires a full commit id");
       const envelope = await store.read();
       const registration = verifiedRegistration(app, envelope);
@@ -291,7 +334,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const state = await readIndex();
         const existing = state.builds.find((item) => item.id === id);
         if (existing !== undefined) return existing;
-        const requested = build.parse({ id, registration, commit, deadline: ports.now() + 45 * 60_000 });
+        const requested = lifecycleIndexBuild.parse({ id, registration, commit, deadline: ports.now() + 45 * 60_000 });
         await journal.write({ ...state, builds: [...state.builds, requested] });
         return requested;
       });
@@ -637,7 +680,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     runtimeHealthSnapshot: async (ports: Parameters<typeof deploymentHealth>[2] | undefined) => {
       if (closed) throw new Error("lifecycle app index is closed");
       const snapshot = await serialIndex(readIndex);
-      const observations = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
+      if (snapshot.apps.some((app) => app.protocol === "managed-v3")) throw new Error("managed-v3 runtime health projection is not available; normal managed integration remains disabled");
+      const observations = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol !== "managed-v3").map((app) => useReady(app.app, async (store) => {
         const envelope = await store.read();
         // Unverified registrations cannot own Swarm workloads. Compose retains its existing observations.
         if (envelope?.registrationReceipt?.runtime !== "swarm" || envelope.fence?.lifecycle.phase !== "registered") return Object.freeze([]);
@@ -661,7 +705,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     pendingRolloutOperations: async () => {
       if (closed) throw new Error("lifecycle app index is closed");
       const snapshot = await serialIndex(readIndex);
-      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
+      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol !== "managed-v3").map((app) => useReady(app.app, async (store) => {
         const state = await store.read(); const operation = state?.rollout;
         if (operation === undefined || operation.completion === undefined && operation.preparation.phase === "held" &&
           !operation.preparation.sequence?.steps.some((step) => step.attempts.some((attempt) => attempt.cleanups?.at(-1)?.state.phase === "fencing")) &&
@@ -677,7 +721,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     pendingHttpOperations: async () => {
       if (closed) throw new Error("lifecycle app index is closed");
       const snapshot = await serialIndex(readIndex);
-      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready").map((app) => useReady(app.app, async (store) => {
+      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol !== "managed-v3").map((app) => useReady(app.app, async (store) => {
         const envelope = await store.read();
         const latest = envelope?.http?.requests.at(-1);
         if (latest === undefined || latest.phase === "held" || latest.deployment !== undefined) return [];
@@ -716,11 +760,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     },
     registrationProvisioning,
     registrationOwnership: async (app: string, ticket: string, generation: string) => (await registrationProvisioning(app, ticket, generation)).reference,
-    reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useReady(app, (store) => store.reserveRegistration(generation, runtime)),
+    reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useIndexed(app, (store, owner) => { if (owner.protocol === "managed-v3" && runtime !== "swarm") throw new Error("managed-v3 registration requires Swarm"); return store.reserveRegistration(generation, runtime); }),
     submitRegistration: (app: string, ticket: string, generation: string) =>
-      useReady(app, (store) => store.submitRegistration(ticket, generation)),
+      useIndexed(app, (store) => store.submitRegistration(ticket, generation)),
     reconcileRegistration: (app: string, ticket: string, generation: string) =>
-      useReady(app, (store) => store.reconcileRegistration(ticket, generation)),
+      useIndexed(app, (store) => store.reconcileRegistration(ticket, generation)),
     close: async () => {
       closed = true;
       await Promise.all(pendingApps.values());

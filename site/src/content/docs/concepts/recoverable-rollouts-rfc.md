@@ -1963,3 +1963,32 @@ accepted immutable source. Expired scheduling deadlines and revoked workload
 grants do not become fresh authority. Existing roots are never reset by this path.
 The platform-wide index/protocol binding and normal client dispatch remain pending;
 these envelope methods alone are not a production entrypoint.
+
+
+### Indexed managed ownership and admission
+
+The internal app index now persists an explicit `managed-v3` protocol for new
+experimental applications. Existing entries retain their implementation;
+conversion is refused. Legacy deployment commands and restart queues cannot
+interpret a managed application's records. Registration, data-identity and
+build operations use the common indexed ownership boundary.
+
+Managed reservations use the existing global book and writer alongside legacy
+charges. Owner, retained build receipt, immutable source, shared ticket/action,
+root state and admission binding are revalidated before mutation. Current
+operator permission and normalized host observations are required for admission.
+Source/history/capability preflight happens before issuing a lifecycle ticket.
+The index records known root initialization; a missing initialized root is an
+intervention condition, never permission to create an empty replacement journal.
+
+Metadata-only unstarted settlement revalidates its effect-free proof and closes
+late reservation races even when capacity is unavailable. Foreign source bindings
+remain charged and cannot be adopted by matching their numeric sequence. Completed
+migration assertions replay their retained audit snapshot, including after a newer
+run, with current operator authorization and no repeat job.
+
+Normal managed registration/control dispatch is still disabled. Until its managed
+health projection is integrated, the legacy host-health path explicitly refuses a
+host containing these internal protocol records. Normal builder/platform wiring,
+operator projections, removal/purge, unknown-check cleanup, unsafe forward recovery
+and the complete integrated acceptance matrix remain required.

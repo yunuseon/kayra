@@ -2023,4 +2023,25 @@ and only its synchronized complete root snapshot releases that gate. Reopening
 includes both journals. Runs 2–5 must remain bound to that one action sequence,
 including rollback and both unstarted cancellations. Accounting remains an
 isolated fixture book; this is not the platform-wide index binding or normal
-operator dispatch. Fresh native validation of this gate integration is pending.
+operator dispatch. Fresh source `54fd48e`, VM
+`kayra-volume-lab-20261117235827976627`, passed and was destroyed. Its four
+requests retained one action sequence through journal reopen, rollback and both
+unstarted cancellations; singleton A/B/A recorded 601 effects. The whole group
+recorded 21,378 API requests. Engine/CLI 29.10.0/API 1.57, Compose 5.8.0,
+Node v24.22.1 and Ubuntu 24.04.5 ARM64 plus private raw/SHA-256 evidence were
+retained.
+
+The singleton fixture now uses the filesystem app index itself: explicit new-app
+managed protocol, indexed registration/data owner/volume identities, retained
+fixture build receipts, the existing global resource book and a real normalized
+host observation. Lost previous-budget and unstarted-settlement replies are
+injected after durable writes to that index. Reopening the index must reconstruct
+the same pending run, original deadlines and shared action sequence. Fixture
+build/grant callbacks remain; this does not cover public builder/control dispatch,
+SQL, real process kills or full-platform acceptance. Fresh validation of this
+indexed variant is pending.
+
+The pinned Node runtime image pull in the volume lab permits three provisioning
+retries, five seconds apart, for transient registry connection failures. This
+occurs before runtime probes or workloads start; it adds no application-request
+retry or deployment-effect retry. Failed provisioning labs remain preserved.

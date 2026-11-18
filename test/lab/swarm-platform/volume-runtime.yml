@@ -13,6 +13,10 @@
     - name: Pull the exact lab-only Node runtime image
       ansible.builtin.command:
         argv: [docker, pull, "{{ volume_node_image }}"]
+      register: volume_node_pull
+      until: volume_node_pull.rc == 0
+      retries: 3
+      delay: 5
       changed_when: true
 
     - name: Create a stopped socket-free runtime copy source

@@ -79,6 +79,38 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
     // eslint-disable-next-line functional/immutable-data -- one claimed view per child
     views.set(key, view); return view;
   };
+  /** Reuses exactly the admission/history checks without retaining artifacts or changing either journal. */
+  const validate = async (input: ManagedLifecycleSource, held?: "deadline" | "authorization") => {
+  const value = parseManagedLifecycleSource(input); const description = managedLifecycleDescription(value); const identity = managedLifecycleSourceDigest(value);
+  if (!same(value.candidate.infrastructure.ownership, owner)) throw new Error("managed lifecycle source ownership disagrees");
+    const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return Object.freeze({ value, description, identity, current, at: current.operation.enteredAt, existing: true }); }
+    if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || (current.active?.record ?? null) !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
+    const carried = current?.operation.unstartedAt !== null && current?.operation.unstartedAt !== undefined ? managedUnstartedInventoryCarry(await source(current), value) : current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
+    if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
+      if (current === undefined) throw new Error("managed restore lacks verified release history");
+      const selected = await metadata(async () => {
+        const deadline = performance.now() + 10_000;
+        // eslint-disable-next-line functional/no-let -- follows only synchronized, content-addressed history under one metadata deadline
+        let cursor = current;
+        // eslint-disable-next-line functional/no-let -- remembers an old match while searching for any subsequently verified compatible copy
+        let historical: ManagedLifecycleStore["active"] = null;
+        for (;;) {
+          if (performance.now() >= deadline) throw new Error("managed release history inspection expired");
+          const release = [cursor.active, cursor.lastGood].find((item) => item !== null && (value.restore === null ? item.plan === description.admission.planDigest : item.record === value.restore));
+          if (release !== undefined && release !== null) { if (value.restore !== null || release.epoch === current.compatibilityEpoch) return release; historical = release; }
+          if (cursor.history === null) { if (value.restore !== null) throw new Error("unknown managed restore record"); return Object.freeze({ historical }); }
+          const bytes = await artifact(cursor.history); const raw: unknown = JSON.parse(bytes); const archive = z.object({ previous: digest.nullable(), state: z.unknown() }).strict().parse(raw); const prior = parseManagedLifecycleStore(archive.state);
+          if (!same(prior.owner, owner) || archive.previous !== prior.history || prior.sequence >= cursor.sequence || prior.compatibilityEpoch > cursor.compatibilityEpoch) throw new Error("managed restore history disagrees"); cursor = prior;
+        }
+      });
+      const release = "historical" in selected ? selected.historical : selected;
+      if (release !== null && release.plan !== description.admission.planDigest) throw new Error("managed restore candidate differs from its verified release");
+      if (release !== null && release.epoch !== current.compatibilityEpoch) throw new Error("managed restore crosses a data compatibility fence; forward recovery is required");
+    }
+    if (current?.active !== null && current?.active !== undefined && current.active.epoch !== current.compatibilityEpoch && value.candidate.rollout.strategy === "rolling") throw new Error("managed rolling baseline crosses a data compatibility fence");
+    const at = time(value.createdAt); if (held === "deadline" && at < description.admissionDeadline) throw new Error("managed lifecycle accepted deadline has not expired"); if (at >= description.admissionDeadline && held === undefined) throw new Error("managed lifecycle admission deadline expired");
+    return Object.freeze({ value, description, identity, current, at, existing: false });
+  };
   return Object.freeze({
     read: () => serial(load),
     source: () => serial(async () => source(await required())),
@@ -125,37 +157,11 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       return Object.freeze({ state: next, receipt });
     }),
     child,
-    begin: (input: ManagedLifecycleSource, held?: "deadline" | "authorization") => {
-      const value = parseManagedLifecycleSource(input); const description = managedLifecycleDescription(value); const identity = managedLifecycleSourceDigest(value);
-      if (!same(value.candidate.infrastructure.ownership, owner)) return Promise.reject(new Error("managed lifecycle source ownership disagrees"));
-      return serial(async () => {
-        const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return current; }
-        if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || (current.active?.record ?? null) !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
-        const carried = current?.operation.unstartedAt !== null && current?.operation.unstartedAt !== undefined ? managedUnstartedInventoryCarry(await source(current), value) : current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
-        if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
-          if (current === undefined) throw new Error("managed restore lacks verified release history");
-          const selected = await metadata(async () => {
-            const deadline = performance.now() + 10_000;
-            // eslint-disable-next-line functional/no-let -- follows only synchronized, content-addressed history under one metadata deadline
-            let cursor = current;
-            // eslint-disable-next-line functional/no-let -- remembers an old match while searching for any subsequently verified compatible copy
-            let historical: ManagedLifecycleStore["active"] = null;
-            for (;;) {
-              if (performance.now() >= deadline) throw new Error("managed release history inspection expired");
-              const release = [cursor.active, cursor.lastGood].find((item) => item !== null && (value.restore === null ? item.plan === description.admission.planDigest : item.record === value.restore));
-              if (release !== undefined && release !== null) { if (value.restore !== null || release.epoch === current.compatibilityEpoch) return release; historical = release; }
-              if (cursor.history === null) { if (value.restore !== null) throw new Error("unknown managed restore record"); return Object.freeze({ historical }); }
-              const bytes = await artifact(cursor.history); const raw: unknown = JSON.parse(bytes); const archive = z.object({ previous: digest.nullable(), state: z.unknown() }).strict().parse(raw); const prior = parseManagedLifecycleStore(archive.state);
-              if (!same(prior.owner, owner) || archive.previous !== prior.history || prior.sequence >= cursor.sequence || prior.compatibilityEpoch > cursor.compatibilityEpoch) throw new Error("managed restore history disagrees"); cursor = prior;
-            }
-          });
-          const release = "historical" in selected ? selected.historical : selected;
-          if (release !== null && release.plan !== description.admission.planDigest) throw new Error("managed restore candidate differs from its verified release");
-          if (release !== null && release.epoch !== current.compatibilityEpoch) throw new Error("managed restore crosses a data compatibility fence; forward recovery is required");
-        }
-        if (current?.active !== null && current?.active !== undefined && current.active.epoch !== current.compatibilityEpoch && value.candidate.rollout.strategy === "rolling") throw new Error("managed rolling baseline crosses a data compatibility fence");
-        const at = time(value.createdAt); if (held === "deadline" && at < description.admissionDeadline) throw new Error("managed lifecycle accepted deadline has not expired"); if (at >= description.admissionDeadline && held === undefined) throw new Error("managed lifecycle admission deadline expired");
-        if (await retain(JSON.stringify(value)) !== identity) throw new Error("managed lifecycle source retention failed");
+    validate: (input: ManagedLifecycleSource) => serial(async () => { const checked = await validate(input); return Object.freeze({ source: checked.identity, run: checked.value.run, action: checked.value.action, existing: checked.existing }); }),
+    begin: (input: ManagedLifecycleSource, held?: "deadline" | "authorization") => serial(async () => {
+      const checked = await validate(input, held); const { value, description, identity, current, at } = checked;
+      if (checked.existing && current !== undefined) return current;
+      if (await retain(JSON.stringify(value)) !== identity) throw new Error("managed lifecycle source retention failed");
         const historyBytes = current === undefined ? null : JSON.stringify({ previous: current.history, state: current });
         const history = historyBytes === null ? null : await retain(historyBytes); if (historyBytes !== null && history !== hash(historyBytes)) throw new Error("managed lifecycle history retention failed");
         const compatibilityEpoch = current?.compatibilityEpoch ?? 0;
@@ -163,8 +169,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
           operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, previousPlan: description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous), createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: held === undefined ? "admitting" : "held", enteredAt: at, reason: held ?? null, outcome: null, settlement: null, unstartedAt: null, failure: null, recoverySource: null, recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
         // eslint-disable-next-line functional/immutable-data -- obsolete views retain their bound run and can never write the next operation
         views.clear(); return state;
-      });
-    },
+    }),
     admit: () => serial(async () => { const state = await required(); const at = time(state.operation.createdAt); if (state.operation.phase !== "admitting") return state; if (at >= state.operation.admissionDeadline) return write({ ...state, operation: { ...state.operation, phase: "held", reason: "deadline" } }); const run = await source(state); return write({ ...state, operation: { ...state.operation, admitted: true, phase: run.candidate.rollout.strategy === "maintenance" ? "quiescing" : "preparing", enteredAt: at } }); }),
     enter: (expected: "quiescing" | "preparing" | "updating", next: "preparing" | "updating" | "verifying", at: number) => serial(async () => { const state = await required(); if (state.operation.phase !== expected) return state;
       const transition = expected === "quiescing" ? next === "preparing" && state.operation.quiescence?.phase === "complete" && at === state.operation.quiescence.verifiedAt : expected === "preparing" ? next === "updating" && state.operation.preparation?.phase === "ready" && at === (state.operation.preparation.consumerDeadline ?? 0) - 90_000 : next === "verifying" && state.operation.consumers?.phase === "ready" && at === state.operation.consumers.verifiedAt;

@@ -2178,3 +2178,21 @@ original deadline before returning fixture inputs. The loop completes A without
 further manual ticks, then stops before the existing candidate/rollback fault
 steps. This proves scheduling reconstruction in the same lab process, not a
 coordinator SIGKILL or public deployment-pipeline guarantee.
+
+Maintenance fixtures now bind the job composition to an immutable run context
+when opening or reopening the lifecycle owner. Migration and status-probe Create
+use the platform input materializer rather than selecting environment values
+inside the native callback. Existing application-ledger, one-Start, recovery and
+retained-data assertions remain. The isolated accounting and fixture grant/input
+scope is unchanged; this is not normal platform factory acceptance.
+
+Index-owned catalog source `d95aa14` passed in fresh VM
+`kayra-volume-lab-20261118151611837056` on 2026-11-18. The singleton recorded
+716 A/B/A effects, one Create and successful lost-acknowledgement reconstruction;
+the group recorded 21,320 observations. Observer source `3ccc2be` then passed in
+fresh VM `kayra-volume-lab-20261118152539312639`: 25 reconstructed input loads,
+693 singleton effects, one Create and 20,552 group observations. Both used
+`--volume-state --managed-group --egress-mtu 1280`; both successful VMs were
+destroyed. Raw source/results/events have verified SHA256SUMS. CLI 29.10.0,
+Compose 5.8.0, Node 24.22.1 and pinned images were unchanged. The distinct scope
+limitations for catalog ownership and same-process observer restart above apply.

@@ -2302,3 +2302,18 @@ changed data ownership/host metadata, unreadable publications, missing namespace
 permission and cleanup without startup permission. Its synthetic host, overlay
 and image references prove metadata policy only, not live runtime existence or
 admission. Normal platform controller/control wiring remains subsequent work.
+
+### Compatibility fences survive proposal metadata changes
+
+After an incompatible operation advances the data epoch, ordinary deployment
+must not revive a commit known only from an older epoch by changing artifact or
+configuration metadata to obtain a new plan digest. The owning lifecycle writer
+now authenticates historical release records and checks their source commits as
+well as plan identity. An exact verified plan from the current epoch remains
+eligible; explicit restores still require their exact authenticated record.
+
+A metadata change does not establish forward schema compatibility for an old
+commit. Such a request is refused before admission and requires a new app release
+or an explicitly supported audited forward-recovery path. History inspection
+retains its existing bounded metadata deadline. Unavailable/corrupt evidence
+never grants permission, and no database state is inferred from commit identity.

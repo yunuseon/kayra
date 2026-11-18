@@ -2229,3 +2229,19 @@ singleton effects across A/B/A and cancellation; the group recorded 21,209
 observations. The successful VM was destroyed and raw source/results/events have
 verified SHA256SUMS. Its grants and build inputs still used fixture callbacks;
 the filesystem permission provider is the subsequent revision above.
+
+The maintenance compatibility check additionally changes the old commit's artifact
+identity and worker inputs before attempting an ordinary deployment. It must
+still refuse across the data epoch, preserve the completed root and retain zero
+old-version effects after migration. Metadata alone cannot grant forward schema
+compatibility for a historical commit.
+
+Platform-policy source `bd88079` passed in fresh VM
+`kayra-volume-lab-20261118195448905520` on 2026-11-18 with
+`--platform-inputs --volume-state --managed-group --egress-mtu 1280`.
+The UID-1000 metadata probe accepted the valid grant and refused all six invalid
+publication/namespace cases, preserving cleanup while refusing deployment stops
+without current startup grants. The group recorded 19,097 observations and the
+singleton recorded 607 effects with one Create. The successful VM was destroyed;
+raw source/results/events have verified SHA256SUMS. The metadata-only scope of
+that permission probe remains separate from workload admission evidence.

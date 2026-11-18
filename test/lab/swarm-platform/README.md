@@ -2170,3 +2170,11 @@ A/B/A effects; the group recorded 19,931 observations. The successful VM was
 destroyed and raw source/results/events have verified SHA256SUMS. Versions and
 image pins stayed unchanged. This source still used a fixture-owned catalog
 journal; index-owned storage is the subsequent revision above.
+
+The next observer check reconstructs A after the lost Create acknowledgement by
+starting the managed reconciliation loop against the reopened index. Its runtime
+factory checks the accepted run, source identity, allocation requirement and
+original deadline before returning fixture inputs. The loop completes A without
+further manual ticks, then stops before the existing candidate/rollback fault
+steps. This proves scheduling reconstruction in the same lab process, not a
+coordinator SIGKILL or public deployment-pipeline guarantee.

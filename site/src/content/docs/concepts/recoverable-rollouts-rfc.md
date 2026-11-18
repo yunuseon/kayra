@@ -2207,3 +2207,27 @@ This moves journal ownership out of the native fixture. Public builder-to-plan
 compilation, current platform grant/input wiring, lifecycle removal and guarded
 purge remain separate acceptance work. The normal experimental mutation entrypoint
 remains disabled.
+
+### Observer reconstruction and input loading
+
+The deployment index publishes a validated, immutable execution context from the
+accepted request and its content-addressed source. It contains normalized plan
+references and original identities/deadlines, without exposing the private root
+journal layout or resolved secret values. Producing context does not initialize,
+repair or promote a root and does not grant effects. Completed requests need no
+new runtime context. A missing or changed source refuses reconstruction.
+
+The optional managed observer in the existing composition root enumerates
+pending operations, loads context, then binds per-run runtime inputs before
+entering the application writer. A factory must not re-enter the index from a
+job or service callback. Runtime-input loading has a bounded wait; a late result
+cannot dispatch a tick. One unavailable application does not prevent others from
+being reconciled. Observer restart uses the accepted plan and original deadlines,
+never a fresh branch resolution or scheduling window.
+
+The native singleton can stop its manual observer after the lost Create
+acknowledgement and continue through a newly constructed managed observer. This
+is observer reconstruction within the lab process, not a claim of full public
+pipeline integration or coordinator SIGKILL acceptance. Wiring the factory to
+normal current platform grants, private input generations and job materialization
+remains required before enabling ordinary mutation dispatch.

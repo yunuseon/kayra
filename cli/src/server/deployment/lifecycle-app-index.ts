@@ -456,12 +456,13 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
       return Object.freeze({ metadata, runtime });
     }),
-    prepareBuild: (app: string, commit: string, ports: BuildPorts) => useIndexed(app, async (store) => {
+    prepareBuild: (app: string, commit: string, ports: BuildPorts) => useIndexed(app, async (store, indexed) => {
       if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("build requires a full commit id");
       const envelope = await store.read();
       const registration = verifiedRegistration(app, envelope);
       const runtime = envelope?.registrationAllocation?.runtime;
       if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
+      if (indexed.protocol === "managed-v3" && envelope?.managed?.some((request) => request.completion === null)) throw new Error("managed build is blocked while a deployment is unresolved");
       const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
       const intent = await serialIndex(async () => {
         const state = await readIndex();

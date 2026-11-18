@@ -5,6 +5,12 @@
   roles:
     - docker
   tasks:
+    - name: Set only the disposable VM egress MTU when explicitly requested
+      ansible.builtin.command:
+        argv: [ip, link, set, dev, "{{ ansible_default_ipv4.interface }}", mtu, "{{ volume_egress_mtu }}"]
+      when: volume_egress_mtu | default(0) | int >= 1280 and volume_egress_mtu | int <= 1500
+      changed_when: true
+
     - name: Initialize only this disposable single-node Swarm
       ansible.builtin.command:
         argv: [docker, swarm, init, --advertise-addr, "{{ ansible_host }}", --listen-addr, "{{ ansible_host }}:2377"]

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { managedDeploymentHealth } from "./managed-deployment-health.ts";
 import { managedDeploymentStatus } from "./managed-deployment-status.ts";
 import type { ManagedAdmissionPort } from "../../contracts/managed-admission.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
@@ -97,6 +98,11 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
       if (bytes !== JSON.stringify(root) || root.owner.app !== statement.value.app || JSON.stringify(root.owner) !== JSON.stringify(value.owner) || operation.run !== value.run || operation.source !== value.source || operation.action !== value.action || operation.plan !== value.plan || operation.phase !== "complete" || !operation.settled || operation.outcome !== completion.outcome || audit === undefined || receipt === undefined || audit.outcome !== statement.value.outcome || audit.reason !== statement.value.reason || JSON.stringify(audit.actor) !== JSON.stringify(identity.value) ||
         await bounded(ports.now() + 10_000, () => ports.authorize(source, { kind: "migration-resolution", request: statement.value, actor: identity.value })) !== true) throw new Error("completed managed migration assertion conflicts or is not authorized");
       return Object.freeze({ state: root, receipt });
+    },
+    health: async () => {
+      const root = await owner.read(); if (root === undefined) return null;
+      const value = await bounded(ports.now() + 10_000, async () => managedDeploymentHealth(root, await owner.source(), ports));
+      if (value === undefined) throw new Error("managed runtime health evidence is unavailable"); return value;
     },
     status: async () => {
       const root = await owner.read(); if (root === undefined) return null;

@@ -283,6 +283,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),
     resolveManagedMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.resolve(request, actor)),
+    managedDeploymentHealth: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.health()),
     managedDeploymentStatus: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.status()),
     managedState: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.read()),
     pendingManagedDeployments: async () => {
@@ -678,10 +679,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return verified;
     }),
     reconcileHttpResources: (app: string, ticket: string) => useReady(app, (store) => reconcileHttpResources(app, store, ticket)),
-    runtimeHealthSnapshot: async (ports: Parameters<typeof deploymentHealth>[2] | undefined) => {
+    runtimeHealthSnapshot: async (ports: Parameters<typeof deploymentHealth>[2] | undefined, managedPorts?: IndexedManagedRuntime) => {
       if (closed) throw new Error("lifecycle app index is closed");
       const snapshot = await serialIndex(readIndex);
-      if (snapshot.apps.some((app) => app.protocol === "managed-v3")) throw new Error("managed-v3 runtime health projection is not available; normal managed integration remains disabled");
+      if (snapshot.apps.some((app) => app.protocol === "managed-v3") && managedPorts === undefined) throw new Error("managed-v3 runtime health observations are unavailable; normal managed integration remains disabled");
+      const managed = managedPorts === undefined ? [] : await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useManaged(app.app, managedPorts, (controller) => controller.health())));
       const observations = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol !== "managed-v3").map((app) => useReady(app.app, async (store) => {
         const envelope = await store.read();
         // Unverified registrations cannot own Swarm workloads. Compose retains its existing observations.
@@ -689,7 +691,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         if (ports === undefined) throw new Error("runtime health observations are unavailable");
         return Object.freeze([await deploymentHealth(app.app, envelope, ports)]);
       })));
-      return Object.freeze(observations.flat());
+      return Object.freeze([...observations.flat(), ...managed.flatMap((value) => value === null ? [] : [value])]);
     },
     deploymentHealth: (app: string, ports: Parameters<typeof deploymentHealth>[2]) => useReady(app, async (store) => deploymentHealth(app, await store.read(), ports)),
     deploymentImagePins: (app: string, ports: Pick<BuildPorts, "read">) => useReady(app, async (store) => {

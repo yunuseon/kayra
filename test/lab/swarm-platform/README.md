@@ -2045,3 +2045,10 @@ The pinned Node runtime image pull in the volume lab permits three provisioning
 retries, five seconds apart, for transient registry connection failures. This
 occurs before runtime probes or workloads start; it adds no application-request
 retry or deployment-effect retry. Failed provisioning labs remain preserved.
+
+For a network path that stalls Docker registry downloads at the default MTU,
+`python3 test/lab/swarm-platform/volume-lab.py --managed-group --egress-mtu 1280`
+sets only the disposable VM's default-route interface MTU. The requested value is
+recorded in `context.json`. The Docker role, daemon TLS defaults, host network,
+other VMs and host Docker context are unchanged. This is a lab network parameter,
+not a Kayra fleet setting or an application rollout retry.

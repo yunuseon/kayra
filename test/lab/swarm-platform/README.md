@@ -2079,3 +2079,12 @@ default-route interface MTU to 1280 permitted the same pinned download after
 restoring Docker TLS defaults. That diagnostic VM was stopped after evidence
 was archived and hashed. The fresh passing VM used the explicit MTU option from
 creation; this did not change host/other-VM networking or rollout criteria.
+
+The subsequent reporting-capability extraction, source `cbe0f4c`, also passed
+the same fresh native command on 2026-11-18 in
+`kayra-volume-lab-20261118120753175175`. The group recorded 21,053 API
+observations and verified managed status/health, shared indexed accounting,
+rollback and later cancellation with the narrower read ports. The successful
+VM was destroyed, and raw source/results/events plus verified SHA256SUMS were
+archived. Versions, image pins and explicit egress MTU 1280 were unchanged from
+the preceding run. This retains the same fixture/pipeline scope limitations.

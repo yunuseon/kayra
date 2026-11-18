@@ -4753,133 +4753,140 @@
               "application/json": {
                 "schema": {
                   "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "readOnly": true,
-                  "type": "object",
-                  "properties": {
-                    "version": {
-                      "type": "number",
-                      "const": 1
-                    },
-                    "app": {
-                      "type": "string",
-                      "pattern": "^[a-z][a-z0-9-]*$"
-                    },
-                    "incarnation": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                    },
-                    "runtime": {
-                      "type": "string",
-                      "enum": [
-                        "compose",
-                        "swarm"
-                      ]
-                    },
-                    "scope": {
-                      "type": "string",
-                      "const": "runtime-services"
-                    },
-                    "observedAt": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "state": {
-                      "type": "string",
-                      "enum": [
-                        "available",
-                        "starting",
-                        "unhealthy",
-                        "missing",
-                        "mismatch",
-                        "unavailable",
-                        "not-requested",
-                        "unsupported"
-                      ]
-                    },
-                    "services": {
+                  "anyOf": [
+                    {
                       "readOnly": true,
-                      "maxItems": 128,
-                      "type": "array",
-                      "items": {
-                        "readOnly": true,
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string",
-                            "pattern": "^[a-z][a-z0-9-]*$"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "available",
-                              "starting",
-                              "unhealthy",
-                              "missing",
-                              "mismatch",
-                              "unavailable"
-                            ]
-                          },
-                          "currentTasks": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 100000
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "healthyTasks": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 100000
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "ignoredHistoricalTasks": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 100000
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "const": 1
                         },
-                        "required": [
-                          "name",
-                          "state",
-                          "currentTasks",
-                          "healthyTasks",
-                          "ignoredHistoricalTasks"
-                        ],
-                        "additionalProperties": false
-                      }
+                        "app": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]*$"
+                        },
+                        "incarnation": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "runtime": {
+                          "type": "string",
+                          "enum": [
+                            "compose",
+                            "swarm"
+                          ]
+                        },
+                        "scope": {
+                          "type": "string",
+                          "const": "runtime-services"
+                        },
+                        "observedAt": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "available",
+                            "starting",
+                            "unhealthy",
+                            "missing",
+                            "mismatch",
+                            "unavailable",
+                            "not-requested",
+                            "unsupported"
+                          ]
+                        },
+                        "services": {
+                          "readOnly": true,
+                          "maxItems": 128,
+                          "type": "array",
+                          "items": {
+                            "readOnly": true,
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9-]*$"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "available",
+                                  "starting",
+                                  "unhealthy",
+                                  "missing",
+                                  "mismatch",
+                                  "unavailable"
+                                ]
+                              },
+                              "currentTasks": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 100000
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "healthyTasks": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 100000
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "ignoredHistoricalTasks": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 100000
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "state",
+                              "currentTasks",
+                              "healthyTasks",
+                              "ignoredHistoricalTasks"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "app",
+                        "incarnation",
+                        "runtime",
+                        "scope",
+                        "observedAt",
+                        "state",
+                        "services"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
                     }
-                  },
-                  "required": [
-                    "version",
-                    "app",
-                    "incarnation",
-                    "runtime",
-                    "scope",
-                    "observedAt",
-                    "state",
-                    "services"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             }
@@ -4963,104 +4970,255 @@
               "application/json": {
                 "schema": {
                   "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "readOnly": true,
-                  "type": "object",
-                  "properties": {
-                    "version": {
-                      "type": "number",
-                      "const": 1
-                    },
-                    "app": {
-                      "type": "string",
-                      "pattern": "^[a-z][a-z0-9-]*$"
-                    },
-                    "incarnation": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                    },
-                    "runtime": {
-                      "type": "string",
-                      "enum": [
-                        "compose",
-                        "swarm"
-                      ]
-                    },
-                    "scope": {
-                      "type": "string",
-                      "const": "coordinator-plans"
-                    },
-                    "gcSafe": {
-                      "type": "boolean",
-                      "const": false
-                    },
-                    "plans": {
-                      "readOnly": true,
-                      "maxItems": 4096,
-                      "type": "array",
-                      "items": {
-                        "readOnly": true,
-                        "type": "object",
-                        "properties": {
-                          "plan": {
-                            "type": "string",
-                            "pattern": "^[0-9a-f]{64}$"
-                          },
-                          "workload": {
-                            "type": "string",
-                            "pattern": "^[0-9a-f]{64}$"
-                          },
-                          "commit": {
-                            "type": "string",
-                            "pattern": "^[0-9a-f]{40}$"
-                          },
-                          "roles": {
-                            "readOnly": true,
-                            "minItems": 1,
-                            "maxItems": 5,
-                            "type": "array",
-                            "items": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "app": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]*$"
+                            },
+                            "incarnation": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "runtime": {
                               "type": "string",
                               "enum": [
-                                "active",
-                                "last-known-good",
-                                "candidate",
-                                "rollback",
-                                "unresolved"
+                                "compose",
+                                "swarm"
                               ]
+                            },
+                            "scope": {
+                              "type": "string",
+                              "const": "coordinator-plans"
+                            },
+                            "gcSafe": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "plans": {
+                              "readOnly": true,
+                              "maxItems": 4096,
+                              "type": "array",
+                              "items": {
+                                "readOnly": true,
+                                "type": "object",
+                                "properties": {
+                                  "plan": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  },
+                                  "workload": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  },
+                                  "commit": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{40}$"
+                                  },
+                                  "roles": {
+                                    "readOnly": true,
+                                    "minItems": 1,
+                                    "maxItems": 5,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "active",
+                                        "last-known-good",
+                                        "candidate",
+                                        "rollback",
+                                        "unresolved"
+                                      ]
+                                    }
+                                  },
+                                  "images": {
+                                    "readOnly": true,
+                                    "minItems": 1,
+                                    "maxItems": 128,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "plan",
+                                  "workload",
+                                  "commit",
+                                  "roles",
+                                  "images"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
-                          "images": {
-                            "readOnly": true,
-                            "minItems": 1,
-                            "maxItems": 128,
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          }
+                          "required": [
+                            "version",
+                            "app",
+                            "incarnation",
+                            "runtime",
+                            "scope",
+                            "gcSafe",
+                            "plans"
+                          ],
+                          "additionalProperties": false
                         },
-                        "required": [
-                          "plan",
-                          "workload",
-                          "commit",
-                          "roles",
-                          "images"
-                        ],
-                        "additionalProperties": false
-                      }
+                        {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "number",
+                              "const": 3
+                            },
+                            "protocol": {
+                              "type": "string",
+                              "const": "managed-v3"
+                            },
+                            "runtime": {
+                              "type": "string",
+                              "const": "swarm"
+                            },
+                            "app": {
+                              "type": "string",
+                              "maxLength": 48,
+                              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                            },
+                            "incarnation": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "scope": {
+                              "type": "string",
+                              "const": "deployment-evidence"
+                            },
+                            "gcSafe": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "attachments": {
+                              "type": "string",
+                              "const": "not-observed"
+                            },
+                            "plans": {
+                              "readOnly": true,
+                              "maxItems": 4096,
+                              "type": "array",
+                              "items": {
+                                "readOnly": true,
+                                "type": "object",
+                                "properties": {
+                                  "plan": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "bundle": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "commit": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{40}$"
+                                  },
+                                  "roles": {
+                                    "readOnly": true,
+                                    "minItems": 1,
+                                    "maxItems": 5,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "active",
+                                        "last-known-good",
+                                        "candidate",
+                                        "rollback",
+                                        "unresolved"
+                                      ]
+                                    }
+                                  },
+                                  "images": {
+                                    "readOnly": true,
+                                    "minItems": 1,
+                                    "maxItems": 128,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "maxLength": 512
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "plan",
+                                  "bundle",
+                                  "commit",
+                                  "roles",
+                                  "images"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "retired": {
+                              "readOnly": true,
+                              "maxItems": 32,
+                              "type": "array",
+                              "items": {
+                                "readOnly": true,
+                                "type": "object",
+                                "properties": {
+                                  "service": {
+                                    "type": "string",
+                                    "maxLength": 48,
+                                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                                  },
+                                  "specification": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "image": {
+                                    "type": "string",
+                                    "maxLength": 512
+                                  }
+                                },
+                                "required": [
+                                  "service",
+                                  "specification",
+                                  "image"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "protocol",
+                            "runtime",
+                            "app",
+                            "incarnation",
+                            "scope",
+                            "gcSafe",
+                            "attachments",
+                            "plans",
+                            "retired"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
                     }
-                  },
-                  "required": [
-                    "version",
-                    "app",
-                    "incarnation",
-                    "runtime",
-                    "scope",
-                    "gcSafe",
-                    "plans"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             }
@@ -5144,443 +5302,71 @@
               "application/json": {
                 "schema": {
                   "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "readOnly": true,
-                  "type": "object",
-                  "properties": {
-                    "version": {
-                      "type": "number",
-                      "const": 1
-                    },
-                    "app": {
-                      "type": "string",
-                      "pattern": "^[a-z][a-z0-9-]*$"
-                    },
-                    "incarnation": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                    },
-                    "runtime": {
-                      "type": "string",
-                      "enum": [
-                        "compose",
-                        "swarm"
-                      ]
-                    },
-                    "lifecycle": {
-                      "type": "string",
-                      "enum": [
-                        "registering",
-                        "registered",
-                        "removal-requested",
-                        "removing",
-                        "removed",
-                        "purging",
-                        "purged"
-                      ]
-                    },
-                    "verification": {
-                      "type": "string",
-                      "enum": [
-                        "legacy-unverified",
-                        "unverified",
-                        "verified"
-                      ]
-                    },
-                    "requested": {
+                  "anyOf": [
+                    {
                       "anyOf": [
                         {
                           "readOnly": true,
                           "type": "object",
                           "properties": {
-                            "plan": {
-                              "type": "string",
-                              "pattern": "^[0-9a-f]{64}$"
+                            "version": {
+                              "type": "number",
+                              "const": 1
                             },
-                            "commit": {
+                            "app": {
                               "type": "string",
-                              "pattern": "^[0-9a-f]{40}$"
-                            }
-                          },
-                          "required": [
-                            "plan",
-                            "commit"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "desired": {
-                      "anyOf": [
-                        {
-                          "readOnly": true,
-                          "type": "object",
-                          "properties": {
-                            "plan": {
-                              "type": "string",
-                              "pattern": "^[0-9a-f]{64}$"
+                              "pattern": "^[a-z][a-z0-9-]*$"
                             },
-                            "commit": {
-                              "type": "string",
-                              "pattern": "^[0-9a-f]{40}$"
-                            }
-                          },
-                          "required": [
-                            "plan",
-                            "commit"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "verifiedActive": {
-                      "anyOf": [
-                        {
-                          "readOnly": true,
-                          "type": "object",
-                          "properties": {
-                            "plan": {
-                              "type": "string",
-                              "pattern": "^[0-9a-f]{64}$"
-                            },
-                            "commit": {
-                              "type": "string",
-                              "pattern": "^[0-9a-f]{40}$"
-                            },
-                            "verifiedAt": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            }
-                          },
-                          "required": [
-                            "plan",
-                            "commit",
-                            "verifiedAt"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "lastKnownGood": {
-                      "anyOf": [
-                        {
-                          "readOnly": true,
-                          "type": "object",
-                          "properties": {
-                            "plan": {
-                              "type": "string",
-                              "pattern": "^[0-9a-f]{64}$"
-                            },
-                            "commit": {
-                              "type": "string",
-                              "pattern": "^[0-9a-f]{40}$"
-                            },
-                            "verifiedAt": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            }
-                          },
-                          "required": [
-                            "plan",
-                            "commit",
-                            "verifiedAt"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "operation": {
-                      "anyOf": [
-                        {
-                          "readOnly": true,
-                          "type": "object",
-                          "properties": {
-                            "request": {
+                            "incarnation": {
                               "type": "string",
                               "format": "uuid",
                               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                             },
-                            "phase": {
+                            "runtime": {
                               "type": "string",
                               "enum": [
-                                "prepared",
-                                "admitted",
-                                "applying",
-                                "verifying",
-                                "recovering",
-                                "held",
-                                "succeeded",
-                                "failed",
-                                "cancelled"
+                                "compose",
+                                "swarm"
                               ]
                             },
-                            "reason": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    "deadline",
-                                    "admission",
-                                    "runtime",
-                                    "routed",
-                                    "cancelled"
-                                  ]
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "cancelRequestedAt": {
-                              "default": null,
-                              "anyOf": [
-                                {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "updateDeadline": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            "recoveryDeadline": {
-                              "anyOf": [
-                                {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "recovery": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    "automatic-rollback",
-                                    "previous-preserved",
-                                    "compensated",
-                                    "removed-unverified",
-                                    "unstarted"
-                                  ]
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            }
-                          },
-                          "required": [
-                            "request",
-                            "phase",
-                            "reason",
-                            "cancelRequestedAt",
-                            "updateDeadline",
-                            "recoveryDeadline",
-                            "recovery"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "requiredAction": {
-                      "type": "string",
-                      "enum": [
-                        "none",
-                        "inspect-and-resolve"
-                      ]
-                    },
-                    "preparation": {
-                      "default": null,
-                      "anyOf": [
-                        {
-                          "readOnly": true,
-                          "type": "object",
-                          "properties": {
-                            "request": {
-                              "type": "string",
-                              "format": "uuid",
-                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                            },
-                            "phase": {
+                            "lifecycle": {
                               "type": "string",
                               "enum": [
-                                "prepared",
-                                "admitted",
-                                "migrating",
-                                "ready-for-http",
-                                "held",
-                                "cancelling",
-                                "cancelled",
-                                "failed"
+                                "registering",
+                                "registered",
+                                "removal-requested",
+                                "removing",
+                                "removed",
+                                "purging",
+                                "purged"
                               ]
                             },
-                            "reason": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    "deadline",
-                                    "migration",
-                                    "cancelled"
-                                  ]
-                                },
-                                {
-                                  "type": "null"
-                                }
+                            "verification": {
+                              "type": "string",
+                              "enum": [
+                                "legacy-unverified",
+                                "unverified",
+                                "verified"
                               ]
                             },
-                            "admissionDeadline": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            "deadline": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            "migrationDeadline": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            "httpDeadline": {
-                              "anyOf": [
-                                {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "completedAt": {
-                              "default": null,
-                              "anyOf": [
-                                {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "cancelRequestedAt": {
-                              "default": null,
-                              "anyOf": [
-                                {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "recovery": {
-                              "default": null,
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    "previous-preserved",
-                                    "no-active-release"
-                                  ]
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "migrationOutcomes": {
-                              "default": [],
-                              "readOnly": true,
-                              "maxItems": 128,
-                              "type": "array",
-                              "items": {
-                                "readOnly": true,
-                                "type": "object",
-                                "properties": {
-                                  "step": {
-                                    "type": "string",
-                                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
-                                  },
-                                  "outcome": {
-                                    "type": "string",
-                                    "enum": [
-                                      "applied",
-                                      "not-applied",
-                                      "unstarted"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "step",
-                                  "outcome"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "resolution": {
-                              "default": null,
+                            "requested": {
                               "anyOf": [
                                 {
                                   "readOnly": true,
                                   "type": "object",
                                   "properties": {
-                                    "id": {
+                                    "plan": {
                                       "type": "string",
                                       "pattern": "^[0-9a-f]{64}$"
                                     },
-                                    "outcome": {
+                                    "commit": {
                                       "type": "string",
-                                      "enum": [
-                                        "applied",
-                                        "not-applied"
-                                      ]
-                                    },
-                                    "at": {
-                                      "type": "integer",
-                                      "exclusiveMinimum": 0,
-                                      "maximum": 9007199254740991
+                                      "pattern": "^[0-9a-f]{40}$"
                                     }
                                   },
                                   "required": [
-                                    "id",
-                                    "outcome",
-                                    "at"
+                                    "plan",
+                                    "commit"
                                   ],
                                   "additionalProperties": false
                                 },
@@ -5589,62 +5375,864 @@
                                 }
                               ]
                             },
-                            "step": {
+                            "desired": {
                               "anyOf": [
                                 {
-                                  "type": "string",
-                                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "plan": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{64}$"
+                                    },
+                                    "commit": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{40}$"
+                                    }
+                                  },
+                                  "required": [
+                                    "plan",
+                                    "commit"
+                                  ],
+                                  "additionalProperties": false
                                 },
                                 {
                                   "type": "null"
                                 }
                               ]
+                            },
+                            "verifiedActive": {
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "plan": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{64}$"
+                                    },
+                                    "commit": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{40}$"
+                                    },
+                                    "verifiedAt": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "plan",
+                                    "commit",
+                                    "verifiedAt"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastKnownGood": {
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "plan": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{64}$"
+                                    },
+                                    "commit": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{40}$"
+                                    },
+                                    "verifiedAt": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "plan",
+                                    "commit",
+                                    "verifiedAt"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "operation": {
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "request": {
+                                      "type": "string",
+                                      "format": "uuid",
+                                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": [
+                                        "prepared",
+                                        "admitted",
+                                        "applying",
+                                        "verifying",
+                                        "recovering",
+                                        "held",
+                                        "succeeded",
+                                        "failed",
+                                        "cancelled"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "deadline",
+                                            "admission",
+                                            "runtime",
+                                            "routed",
+                                            "cancelled"
+                                          ]
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "cancelRequestedAt": {
+                                      "default": null,
+                                      "anyOf": [
+                                        {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "updateDeadline": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "recoveryDeadline": {
+                                      "anyOf": [
+                                        {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "recovery": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "automatic-rollback",
+                                            "previous-preserved",
+                                            "compensated",
+                                            "removed-unverified",
+                                            "unstarted"
+                                          ]
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "request",
+                                    "phase",
+                                    "reason",
+                                    "cancelRequestedAt",
+                                    "updateDeadline",
+                                    "recoveryDeadline",
+                                    "recovery"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "requiredAction": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "inspect-and-resolve"
+                              ]
+                            },
+                            "preparation": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "request": {
+                                      "type": "string",
+                                      "format": "uuid",
+                                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": [
+                                        "prepared",
+                                        "admitted",
+                                        "migrating",
+                                        "ready-for-http",
+                                        "held",
+                                        "cancelling",
+                                        "cancelled",
+                                        "failed"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "deadline",
+                                            "migration",
+                                            "cancelled"
+                                          ]
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "admissionDeadline": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "deadline": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "migrationDeadline": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "httpDeadline": {
+                                      "anyOf": [
+                                        {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "completedAt": {
+                                      "default": null,
+                                      "anyOf": [
+                                        {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "cancelRequestedAt": {
+                                      "default": null,
+                                      "anyOf": [
+                                        {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "recovery": {
+                                      "default": null,
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "previous-preserved",
+                                            "no-active-release"
+                                          ]
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "migrationOutcomes": {
+                                      "default": [],
+                                      "readOnly": true,
+                                      "maxItems": 128,
+                                      "type": "array",
+                                      "items": {
+                                        "readOnly": true,
+                                        "type": "object",
+                                        "properties": {
+                                          "step": {
+                                            "type": "string",
+                                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                                          },
+                                          "outcome": {
+                                            "type": "string",
+                                            "enum": [
+                                              "applied",
+                                              "not-applied",
+                                              "unstarted"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "step",
+                                          "outcome"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "resolution": {
+                                      "default": null,
+                                      "anyOf": [
+                                        {
+                                          "readOnly": true,
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "pattern": "^[0-9a-f]{64}$"
+                                            },
+                                            "outcome": {
+                                              "type": "string",
+                                              "enum": [
+                                                "applied",
+                                                "not-applied"
+                                              ]
+                                            },
+                                            "at": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "outcome",
+                                            "at"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "step": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "request",
+                                    "phase",
+                                    "reason",
+                                    "admissionDeadline",
+                                    "deadline",
+                                    "migrationDeadline",
+                                    "httpDeadline",
+                                    "completedAt",
+                                    "cancelRequestedAt",
+                                    "recovery",
+                                    "migrationOutcomes",
+                                    "resolution",
+                                    "step"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "runtimeObservation": {
+                              "type": "string",
+                              "const": "not-observed"
                             }
                           },
                           "required": [
-                            "request",
-                            "phase",
-                            "reason",
-                            "admissionDeadline",
-                            "deadline",
-                            "migrationDeadline",
-                            "httpDeadline",
-                            "completedAt",
-                            "cancelRequestedAt",
-                            "recovery",
-                            "migrationOutcomes",
-                            "resolution",
-                            "step"
+                            "version",
+                            "app",
+                            "incarnation",
+                            "runtime",
+                            "lifecycle",
+                            "verification",
+                            "requested",
+                            "desired",
+                            "verifiedActive",
+                            "lastKnownGood",
+                            "operation",
+                            "requiredAction",
+                            "preparation",
+                            "runtimeObservation"
                           ],
                           "additionalProperties": false
                         },
                         {
-                          "type": "null"
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "number",
+                              "const": 3
+                            },
+                            "protocol": {
+                              "type": "string",
+                              "const": "managed-v3"
+                            },
+                            "runtime": {
+                              "type": "string",
+                              "const": "swarm"
+                            },
+                            "app": {
+                              "type": "string",
+                              "maxLength": 48,
+                              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                            },
+                            "incarnation": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "requested": {
+                              "readOnly": true,
+                              "type": "object",
+                              "properties": {
+                                "plan": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "commit": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{40}$"
+                                }
+                              },
+                              "required": [
+                                "plan",
+                                "commit"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "desired": {
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "plan": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "commit": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    }
+                                  },
+                                  "required": [
+                                    "plan",
+                                    "commit"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "verifiedActive": {
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "plan": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "commit": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    },
+                                    "run": {
+                                      "type": "string",
+                                      "format": "uuid",
+                                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                    },
+                                    "verifiedAt": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "compatibilityEpoch": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "plan",
+                                    "commit",
+                                    "run",
+                                    "verifiedAt",
+                                    "compatibilityEpoch"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "lastKnownGood": {
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "plan": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "commit": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{40}$"
+                                    },
+                                    "run": {
+                                      "type": "string",
+                                      "format": "uuid",
+                                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                    },
+                                    "verifiedAt": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "compatibilityEpoch": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "plan",
+                                    "commit",
+                                    "run",
+                                    "verifiedAt",
+                                    "compatibilityEpoch"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "compatibilityEpoch": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "rollback": {
+                              "type": "string",
+                              "enum": [
+                                "eligible",
+                                "no-previous-release",
+                                "application-incompatible",
+                                "data-fenced"
+                              ]
+                            },
+                            "operation": {
+                              "readOnly": true,
+                              "type": "object",
+                              "properties": {
+                                "run": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "rolling",
+                                    "maintenance"
+                                  ]
+                                },
+                                "phase": {
+                                  "type": "string",
+                                  "enum": [
+                                    "admitting",
+                                    "quiescing",
+                                    "preparing",
+                                    "updating",
+                                    "verifying",
+                                    "recovering",
+                                    "recovery-verifying",
+                                    "settling",
+                                    "complete",
+                                    "held"
+                                  ]
+                                },
+                                "reason": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "admission",
+                                        "deadline",
+                                        "authorization",
+                                        "quiescence",
+                                        "preparation",
+                                        "consumers",
+                                        "verification",
+                                        "recovery",
+                                        "recovery-verification",
+                                        "cancellation"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "outcome": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "deployed",
+                                        "rolled-back",
+                                        "absent",
+                                        "unchanged"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "admissionDeadline": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "deadline": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "recoveryDeadline": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "cancelRequestedAt": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "admitted": {
+                                  "type": "boolean"
+                                },
+                                "settled": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "run",
+                                "strategy",
+                                "phase",
+                                "reason",
+                                "outcome",
+                                "admissionDeadline",
+                                "deadline",
+                                "recoveryDeadline",
+                                "cancelRequestedAt",
+                                "admitted",
+                                "settled"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "migrations": {
+                              "readOnly": true,
+                              "type": "object",
+                              "properties": {
+                                "phase": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not-started",
+                                    "running",
+                                    "held",
+                                    "succeeded"
+                                  ]
+                                },
+                                "reason": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "deadline",
+                                        "runtime",
+                                        "unsafe-outcome",
+                                        "probe-unknown",
+                                        "not-applied",
+                                        "attempts-exhausted",
+                                        "cancelled"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "step": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 128
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "resolutions": {
+                                  "readOnly": true,
+                                  "maxItems": 128,
+                                  "type": "array",
+                                  "items": {
+                                    "readOnly": true,
+                                    "type": "object",
+                                    "properties": {
+                                      "step": {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "outcome": {
+                                        "type": "string",
+                                        "enum": [
+                                          "applied",
+                                          "not-applied"
+                                        ]
+                                      },
+                                      "at": {
+                                        "type": "integer",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 9007199254740991
+                                      }
+                                    },
+                                    "required": [
+                                      "step",
+                                      "id",
+                                      "outcome",
+                                      "at"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "phase",
+                                "reason",
+                                "step",
+                                "resolutions"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "requiredAction": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "inspect-and-resolve"
+                              ]
+                            },
+                            "runtimeObservation": {
+                              "type": "string",
+                              "const": "not-observed"
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "protocol",
+                            "runtime",
+                            "app",
+                            "incarnation",
+                            "requested",
+                            "desired",
+                            "verifiedActive",
+                            "lastKnownGood",
+                            "compatibilityEpoch",
+                            "rollback",
+                            "operation",
+                            "migrations",
+                            "requiredAction",
+                            "runtimeObservation"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
-                    "runtimeObservation": {
-                      "type": "string",
-                      "const": "not-observed"
+                    {
+                      "type": "null"
                     }
-                  },
-                  "required": [
-                    "version",
-                    "app",
-                    "incarnation",
-                    "runtime",
-                    "lifecycle",
-                    "verification",
-                    "requested",
-                    "desired",
-                    "verifiedActive",
-                    "lastKnownGood",
-                    "operation",
-                    "requiredAction",
-                    "preparation",
-                    "runtimeObservation"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             }
@@ -10485,443 +11073,71 @@
         "additionalProperties": false
       },
       "DeploymentStatus": {
-        "readOnly": true,
-        "type": "object",
-        "properties": {
-          "version": {
-            "type": "number",
-            "const": 1
-          },
-          "app": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]*$"
-          },
-          "incarnation": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "runtime": {
-            "type": "string",
-            "enum": [
-              "compose",
-              "swarm"
-            ]
-          },
-          "lifecycle": {
-            "type": "string",
-            "enum": [
-              "registering",
-              "registered",
-              "removal-requested",
-              "removing",
-              "removed",
-              "purging",
-              "purged"
-            ]
-          },
-          "verification": {
-            "type": "string",
-            "enum": [
-              "legacy-unverified",
-              "unverified",
-              "verified"
-            ]
-          },
-          "requested": {
+        "anyOf": [
+          {
             "anyOf": [
               {
                 "readOnly": true,
                 "type": "object",
                 "properties": {
-                  "plan": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{64}$"
+                  "version": {
+                    "type": "number",
+                    "const": 1
                   },
-                  "commit": {
+                  "app": {
                     "type": "string",
-                    "pattern": "^[0-9a-f]{40}$"
-                  }
-                },
-                "required": [
-                  "plan",
-                  "commit"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "desired": {
-            "anyOf": [
-              {
-                "readOnly": true,
-                "type": "object",
-                "properties": {
-                  "plan": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{64}$"
+                    "pattern": "^[a-z][a-z0-9-]*$"
                   },
-                  "commit": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{40}$"
-                  }
-                },
-                "required": [
-                  "plan",
-                  "commit"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "verifiedActive": {
-            "anyOf": [
-              {
-                "readOnly": true,
-                "type": "object",
-                "properties": {
-                  "plan": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{64}$"
-                  },
-                  "commit": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{40}$"
-                  },
-                  "verifiedAt": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  }
-                },
-                "required": [
-                  "plan",
-                  "commit",
-                  "verifiedAt"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "lastKnownGood": {
-            "anyOf": [
-              {
-                "readOnly": true,
-                "type": "object",
-                "properties": {
-                  "plan": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{64}$"
-                  },
-                  "commit": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{40}$"
-                  },
-                  "verifiedAt": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  }
-                },
-                "required": [
-                  "plan",
-                  "commit",
-                  "verifiedAt"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "operation": {
-            "anyOf": [
-              {
-                "readOnly": true,
-                "type": "object",
-                "properties": {
-                  "request": {
+                  "incarnation": {
                     "type": "string",
                     "format": "uuid",
                     "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   },
-                  "phase": {
+                  "runtime": {
                     "type": "string",
                     "enum": [
-                      "prepared",
-                      "admitted",
-                      "applying",
-                      "verifying",
-                      "recovering",
-                      "held",
-                      "succeeded",
-                      "failed",
-                      "cancelled"
+                      "compose",
+                      "swarm"
                     ]
                   },
-                  "reason": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "deadline",
-                          "admission",
-                          "runtime",
-                          "routed",
-                          "cancelled"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "cancelRequestedAt": {
-                    "default": null,
-                    "anyOf": [
-                      {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "updateDeadline": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "recoveryDeadline": {
-                    "anyOf": [
-                      {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "recovery": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "automatic-rollback",
-                          "previous-preserved",
-                          "compensated",
-                          "removed-unverified",
-                          "unstarted"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "request",
-                  "phase",
-                  "reason",
-                  "cancelRequestedAt",
-                  "updateDeadline",
-                  "recoveryDeadline",
-                  "recovery"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "requiredAction": {
-            "type": "string",
-            "enum": [
-              "none",
-              "inspect-and-resolve"
-            ]
-          },
-          "preparation": {
-            "default": null,
-            "anyOf": [
-              {
-                "readOnly": true,
-                "type": "object",
-                "properties": {
-                  "request": {
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  },
-                  "phase": {
+                  "lifecycle": {
                     "type": "string",
                     "enum": [
-                      "prepared",
-                      "admitted",
-                      "migrating",
-                      "ready-for-http",
-                      "held",
-                      "cancelling",
-                      "cancelled",
-                      "failed"
+                      "registering",
+                      "registered",
+                      "removal-requested",
+                      "removing",
+                      "removed",
+                      "purging",
+                      "purged"
                     ]
                   },
-                  "reason": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "deadline",
-                          "migration",
-                          "cancelled"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
+                  "verification": {
+                    "type": "string",
+                    "enum": [
+                      "legacy-unverified",
+                      "unverified",
+                      "verified"
                     ]
                   },
-                  "admissionDeadline": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "deadline": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "migrationDeadline": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "httpDeadline": {
-                    "anyOf": [
-                      {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "completedAt": {
-                    "default": null,
-                    "anyOf": [
-                      {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "cancelRequestedAt": {
-                    "default": null,
-                    "anyOf": [
-                      {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "recovery": {
-                    "default": null,
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "previous-preserved",
-                          "no-active-release"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "migrationOutcomes": {
-                    "default": [],
-                    "readOnly": true,
-                    "maxItems": 128,
-                    "type": "array",
-                    "items": {
-                      "readOnly": true,
-                      "type": "object",
-                      "properties": {
-                        "step": {
-                          "type": "string",
-                          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
-                        },
-                        "outcome": {
-                          "type": "string",
-                          "enum": [
-                            "applied",
-                            "not-applied",
-                            "unstarted"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "step",
-                        "outcome"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "resolution": {
-                    "default": null,
+                  "requested": {
                     "anyOf": [
                       {
                         "readOnly": true,
                         "type": "object",
                         "properties": {
-                          "id": {
+                          "plan": {
                             "type": "string",
                             "pattern": "^[0-9a-f]{64}$"
                           },
-                          "outcome": {
+                          "commit": {
                             "type": "string",
-                            "enum": [
-                              "applied",
-                              "not-applied"
-                            ]
-                          },
-                          "at": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 9007199254740991
+                            "pattern": "^[0-9a-f]{40}$"
                           }
                         },
                         "required": [
-                          "id",
-                          "outcome",
-                          "at"
+                          "plan",
+                          "commit"
                         ],
                         "additionalProperties": false
                       },
@@ -10930,291 +11146,1251 @@
                       }
                     ]
                   },
-                  "step": {
+                  "desired": {
                     "anyOf": [
                       {
-                        "type": "string",
-                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "plan": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "commit": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "commit"
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "null"
                       }
                     ]
+                  },
+                  "verifiedActive": {
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "plan": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "commit": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          },
+                          "verifiedAt": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "commit",
+                          "verifiedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lastKnownGood": {
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "plan": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "commit": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          },
+                          "verifiedAt": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "commit",
+                          "verifiedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "operation": {
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "request": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "phase": {
+                            "type": "string",
+                            "enum": [
+                              "prepared",
+                              "admitted",
+                              "applying",
+                              "verifying",
+                              "recovering",
+                              "held",
+                              "succeeded",
+                              "failed",
+                              "cancelled"
+                            ]
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "deadline",
+                                  "admission",
+                                  "runtime",
+                                  "routed",
+                                  "cancelled"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "cancelRequestedAt": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "updateDeadline": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "recoveryDeadline": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "recovery": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "automatic-rollback",
+                                  "previous-preserved",
+                                  "compensated",
+                                  "removed-unverified",
+                                  "unstarted"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "request",
+                          "phase",
+                          "reason",
+                          "cancelRequestedAt",
+                          "updateDeadline",
+                          "recoveryDeadline",
+                          "recovery"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "requiredAction": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "inspect-and-resolve"
+                    ]
+                  },
+                  "preparation": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "request": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "phase": {
+                            "type": "string",
+                            "enum": [
+                              "prepared",
+                              "admitted",
+                              "migrating",
+                              "ready-for-http",
+                              "held",
+                              "cancelling",
+                              "cancelled",
+                              "failed"
+                            ]
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "deadline",
+                                  "migration",
+                                  "cancelled"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "admissionDeadline": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "deadline": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "migrationDeadline": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "httpDeadline": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "completedAt": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "cancelRequestedAt": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "recovery": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "previous-preserved",
+                                  "no-active-release"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "migrationOutcomes": {
+                            "default": [],
+                            "readOnly": true,
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "readOnly": true,
+                              "type": "object",
+                              "properties": {
+                                "step": {
+                                  "type": "string",
+                                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                                },
+                                "outcome": {
+                                  "type": "string",
+                                  "enum": [
+                                    "applied",
+                                    "not-applied",
+                                    "unstarted"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "step",
+                                "outcome"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "resolution": {
+                            "default": null,
+                            "anyOf": [
+                              {
+                                "readOnly": true,
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "applied",
+                                      "not-applied"
+                                    ]
+                                  },
+                                  "at": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "outcome",
+                                  "at"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "step": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "request",
+                          "phase",
+                          "reason",
+                          "admissionDeadline",
+                          "deadline",
+                          "migrationDeadline",
+                          "httpDeadline",
+                          "completedAt",
+                          "cancelRequestedAt",
+                          "recovery",
+                          "migrationOutcomes",
+                          "resolution",
+                          "step"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "runtimeObservation": {
+                    "type": "string",
+                    "const": "not-observed"
                   }
                 },
                 "required": [
-                  "request",
-                  "phase",
-                  "reason",
-                  "admissionDeadline",
-                  "deadline",
-                  "migrationDeadline",
-                  "httpDeadline",
-                  "completedAt",
-                  "cancelRequestedAt",
-                  "recovery",
-                  "migrationOutcomes",
-                  "resolution",
-                  "step"
+                  "version",
+                  "app",
+                  "incarnation",
+                  "runtime",
+                  "lifecycle",
+                  "verification",
+                  "requested",
+                  "desired",
+                  "verifiedActive",
+                  "lastKnownGood",
+                  "operation",
+                  "requiredAction",
+                  "preparation",
+                  "runtimeObservation"
                 ],
                 "additionalProperties": false
               },
               {
-                "type": "null"
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "number",
+                    "const": 3
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "const": "managed-v3"
+                  },
+                  "runtime": {
+                    "type": "string",
+                    "const": "swarm"
+                  },
+                  "app": {
+                    "type": "string",
+                    "maxLength": 48,
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                  },
+                  "incarnation": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "requested": {
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "plan": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "commit": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{40}$"
+                      }
+                    },
+                    "required": [
+                      "plan",
+                      "commit"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "desired": {
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "plan": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "commit": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "commit"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "verifiedActive": {
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "plan": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "commit": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          },
+                          "run": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "verifiedAt": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "compatibilityEpoch": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "commit",
+                          "run",
+                          "verifiedAt",
+                          "compatibilityEpoch"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lastKnownGood": {
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "plan": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "commit": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{40}$"
+                          },
+                          "run": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "verifiedAt": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "compatibilityEpoch": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "plan",
+                          "commit",
+                          "run",
+                          "verifiedAt",
+                          "compatibilityEpoch"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "compatibilityEpoch": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "rollback": {
+                    "type": "string",
+                    "enum": [
+                      "eligible",
+                      "no-previous-release",
+                      "application-incompatible",
+                      "data-fenced"
+                    ]
+                  },
+                  "operation": {
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "run": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "strategy": {
+                        "type": "string",
+                        "enum": [
+                          "rolling",
+                          "maintenance"
+                        ]
+                      },
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "admitting",
+                          "quiescing",
+                          "preparing",
+                          "updating",
+                          "verifying",
+                          "recovering",
+                          "recovery-verifying",
+                          "settling",
+                          "complete",
+                          "held"
+                        ]
+                      },
+                      "reason": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "admission",
+                              "deadline",
+                              "authorization",
+                              "quiescence",
+                              "preparation",
+                              "consumers",
+                              "verification",
+                              "recovery",
+                              "recovery-verification",
+                              "cancellation"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "outcome": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "deployed",
+                              "rolled-back",
+                              "absent",
+                              "unchanged"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "admissionDeadline": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "deadline": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "recoveryDeadline": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "cancelRequestedAt": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "admitted": {
+                        "type": "boolean"
+                      },
+                      "settled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "run",
+                      "strategy",
+                      "phase",
+                      "reason",
+                      "outcome",
+                      "admissionDeadline",
+                      "deadline",
+                      "recoveryDeadline",
+                      "cancelRequestedAt",
+                      "admitted",
+                      "settled"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "migrations": {
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "not-started",
+                          "running",
+                          "held",
+                          "succeeded"
+                        ]
+                      },
+                      "reason": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "deadline",
+                              "runtime",
+                              "unsafe-outcome",
+                              "probe-unknown",
+                              "not-applied",
+                              "attempts-exhausted",
+                              "cancelled"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "step": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 128
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "resolutions": {
+                        "readOnly": true,
+                        "maxItems": 128,
+                        "type": "array",
+                        "items": {
+                          "readOnly": true,
+                          "type": "object",
+                          "properties": {
+                            "step": {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "applied",
+                                "not-applied"
+                              ]
+                            },
+                            "at": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "step",
+                            "id",
+                            "outcome",
+                            "at"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "phase",
+                      "reason",
+                      "step",
+                      "resolutions"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "requiredAction": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "inspect-and-resolve"
+                    ]
+                  },
+                  "runtimeObservation": {
+                    "type": "string",
+                    "const": "not-observed"
+                  }
+                },
+                "required": [
+                  "version",
+                  "protocol",
+                  "runtime",
+                  "app",
+                  "incarnation",
+                  "requested",
+                  "desired",
+                  "verifiedActive",
+                  "lastKnownGood",
+                  "compatibilityEpoch",
+                  "rollback",
+                  "operation",
+                  "migrations",
+                  "requiredAction",
+                  "runtimeObservation"
+                ],
+                "additionalProperties": false
               }
             ]
           },
-          "runtimeObservation": {
-            "type": "string",
-            "const": "not-observed"
+          {
+            "type": "null"
           }
-        },
-        "required": [
-          "version",
-          "app",
-          "incarnation",
-          "runtime",
-          "lifecycle",
-          "verification",
-          "requested",
-          "desired",
-          "verifiedActive",
-          "lastKnownGood",
-          "operation",
-          "requiredAction",
-          "preparation",
-          "runtimeObservation"
-        ],
-        "additionalProperties": false
+        ]
       },
       "DeploymentHealth": {
-        "readOnly": true,
-        "type": "object",
-        "properties": {
-          "version": {
-            "type": "number",
-            "const": 1
-          },
-          "app": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]*$"
-          },
-          "incarnation": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "runtime": {
-            "type": "string",
-            "enum": [
-              "compose",
-              "swarm"
-            ]
-          },
-          "scope": {
-            "type": "string",
-            "const": "runtime-services"
-          },
-          "observedAt": {
-            "type": "integer",
-            "exclusiveMinimum": 0,
-            "maximum": 9007199254740991
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "available",
-              "starting",
-              "unhealthy",
-              "missing",
-              "mismatch",
-              "unavailable",
-              "not-requested",
-              "unsupported"
-            ]
-          },
-          "services": {
+        "anyOf": [
+          {
             "readOnly": true,
-            "maxItems": 128,
-            "type": "array",
-            "items": {
-              "readOnly": true,
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9-]*$"
-                },
-                "state": {
-                  "type": "string",
-                  "enum": [
-                    "available",
-                    "starting",
-                    "unhealthy",
-                    "missing",
-                    "mismatch",
-                    "unavailable"
-                  ]
-                },
-                "currentTasks": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 100000
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "healthyTasks": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 100000
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "ignoredHistoricalTasks": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 100000
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "number",
+                "const": 1
               },
-              "required": [
-                "name",
-                "state",
-                "currentTasks",
-                "healthyTasks",
-                "ignoredHistoricalTasks"
-              ],
-              "additionalProperties": false
-            }
+              "app": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "incarnation": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "compose",
+                  "swarm"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "const": "runtime-services"
+              },
+              "observedAt": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "starting",
+                  "unhealthy",
+                  "missing",
+                  "mismatch",
+                  "unavailable",
+                  "not-requested",
+                  "unsupported"
+                ]
+              },
+              "services": {
+                "readOnly": true,
+                "maxItems": 128,
+                "type": "array",
+                "items": {
+                  "readOnly": true,
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "available",
+                        "starting",
+                        "unhealthy",
+                        "missing",
+                        "mismatch",
+                        "unavailable"
+                      ]
+                    },
+                    "currentTasks": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "healthyTasks": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "ignoredHistoricalTasks": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "state",
+                    "currentTasks",
+                    "healthyTasks",
+                    "ignoredHistoricalTasks"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "version",
+              "app",
+              "incarnation",
+              "runtime",
+              "scope",
+              "observedAt",
+              "state",
+              "services"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
           }
-        },
-        "required": [
-          "version",
-          "app",
-          "incarnation",
-          "runtime",
-          "scope",
-          "observedAt",
-          "state",
-          "services"
-        ],
-        "additionalProperties": false
+        ]
       },
       "DeploymentImagePins": {
-        "readOnly": true,
-        "type": "object",
-        "properties": {
-          "version": {
-            "type": "number",
-            "const": 1
-          },
-          "app": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]*$"
-          },
-          "incarnation": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-          },
-          "runtime": {
-            "type": "string",
-            "enum": [
-              "compose",
-              "swarm"
-            ]
-          },
-          "scope": {
-            "type": "string",
-            "const": "coordinator-plans"
-          },
-          "gcSafe": {
-            "type": "boolean",
-            "const": false
-          },
-          "plans": {
-            "readOnly": true,
-            "maxItems": 4096,
-            "type": "array",
-            "items": {
-              "readOnly": true,
-              "type": "object",
-              "properties": {
-                "plan": {
-                  "type": "string",
-                  "pattern": "^[0-9a-f]{64}$"
-                },
-                "workload": {
-                  "type": "string",
-                  "pattern": "^[0-9a-f]{64}$"
-                },
-                "commit": {
-                  "type": "string",
-                  "pattern": "^[0-9a-f]{40}$"
-                },
-                "roles": {
-                  "readOnly": true,
-                  "minItems": 1,
-                  "maxItems": 5,
-                  "type": "array",
-                  "items": {
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "app": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "incarnation": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "runtime": {
                     "type": "string",
                     "enum": [
-                      "active",
-                      "last-known-good",
-                      "candidate",
-                      "rollback",
-                      "unresolved"
+                      "compose",
+                      "swarm"
                     ]
+                  },
+                  "scope": {
+                    "type": "string",
+                    "const": "coordinator-plans"
+                  },
+                  "gcSafe": {
+                    "type": "boolean",
+                    "const": false
+                  },
+                  "plans": {
+                    "readOnly": true,
+                    "maxItems": 4096,
+                    "type": "array",
+                    "items": {
+                      "readOnly": true,
+                      "type": "object",
+                      "properties": {
+                        "plan": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "workload": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "commit": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        },
+                        "roles": {
+                          "readOnly": true,
+                          "minItems": 1,
+                          "maxItems": 5,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "last-known-good",
+                              "candidate",
+                              "rollback",
+                              "unresolved"
+                            ]
+                          }
+                        },
+                        "images": {
+                          "readOnly": true,
+                          "minItems": 1,
+                          "maxItems": 128,
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "plan",
+                        "workload",
+                        "commit",
+                        "roles",
+                        "images"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
-                "images": {
-                  "readOnly": true,
-                  "minItems": 1,
-                  "maxItems": 128,
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
+                "required": [
+                  "version",
+                  "app",
+                  "incarnation",
+                  "runtime",
+                  "scope",
+                  "gcSafe",
+                  "plans"
+                ],
+                "additionalProperties": false
               },
-              "required": [
-                "plan",
-                "workload",
-                "commit",
-                "roles",
-                "images"
-              ],
-              "additionalProperties": false
-            }
+              {
+                "readOnly": true,
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "number",
+                    "const": 3
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "const": "managed-v3"
+                  },
+                  "runtime": {
+                    "type": "string",
+                    "const": "swarm"
+                  },
+                  "app": {
+                    "type": "string",
+                    "maxLength": 48,
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                  },
+                  "incarnation": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "const": "deployment-evidence"
+                  },
+                  "gcSafe": {
+                    "type": "boolean",
+                    "const": false
+                  },
+                  "attachments": {
+                    "type": "string",
+                    "const": "not-observed"
+                  },
+                  "plans": {
+                    "readOnly": true,
+                    "maxItems": 4096,
+                    "type": "array",
+                    "items": {
+                      "readOnly": true,
+                      "type": "object",
+                      "properties": {
+                        "plan": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "bundle": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "commit": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{40}$"
+                        },
+                        "roles": {
+                          "readOnly": true,
+                          "minItems": 1,
+                          "maxItems": 5,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "last-known-good",
+                              "candidate",
+                              "rollback",
+                              "unresolved"
+                            ]
+                          }
+                        },
+                        "images": {
+                          "readOnly": true,
+                          "minItems": 1,
+                          "maxItems": 128,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "maxLength": 512
+                          }
+                        }
+                      },
+                      "required": [
+                        "plan",
+                        "bundle",
+                        "commit",
+                        "roles",
+                        "images"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "retired": {
+                    "readOnly": true,
+                    "maxItems": 32,
+                    "type": "array",
+                    "items": {
+                      "readOnly": true,
+                      "type": "object",
+                      "properties": {
+                        "service": {
+                          "type": "string",
+                          "maxLength": 48,
+                          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                        },
+                        "specification": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "image": {
+                          "type": "string",
+                          "maxLength": 512
+                        }
+                      },
+                      "required": [
+                        "service",
+                        "specification",
+                        "image"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "version",
+                  "protocol",
+                  "runtime",
+                  "app",
+                  "incarnation",
+                  "scope",
+                  "gcSafe",
+                  "attachments",
+                  "plans",
+                  "retired"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "type": "null"
           }
-        },
-        "required": [
-          "version",
-          "app",
-          "incarnation",
-          "runtime",
-          "scope",
-          "gcSafe",
-          "plans"
-        ],
-        "additionalProperties": false
+        ]
       },
       "AppRuns": {
         "type": "object",

@@ -2060,3 +2060,19 @@ or a newer accepted request whose root still describes its predecessor, refuses
 reporting until lifecycle reconciliation reconstructs the operation. Reports do
 not silently present the predecessor as the latest request. Existing initialized
 journals are opened strictly; missing records are never replaced by a reader.
+
+### Published query compatibility
+
+The existing authenticated deployment status, health and image-pin queries select
+the reporting implementation from the indexed ownership protocol. They do not
+infer a backend from Docker observations or enable deployment mutations. Managed
+reports use the shared versioned contracts; an application with no accepted
+deployment returns null. Non-null responses retain the existing application-scope
+check in the wire client. Managed health requires explicit managed read-only
+observation ports and refuses substitution of legacy observations.
+
+CLI/API/MCP share the regenerated query contracts. The web deployment view shows
+managed strategy, phase, requested/desired/certified releases, rollback eligibility,
+migration step and current health separately. It omits legacy mutation controls
+for managed reports. Normal managed registration/deployment compilation, mutation
+operations, health composition and complete integrated acceptance remain pending.

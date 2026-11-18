@@ -284,6 +284,16 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return Object.freeze({ reference: checked.value, initial: lifecycle.phase === "registering" });
     });
 
+  const managedReporting = async (app: string) => (await serialIndex(readIndex)).apps.find((entry) => entry.app === app)?.protocol === "managed-v3";
+  const legacyStatus = async (app: string, store: EnvelopeStore) => {
+    const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
+    if (envelope?.fence === null || envelope?.fence === undefined || envelope.registrationAllocation === undefined) throw new Error("deployment status lacks lifecycle authority");
+    return deploymentStatus(app, registration.incarnation, envelope.registrationAllocation.runtime, envelope.fence.lifecycle.phase, envelope.http, envelope.rollout);
+  };
+  const legacyPins = async (app: string, store: EnvelopeStore, ports: Pick<BuildPorts, "read">) => {
+    const envelope = await store.read(); if (envelope === undefined) throw new Error("image pins lack lifecycle ownership"); return deploymentImagePins(app, envelope, ports);
+  };
+
   return {
     prepareApp: (app: string, protocol?: "managed-v3") => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
@@ -725,16 +735,26 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return Object.freeze([...observations.flat(), ...managed.flatMap((value) => value === null ? [] : [value])]);
     },
     deploymentHealth: (app: string, ports: Parameters<typeof deploymentHealth>[2]) => useReady(app, async (store) => deploymentHealth(app, await store.read(), ports)),
-    deploymentImagePins: (app: string, ports: Pick<BuildPorts, "read">) => useReady(app, async (store) => {
-      const envelope = await store.read(); if (envelope === undefined) throw new Error("image pins lack lifecycle ownership");
-      return deploymentImagePins(app, envelope, ports);
-    }),
-    deploymentStatus: (app: string) => useReady(app, async (store) => {
-      const envelope = await store.read();
-      const registration = verifiedRegistration(app, envelope);
-      if (envelope?.fence === null || envelope?.fence === undefined || envelope.registrationAllocation === undefined) throw new Error("deployment status lacks lifecycle authority");
-      return deploymentStatus(app, registration.incarnation, envelope.registrationAllocation.runtime, envelope.fence.lifecycle.phase, envelope.http, envelope.rollout);
-    }),
+    deploymentImagePins: (app: string, ports: Pick<BuildPorts, "read">) => useReady(app, (store) => legacyPins(app, store, ports)),
+    deploymentStatus: (app: string) => useReady(app, (store) => legacyStatus(app, store)),
+    /** Dispatch is based only on the persisted owner protocol; readers never guess a backend from observed Docker objects. */
+    publishedDeploymentStatus: async (app: string, ports?: ManagedDeploymentReadPort) => {
+      if (!(await managedReporting(app))) return useReady(app, (store) => legacyStatus(app, store));
+      if (ports === undefined) throw new Error("managed deployment reporting is unavailable");
+      return useManagedRead(app, ports, (state, source) => managedDeploymentStatus(state, source, ports));
+    },
+    publishedDeploymentImagePins: async (app: string, ports: ManagedDeploymentReadPort) => {
+      if (!(await managedReporting(app))) return useReady(app, (store) => legacyPins(app, store, ports));
+      return useManagedRead(app, ports, (state, source) => managedImagePins(state, source, ports));
+    },
+    publishedDeploymentHealth: async (app: string, legacy?: Parameters<typeof deploymentHealth>[2], managed?: ManagedHealthReadPort) => {
+      if (await managedReporting(app)) {
+        if (managed === undefined) throw new Error("managed-v3 runtime health observations are unavailable");
+        return useManagedRead(app, managed, (state, source) => managedDeploymentHealth(state, source, managed));
+      }
+      if (legacy === undefined) throw new Error("runtime health observations are unavailable");
+      return useReady(app, async (store) => deploymentHealth(app, await store.read(), legacy));
+    },
     /** Owner-only restart work list; consumers get identities, never journal paths or mutable intent. */
     pendingRolloutOperations: async () => {
       if (closed) throw new Error("lifecycle app index is closed");

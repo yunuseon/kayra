@@ -12,6 +12,7 @@ const schema = z.object({ version: z.literal(1), owner: z.unknown(), deployment:
   createdAt: positive, phase: z.enum(["prepared", "creating", "ready", "held"]), attempts: z.number().int().min(0).max(8),
   receipt: z.string().max(128).refine((value) => Number.isFinite(Date.parse(value))).nullable(),
   reason: z.enum(["deadline", "unauthorized", "conflict", "missing", "attempts"]).nullable(),
+  recoveredReceipt: z.object({ createdAt: z.string().max(128).refine((value) => Number.isFinite(Date.parse(value))), observedAt: positive }).strict().readonly().optional(),
 }).strict().readonly();
 export const parseDataVolumeCreation = (input: unknown) => {
   const checked = schema.safeParse(input); if (!checked.success) throw new Error("invalid volume creation state");
@@ -20,14 +21,18 @@ export const parseDataVolumeCreation = (input: unknown) => {
     state.action.deadline <= state.createdAt || state.action.deadline - state.createdAt > 90000 ||
     (state.phase === "held") !== (state.reason !== null) || (state.phase === "prepared" && (state.attempts !== 0 || state.receipt !== null)) ||
     (state.phase === "creating" && (state.attempts === 0 || state.receipt !== null)) || (state.phase === "ready" && (state.attempts === 0 || state.receipt === null)) ||
-    ((state.reason === "missing") && state.receipt === null) || (state.reason === "attempts" && state.attempts !== 8)) throw new Error("inconsistent volume creation state");
-  return Object.freeze({ ...state, owner: owner.value });
+    ((state.reason === "missing") && state.receipt === null) ||
+    state.recoveredReceipt !== undefined && (state.receipt !== null || state.attempts === 0 || state.phase !== "held" || state.reason !== "deadline" && state.reason !== "attempts" || state.recoveredReceipt.observedAt < state.createdAt || state.reason === "deadline" && state.recoveredReceipt.observedAt < state.action.deadline || Date.parse(state.recoveredReceipt.createdAt) < Math.floor(state.createdAt / 1000) * 1000 || Date.parse(state.recoveredReceipt.createdAt) > state.recoveredReceipt.observedAt) || (state.reason === "attempts" && state.attempts !== 8)) throw new Error("inconsistent volume creation state");
+  const { recoveredReceipt, ...original } = state;
+  return Object.freeze({ ...original, owner: owner.value, ...(recoveredReceipt === undefined ? {} : { recoveredReceipt }) });
 };
 export type DataVolumeCreation = ReturnType<typeof parseDataVolumeCreation>;
 type Ports = {
   readonly native: Pick<OwnedVolumePort, "observe" | "create">;
   /** The owning coordinator verifies its registration fence, allocation, plan and current resource lease. */
   readonly authorize: (state: DataVolumeCreation) => Promise<boolean>;
+  /** Current metadata ownership only. It never renews creation authority, admission or the original action deadline. */
+  readonly authorizeReceipt?: ((state: DataVolumeCreation) => Promise<boolean>) | undefined;
   readonly now: () => number;
 };
 type Observation = Awaited<ReturnType<OwnedVolumePort["observe"]>>;
@@ -59,6 +64,15 @@ export const dataVolumeCreation = (journal: OperationJournal, ports: Ports) => {
   const bounded = <T>(state: DataVolumeCreation, call: () => Promise<T>) => boundedAt(state.action.deadline, state.createdAt, call);
   const hold = (state: DataVolumeCreation, reason: NonNullable<DataVolumeCreation["reason"]>) => write({ ...state, phase: "held", reason });
   const result = (state: DataVolumeCreation, observation: Observation["status"]) => Object.freeze({ state, observation });
+  const inspect = async (state: DataVolumeCreation, observationDeadline: number) => {
+    const minimum = Math.max(state.createdAt, state.recoveredReceipt?.observedAt ?? 0); const now = time(minimum);
+    if (!Number.isSafeInteger(observationDeadline) || observationDeadline <= now || observationDeadline - now > 10000) throw new Error("invalid volume observation deadline");
+    const observed = await boundedAt(observationDeadline, minimum, () => ports.native.observe(state.action.volume));
+    if (observed.status !== "completed" || time(minimum) >= observationDeadline) return typed<Observation>({ status: "unavailable" });
+    const volume = observed.value; if (volume.status !== "owned") return volume;
+    const recorded = state.receipt ?? state.recoveredReceipt?.createdAt;
+    return state.attempts > 0 && sameVolume(volume.receipt, state) && (recorded === undefined || recorded === volume.receipt.createdAt) ? volume : typed<Observation>({ status: "foreign" });
+  };
   return Object.freeze({
     prepare: (input: Pick<DataVolumeCreation, "owner" | "deployment" | "action" | "createdAt">) => {
       const proposal = parseDataVolumeCreation({ version: 1, ...input, phase: "prepared", attempts: 0, receipt: null, reason: null });
@@ -103,15 +117,23 @@ export const dataVolumeCreation = (journal: OperationJournal, ports: Ports) => {
       return result(intent, "unavailable");
     }),
     inspect: (observationDeadline: number) => serial(async () => {
-      const state = await load(); if (state === undefined) throw new Error("volume creation intent is missing");
-      const now = time(state.createdAt);
+      const state = await load(); if (state === undefined) throw new Error("volume creation intent is missing"); return inspect(state, observationDeadline);
+    }),
+    /** Seal an observed creation outcome after an uncertain/expired attempt. The original attempt remains held; this command issues no native write. */
+    recoverReceipt: (observationDeadline: number) => serial(async () => {
+      const state = await load(); if (state === undefined) throw new Error("volume creation intent is missing"); const authorize = ports.authorizeReceipt;
+      const minimum = Math.max(state.createdAt, state.recoveredReceipt?.observedAt ?? 0); const now = time(minimum);
       if (!Number.isSafeInteger(observationDeadline) || observationDeadline <= now || observationDeadline - now > 10000) throw new Error("invalid volume observation deadline");
-      const observed = await boundedAt(observationDeadline, state.createdAt, () => ports.native.observe(state.action.volume));
-      if (observed.status !== "completed" || time(state.createdAt) >= observationDeadline) return typed<Observation>({ status: "unavailable" });
-      const volume = observed.value;
-      if (volume.status !== "owned") return volume;
-      return state.attempts > 0 && sameVolume(volume.receipt, state) && (state.receipt === null || state.receipt === volume.receipt.createdAt)
-        ? volume : typed<Observation>({ status: "foreign" });
+      const known = state.receipt !== null || state.recoveredReceipt !== undefined;
+      if (authorize === undefined || state.attempts === 0 || !known && (state.phase !== "creating" && state.phase !== "held" || state.phase === "held" && state.reason !== "deadline" && state.reason !== "attempts" || now < state.action.deadline && state.reason !== "attempts")) return typed<Observation>({ status: "unavailable" });
+      const permitted = await boundedAt(observationDeadline, minimum, () => authorize(state));
+      if (permitted.status !== "completed" || !permitted.value || time(minimum) >= observationDeadline) return typed<Observation>({ status: "unavailable" });
+      const volume = await inspect(state, observationDeadline); if (volume.status !== "owned" || known) return volume;
+      if (Date.parse(volume.receipt.createdAt) < Math.floor(state.createdAt / 1000) * 1000 || Date.parse(volume.receipt.createdAt) > time(minimum)) return typed<Observation>({ status: "foreign" });
+      const current = await boundedAt(observationDeadline, minimum, () => authorize(state)); const at = time(minimum);
+      if (current.status !== "completed" || !current.value || at >= observationDeadline) return typed<Observation>({ status: "unavailable" });
+      await write({ ...state, phase: "held", reason: state.reason === "attempts" ? "attempts" : "deadline", recoveredReceipt: { createdAt: volume.receipt.createdAt, observedAt: at } });
+      return volume;
     }),
     read: () => serial(load),
   });

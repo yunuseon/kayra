@@ -2088,3 +2088,24 @@ rollback and later cancellation with the narrower read ports. The successful
 VM was destroyed, and raw source/results/events plus verified SHA256SUMS were
 archived. Versions, image pins and explicit egress MTU 1280 were unchanged from
 the preceding run. This retains the same fixture/pipeline scope limitations.
+
+Source `eb1e115` passed the composed-workload managed-group run on 2026-11-18
+in fresh VM `kayra-volume-lab-20261118123920730861` with explicit egress MTU
+1280. Its group recorded 21,384 observations, and the actual-index singleton
+recorded 650 A/B/A effects through the composition factory, retaining its
+rollback, lost acknowledgement, status/health and cancellation assertions.
+The successful VM was destroyed after evidence collection. Raw source, events,
+results and logs have verified SHA256SUMS; exact versions stayed Engine/CLI
+29.10.0, API 1.57, Compose 5.8.0, Node 24.22.1, Ubuntu 24.04.5 ARM64 and kernel
+6.8.0-147-generic. Recorded receipts and permission remain explicit fixture
+callbacks, not the normal platform deployment pipeline.
+
+The volume-state probe additionally covers a real SIGKILL immediately after
+late receipt metadata is synchronized. It advances only the fixture's logical
+creation clock after a real Create whose acknowledgement is lost; it never
+changes the VM clock. The original creation attempt stays held with its original
+deadline. A restarted metadata observer retains the same creation receipt and
+issues no further Create, checked in both live volume events and raw API request
+counts. Reproduce with `volume-lab.py --volume-state --managed-group
+--egress-mtu 1280`. This metadata probe does not establish application-job or
+normal indexed volume-catalog acceptance.

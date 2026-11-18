@@ -17,21 +17,24 @@ const native = ownedVolumes({ request: async (...args) => {
 } });
 const forever = () => new Promise(() => {});
 if (mode === '--child') {
-  assert.ok(['before-create', 'after-create', 'after-receipt'].includes(cut));
+  assert.ok(['before-create', 'after-create', 'after-receipt', 'after-recovered-receipt'].includes(cut));
   // An unsettled promise alone does not keep Node alive at the receipt-write checkpoint.
   setInterval(() => {}, 1000);
   const request = JSON.parse(await readFile(join(output, cut, 'request.json'), 'utf8')); const journal = await openJournal(join(output, cut, 'journal'));
+  let logicalNow = null;
+  const recoveringReceipt = cut === 'after-recovered-receipt';
   const checkpoint = (phase) => { process.stdout.write(JSON.stringify({ checkpoint: phase, pid: process.pid, at: Date.now() }) + '\n'); };
-  const wrapped = { read: journal.read, write: async (value) => { await journal.write(value); if (cut === 'after-receipt' && parseDataVolumeCreation(value).phase === 'ready') { checkpoint(cut); await forever(); } } };
+  const wrapped = { read: journal.read, write: async (value) => { await journal.write(value); if (cut === 'after-receipt' && parseDataVolumeCreation(value).phase === 'ready' || recoveringReceipt && parseDataVolumeCreation(value).recoveredReceipt !== undefined) { checkpoint(cut); await forever(); } } };
   const runtime = { observe: native.observe, create: async (action) => {
     assert.equal(parseDataVolumeCreation(await journal.read()).phase, 'creating');
     if (cut === 'before-create') { checkpoint(cut); await forever(); }
     const reply = await native.create(action); assert.equal(reply, 'acknowledged');
     if (cut === 'after-create') { checkpoint(cut); await forever(); }
+    if (recoveringReceipt) { logicalNow = request.action.deadline + 1; throw new Error('fixture lost Create acknowledgement before logical deadline recovery'); }
     return reply;
   } };
-  const engine = dataVolumeCreation(wrapped, { native: runtime, authorize: () => Promise.resolve(true), now: Date.now });
-  await engine.prepare(request); await engine.tick(); await engine.tick(); throw new Error('expected kill checkpoint was not reached');
+  const engine = dataVolumeCreation(wrapped, { native: runtime, authorize: () => Promise.resolve(logicalNow === null), authorizeReceipt: () => Promise.resolve(true), now: () => logicalNow ?? Date.now() });
+  await engine.prepare(request); await engine.tick(); if (recoveringReceipt) await engine.recoverReceipt(logicalNow + 10000); else await engine.tick(); throw new Error('expected kill checkpoint was not reached');
 } else {
   assert.equal(mode, '--run'); await mkdir(output, { mode: 0o700 });
   const events = []; let eventError; let eventBytes = 0; let complete = false; let partial = '';
@@ -48,7 +51,13 @@ if (mode === '--child') {
   const settle = async (name, expected) => {
     const journal = await openJournal(join(output, name, 'journal'), 'existing');
     try {
-      const engine = dataVolumeCreation(journal, { native, authorize: () => Promise.resolve(true), now: Date.now });
+      const saved = parseDataVolumeCreation(await journal.read()); const metadata = name === 'after-recovered-receipt';
+      const logicalNow = metadata ? Math.max(Date.now(), saved.recoveredReceipt?.observedAt ?? 0) + 1 : null;
+      const engine = dataVolumeCreation(journal, { native, authorize: () => Promise.resolve(!metadata), authorizeReceipt: () => Promise.resolve(true), now: () => logicalNow ?? Date.now() });
+      if (metadata) {
+        assert.equal(saved.phase, 'held'); assert.equal(saved.reason, 'deadline'); assert.equal(saved.receipt, null); assert.ok(saved.recoveredReceipt); assert.equal(saved.action.deadline, expected.action.deadline);
+        const observation = await engine.recoverReceipt(logicalNow + 10000); assert.equal(observation.status, 'owned'); assert.equal(observation.receipt.createdAt, saved.recoveredReceipt.createdAt); assert.deepEqual(await engine.read(), saved); assert.equal((await engine.tick()).state.phase, 'held'); return saved;
+      }
       for (let i = 0; i < 10; i++) { const result = await engine.tick(); if (result.state.phase === 'ready') { assert.equal(result.observation, 'owned'); assert.equal(result.state.action.deadline, expected.action.deadline); assert.deepEqual(result.state.action.volume, expected.action.volume); return result.state; } assert.notEqual(result.state.phase, 'held'); }
       throw new Error('volume did not settle');
     } finally { await journal.close(); }
@@ -56,7 +65,7 @@ if (mode === '--child') {
   const cases = [];
   try {
     await pause(200);
-    for (const phase of ['before-create', 'after-create', 'after-receipt']) {
+    for (const phase of ['before-create', 'after-create', 'after-receipt', 'after-recovered-receipt']) {
       const input = await request(phase); const reached = Promise.withResolvers(); let stdout = ''; let stderr = ''; let childPartial = '';
       const child = spawn(process.execPath, [new URL(import.meta.url).pathname, '--child', output, phase], { stdio: ['ignore', 'pipe', 'pipe'] }); const exited = once(child, 'exit');
       child.on('error', reached.reject); exited.then(() => { reached.reject(new Error('child exited before its checkpoint')); });
@@ -91,7 +100,8 @@ if (mode === '--child') {
     for (const item of cases) { item.nativeCreates = events.filter((event) => event.Action === 'create' && event.Actor?.ID === item.volume).length; assert.equal(item.nativeCreates, 1); }
     assert.equal(events.filter((event) => event.Action === 'create' && event.Actor?.ID === missing.action.volume.name).length, 1);
     assert.equal(events.filter((event) => event.Action === 'create' && event.Actor?.ID === expired.action.volume.name).length, 0);
-    const result = { passed: true, scope: 'isolated creation coordinator with native volumes and synchronized OS-locked journals; fixture authorization, not indexed admission or app data-retention acceptance', cases, missingVolumeHeldWithoutRecreation: true, expiredIntentCreatedNothing: true, node: process.version };
+    const creationRequests = (await readFile(join(output, 'api-requests.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line)).filter((call) => call.method === 'POST' && call.path === '/volumes/create').length; assert.equal(creationRequests, cases.length + 1);
+    const result = { passed: true, creationRequests, scope: 'isolated creation coordinator with native volumes and synchronized OS-locked journals; fixture authorization, not indexed admission or app data-retention acceptance', cases, missingVolumeHeldWithoutRecreation: true, expiredIntentCreatedNothing: true, recoveredReceiptNativeCreates: cases.find((item) => item.cut === 'after-recovered-receipt').nativeCreates, recoveredReceiptPreservedHeldAttemptAndDeadline: true, recoveredReceiptActualSigkillAfterReplacement: true, recoveredReceiptClockScope: 'fixture logical creation clock advances after a real Create with lost acknowledgement; no VM clock change or app deadline claim', node: process.version };
     await writeFile(join(output, 'volume-state.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
   } catch (error) { await writeFile(join(output, 'failure.json'), JSON.stringify({ error: String(error), cases }, null, 2)); throw error; }
   finally { complete = true; if (observer.exitCode === null) { observer.kill('SIGTERM'); await observedExit; } await writeFile(join(output, 'docker-events.json'), JSON.stringify(events, null, 2)); }

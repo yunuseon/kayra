@@ -96,15 +96,21 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
         let historical: ManagedLifecycleStore["active"] = null;
         for (;;) {
           if (performance.now() >= deadline) throw new Error("managed release history inspection expired");
-          const release = [cursor.active, cursor.lastGood].find((item) => item !== null && (value.restore === null ? item.plan === description.admission.planDigest : item.record === value.restore));
-          if (release !== undefined && release !== null) { if (value.restore !== null || release.epoch === current.compatibilityEpoch) return release; historical = release; }
+          const pointers = Object.freeze([cursor.active, ...(cursor.lastGood?.record === cursor.active?.record ? [] : [cursor.lastGood])].filter((item) => item !== null));
+          for (const pointer of pointers) {
+            if (value.restore !== null) { if (pointer.record === value.restore) return pointer; continue; }
+            const bytes = await artifact(pointer.record); const release = parseManagedRelease(JSON.parse(bytes)); const application = release.source.application;
+            if (bytes !== JSON.stringify(release) || !same(application.infrastructure.ownership, owner) || managedApplicationDigest(application) !== pointer.plan || release.verification.run !== pointer.run || release.verification.verified?.at !== pointer.verifiedAt) throw new Error("managed compatibility history release disagrees");
+            if (pointer.epoch === current.compatibilityEpoch && pointer.plan === description.admission.planDigest) return pointer;
+            if (pointer.epoch < current.compatibilityEpoch && application.commit === value.candidate.commit) historical = pointer;
+          }
           if (cursor.history === null) { if (value.restore !== null) throw new Error("unknown managed restore record"); return Object.freeze({ historical }); }
           const bytes = await artifact(cursor.history); const raw: unknown = JSON.parse(bytes); const archive = z.object({ previous: digest.nullable(), state: z.unknown() }).strict().parse(raw); const prior = parseManagedLifecycleStore(archive.state);
           if (!same(prior.owner, owner) || archive.previous !== prior.history || prior.sequence >= cursor.sequence || prior.compatibilityEpoch > cursor.compatibilityEpoch) throw new Error("managed restore history disagrees"); cursor = prior;
         }
       });
       const release = "historical" in selected ? selected.historical : selected;
-      if (release !== null && release.plan !== description.admission.planDigest) throw new Error("managed restore candidate differs from its verified release");
+      if (value.restore !== null && release !== null && release.plan !== description.admission.planDigest) throw new Error("managed restore candidate differs from its verified release");
       if (release !== null && release.epoch !== current.compatibilityEpoch) throw new Error("managed restore crosses a data compatibility fence; forward recovery is required");
     }
     if (current?.active !== null && current?.active !== undefined && current.active.epoch !== current.compatibilityEpoch && value.candidate.rollout.strategy === "rolling") throw new Error("managed rolling baseline crosses a data compatibility fence");

@@ -216,7 +216,13 @@ for (const unsafe of [false, true]) test(`historical restore ${unsafe ? "refuses
   const restore = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":4", previous: releaseB, retained: references(releaseB), restore: first.active.record });
   if (unsafe) {
     await assert.rejects(lab.owner().begin(restore), /compatibility fence/); await assert.rejects(lab.owner().begin({ ...restore, restore: null }), /compatibility fence/);
+    const worker = restore.candidate.services["worker"]; assert.ok(worker);
+    const changedMetadata = parseManagedApplicationPlan({ ...restore.candidate, artifact: "9".repeat(64), services: { ...restore.candidate.services, worker: { ...worker, inputs: { ...worker.inputs, environment: { ...worker.inputs.environment, RETRY_FLAG: { kind: "literal", value: "new-inputs" } } } } } }); assert.ok(changedMetadata.ok);
+    await assert.rejects(lab.owner().begin({ ...restore, restore: null, candidate: changedMetadata.value }), /compatibility fence/);
     assert.deepEqual(await lab.owner().read(), second); assert.equal(lab.reserveCalls(), 2);
+    const currentPlan = parseManagedLifecycleSource({ ...secondSource, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":4", previous: releaseB, retained: references(releaseB) });
+    assert.equal((await lab.owner().begin(currentPlan)).operation.phase, "admitting");
+
   } else { const accepted = await lab.owner().begin(restore); assert.equal(accepted.compatibilityEpoch, 0); assert.equal(accepted.operation.phase, "admitting"); }
 });
 

@@ -2040,3 +2040,8 @@ the same pending run, original deadlines and shared action sequence. Fixture
 build/grant callbacks remain; this does not cover public builder/control dispatch,
 SQL, real process kills or full-platform acceptance. Fresh validation of this
 indexed variant is pending.
+
+The pinned Node runtime image pull in the volume lab permits three provisioning
+retries, five seconds apart, for transient registry connection failures. This
+occurs before runtime probes or workloads start; it adds no application-request
+retry or deployment-effect retry. Failed provisioning labs remain preserved.

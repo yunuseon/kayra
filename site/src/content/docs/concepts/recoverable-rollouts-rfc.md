@@ -2094,3 +2094,21 @@ not create or infer volumes. A deployment-owned receipt catalog and ordinary
 platform policy wiring are still required before normal managed execution can
 be enabled. The native singleton fixture supplies its explicitly recorded
 creation receipt and fixture permission callback to exercise this composition.
+
+### Recovering a volume creation receipt
+
+An uncertain volume creation may leave a known allocation present without its
+creation-time receipt having been synchronized. A separate metadata-authorized
+command can inspect that attempted allocation and record its creation time. The
+original attempt remains held with its original action, deadline and reason;
+metadata observation does not become a successful rollout or new creation grant.
+
+Recovery requires a prior attempted creation, a bounded observation, current
+metadata permission before observation and before persistence, and matching
+ownership. Unattempted, unauthorized or disputed allocations are not adopted.
+The creation timestamp cannot precede the original intent (allowing Docker's
+whole-second timestamp precision). Once recorded, later observations must match
+that creation time; absence or a replacement is never permission to recreate.
+Replay after lost journal acknowledgements retains the same receipt and original
+creation deadline. The deployment-owned receipt catalog and normal lifecycle
+wiring remain separate work.

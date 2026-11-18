@@ -12,7 +12,7 @@ import { hasRecordedRetainedMount } from "../../contracts/managed-retained-mount
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const native = z.object({ id: z.string().regex(/^[a-z0-9]{25}$/), version: positive }).strict().readonly();
-const schema = z.object({ version: z.literal(1), run: z.uuid(), action: z.string().max(80), createdAt: positive,
+const schema = z.object({ version: z.union([z.literal(1), z.literal(2)]), run: z.uuid(), action: z.string().max(80), createdAt: positive,
   restore: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
   candidate: z.unknown(), previous: z.unknown().nullable(),
   retained: z.array(z.object({ name: z.string(), kind: z.enum(["active", "barrier"]), action: z.unknown(), native }).strict().readonly()).max(32).readonly(),
@@ -51,15 +51,15 @@ export const parseManagedLifecycleSource = (input: unknown) => {
   if (new Set(retained.map((value) => value.name)).size !== retained.length || new Set(retired.map((value) => value.plan.service)).size !== retired.length ||
     Object.values(previousPlan?.services ?? {}).some((service) => service.role === "retained-dependency" && !retained.some((value) => value.name === service.service)) ||
     retired.some((value) => plan.services[value.plan.service] !== undefined && !retained.some((reference) => reference.name === value.plan.service && reference.kind === "barrier"))) throw new Error("managed lifecycle retained coverage disagrees");
-  const deadline = raw.createdAt + duration(plan, previousPlan);
+  const deadline = raw.createdAt + duration(plan, previousPlan) + (raw.version === 2 ? 90_000 : 0);
   if (!Number.isSafeInteger(deadline)) throw new Error("managed lifecycle deadline exceeds clock range");
-  return Object.freeze({ version: 1 as const, run: raw.run, action: raw.action, createdAt: raw.createdAt, restore: raw.restore, candidate: plan, previous, retained, retired });
+  return Object.freeze({ version: raw.version, run: raw.run, action: raw.action, createdAt: raw.createdAt, restore: raw.restore, candidate: plan, previous, retained, retired });
 };
 export type ManagedLifecycleSource = ReturnType<typeof parseManagedLifecycleSource>;
 export const managedLifecycleSourceDigest = (input: ManagedLifecycleSource) => createHash("sha256").update(JSON.stringify(parseManagedLifecycleSource(input))).digest("hex");
 export const managedLifecycleDescription = (input: ManagedLifecycleSource) => {
   const source = parseManagedLifecycleSource(input); const previous = source.previous?.source.application ?? null; const checked = managedAdmissionDescription(source.candidate, previous); if (!checked.ok) throw new Error(checked.error);
-  const deadline = source.createdAt + duration(source.candidate, previous);
+  const deadline = source.createdAt + duration(source.candidate, previous) + (source.version === 2 ? 90_000 : 0);
   return Object.freeze({ source, admission: checked.value, previous: source.previous === null ? null : managedReleaseDigest(source.previous), admissionDeadline: source.createdAt + 90_000, deadline,
     baselines: Object.freeze((source.previous === null ? [] : managedReleaseBaselines(source.previous)).filter((value) => previous?.services[value.name]?.role !== "retained-dependency")),
   });

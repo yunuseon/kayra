@@ -12,11 +12,12 @@ const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const epoch = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const pointer = z.object({ record: digest, plan: digest, run: z.uuid(), verifiedAt: positive, epoch }).strict().readonly();
-const phase = z.enum(["admitting", "quiescing", "preparing", "updating", "verifying", "recovering", "recovery-verifying", "settling", "complete", "held"]);
-const reason = z.enum(["admission", "deadline", "authorization", "quiescence", "preparation", "consumers", "verification", "recovery", "recovery-verification", "cancellation"]);
+const phase = z.enum(["admitting", "allocating", "quiescing", "preparing", "updating", "verifying", "recovering", "recovery-verifying", "settling", "complete", "held"]);
+const reason = z.enum(["admission", "allocation", "deadline", "authorization", "quiescence", "preparation", "consumers", "verification", "recovery", "recovery-verification", "cancellation"]);
 const schema = z.object({ version: z.literal(3), protocol: z.literal("managed-v3"), runtime: z.literal("swarm"), owner: z.unknown(), sequence: positive, compatibilityEpoch: epoch,
   active: pointer.nullable(), lastGood: pointer.nullable(), history: digest.nullable(),
   operation: z.object({ run: z.uuid(), action: z.string().max(80), source: digest, plan: digest, previous: digest.nullable(), previousPlan: digest.nullable(), createdAt: positive, admissionDeadline: positive, deadline: positive,
+    allocation: z.object({ createdAt: positive, deadline: positive, readyAt: positive.nullable() }).strict().readonly().optional(),
     phase, enteredAt: positive, reason: reason.nullable(),
     outcome: z.enum(["deployed", "rolled-back", "absent", "unchanged"]).nullable(), settlement: z.enum(["target", "previous", "absent"]).nullable(),
     unstartedAt: positive.nullable().default(null),
@@ -36,7 +37,8 @@ export const parseManagedLifecycleStore = (input: unknown) => {
   const verification = operation.verification === null ? null : parseManagedGroupVerification(operation.verification);
   const recovery = operation.recovery === null ? null : parseManagedGroupCompensation(operation.recovery);
   const recoveryVerification = operation.recoveryVerification === null ? null : parseManagedGroupVerification(operation.recoveryVerification);
-  if ((operation.previous === null) !== (operation.previousPlan === null) || (operation.recoverySource === null) !== (operation.recoveryStartedAt === null) || (operation.recoverySource === null) !== (operation.recoveryDeadline === null) || (operation.recoverySource === null && operation.unstartedAt === null) !== (operation.failure === null) || operation.failure !== null && operation.failure.at !== (operation.unstartedAt ?? operation.recoveryStartedAt) ||
+  if (operation.allocation !== undefined && (operation.allocation.deadline !== operation.allocation.createdAt + 90_000 || operation.allocation.createdAt < operation.createdAt || operation.allocation.deadline > operation.deadline || operation.allocation.readyAt !== null && (operation.allocation.readyAt < operation.allocation.createdAt || operation.allocation.readyAt >= operation.allocation.deadline)) || operation.allocation?.readyAt === null && (["quiescing", "preparing", "updating", "verifying", "recovering", "recovery-verifying"].includes(operation.phase) || quiescence !== null || preparation !== null || consumers !== null || verification !== null || recovery !== null || recoveryVerification !== null) || operation.phase === "allocating" && (operation.allocation?.readyAt !== null || operation.enteredAt !== operation.allocation.createdAt || !operation.admitted) ||
+    (operation.previous === null) !== (operation.previousPlan === null) || (operation.recoverySource === null) !== (operation.recoveryStartedAt === null) || (operation.recoverySource === null) !== (operation.recoveryDeadline === null) || (operation.recoverySource === null && operation.unstartedAt === null) !== (operation.failure === null) || operation.failure !== null && operation.failure.at !== (operation.unstartedAt ?? operation.recoveryStartedAt) ||
     operation.recoveryStartedAt !== null && (operation.recoveryStartedAt < operation.createdAt || operation.recoveryDeadline !== operation.recoveryStartedAt + 90_000 || operation.recoveryDeadline > operation.deadline || operation.failure === null || preparation === null && (quiescence === null || operation.previousPlan === null || consumers !== null || verification !== null)) ||
     recovery !== null && (recovery.source !== operation.recoverySource || recovery.plan !== operation.plan || recovery.previous !== operation.previousPlan || recovery.run !== operation.run || recovery.action !== operation.action || recovery.createdAt !== operation.recoveryStartedAt || recovery.deadline !== operation.recoveryDeadline || recovery.app !== owner.value.app || recovery.incarnation !== owner.value.incarnation || recovery.dataOwner !== owner.value.dataOwner) ||
     recoveryVerification !== null && (recovery?.phase !== "verified" || recoveryVerification.plan !== operation.previousPlan || recoveryVerification.run !== operation.run || recoveryVerification.deadline > operation.deadline || recoveryVerification.app !== owner.value.app || recoveryVerification.incarnation !== owner.value.incarnation || recoveryVerification.dataOwner !== owner.value.dataOwner) ||
@@ -61,9 +63,10 @@ export const parseManagedLifecycleStore = (input: unknown) => {
     preparation !== null && (preparation.action !== operation.action || preparation.createdAt < operation.createdAt || preparation.migrationDeadline > operation.deadline) ||
     consumers !== null && (preparation?.phase !== "ready" || consumers.action !== operation.action || consumers.deadline !== preparation.consumerDeadline || consumers.preparation !== hash(JSON.stringify(preparation))) ||
     verification !== null && (consumers?.phase !== "ready" || verification.deadline > operation.deadline) ||
-    ["quiescing", "preparing", "updating", "verifying", "recovering", "recovery-verifying", "settling", "complete"].includes(operation.phase) && !operation.admitted && operation.unstartedAt === null ||
+    ["allocating", "quiescing", "preparing", "updating", "verifying", "recovering", "recovery-verifying", "settling", "complete"].includes(operation.phase) && !operation.admitted && operation.unstartedAt === null ||
     ["updating", "verifying"].includes(operation.phase) && preparation?.phase !== "ready" ||
     operation.phase === "verifying" && consumers?.phase !== "ready") throw new Error("inconsistent managed lifecycle store");
-  return Object.freeze({ ...raw, owner: owner.value, operation: Object.freeze({ ...operation, resolutionReceipts, quiescence, preparation, consumers, verification, recovery, recoveryVerification }) });
+  const { allocation, ...original } = operation;
+  return Object.freeze({ ...raw, owner: owner.value, operation: Object.freeze({ ...original, ...(allocation === undefined ? {} : { allocation }), resolutionReceipts, quiescence, preparation, consumers, verification, recovery, recoveryVerification }) });
 };
 export type ManagedLifecycleStore = ReturnType<typeof parseManagedLifecycleStore>;

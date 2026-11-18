@@ -2154,3 +2154,32 @@ still uses explicit fixture authority before indexed workload admission. The
 normal coordinator's admitted allocation phase, removal retention and explicit
 cross-incarnation delegation remain integration work; this catalog does not
 establish those guarantees by itself.
+
+### Admitted volume preparation phase
+
+Private lifecycle source version 2 explicitly adds allocation after admission and
+before maintenance quiescence, retained startup or application jobs. Existing
+version 1 sources retain their exact normalized representation and deadlines;
+reading them does not infer newly admitted storage preparation. Version 2 adds
+one 90-second window to the total run deadline. Entry time, original allocation
+deadline and completion time are durable root state, and `allocating` is a
+published phase. Missing preparation capability fails preflight.
+
+A typed preparation port reconciles the exact registered volume identities with
+the deployment-owned catalog. It uses the run UUID for each stable allocation
+operation and the immutable application plan digest. Every registration,
+creation and recovery observation checks fresh parent permission, including the
+shared admission lease and operator grants. A permission response arriving after
+cancellation cannot grant creation authority. The port revokes its callback
+scope when reconciliation returns. The original deadline and fresh parent
+permission also bound work that outlives an observer wait. No service or migration starts before preparation reports
+ready. A lost Create acknowledgement is reconstructed from the original catalog
+intent, not a new operation or deadline.
+
+Cancellation or expiry before any workload intent can settle CPU/memory
+accounting without deleting empty allocations. This is not proof of zero native
+effects: allocation intents and historical receipts remain in the separate
+catalog. Removal and purge must retain and consult that inventory, including
+uncertain creations. Disk reclamation is never implied by resource settlement.
+The native fixture owns the catalog journal and current build/grant inputs;
+normal platform catalog storage, tombstones and public dispatch remain pending.

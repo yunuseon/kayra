@@ -2275,3 +2275,30 @@ The singleton fixture constructs this factory from preloaded context, including
 when reconstructing its observer. Fixture build, grant and configuration callbacks
 remain explicit. The factory alone does not wire normal registration/deployment
 commands, establish safe unknown-Exec rollback or complete lifecycle removal.
+
+### Current platform permissions and explicit cleanup purpose
+
+The platform permission provider verifies the app namespace claim and exact
+immutable registration ownership before granting any operation. Creation,
+startup, verification and private-input access additionally require the current
+registration pointer, Swarm host profile, infrastructure grant, configuration
+identity, resource grants, hostname/secret grants and migration policy. A stale
+source cannot borrow a newer generation or silently fall back when publications
+are missing. Policy reads resolve no secret values and never open deployment
+journals.
+
+Owned cleanup and audited metadata recovery can remain available when current
+startup grants are unavailable. Service effects carry an explicit purpose from
+the coordinator: deployment or cleanup. Quiescence and stop-first replacement
+are deployment effects and still require current rollout permission. Recovery
+fencing/stopping is cleanup; restoring or applying an image still requires
+current startup permission. The platform does not infer purpose from private
+phase files or application behavior. Native ownership/CAS checks and original
+cleanup deadlines remain independently required.
+
+The platform-input lab checks the filesystem provider as UID 1000 against
+synthetic root-owned immutable publications. It covers stale current pointers,
+changed data ownership/host metadata, unreadable publications, missing namespace
+permission and cleanup without startup permission. Its synthetic host, overlay
+and image references prove metadata policy only, not live runtime existence or
+admission. Normal platform controller/control wiring remains subsequent work.

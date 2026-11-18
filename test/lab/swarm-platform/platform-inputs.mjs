@@ -1,3 +1,4 @@
+import { preparePlatformRuntimeAuthority, observePlatformRuntimeAuthority } from './platform-runtime-authority.mjs';
 // Isolated permission and generation checks with synthetic inputs, never application secrets.
 import { strict as assert } from 'node:assert';
 import { createHash, randomUUID } from 'node:crypto';
@@ -19,7 +20,7 @@ if (mode === '--reader') {
     cases[name] = await port.compare(refs.baseline, refs[name]); assert.equal(cases[name], expected, name);
   }
   assert.equal(JSON.stringify(cases).includes('synthetic'), false);
-  console.log(JSON.stringify({ passed: true, readerUid: process.getuid(), readerGid: process.getgid(), cases }));
+  const runtimeAuthority = await observePlatformRuntimeAuthority(output); console.log(JSON.stringify({ passed: true, readerUid: process.getuid(), readerGid: process.getgid(), cases, runtimeAuthority }));
 } else {
   assert.equal(mode, '--prepare'); assert.equal(process.getuid(), 0);
   await mkdir(root, { mode: 0o755 }); await mkdir(join(root, 'public'), { mode: 0o755 }); await mkdir(join(root, 'private'), { mode: 0o750 }); await chown(join(root, 'private'), 0, 1000);
@@ -43,8 +44,9 @@ if (mode === '--reader') {
     await file(join(priv, 'secrets', 'UNUSED_TOKEN'), name === 'baseline' ? 'synthetic-unused-old' : 'synthetic-unused-new', 0o440, 1000);
     refs[name] = { version: 1, registration: metadata, configurationIdentity: name === 'wrongConfigurationIdentity' ? 'sha256:' + '0'.repeat(64) : 'sha256:' + createHash('sha256').update(configuration).digest('hex'), environment: { DB_PASSWORD: { kind: 'secret', key: 'PASSWORD' }, DB_NAME: { kind: 'configuration', key: 'DATABASE' } } };
   }
+  await preparePlatformRuntimeAuthority(output, refs);
   await file(join(root, 'references.json'), JSON.stringify(refs), 0o444, 0);
   const result = JSON.parse(execFileSync(process.execPath, [new URL(import.meta.url).pathname, '--reader', output], { uid: 1000, gid: 1000, encoding: 'utf8', maxBuffer: 1024 * 1024 }));
-  assert.equal(result.passed, true); await writeFile(join(output, 'platform-inputs.json'), JSON.stringify({ ...result, scope: 'isolated immutable registration readers and retained-input comparison; no retained service reconciliation or coordinator integration', node: process.version }, null, 2));
+  assert.equal(result.passed, true); await writeFile(join(output, 'platform-inputs.json'), JSON.stringify({ ...result, scope: 'isolated immutable registration readers, retained-input comparison and platform permission publications; no runtime effects or coordinator admission integration', node: process.version }, null, 2));
   await rm(root, { recursive: true }); console.log(JSON.stringify(result));
 }

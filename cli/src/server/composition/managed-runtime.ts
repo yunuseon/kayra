@@ -45,8 +45,8 @@ export const managedRuntime = (input: ManagedExecutionContext, ports: Ports) => 
       observe: (scope) => owned(scope) ? base.observe(scope) : Promise.resolve({ status: "foreign" }),
       apply: (action, expected, service, application) => write(action) && known(application) ? base.apply(action, expected, service, application) : Promise.resolve("refused"),
       reactivate: (action, expected, service, application) => { const call = base.reactivate; return write(action) && known(application) && call !== undefined ? call(action, expected, service, application) : Promise.resolve("refused"); },
-      fence: async (action, expected) => write(action) && await allowed({ kind: "service", action }) ? ports.native.services.fence(action, expected) : "refused",
-      tombstone: async (action, expected, image) => write(action) && plans.some((plan) => plan.services[action.service]?.image === image) && await allowed({ kind: "service", action }) ? ports.native.services.tombstone(action, expected, image) : "refused",
+      fence: async (action, expected) => write(action) && await allowed({ kind: "service", purpose: "cleanup", action }) ? ports.native.services.fence(action, expected) : "refused",
+      tombstone: async (action, expected, image) => write(action) && plans.some((plan) => plan.services[action.service]?.image === image) && await allowed({ kind: "service", purpose: "cleanup", action }) ? ports.native.services.tombstone(action, expected, image) : "refused",
     }));
   };
   const matches = (source: ManagedLifecycleSource) => {
@@ -56,6 +56,7 @@ export const managedRuntime = (input: ManagedExecutionContext, ports: Ports) => 
   };
   const permission = (effect: ManagedLifecycleEffect) => {
     if (effect.kind === "accepted-recovery") return typed<ManagedRuntimePermission>({ kind: "accepted-recovery" });
+    if (effect.kind === "service") return typed<ManagedRuntimePermission>({ ...effect, purpose: effect.purpose ?? "deployment" });
     if (effect.kind === "migration") return typed<ManagedRuntimePermission>({ kind: "migration", effect: effect.effect });
     return typed<ManagedRuntimePermission>(effect);
   };

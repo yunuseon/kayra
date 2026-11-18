@@ -8,7 +8,7 @@ import type { JobPlan } from "./one-shot-job.ts";
 /** Current platform grants, not coordinator admission or a durable effect intent. No private deployment journal types cross this boundary. */
 export type ManagedRuntimePermission =
   | { readonly kind: "admission" | "allocation" | "verify" | "recovery" | "accepted-recovery" }
-  | { readonly kind: "service"; readonly action: ManagedServiceAction }
+  | { readonly kind: "service"; readonly purpose: "deployment" | "cleanup"; readonly action: ManagedServiceAction }
   | { readonly kind: "service-inputs"; readonly application: ManagedApplicationPlan; readonly service: ManagedServicePlan }
   | { readonly kind: "migration"; readonly effect: "create" | "start" | "fence" }
   | { readonly kind: "check"; readonly check: string; readonly effect: "create" | "start" }

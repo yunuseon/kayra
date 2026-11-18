@@ -311,6 +311,16 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   const legacyPins = async (app: string, store: EnvelopeStore, ports: Pick<BuildPorts, "read">) => {
     const envelope = await store.read(); if (envelope === undefined) throw new Error("image pins lack lifecycle ownership"); return deploymentImagePins(app, envelope, ports);
   };
+  const executionContext = (app: string, ports: ManagedDeploymentReadPort, run?: string, pendingOnly = true) => useIndexed(app, async (store, indexed) => {
+    if (indexed.protocol !== "managed-v3" || run !== undefined && !z.uuid().safeParse(run).success) throw new Error("managed execution scope unavailable");
+    const envelope = await store.read(); const request = run === undefined ? envelope?.managed?.at(-1) : envelope?.managed?.find((item) => item.run === run);
+    if (request === undefined || pendingOnly && request.completion !== null) return undefined;
+    const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(request.source));
+    if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== request.source) throw new Error("managed execution source unavailable");
+    const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
+    if (bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed execution source binding disagrees");
+    return managedSourceContext(source);
+  });
 
   return {
     prepareApp: (app: string, protocol?: "managed-v3") => serialApp(app, () => serialIndex(async () => {
@@ -385,15 +395,12 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return await managedDeploymentProposal(candidate, ownership.value, request, { state, source }, ports);
       } finally { await root.close(); }
     }),
-    managedExecutionContext: (app: string, run: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
-      if (indexed.protocol !== "managed-v3" || !z.uuid().safeParse(run).success) throw new Error("managed execution scope unavailable");
-      const envelope = await store.read(); const request = envelope?.managed?.find((item) => item.run === run); if (request?.completion !== null) return undefined;
-      const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(request.source));
-      if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== request.source) throw new Error("managed execution source unavailable");
-      const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
-      if (bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed execution source binding disagrees");
-      return managedSourceContext(source);
-    }),
+    managedExecutionContext: (app: string, run: string, ports: ManagedDeploymentReadPort) => executionContext(app, ports, run),
+    managedHealthContexts: async (ports: ManagedDeploymentReadPort) => {
+      if (closed) throw new Error("lifecycle app index is closed"); const snapshot = await serialIndex(readIndex);
+      const contexts = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => executionContext(app.app, ports, undefined, false)));
+      return Object.freeze(contexts.filter((context) => context !== undefined));
+    },
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),

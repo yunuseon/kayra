@@ -65,3 +65,33 @@ the images of the commit it deploys.
 
 Read on: [CI isolation](../ci-isolation/) for what each piece may reach, and
 [the app contract](../app-contract/) for what an app provides.
+
+## Proposed rollout boundaries
+
+The [recoverable rollouts RFC](../recoverable-rollouts-rfc/) defines a target
+architecture. These views describe proposed behavior, not capabilities of the
+current deployer. The coordinator, platform integration and runtime adapters are
+code boundaries inside the existing privileged process; the builder remains a
+separate process.
+
+<LikeC4View viewId="deliveryBoundaries" client:only="react" />
+
+A deployment persists an admitted plan and intent before workload effects and
+promotes only after verification.
+
+<LikeC4View viewId="proposedDeployment" client:only="react" />
+
+After interruption, recovery observes existing effects and retains the original
+deadlines. An ambiguous migration can require an audited operator decision.
+
+<LikeC4View viewId="proposedRecovery" client:only="react" />
+
+A maintenance rollout has explicit fleet permission and reports expected
+downtime while dependencies remain available.
+
+<LikeC4View viewId="proposedMaintenance" client:only="react" />
+
+Removal fences new requests and retains volumes; purge is a separate guarded
+operation.
+
+<LikeC4View viewId="proposedRemoval" client:only="react" />

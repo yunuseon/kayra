@@ -55,6 +55,12 @@ export const settings: readonly Setting[] = [
   setting("authelia_smtp_sender", platform, text, "Sender address of Authelia's mails."),
   setting("acme_dns", platform, z.enum(["", "hetzner"]), "Certificates by DNS-01 instead of HTTP-01, for a server the internet never reaches: the DNS provider (hetzner)."),
   setting("apex_redirect", platform, subdomainSchema, "The host the bare domain redirects to, permanently, path and query kept: www sends https://<domain>/x?y to https://www.<domain>/x?y. Unset, the bare domain is not served."),
+  setting(
+    "redirect_domains",
+    platform,
+    z.record(domainSchema, subdomainSchema),
+    "Other domains that only send visitors here, each to a host of the server's domain: example.de: www sends https://example.de/x?y and https://www.example.de/x?y to https://www.<domain>/x?y, permanently, path and query kept. Their DNS is the fleet's: both names must point at the server before setup, or their certificates fail.",
+  ),
   setting("webhooks", platform, z.boolean(), "Whether a push webhook may start a deploy at once: true (default) serves deploy.<domain>/hook/<app>; false serves no such endpoint, and pushes deploy by deploy_poll."),
   setting("deploy_poll", platform, text, "When the deployer looks for pushes no webhook brought, as a five-field cron spec in the server's time (default hourly: 17 * * * *)."),
   setting("renovate_repositories", platform, texts, "owner/repo of the repos this server's Renovate job keeps up to date; the job runs only where the list is not empty."),

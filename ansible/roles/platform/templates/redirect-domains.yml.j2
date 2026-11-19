@@ -1,0 +1,26 @@
+# Other domains that only send visitors to {{ domain }} (redirect_domains in
+# vars.yml): each, bare and www, a permanent redirect to its host there, path
+# and query kept. Their certificates come like every other host's; plain HTTP
+# reaches them through the web entrypoint's redirect to HTTPS first.
+http:
+  routers:
+{% for alias, target in redirect_domains | dictsort %}
+    redirect-{{ alias | replace('.', '-') }}:
+      rule: "Host(`{{ alias }}`) || Host(`www.{{ alias }}`)"
+      entryPoints: [websecure]
+      tls:
+        certResolver: le
+        domains:
+          - main: "{{ alias }}"
+            sans: ["www.{{ alias }}"]
+      middlewares: [redirect-{{ alias | replace('.', '-') }}]
+      service: noop@internal
+{% endfor %}
+  middlewares:
+{% for alias, target in redirect_domains | dictsort %}
+    redirect-{{ alias | replace('.', '-') }}:
+      redirectRegex:
+        regex: "^https?://[^/]+(.*)$"
+        replacement: "https://{{ target }}.{{ domain }}${1}"
+        permanent: true
+{% endfor %}

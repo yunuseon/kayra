@@ -68,6 +68,28 @@
       },
       {
         "conditions": [
+          "[STATUS] == 301",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "shop.de",
+        "redirects": false,
+        "url": "https://shop.de/"
+      },
+      {
+        "conditions": [
+          "[STATUS] == 301",
+          "[CERTIFICATE_EXPIRATION] > 240h"
+        ],
+        "group": "shop",
+        "health": false,
+        "name": "www.shop.de",
+        "redirects": false,
+        "url": "https://www.shop.de/"
+      },
+      {
+        "conditions": [
           "[STATUS] < 500",
           "[CERTIFICATE_EXPIRATION] > 240h"
         ],
@@ -107,7 +129,9 @@
       "shop.test": "192.0.2.9",
       "status.shop.test": "192.0.2.9",
       "traefik.shop.test": "192.0.2.9",
-      "www.shop.test": "192.0.2.9"
+      "www.shop.test": "192.0.2.9",
+      "shop.de": "192.0.2.9",
+      "www.shop.de": "192.0.2.9"
     }
   },
   "shop": {

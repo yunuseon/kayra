@@ -8,8 +8,9 @@ import type { HttpOperation } from "./http-state.ts";
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { parseMigrationResolutionQuery, parseMigrationResolutionRequest, parseMigrationResolutionReport } from "../../contracts/migration-resolution.ts";
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
+import type { managedOperationControl } from "./managed-operation-control.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "prepareRollout" | "httpOperation" | "prepareHttpRollout" | "publishedDeploymentStatus" | "publishedDeploymentImagePins" | "publishedDeploymentHealth" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit" | "rolloutOperation" | "cancelManagedRollout">>;
+type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "deploymentProtocol" | "prepareRollout" | "httpOperation" | "prepareHttpRollout" | "publishedDeploymentStatus" | "publishedDeploymentImagePins" | "publishedDeploymentHealth" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit" | "rolloutOperation" | "cancelManagedRollout">>;
 type Ports = {
   readonly index: Index;
   readonly canAccess: (app: string) => Promise<boolean>;
@@ -20,6 +21,7 @@ type Ports = {
   readonly observations?: Parameters<Index["publishedDeploymentHealth"]>[1] | undefined;
   readonly managedObservations?: Parameters<Index["publishedDeploymentHealth"]>[2] | undefined;
   readonly artifacts?: Pick<BuildPorts, "read"> | undefined;
+  readonly managed?: ReturnType<typeof managedOperationControl> | undefined;
   readonly recovery?: Readonly<{ actor: MigrationResolutionActor; ports: Parameters<Index["resolveMigration"]>[3] }> | undefined;
 };
 
@@ -41,7 +43,7 @@ const completeReceipt = (app: string, root: RolloutRequest, http?: HttpOperation
 };
 
 /** Local lifecycle interface. Callers cannot supply native authority, private inputs or effect decisions. */
-export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, now, recovery, artifacts, observations, managedObservations }: Ports) => async (path: string, input: unknown) => {
+export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, managed, now, recovery, artifacts, observations, managedObservations }: Ports) => async (path: string, input: unknown) => {
   if (path === "/deployment/migration-cleanup-audit") {
     const query = parseMigrationResolutionQuery(input); if (!query.ok) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
@@ -86,6 +88,7 @@ export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, 
     const requested = parseDeploymentCancellation(input);
     if (!requested.ok) return undefined;
     if (!(await canAccess(requested.value.app))) throw new Error("app is outside deployment scope");
+    if (await index.deploymentProtocol(requested.value.app) === "managed-v3") { if (managed === undefined) throw new Error("managed-v3 mutation dispatch is disabled"); return managed.cancel(requested.value); }
     if (await index.rolloutOperation(requested.value.app, requested.value.request) !== undefined) {
       const answer = await index.cancelManagedRollout(requested.value.app, requested.value.request, { now });
       return completeReceipt(requested.value.app, answer.operation, answer.http);
@@ -94,9 +97,10 @@ export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, 
   }
   if (path !== "/deployment/prepare") return undefined;
   const requested = parseDeploymentRequest(input);
-  if (!requested.ok || plans === undefined && rollouts === undefined) return undefined;
+  if (!requested.ok || plans === undefined && rollouts === undefined && managed === undefined) return undefined;
   if (!(await enabled()) || !(await canAccess(requested.value.app))) throw new Error("experimental deployment is unavailable or outside scope");
   const { app, request, commit } = requested.value;
+  if (await index.deploymentProtocol(app) === "managed-v3") { if (managed === undefined) throw new Error("managed-v3 mutation dispatch is disabled"); return managed.prepare(requested.value); }
   if (rollouts !== undefined) {
     const root = await index.rolloutOperation(app, request); const http = await index.httpOperation(app, request);
     if (root === undefined && http !== undefined) {

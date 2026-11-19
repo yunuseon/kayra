@@ -151,3 +151,10 @@ certificates come by HTTP-01, and a name that still points elsewhere fails its
 challenge, which Let's Encrypt counts against the name for an hour.
 `kayra validate` checks each target like `apex_redirect`'s; `kayra verify` and
 the monitors check both names of each domain.
+
+**Changing a server's domain** (`domain` in `server.yml`) moves every host,
+the platform's and the apps'. Point the new names at the server first (the
+same HTTP-01 rule as above), then `kayra deploy`: it sets the platform up for
+the new domain and, since each app's registration and `.env` change with it,
+deploys every app again at the release it runs, so its routes move too. To
+keep the old domain working for visitors, list it in `redirect_domains`.

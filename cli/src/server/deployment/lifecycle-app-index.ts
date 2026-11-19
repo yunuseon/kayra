@@ -355,6 +355,25 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       await journal.write({ ...index, apps: [...index.apps.filter((item) => item.app !== app), { ...ownership, phase: "ready" }] });
       return ownership.incarnation;
     })),
+    deploymentProtocol: (app: string) => useIndexed(app, (_store, indexed) => Promise.resolve(indexed.protocol === "managed-v3" ? "managed-v3" as const : "legacy" as const)),
+    retainedManagedBuild: (app: string, commit: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
+      if (indexed.protocol !== "managed-v3" || !/^[a-f0-9]{40}$/.test(commit)) throw new Error("managed build receipt scope unavailable");
+      const registration = verifiedRegistration(app, await store.read()); const state = await serialIndex(readIndex);
+      const build = state.builds.find((item) => item.commit === commit && JSON.stringify(item.registration) === JSON.stringify(registration));
+      if (build?.artifact === null || build === undefined) throw new Error("managed rollout requires a retained build");
+      const artifact = build.artifact; const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(artifact));
+      if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== artifact) throw new Error("managed retained build unavailable");
+      return Object.freeze({ registration, commit, artifact });
+    }),
+    acceptedManagedRequest: (app: string, run: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
+      if (indexed.protocol !== "managed-v3" || !z.uuid().safeParse(run).success) throw new Error("managed request scope unavailable");
+      const envelope = await store.read(); const request = envelope?.managed?.find((item) => item.run === run); if (request === undefined) return undefined;
+      const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(request.source));
+      if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== request.source) throw new Error("managed request source unavailable");
+      const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
+      if (bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed request source binding disagrees");
+      return Object.freeze({ source, request });
+    }),
     managedRequestSource: (app: string, run: string, commit: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
       const envelope = await store.read();
       if (indexed.protocol !== "managed-v3" || indexed.managedVolumes !== 1 || !z.uuid().safeParse(run).success || !/^[a-f0-9]{40}$/.test(commit) || envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("managed preparation scope unavailable");

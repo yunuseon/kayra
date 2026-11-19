@@ -2299,3 +2299,15 @@ This failed run is preserved as negative recovery evidence. Nominal maintenance
 fixtures now declare a 30-second migration step and a 10-second HTTP timeout;
 job logs are retained before cleanup. Production deadlines and HTTP continuity
 load-generator timeouts are unchanged.
+
+Platform-composition snapshot `03df8a4` passed in VM
+`kayra-volume-lab-20261118213900711931` (destroyed): 19,847 group observations,
+649 singleton effects, four prepared requests and one volume Create. Its
+UID-1000 composition probe issued only synthetic native reads; raw evidence and
+source snapshots have verified checksum manifests.
+
+The singleton fixture now routes prepare/cancel through `deploymentControl` and
+`managedOperationControl`, validates public version-3 receipts, and reconstructs
+accepted sources from the owner. Compiler and grant callbacks remain fixtures;
+this does not enable mutations in the normal listener or establish CLI/network
+integration.

@@ -19,7 +19,7 @@ test("existing authenticated queries publish managed reports while mutation disp
   const legacyObservations = { ...readers, observe: () => Promise.reject(new Error("legacy observations must not handle managed services")) };
   const withoutManaged = deploymentControl({ index: lab.index(), now: readers.now, artifacts: readers, observations: legacyObservations, canAccess: () => Promise.resolve(true), enabled: () => Promise.resolve(false) });
   await assert.rejects(withoutManaged("/deployment/health", { app: "shop" }), /managed-v3 runtime health observations/);
-  await assert.rejects(control()("/deployment/cancel", { app: "shop", request: lab.source.run }), /legacy deployment commands/);
+  await assert.rejects(control()("/deployment/cancel", { app: "shop", request: lab.source.run }), /managed-v3 mutation dispatch is disabled/);
   assert.equal(await control()("/deployment/status", { app: "shop", runtime: "compose" }), undefined);
   await lab.reopen(); assert.deepEqual(await control()("/deployment/status", { app: "shop" }), status);
 });

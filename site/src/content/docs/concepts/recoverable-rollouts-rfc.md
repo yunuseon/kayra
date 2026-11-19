@@ -2394,3 +2394,28 @@ legacy build endpoint from holding the application writer for a long build while
 reconciliation needs that writer. Accepted-run replay does not rebuild; building
 is available again after the operation has durably settled. Compose build
 behavior is unchanged.
+
+#### Managed command receipts and dispatch
+
+The deployment command adapter validates app/request/commit identities and app
+scope before loading owner records. Normal prepare retains its existing
+requirement for an already retained build; it cannot launch a long builder job
+inside the control request. Accepted-run replay authenticates the original source
+before current build lookup and preserves the original absolute deadlines.
+
+Managed prepare/cancel receipts use version 3 and distinguish durable acceptance
+from completion. Completion carries outcome and disposition; acceptance never
+claims service readiness or active-release promotion. Detailed live phase, active
+release and required action remain in the status projection. Private source,
+release certificates and journal ownership records are excluded from receipts.
+
+Dispatch follows the persisted lifecycle protocol. A managed app cannot fall back
+to legacy rollout ports or select a backend through request fields. Cancellation
+loads immutable runtime inputs outside the app writer, with a bounded loader; late
+loader results cannot dispatch cancellation. Completed retries return their
+receipt without native reconstruction.
+
+The adapter is available to explicit trusted composition and native tests. The
+normal process still omits its mutation port: public managed mutation enablement,
+registration setup, migration audit integration and lifecycle completion remain
+pending.

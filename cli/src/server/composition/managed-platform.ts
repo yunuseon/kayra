@@ -5,6 +5,7 @@ import type { ImageResolutionPort } from "../../contracts/image-admission.ts";
 import type { openLifecycleAppIndex } from "../deployment/lifecycle-app-index.ts";
 import type { dockerApi } from "../runtime/docker-api.ts";
 import { managedPreparation } from "../deployment/managed-preparation.ts";
+import { managedOperationControl } from "../deployment/managed-operation-control.ts";
 import { platformManagedRuntimeAuthority } from "../platform/managed-runtime-authority.ts";
 import { platformServiceInputs } from "../platform/service-inputs.ts";
 import { managedRoutedReadiness } from "../platform/managed-routed-readiness.ts";
@@ -18,7 +19,7 @@ import { platformManagedPlans } from "./managed-plans.ts";
 import { managedRuntime } from "./managed-runtime.ts";
 import { typed } from "../../lib/typed.ts";
 
-type Index = Parameters<typeof managedPreparation>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts">>;
+type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
 type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined };
 
@@ -31,9 +32,11 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
     receipts: { read: (references) => index.recordedManagedVolumes(context.owner.app, references) }, native, observeHost: (host) => observeSwarmHost(host, ports.api) }));
   const plans = platformManagedPlans(paths, { read, images: ports.images ?? registryImages() });
   const preparation = managedPreparation(index, { builds: ports.builds, plans, inputs: environment, runtime: forRun });
+  const prepare = async (app: string, run: string, commit: string) => { if (!await ports.canAccess(app)) throw new Error("app is outside managed deployment scope"); return preparation.prepare(app, run, commit); };
   const health = async (context: ManagedExecutionContext) => { const runtime = await forRun(context); return typed<ManagedHealthReadPort>({ read, now, services: { observe: runtime.services.observe, observeDesired: runtime.services.observeDesired } }); };
   return Object.freeze({
-    prepare: async (app: string, run: string, commit: string) => { if (!await ports.canAccess(app)) throw new Error("app is outside managed deployment scope"); return preparation.prepare(app, run, commit); },
+    prepare,
+    commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, forRun }),
     work: Object.freeze({ read, now, forRun }),
     health,
     healthSnapshot: async () => {

@@ -153,21 +153,40 @@ const routeFindings = (facts: Facts) => {
   );
 };
 
+/** The hosts the cloned apps route, and whether every app is cloned. */
+type Routed = { readonly hosts: readonly string[]; readonly complete: boolean };
+const routedHosts = (facts: Facts) => typed<Routed>({
+  hosts: facts.server.apps.flatMap((app) => {
+    const parsed = appManifestSchema.safeParse(facts.manifests[app.name]);
+    return typed<readonly string[]>(parsed.success ? (parsed.data.routes ?? []).map((route) => String(route.host)) : []);
+  }),
+  complete: facts.server.apps.every((app) => facts.manifests[app.name] !== undefined),
+});
+
+/** A redirect to target.<domain> (named by setting, sending from): one of the server's apps must serve that host. */
+const redirectFinding = (facts: Facts, setting: string, from: string, target: string, routed: Routed) => {
+  const domain = facts.server.domain;
+  if (routed.hosts.includes(target)) return passed(`${setting}: ${from} redirects to ${target}.${domain}, which app routes serve`);
+  if (!routed.complete) return unchecked(`${setting} not checked: not every app is cloned yet`, `kayra apps ${facts.server.name} clones them`);
+  return problem(`${setting}: no app routes ${target}.${domain}, so ${from} would redirect to nothing`, "name a route host of one of the server's apps");
+};
+
 /** apex_redirect: the bare domain redirects to a host one of the server's apps serves. */
 const apexFindings = (facts: Facts) => {
   const target = facts.vars["apex_redirect"];
   if (typeof target !== "string" || target === "") return typed<readonly Finding[]>([]);
-  const hosts = facts.server.apps.flatMap((app) => {
-    const parsed = appManifestSchema.safeParse(facts.manifests[app.name]);
-    return typed<readonly string[]>(parsed.success ? (parsed.data.routes ?? []).map((route) => String(route.host)) : []);
-  });
+  return typed<readonly Finding[]>([redirectFinding(facts, "apex_redirect", facts.server.domain, target, routedHosts(facts))]);
+};
+
+/** redirect_domains: each other domain redirects to a host one of the server's apps serves, and is not the server's own. */
+const redirectDomainFindings = (facts: Facts) => {
+  const redirects = mapping(facts.vars["redirect_domains"]);
+  const routed = routedHosts(facts);
   const domain = facts.server.domain;
-  if (hosts.includes(target)) return typed<readonly Finding[]>([passed(`apex_redirect: ${domain} redirects to ${target}.${domain}, which app routes serve`)]);
-  if (facts.server.apps.some((app) => facts.manifests[app.name] === undefined))
-    return typed<readonly Finding[]>([unchecked(`apex_redirect not checked: not every app is cloned yet`, `kayra apps ${facts.server.name} clones them`)]);
-  return typed<readonly Finding[]>([
-    problem(`apex_redirect: no app routes ${target}.${domain}, so ${domain} would redirect to nothing`, "name a route host of one of the server's apps"),
-  ]);
+  return Object.freeze(Object.entries(redirects).map(([alias, target]) =>
+    alias === domain || alias.endsWith(`.${domain}`)
+      ? problem(`redirect_domains: ${alias} is the server's own domain or under it`, "list only other domains; apex_redirect sends the bare domain")
+      : redirectFinding(facts, `redirect_domains.${alias}`, `${alias} (and www.${alias})`, String(target), routed)));
 };
 
 /** Each app's contract against the fleet's values for it. */
@@ -207,7 +226,7 @@ const rank: Readonly<Record<Verdict, number>> = { problem: 0, unchecked: 1, pass
 
 /** Everything validate finds for one server: problems first, then what it could not check, then what holds. */
 export const findings = (facts: Facts) =>
-  Object.freeze([...secretsFindings(facts), ...recipientFindings(facts), ...terraformFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...apexFindings(facts), ...appFindings(facts)].toSorted(
+  Object.freeze([...secretsFindings(facts), ...recipientFindings(facts), ...terraformFindings(facts), ...stackFindings(facts), ...routeFindings(facts), ...apexFindings(facts), ...redirectDomainFindings(facts), ...appFindings(facts)].toSorted(
     (a, b) => rank[a.result] - rank[b.result],
   ));
 

@@ -100,6 +100,24 @@
   when: apex_redirect | length == 0
   become: true
 
+# The same for other domains that only redirect here (redirect_domains).
+- name: Render the other domains' redirects
+  ansible.builtin.template:
+    src: redirect-domains.yml.j2
+    dest: "{{ platform_dir }}/traefik/dynamic/redirect-domains.yml"
+    owner: deploy
+    group: deploy
+    mode: "0644"
+  when: redirect_domains | length > 0
+  become: true
+
+- name: Remove the other domains' redirects
+  ansible.builtin.file:
+    path: "{{ platform_dir }}/traefik/dynamic/redirect-domains.yml"
+    state: absent
+  when: redirect_domains | length == 0
+  become: true
+
 # The deployer's code and the scripts it and the builder run, into the build
 # context of both images: a checkout's TypeScript, or the published package's
 # JavaScript (Node strips types only outside node_modules).

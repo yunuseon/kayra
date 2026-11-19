@@ -130,3 +130,24 @@ The bare domain is served only where `apex_redirect` in the server's
 own, and the module adds the record for it (`@`, or `shop` under the zone).
 `kayra validate` checks that one of the server's apps routes that host;
 `kayra verify` and the monitors check the redirect.
+
+Other domains that should only send visitors here — the same brand under
+another TLD, an old name — go in `redirect_domains`, each to a host of the
+server's domain:
+
+```yaml
+redirect_domains:
+  example.de: www
+  example.com: www
+```
+
+`https://example.de/x?y` and `https://www.example.de/x?y` then redirect
+permanently to `https://www.example.com/x?y` (with `example.com` the server's
+domain), each name with a certificate of its own. Their DNS is the fleet's own:
+a zone per domain beside the platform-dns module, with `@` and `www` pointing
+at the server, and whatever else those domains carry (mail, a shop elsewhere).
+**Set `redirect_domains` only once both names resolve to the server:**
+certificates come by HTTP-01, and a name that still points elsewhere fails its
+challenge, which Let's Encrypt counts against the name for an hour.
+`kayra validate` checks each target like `apex_redirect`'s; `kayra verify` and
+the monitors check both names of each domain.

@@ -87,6 +87,20 @@ test("apex_redirect names a host one of the server's apps routes", () => {
   ]);
 });
 
+test("redirect_domains send other domains to a host one of the server's apps routes", () => {
+  deepStrictEqual(said({ vars: { redirect_domains: { "shop.de": "www" } } }).filter((each) => each.includes("redirect_domains")), [
+    "✓ redirect_domains.shop.de: shop.de (and www.shop.de) redirects to www.shop.test, which app routes serve",
+  ]);
+  deepStrictEqual(problems({ vars: { redirect_domains: { "shop.de": "shop", "www.shop.test": "www" } } }), [
+    "✗ redirect_domains.shop.de: no app routes shop.shop.test, so shop.de (and www.shop.de) would redirect to nothing → name a route host of one of the server's apps",
+    "✗ redirect_domains: www.shop.test is the server's own domain or under it → list only other domains; apex_redirect sends the bare domain",
+  ]);
+  deepStrictEqual(problems({ vars: { redirect_domains: { "shop.de": "www" } }, manifests: {} }), [
+    "· redirect_domains.shop.de not checked: not every app is cloned yet → kayra apps shop clones them",
+    "· app shop not checked: not cloned yet → kayra apps shop clones it",
+  ]);
+});
+
 test("an app's values match what its app.yml asks for; an app without app_secrets has none", () => {
   deepStrictEqual(said({ appConfig: { shop: {} }, appSecrets: {} }), [
     "✗ apps/shop.yml: no value for FLAG, which app.yml asks for → add FLAG: … to servers/shop/apps/shop.yml",

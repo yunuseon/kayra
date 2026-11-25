@@ -1,6 +1,7 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- models native effects, accounting and coordinator interruption */
 import { managedVolumePreparation } from "../../src/server/deployment/managed-volume-preparation.ts";
 import type { VolumeAction, VolumeObservation } from "../../src/contracts/owned-volume.ts";
+import { managedForwardSelection } from "../../src/server/deployment/managed-forward-selection.ts";
 import { managedHistorySelection } from "../../src/server/deployment/managed-history-selection.ts";
 import { managedDeploymentStatus } from "../../src/server/deployment/managed-deployment-status.ts";
 import { managedImagePins } from "../../src/server/deployment/managed-image-pins.ts";
@@ -489,4 +490,52 @@ test("forward proposals refuse unresolved migration outcomes and cannot convert 
   await assert.rejects(unknown.owner().proposeForward(unknown.source.candidate, request, { compare: () => Promise.resolve("unchanged") }), /resolved migration outcomes/); assert.deepEqual(await unknown.owner().read(), held);
   const compatible = await fixture(t, true, true, false, true); await compatible.owner().begin(compatible.source); compatible.checkMode("fail"); const safeHeld = await compatible.drive();
   await assert.rejects(compatible.owner().proposeForward(compatible.source.candidate, { ...request, action: safeHeld.owner.incarnation + ":3" }, { compare: () => Promise.resolve("unchanged") }), /distinct granted maintenance/); assert.deepEqual(await compatible.owner().read(), safeHeld);
+});
+
+
+const forwardSelectionFixture = async (t: TestContext) => {
+  const lab = await fixture(t, true, true, true, true); await lab.owner().begin(lab.source); lab.checkMode("fail"); const held = await lab.drive();
+  const path = await mkdtemp(join(tmpdir(), "kayra-forward-selection-")); let journal = await openJournal(path); await journal.write({ selection: null });
+  let clock = 2000; let allowed = true; let checkpoint = createHash("sha256").update(JSON.stringify(held)).digest("hex"); let fail: "before" | "after" | null = null; let onAuthorize: (() => void) | undefined; let visible = true;
+  const input = { state: held, source: lab.source, registration: lab.source.candidate.infrastructure.registration, request: { app: held.owner.app, blockedRun: held.operation.run, request: randomUUID(), commit: "e".repeat(40), reason: "Build the reviewed forward fix for this blocked run" }, actor };
+  let registration = input.registration;
+  const ports = { ...lab.artifacts, now: () => clock, current: () => Promise.resolve(visible ? { status: "held" as const, checkpoint, registration } : undefined), authorize: () => { const call = onAuthorize; onAuthorize = undefined; call?.(); return Promise.resolve(allowed); } };
+  const open = () => managedForwardSelection({ read: async () => { const value = await journal.read(); if (typeof value !== "object" || value === null || !("selection" in value)) throw new Error("missing fixture parent"); return value.selection ?? undefined; }, write: async (value) => { const cut = fail; fail = null; if (cut === "before") throw new Error("injected before decision replacement"); await journal.write({ selection: value }); if (cut === "after") throw new Error("injected after decision replacement"); } }, ports);
+  let selection = open(); t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
+  return { lab, held, input, owner: () => selection, withdrawLifecycle: () => { visible = false; }, duringAuthorization: (call: () => void) => { onAuthorize = call; }, changeRegistration: () => { registration = { ...input.registration, registrationGeneration: randomUUID() }; }, clock: (at: number) => { clock = at; }, deny: () => { allowed = false; }, changeCheckpoint: () => { checkpoint = "f".repeat(64); }, fail: (when: "before" | "after") => { fail = when; }, reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); selection = open(); } };
+};
+
+test("durable forward selection audits an exact commit but grants only an independently checked fixed build window", async (t) => {
+  const lab = await forwardSelectionFixture(t); const before = lab.lab.calls.length; const decision = await lab.owner().select(lab.input); assert.equal(decision.audit.actor.identity, actor.identity); assert.equal(decision.audit.request.commit, "e".repeat(40)); assert.equal(decision.audit.createdAt, 2000); assert.equal(decision.audit.buildDeadline, 2000 + 45 * 60000);
+  const grant = await lab.owner().buildGrant(); assert.equal(grant?.selection, decision.id); assert.equal(grant.commit, lab.input.request.commit); assert.equal(grant.deadline, decision.audit.buildDeadline);
+  await lab.reopen(); lab.changeCheckpoint(); assert.equal(await lab.owner().buildGrant(), undefined); assert.deepEqual(await lab.owner().select(lab.input), decision);
+  lab.clock(decision.audit.buildDeadline + 1); await lab.reopen(); assert.deepEqual(await lab.owner().select(lab.input), decision); assert.equal(await lab.owner().buildGrant(), undefined);
+  assert.equal(lab.lab.calls.length, before); assert.deepEqual(await lab.lab.owner().read(), lab.held); assert.equal(lab.lab.settleCalls(), 0);
+  await assert.rejects(lab.owner().select({ ...lab.input, request: { ...lab.input.request, commit: "f".repeat(40) } }), /conflicts/);
+});
+
+for (const cut of ["before", "after"] as const) test(`forward selection reopens an uncertain ${cut} decision replacement without changing its authority window`, async (t) => {
+  const lab = await forwardSelectionFixture(t); lab.fail(cut); await assert.rejects(lab.owner().select(lab.input), /uncertain/); await assert.rejects(lab.owner().buildGrant(), /uncertain/);
+  await lab.reopen(); const decision = await lab.owner().select(lab.input); assert.equal(decision.audit.createdAt, 2000); assert.equal(decision.audit.buildDeadline, 2000 + 45 * 60000); assert.equal((await lab.owner().buildGrant())?.selection, decision.id); assert.deepEqual(await lab.lab.owner().read(), lab.held);
+});
+
+test("forward build permission is revoked independently of the immutable operator audit", async (t) => {
+  const lab = await forwardSelectionFixture(t); const decision = await lab.owner().select(lab.input); lab.deny(); assert.equal(await lab.owner().buildGrant(), undefined); assert.deepEqual(await lab.owner().select(lab.input), decision);
+  const denied = await forwardSelectionFixture(t); denied.deny(); await assert.rejects(denied.owner().select(denied.input), /operator authority/); assert.equal(await denied.owner().read(), undefined); assert.deepEqual(await denied.lab.owner().read(), denied.held);
+});
+
+
+test("forward grants recheck checkpoint and registration and cannot survive late authorization", async (t) => {
+  const changed = await forwardSelectionFixture(t); const decision = await changed.owner().select(changed.input); changed.duringAuthorization(changed.changeCheckpoint); assert.equal(await changed.owner().buildGrant(), undefined); assert.deepEqual(await changed.owner().read(), decision);
+  const registration = await forwardSelectionFixture(t); const selected = await registration.owner().select(registration.input); registration.changeRegistration(); assert.equal(await registration.owner().buildGrant(), undefined); assert.deepEqual(await registration.owner().select(registration.input), selected);
+  const late = await forwardSelectionFixture(t); const original = await late.owner().select(late.input); late.duringAuthorization(() => { late.clock(original.audit.buildDeadline); }); assert.equal(await late.owner().buildGrant(), undefined); assert.deepEqual(await late.owner().select(late.input), original);
+  const removed = await forwardSelectionFixture(t); const prior = await removed.owner().select(removed.input); removed.withdrawLifecycle(); assert.equal(await removed.owner().buildGrant(), undefined); assert.deepEqual(await removed.owner().select(removed.input), prior);
+  const stale = await forwardSelectionFixture(t); stale.duringAuthorization(stale.changeCheckpoint); await assert.rejects(stale.owner().select(stale.input), /preparation expired or changed/); assert.equal(await stale.owner().read(), undefined);
+});
+
+
+test("a parent-pinned forward selection window cannot be renewed while its child is being initialized", async (t) => {
+  const lab = await forwardSelectionFixture(t); const selected = await lab.owner().select({ ...lab.input, createdAt: 1000 }); assert.equal(selected.audit.createdAt, 1000); assert.equal(selected.audit.buildDeadline, 1000 + 45 * 60000);
+  await lab.reopen(); await assert.rejects(lab.owner().select({ ...lab.input, createdAt: 2000 }), /conflicts/); assert.deepEqual(await lab.owner().select({ ...lab.input, createdAt: 1000 }), selected);
+  const expired = await forwardSelectionFixture(t); expired.clock(91000); await assert.rejects(expired.owner().select({ ...expired.input, createdAt: 1000 }), /preparation deadline expired/); assert.equal(await expired.owner().read(), undefined);
 });

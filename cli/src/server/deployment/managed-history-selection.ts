@@ -6,7 +6,7 @@ import type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 import { parseManagedRelease } from "./managed-release.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
-const request = z.object({ restore: digest.nullable(), plan: digest, commit: z.string().regex(/^[a-f0-9]{40}$/) }).strict().readonly();
+const request = z.object({ restore: digest.nullable(), plan: digest.nullable(), commit: z.string().regex(/^[a-f0-9]{40}$/) }).strict().readonly();
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 /** Metadata only: a historical commit cannot disguise an old data epoch as a fresh deployment. */
 export const managedHistorySelection = async (input: ManagedLifecycleStore, selection: z.input<typeof request>, ports: { readonly read: (digest: string) => Promise<string>; readonly expired: () => boolean }) => {

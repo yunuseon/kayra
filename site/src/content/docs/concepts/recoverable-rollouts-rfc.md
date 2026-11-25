@@ -2504,3 +2504,20 @@ not change. The owning coordinator rechecks the root checkpoint after preparatio
 This is the review boundary for the forthcoming forward-recovery operation.
 Durable operator selection, guarded build authorization, effect cessation,
 admission transfer and successor dispatch are not enabled by this proposal API.
+
+
+Forward selection has a separate private decision owner. It records an exact
+commit, blocked run/checkpoint and data epoch, target registration, trusted actor,
+reason and fixed build deadline before issuing any isolated-build permission.
+The original held operation and its capacity charge remain unchanged. Same-request
+replay reads the original immutable decision even after expiry or current-state
+changes; it cannot renew authority. Build permission independently rechecks current
+checkpoint, registration, operator authorization and the original deadline. An
+uncertain decision write invalidates the handle until its journal is reopened.
+The parent may pin initiation time before creating the private decision journal;
+child initialization cannot replace that time or refresh the build window.
+
+This component supplies no builder or workload effects. Ordinary preparation still
+refuses unresolved deployments; composition must authenticate the decision before
+a future guarded forward-build entrypoint can consume it. It does not authorize
+migration execution, admission transfer or successor activation.

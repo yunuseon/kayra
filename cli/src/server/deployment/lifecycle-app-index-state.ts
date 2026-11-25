@@ -8,10 +8,11 @@ import { parseManagedAdmissionAccounting } from "./managed-admission-binding.ts"
 
 const appName = z.string().regex(names.app.pattern);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+export const lifecycleIndexPreparedForwardBuild = z.object({ id: digest, artifact: digest, deadline: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict().readonly();
 export const lifecycleIndexForwardSelection = z.object({ request: z.uuid(), identity: digest, blockedRun: z.uuid(), checkpoint: digest, blockedSource: digest, compatibilityEpoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   registration: z.object({ version: z.literal(1), app: appName, incarnation: z.uuid(), actionId: z.string(), registrationGeneration: z.uuid() }).strict().readonly(),
-  createdAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), phase: z.enum(["initializing", "ready"]), source: digest.nullable(), decision: digest.nullable(),
-}).strict().refine((value) => value.request !== value.blockedRun && parseRegistrationGeneration(value.registration).ok && (value.phase === "ready" ? value.source !== null && value.decision !== null : value.source === null && value.decision === null)).readonly();
+  createdAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), phase: z.enum(["initializing", "ready"]), source: digest.nullable(), decision: digest.nullable(), preparedBuild: lifecycleIndexPreparedForwardBuild.exactOptional(),
+}).strict().refine((value) => value.request !== value.blockedRun && parseRegistrationGeneration(value.registration).ok && (value.phase === "ready" ? value.source !== null && value.decision !== null : value.source === null && value.decision === null && value.preparedBuild === undefined)).readonly();
 export const lifecycleIndexEntry = z.object({
   app: appName,
   incarnation: z.uuid(),
@@ -53,6 +54,7 @@ export const parseLifecycleAppIndex = (input: unknown) => {
   if (accounting.value.resources?.charges.some((charge) => !checked.data.apps.some((app) => app.app === charge.app && app.incarnation === charge.incarnation)) ||
     accounting.value.bindings.some((binding) => !checked.data.apps.some((app) => app.protocol === "managed-v3" && app.app === binding.owner.app && app.incarnation === binding.owner.incarnation && app.dataOwner === binding.owner.dataOwner)) ||
     accounting.value.resources?.charges.some((charge) => checked.data.apps.some((app) => app.app === charge.app && app.protocol === "managed-v3") && !accounting.value.bindings.some((binding) => binding.owner.app === charge.app))) throw new Error("resource ownership disagrees with app index");
+  if (checked.data.apps.some((app) => app.forwardSelections?.some((selection) => selection.preparedBuild !== undefined && !checked.data.builds.some((build) => build.id === selection.preparedBuild?.id && build.artifact === selection.preparedBuild.artifact && build.deadline === selection.preparedBuild.deadline && JSON.stringify(build.registration) === JSON.stringify(selection.registration))))) throw new Error("forward build receipt disagrees with retained build evidence");
   const { managedBindings, ...data } = checked.data;
   return Object.freeze({ ...data, resources: accounting.value.resources, ...(managedBindings === undefined ? {} : { managedBindings: accounting.value.bindings }) });
 };

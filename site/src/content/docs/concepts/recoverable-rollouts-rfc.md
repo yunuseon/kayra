@@ -2537,3 +2537,24 @@ No application capacity is settled or transferred by selection. The previous
 held root, verified/historical pointers and pending charge remain unchanged.
 The index exposes this internal owner operation; normal public mutation dispatch
 and the actual guarded build consumer remain disabled.
+
+
+A guarded forward-build entrypoint can now consume a published selection while
+the old maintenance run remains held. It authenticates decision ownership,
+registration, exact commit, checkpoint and current permission before recording
+build intent, before dispatching a queued builder, after output, and before
+receipt publication. It reuses the builder queue outside the application writer;
+ordinary preparation still refuses unresolved operations. New forward build
+intents use the decision's original build deadline.
+
+The immutable artifact receipt and the selection's prepared-build reference are
+published in one synchronized index replacement. A lost completion reply can
+therefore be replayed after expiry or mutable-root loss without another build or
+fresh authority. Catalog proof is cross-checked against the retained build;
+corruption, missing decision evidence or permission loss prevents new publication.
+Shutdown cancels builder waits, and late output cannot write through a reopened
+owner. Owned root handles are acquired before timed permission callbacks, which
+cannot acquire a late, untracked writer lock. Historical receipt reads carry no
+build authority. This prepares a successor bundle only: the blocked root and its
+pending resource charge are preserved; no admission transfer or app activation
+is granted. Normal public managed mutation dispatch remains disabled.

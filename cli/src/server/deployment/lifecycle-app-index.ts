@@ -1,3 +1,4 @@
+import { preparedManagedForwardBuild } from "./managed-forward-build-state.ts";
 import { managedForwardSelection, managedForwardSelectionInput, managedForwardSelectionIntent, verifyManagedForwardSelectionBaseline } from "./managed-forward-selection.ts";
 import { parseManagedForwardSelectionRequest } from "../../contracts/managed-forward-selection.ts";
 import type { ManagedForwardSelectionRequest } from "../../contracts/managed-forward-selection.ts";
@@ -69,6 +70,9 @@ import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
 
 const appName = z.string().regex(names.app.pattern);
+type ForwardSelectionUse<T> = (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown) => Promise<T>;
+type ForwardBuildPorts = BuildPorts & { readonly authorizeSelection: ForwardSelectionPorts["authorize"] };
+type ForwardBuildContext = { readonly request: ManagedForwardSelectionRequest; readonly ports: ForwardSelectionPorts };
 type ForwardSelectionPorts = Pick<Parameters<typeof managedForwardSelection>[1], "now" | "read" | "retain" | "authorize">;
 type EnvelopeStore = ReturnType<typeof openLifecycleEnvelopeStore>;
 
@@ -299,13 +303,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return checked.value;
   };
 
-  const withForwardSelection = <T>(app: string, request: ManagedForwardSelectionRequest, actor: MigrationResolutionActor | undefined, ports: ForwardSelectionPorts, use: (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+  const forwardSelectionHeld = async <T>(store: EnvelopeStore, indexed: IndexEntry, app: string, request: ManagedForwardSelectionRequest, actor: MigrationResolutionActor | undefined, ports: ForwardSelectionPorts, use: ForwardSelectionUse<T>, observeRoot = actor === undefined) => {
     const checked = parseManagedForwardSelectionRequest(request); if (!checked.ok || checked.value.app !== app || indexed.protocol !== "managed-v3" || indexed.managedRoot !== "ready") throw new Error("managed forward selection scope unavailable");
     const statement = checked.value; const identity = actor === undefined ? undefined : createHash("sha256").update(JSON.stringify({ request: statement, actor })).digest("hex");
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner }); if (!ownership.ok) throw new Error("managed forward selection ownership unavailable");
-    const parent = join(appDirectory(app), "managed"); let root: Awaited<ReturnType<typeof journals>> | undefined;
-    const rootState = async () => { if (root === undefined) { await requireDirectory(parent); root = await journals(parent, "existing"); } return parseManagedLifecycleStore(await root.read()); };
+    const parent = join(appDirectory(app), "managed"); let root: Awaited<ReturnType<typeof journals>> | undefined; let unavailable = false;
+    const rootState = async () => { if (unavailable) throw new Error("managed forward root unavailable"); if (root === undefined) { await requireDirectory(parent); root = await journals(parent, "existing"); } return parseManagedLifecycleStore(await root.read()); };
     const current = async () => {
+      if (root === undefined || unavailable) return undefined;
       const state = await rootState(); const envelope = await store.read(); const entry = (await serialIndex(readIndex)).apps.find((item) => item.app === app);
       if (entry?.protocol !== "managed-v3" || entry.phase !== "ready" || entry.managedRoot !== "ready" || entry.dataOwner !== ownership.value.dataOwner || envelope?.fence?.lifecycle.phase !== "registered" || !envelope.managed?.some((item) => item.run === statement.blockedRun && item.completion === null) || state.operation.phase !== "held" || state.operation.run !== statement.blockedRun || JSON.stringify(state.owner) !== JSON.stringify(ownership.value)) return undefined;
       return Object.freeze({ status: "held" as const, checkpoint: createHash("sha256").update(JSON.stringify(state)).digest("hex"), registration: verifiedRegistration(app, envelope) });
@@ -332,28 +337,47 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       else { await requireDirectory(group); await requireDirectory(path); }
       const child = await journals(path, catalog.phase === "ready" ? "existing" : "initialize");
       try {
-        const selection = managedForwardSelection(child, { ...ports, current }); const recorded = await selection.read();
+        const owner = managedForwardSelection(child, { ...ports, current });
+        const selection = Object.freeze({ ...owner, buildGrant: observeRoot ? owner.buildGrant : () => Promise.reject(new Error("forward selection context has no build authority")) }); const recorded = await selection.read();
         if (recorded !== undefined && (JSON.stringify(recorded.audit.request) !== JSON.stringify(statement) || JSON.stringify(recorded.audit.owner) !== JSON.stringify(ownership.value) || recorded.audit.blocked.checkpoint !== catalog.checkpoint || recorded.audit.blocked.source !== catalog.blockedSource || recorded.audit.blocked.compatibilityEpoch !== catalog.compatibilityEpoch || recorded.audit.createdAt !== catalog.createdAt || JSON.stringify(recorded.audit.registration) !== JSON.stringify(catalog.registration) || createHash("sha256").update(JSON.stringify({ request: recorded.audit.request, actor: recorded.audit.actor })).digest("hex") !== catalog.identity || catalog.phase === "ready" && (recorded.id !== catalog.decision || recorded.source !== catalog.source)) || catalog.phase === "ready" && recorded === undefined) throw new Error("managed forward selection catalog binding disagrees");
         const input = prepared.input ?? (recorded === undefined ? await (async () => { const state = await rootState(); if (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== catalog.checkpoint || actor === undefined) throw new Error("managed forward selection initialization lost its baseline"); const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(catalog.blockedSource)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== catalog.blockedSource) throw new Error("managed forward selection source unavailable"); return { state, source: parseManagedLifecycleSource(JSON.parse(bytes)), registration: catalog.registration, request: statement, actor }; })() : { state: undefined, source: undefined, registration: undefined, request: statement, actor: actor ?? recorded.audit.actor });
+        // Acquire owned journal handles before a timed permission callback can be abandoned.
+        if (observeRoot) { try { await rootState(); } catch { unavailable = true; } }
         return await use(selection, catalog, { ...input, createdAt: catalog.createdAt });
       } finally { await child.close(); }
     } finally { if (root !== undefined) await root.close(); }
+  };
+  const withForwardSelection = <T>(app: string, request: ManagedForwardSelectionRequest, actor: MigrationResolutionActor | undefined, ports: ForwardSelectionPorts, use: ForwardSelectionUse<T>, observeRoot = actor === undefined) =>
+    useIndexed(app, (store, indexed) => forwardSelectionHeld(store, indexed, app, request, actor, ports, use, observeRoot));
+  const forwardGrantHeld = (store: EnvelopeStore, indexed: IndexEntry, app: string, forward: ForwardBuildContext) => forwardSelectionHeld(store, indexed, app, forward.request, undefined, forward.ports, async (selection, catalog) => {
+    if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
   });
 
   /** Managed builders wait outside the application writer. Only intent and authenticated receipt publication hold that writer. */
-  const prepareManagedBuild = async (app: string, commit: string, ports: BuildPorts) => {
-    const intent = await useIndexed(app, async (store, indexed) => {
+  const prepareManagedBuild = async (app: string, commit: string, ports: BuildPorts, forward?: ForwardBuildContext) => {
+    const prepared = await useIndexed(app, async (store, indexed) => {
       if (indexed.protocol !== "managed-v3" || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("managed build scope unavailable");
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       if (envelope?.registrationAllocation?.runtime !== "swarm") throw new Error("managed build requires its registered Swarm runtime");
-      if (envelope.managed?.some((request) => request.completion === null)) throw new Error("managed build is blocked while a deployment is unresolved");
+      if (envelope.managed?.some((request) => request.completion === null) && forward === undefined) throw new Error("managed build is blocked while a deployment is unresolved");
+      const grant = forward === undefined ? undefined : await forwardGrantHeld(store, indexed, app, forward);
+      if (forward !== undefined && (grant?.commit !== commit || JSON.stringify(grant.registration) !== JSON.stringify(registration))) throw new Error("managed forward build permission unavailable");
       const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
-      return serialIndex(async () => {
+      const intent = await serialIndex(async () => {
         const state = await readIndex(); const existing = state.builds.find((item) => item.id === id); if (existing !== undefined) return existing;
-        const requested = lifecycleIndexBuild.parse({ id, registration, commit, deadline: ports.now() + 45 * 60_000 });
+        const requested = lifecycleIndexBuild.parse({ id, registration, commit, deadline: grant?.deadline ?? ports.now() + 45 * 60_000 });
         await journal.write({ ...state, builds: [...state.builds, requested] }); return requested;
       });
+      return Object.freeze({ intent, grant });
     });
+    const { intent } = prepared; const deadline = Math.min(intent.deadline, prepared.grant?.deadline ?? intent.deadline);
+    const requireForward = async (store: EnvelopeStore, indexed: IndexEntry) => {
+      if (forward === undefined) return;
+      const grant = await forwardGrantHeld(store, indexed, app, forward);
+      if (grant === undefined || grant.selection !== prepared.grant?.selection || grant.deadline !== prepared.grant.deadline || JSON.stringify(grant.registration) !== JSON.stringify(intent.registration)) throw new Error("managed forward build permission changed");
+      return grant;
+    };
+    const authorizeForward = () => forward === undefined ? Promise.resolve() : useIndexed(app, requireForward);
     const receipt = (artifact: string) => Object.freeze({ id: intent.id, artifact, registration: intent.registration, commit: intent.commit, deadline: intent.deadline });
     const authenticate = async (artifact: string) => {
       const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(artifact));
@@ -362,23 +386,26 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     };
     if (intent.artifact !== null) return authenticate(intent.artifact);
     const existing = pendingBuilds.get(intent.id); if (existing !== undefined) return existing;
-    const requireBuildWindow = () => { if (closed || ports.now() >= intent.deadline) throw new Error("managed build owner closed or original deadline expired"); };
+    const requireBuildWindow = () => { if (closed || ports.now() >= deadline) throw new Error("managed build owner closed or original deadline expired"); };
     const build = (buildQueues.get(app) ?? Promise.resolve()).then(async () => {
-      requireBuildWindow();
-      const content = await prepareBeforeDeadline(ports, intent.registration, intent.commit, intent.deadline, "swarm", buildShutdown.signal);
-      requireBuildWindow();
+      requireBuildWindow(); await authorizeForward(); requireBuildWindow();
+      const content = await prepareBeforeDeadline(ports, intent.registration, intent.commit, deadline, "swarm", buildShutdown.signal);
+      requireBuildWindow(); await authorizeForward(); requireBuildWindow();
       ports.images(content, intent.registration, intent.commit);
-      const artifact = await boundedManagedRead(intent.deadline, ports.now, () => ports.retain(content));
+      const artifact = await boundedManagedRead(deadline, ports.now, () => ports.retain(content));
       if (artifact === undefined || artifact !== createHash("sha256").update(content).digest("hex")) throw new Error("managed build artifact retention failed");
       requireBuildWindow();
       const selected = await useIndexed(app, async (store, indexed) => {
         if (indexed.protocol !== "managed-v3" || JSON.stringify(verifiedRegistration(app, await store.read())) !== JSON.stringify(intent.registration)) throw new Error("managed build registration changed before receipt persistence");
+        const authorization = await requireForward(store, indexed); requireBuildWindow();
         return serialIndex(async () => {
           const state = await readIndex(); const current = state.builds.find((item) => item.id === intent.id);
           if (current?.deadline !== intent.deadline || JSON.stringify(current.registration) !== JSON.stringify(intent.registration)) throw new Error("managed build intent changed");
           if (current.artifact !== null) return current.artifact;
           requireBuildWindow();
-          await journal.write({ ...state, builds: state.builds.map((item) => item.id === intent.id ? { ...item, artifact } : item) }); return artifact;
+          const next = { ...state, builds: state.builds.map((item) => item.id === intent.id ? { ...item, artifact } : item) };
+          const published = forward === undefined || authorization === undefined ? next : preparedManagedForwardBuild(next, { app, request: forward.request.request, selection: authorization.selection, registration: intent.registration, commit: intent.commit }, { id: intent.id, artifact, deadline: intent.deadline });
+          await journal.write(published); return artifact;
         });
       });
       return authenticate(selected);
@@ -613,6 +640,25 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
       return Object.freeze({ metadata, runtime });
     }),
+    prepareManagedForwardBuild: async (app: string, input: ManagedForwardSelectionRequest, ports: ForwardBuildPorts) => {
+      const checked = parseManagedForwardSelectionRequest(input); if (!checked.ok || checked.value.app !== app) throw new Error("invalid managed forward build scope");
+      const request = checked.value; const authority = { now: ports.now, read: ports.read, retain: ports.retain, authorize: ports.authorizeSelection }; const forward = { request, ports: authority };
+      const preparedReceipt = () => withForwardSelection(app, request, undefined, authority, async (selection, catalog) => {
+        const prepared = catalog.preparedBuild; if (prepared === undefined) return undefined; const decision = await selection.audit(); if (decision === undefined) throw new Error("managed forward build decision missing");
+        const state = await serialIndex(readIndex); const record = state.builds.find((item) => item.id === prepared.id);
+        if (record?.artifact !== prepared.artifact || record.commit !== request.commit || record.deadline !== prepared.deadline || JSON.stringify(record.registration) !== JSON.stringify(catalog.registration)) throw new Error("managed forward build receipt source disagrees");
+        const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(prepared.artifact)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== prepared.artifact) throw new Error("managed forward build artifact unavailable"); ports.images(bytes, record.registration, record.commit);
+        return Object.freeze({ selection: decision.id, request: request.request, build: Object.freeze({ id: record.id, artifact: prepared.artifact, registration: record.registration, commit: record.commit, deadline: record.deadline }) });
+      }, false);
+      const completed = await preparedReceipt(); if (completed !== undefined) return completed;
+      const build = await prepareManagedBuild(app, request.commit, ports, forward);
+      const durable = await preparedReceipt(); if (durable !== undefined) { if (durable.build.id !== build.id || durable.build.artifact !== build.artifact) throw new Error("managed forward build completion conflicts"); return durable; }
+      return withForwardSelection(app, request, undefined, authority, async (selection, catalog) => {
+        const grant = await selection.buildGrant(); if (grant?.commit !== build.commit || JSON.stringify(grant.registration) !== JSON.stringify(build.registration) || grant.selection !== catalog.decision) throw new Error("managed forward build completion is not authorized");
+        await serialIndex(async () => { const state = await readIndex(); const next = preparedManagedForwardBuild(state, { app, request: request.request, selection: grant.selection, registration: build.registration, commit: build.commit }, { id: build.id, artifact: build.artifact, deadline: build.deadline }); if (JSON.stringify(next) !== JSON.stringify(state)) await journal.write(next); });
+        return Object.freeze({ selection: grant.selection, request: grant.request, build });
+      });
+    },
     prepareBuild: async (app: string, commit: string, ports: BuildPorts) => {
       const managed = await useIndexed(app, (_store, indexed) => Promise.resolve(indexed.protocol === "managed-v3"));
       if (managed) return prepareManagedBuild(app, commit, ports);

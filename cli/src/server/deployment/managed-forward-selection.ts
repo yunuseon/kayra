@@ -79,6 +79,7 @@ export const managedForwardSelection = (journal: OperationJournal, ports: Ports)
   const current = async (value: ManagedForwardSelection["audit"], deadline: number) => { const observed = await bounded(deadline, ports.current); return observed?.status === "held" && observed.checkpoint === value.blocked.checkpoint && same(observed.registration, value.registration); };
   return Object.freeze({
     read: () => serial(load),
+    audit: () => serial(async () => { const state = await load(); if (state !== undefined) await retained(state); return state; }),
     select: (input: unknown) => serial(async () => {
       const raw = selectionInput.parse(input); const request = parseManagedForwardSelectionRequest(raw.request); const actor = parseMigrationResolutionActor(raw.actor); if (!request.ok || !actor.ok) throw new Error("invalid managed forward selection request or actor");
       const existing = await load();

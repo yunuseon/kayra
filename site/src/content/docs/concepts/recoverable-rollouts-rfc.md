@@ -2558,3 +2558,27 @@ cannot acquire a late, untracked writer lock. Historical receipt reads carry no
 build authority. This prepares a successor bundle only: the blocked root and its
 pending resource charge are preserved; no admission transfer or app activation
 is granted. Normal public managed mutation dispatch remains disabled.
+
+### Forward recovery effect descriptions
+
+The private forward effect source pins the held lifecycle checkpoint, its
+immutable source, the selected decision identity, the normalized successor plan,
+and a new fixed 90-second cleanup deadline. Its preparation revalidates retained
+input generations and release history. This description does not grant runtime
+writes, transfer admission, supersede the held operation, or activate a release.
+
+Cleanup inventory contains consumers from the failed candidate and its previous
+release, including names whose creation was never acknowledged or dispatched.
+It preserves recorded native versions from maintenance quiescence, service
+execution and uncertain check targets. Candidate dependents must stop before
+the services they depend on. Retained dependencies are excluded: their data and
+current resource charge must survive forward recovery. An inactive retired
+dependency may remain omitted; its retirement and volume ownership evidence is
+carried forward. Explicit reactivation still requires its recorded specification.
+
+The following integration still requires an app-owned continuation reservation,
+fresh native migration fences before cleanup writes, container cessation proofs,
+and an atomic transfer of the pending admission charge. A parsed description or
+build decision alone must never authorize those effects. Normal managed mutation
+dispatch remains disabled until that workflow and the remaining acceptance tests
+are complete.

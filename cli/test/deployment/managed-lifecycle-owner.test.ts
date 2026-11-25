@@ -1,6 +1,7 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- models native effects, accounting and coordinator interruption */
 import { managedVolumePreparation } from "../../src/server/deployment/managed-volume-preparation.ts";
 import type { VolumeAction, VolumeObservation } from "../../src/contracts/owned-volume.ts";
+import { managedForwardEffectSource, prepareManagedForwardEffectSource, managedForwardEffectNodes, managedForwardEffectSourceDigest } from "../../src/server/deployment/managed-forward-effect-source.ts";
 import { managedForwardSelection } from "../../src/server/deployment/managed-forward-selection.ts";
 import { managedHistorySelection } from "../../src/server/deployment/managed-history-selection.ts";
 import { managedDeploymentStatus } from "../../src/server/deployment/managed-deployment-status.ts";
@@ -318,6 +319,24 @@ for (const shared of [false, true]) test(`rollback preserves new-only dependency
   await assert.rejects(lab.owner().begin({ ...next, retired: [] }), /preserve dependencies retired/); const accepted = await lab.owner().begin(next); assert.equal(accepted.operation.phase, "admitting");
 });
 
+test("forward recovery preserves omitted inactive dependency retirement without restarting or charging it", async (t) => {
+  const { lab, source } = await checkedCandidate(t, false, true); lab.checkMode("fail"); await lab.drive(); const restored = await lab.drive(); assert.equal(restored.operation.outcome, "rolled-back"); assert.ok(restored.active);
+  const retirement = restored.operation.recovery?.nodes.find((node) => node.name === "cache")?.child?.barrier; assert.equal(retirement?.phase, "complete");
+  const cache = source.candidate.services["cache"]; assert.ok(cache); const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(restored.active.record)));
+  const retained = managedReleaseBaselines(previous).filter((value) => previous.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
+  const broken = parseManagedApplicationPlan({ ...previous.source.application, commit: "e".repeat(40), grants: { ...previous.source.application.grants, maintenance: true }, rollout: { ...previous.source.application.rollout, strategy: "maintenance", rollback_compatible: false } }); assert.ok(broken.ok);
+  const next = parseManagedLifecycleSource({ ...source, candidate: broken.value, previous, run: randomUUID(), action: restored.owner.incarnation + ":4", retained, retired: [{ plan: cache, barrier: retirement }] });
+  await lab.owner().begin(next); const held = await lab.drive(); assert.equal(held.operation.phase, "held"); assert.equal(held.compatibilityEpoch, 1);
+  const fix = parseManagedApplicationPlan({ ...broken.value, commit: "f".repeat(40) }); assert.ok(fix.ok); const writes = lab.calls.length; const comparisons: unknown[] = [];
+  const request = { run: randomUUID(), action: held.owner.incarnation + ":5", createdAt: 1000, reason: "Recover with the inactive cache still omitted" };
+  const proposal = await lab.owner().proposeForward(fix.value, request, { compare: (before) => { comparisons.push(before); return Promise.resolve("unchanged"); } });
+  assert.equal(proposal.candidate.services["cache"], undefined); assert.deepEqual(proposal.retired, next.retired); assert.deepEqual(comparisons, [broken.value.services["db"]?.inputs]); assert.equal(lab.calls.length, writes);
+  const reactivated = parseManagedApplicationPlan({ ...fix.value, services: { ...fix.value.services, cache }, rollout: { ...fix.value.rollout, services: { ...fix.value.rollout.services, cache: { role: "retained-dependency", overlap: "forbidden" } } } }); assert.ok(reactivated.ok);
+  const reuse = await lab.owner().proposeForward(reactivated.value, request, { compare: () => Promise.resolve("unchanged") }); assert.equal(reuse.resources.target.memory, proposal.resources.target.memory + cache.resources.memoryBytes);
+  const changed = parseManagedApplicationPlan({ ...reactivated.value, services: { ...reactivated.value.services, cache: { ...cache, command: ["changed-engine"] } } }); assert.ok(changed.ok);
+  await assert.rejects(lab.owner().proposeForward(changed.value, request, { compare: () => Promise.resolve("unchanged") }), /retained dependency specification changed/);
+});
+
 test("a new migration assertion cannot restart forward deployment after recovery has superseded it", async (t) => {
   const lab = await fixture(t, false, "unknown"); await lab.owner().begin(lab.source); await lab.drive(); await lab.owner().resolveMigration(resolution(lab.source.run), actor); const initial = await lab.drive(); assert.ok(initial.active);
   const previous = parseManagedRelease(JSON.parse(await lab.artifacts.read(initial.active.record))); const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40) }); assert.ok(candidate.ok);
@@ -492,6 +511,39 @@ test("forward proposals refuse unresolved migration outcomes and cannot convert 
   await assert.rejects(compatible.owner().proposeForward(compatible.source.candidate, { ...request, action: safeHeld.owner.incarnation + ":3" }, { compare: () => Promise.resolve("unchanged") }), /distinct granted maintenance/); assert.deepEqual(await compatible.owner().read(), safeHeld);
 });
 
+
+for (const withPrevious of [false, true]) test(`forward effect sources pin ${withPrevious ? "old and candidate" : "initial candidate"} consumer versions without stopping retained data`, async (t) => {
+  const lab = await fixture(t, true, false, false, true);
+  const initial = withPrevious ? await (async () => { await lab.owner().begin(lab.source); return lab.drive(); })() : null;
+  const previous = initial?.active === undefined || initial.active === null ? null : parseManagedRelease(JSON.parse(await lab.artifacts.read(initial.active.record)));
+  const retained = previous === null ? [] : managedReleaseBaselines(previous).filter((value) => previous.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
+  const worker = lab.source.candidate.services["worker"]; assert.ok(worker);
+  const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40), rollout: { ...lab.source.candidate.rollout, rollback_compatible: false }, services: { ...lab.source.candidate.services, web: { ...lab.source.candidate.services["web"], dependencies: [{ service: "worker", condition: "healthy" }] } } }); assert.ok(candidate.ok);
+  const source = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), candidate: candidate.value, previous, retained, action: lab.source.candidate.infrastructure.ownership.incarnation + (withPrevious ? ":3" : ":2") });
+  await lab.owner().begin(source); lab.checkMode("unknown"); const held = await lab.drive(); assert.equal(held.operation.phase, "held"); assert.equal(held.operation.verification?.reason, "check-unknown");
+  const fix = parseManagedApplicationPlan({ ...candidate.value, commit: "f".repeat(40) }); assert.ok(fix.ok);
+  const input = { version: 1, kind: "managed-forward-effect-source", decision: "a".repeat(64), baseline: { state: held, source }, candidate: fix.value, request: { run: randomUUID(), action: held.owner.incarnation + (withPrevious ? ":4" : ":3"), createdAt: 2000, reason: "Fence the failed release before forward maintenance" }, deadline: 92000 };
+  const writes = lab.calls.length; const value = await prepareManagedForwardEffectSource(input, { now: () => 2000, read: lab.artifacts.read, compare: () => Promise.resolve("unchanged") });
+  assert.deepEqual(managedForwardEffectSource(JSON.parse(JSON.stringify(value))), value); assert.equal(managedForwardEffectSourceDigest(value).length, 64);
+  const nodes = managedForwardEffectNodes(value); assert.deepEqual(nodes.map((node) => node.name), ["web", "worker"]); assert.deepEqual(nodes.find((node) => node.name === "worker")?.waitFor, ["web"]);
+  const checked = nodes.find((node) => node.name === "worker"); assert.equal(checked?.checks.length, 1); assert.ok(checked); assert.ok(checked.prior.some((native) => native.version === checked.checks[0]?.native.version));
+  if (withPrevious) { const quiesced = held.operation.quiescence?.nodes.find((node) => node.name === "worker")?.child; assert.ok(quiesced?.proof); assert.ok(checked.prior.some((native) => native.version === quiesced.proof?.native.version)); }
+  assert.equal(lab.calls.length, writes); assert.deepEqual(await lab.owner().read(), held); assert.equal(lab.settleCalls(), withPrevious ? 1 : 0);
+  assert.throws(() => managedForwardEffectSource({ ...value, deadline: 92001 }), /binding/);
+  assert.throws(() => managedForwardEffectSource({ ...value, baseline: { ...value.baseline, source: { ...source, run: randomUUID() } } }), /binding/);
+  assert.throws(() => managedForwardEffectSource({ ...value, request: { ...value.request, run: source.run } }), /distinct granted maintenance/);
+  assert.throws(() => managedForwardEffectSource({ ...value, candidate: { ...value.candidate, services: { ...value.candidate.services, db: { ...value.candidate.services["db"], command: ["upgrade-db"] } } } }), /unchanged retained/);
+  await assert.rejects(prepareManagedForwardEffectSource(input, { now: () => 92000, read: lab.artifacts.read, compare: () => Promise.resolve("unchanged") }), /deadline expired/);
+});
+
+test("forward effect sources retain names for never-dispatched consumers and reject retained dependency checks", async (t) => {
+  const lab = await fixture(t, true, true, true, true); const source = lab.source; await lab.owner().begin(source);
+  for (let i = 0; i < 300; i++) { const current = await lab.owner().tick(); if (current?.operation.consumers !== null && current?.operation.consumers !== undefined) { lab.clock(current.operation.consumers.deadline); break; } }
+  await lab.owner().tick(); const held = await lab.owner().read(); assert.ok(held); assert.equal(held.operation.phase, "held"); assert.ok(held.operation.compatibilityFencedAt);
+  const createdAt = Math.max(2000, held.operation.enteredAt); const input = { version: 1, kind: "managed-forward-effect-source", decision: "a".repeat(64), baseline: { state: held, source }, candidate: { ...source.candidate, commit: "f".repeat(40) }, request: { run: randomUUID(), action: held.owner.incarnation + ":3", createdAt, reason: "Recover after fencing candidate consumer effects" }, deadline: createdAt + 90000 };
+  const value = managedForwardEffectSource(input); assert.deepEqual(managedForwardEffectNodes(value).map((node) => ({ name: node.name, prior: node.prior })), [{ name: "web", prior: [] }, { name: "worker", prior: [] }]); assert.equal(lab.calls.filter((call) => call.service !== "db").length, 0);
+  assert.throws(() => managedForwardEffectSource({ ...input, candidate: { ...input.candidate, rollout: { ...input.candidate.rollout, checks: [{ ...input.candidate.rollout.checks[0], service: "db" }] } } }), /invalid forward effect candidate/);
+});
 
 const forwardSelectionFixture = async (t: TestContext) => {
   const lab = await fixture(t, true, true, true, true); await lab.owner().begin(lab.source); lab.checkMode("fail"); const held = await lab.drive();

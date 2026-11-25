@@ -2419,3 +2419,22 @@ The adapter is available to explicit trusted composition and native tests. The
 normal process still omits its mutation port: public managed mutation enablement,
 registration setup, migration audit integration and lifecycle completion remain
 pending.
+
+#### Audited managed migration commands
+
+The existing migration resolution/audit command paths now dispatch managed apps
+to their owning coordinator. Operator identity is supplied by trusted transport
+composition, never a request field. Resolution reconstructs the accepted source
+outside the app writer and then uses the existing admission and current native
+fence checks. Returning a public receipt excludes private root state.
+
+Audit reads require only artifact reads and existing owner records. Pending runs
+read their existing root without initialization or repair. Completed runs use the
+immutable root snapshot retained in their authenticated acceptance record, so an
+audit remains readable after a newer rollout or loss of the mutable root file.
+The projection validates source, sequence, scope and receipt bindings before
+publishing the original actor, reason and outcome. Corrupt evidence is refused.
+
+Read-only migration audit is wired into the normal composition independently of
+mutation enablement. Normal managed prepare/cancel/resolve mutation ports remain
+disabled pending the remaining lifecycle and integrated acceptance work.

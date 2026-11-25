@@ -2,6 +2,7 @@ import type { BuildPorts } from "../../contracts/build-artifact.ts";
 import type { ManagedExecutionContext } from "../../contracts/managed-execution-context.ts";
 import type { ManagedHealthReadPort } from "../../contracts/managed-deployment-read.ts";
 import type { ImageResolutionPort } from "../../contracts/image-admission.ts";
+import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 import type { openLifecycleAppIndex } from "../deployment/lifecycle-app-index.ts";
 import type { dockerApi } from "../runtime/docker-api.ts";
 import { managedPreparation } from "../deployment/managed-preparation.ts";
@@ -21,7 +22,7 @@ import { typed } from "../../lib/typed.ts";
 
 type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
-type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined };
+type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined; readonly actor?: MigrationResolutionActor | undefined };
 
 /** One composition in the existing privileged process. Constructing it creates no files, workloads, timers or additional Docker transport. */
 export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
@@ -36,7 +37,7 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
   const health = async (context: ManagedExecutionContext) => { const runtime = await forRun(context); return typed<ManagedHealthReadPort>({ read, now, services: { observe: runtime.services.observe, observeDesired: runtime.services.observeDesired } }); };
   return Object.freeze({
     prepare,
-    commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, forRun }),
+    commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, forRun, actor: ports.actor }),
     work: Object.freeze({ read, now, forRun }),
     health,
     healthSnapshot: async () => {

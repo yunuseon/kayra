@@ -144,7 +144,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
   const startController = (index: Readonly<Awaited<ReturnType<typeof openLifecycleAppIndex>>>) => {
     if (controller !== undefined || executionPorts === undefined) return;
     if (builds !== undefined && publicRegistrations !== undefined && privateRegistrations !== undefined && swarmAuthority !== undefined && migrationPolicy !== undefined) {
-      managed = managedPlatform(index, { publicRegistrations, privateRegistrations, swarmAuthority, migrationPolicy, domain }, { builds, api, canAccess: canRegister });
+      managed = managedPlatform(index, { publicRegistrations, privateRegistrations, swarmAuthority, migrationPolicy, domain }, { builds, api, canAccess: canRegister, actor: { kind: "operator-control", identity: "local-control:uid:" + String(process.getuid?.() ?? "unknown") } });
       managedController = startManagedController(index, managed.work, (result) => { if (result.status !== "ready" || result.work.length > 0) console.log("managed-coordinator: " + JSON.stringify(result)); });
     }
     rolloutController = startRolloutController(index, { ...executionPorts, jobs: oneShotJob(api), cleanup: oneShotCleanup(api) }, (result) => {
@@ -197,7 +197,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
-      if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, managedObservations: route === "/deployment/health" ? await managed?.healthSnapshot() : undefined, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
+      if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, managedAudit: managed?.commands.audit, managedObservations: route === "/deployment/health" ? await managed?.healthSnapshot() : undefined, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
         rollouts: rollouts === undefined || artifacts === undefined ? undefined : { ...rollouts, now: Date.now, retain: artifacts.retain },

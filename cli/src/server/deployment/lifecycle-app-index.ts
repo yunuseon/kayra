@@ -1,4 +1,5 @@
 import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
+import { managedMigrationAudit } from "./managed-migration-audit.ts";
 import { parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
 import type { ManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
 import type { RetainedInputsPort } from "../../contracts/service-inputs.ts";
@@ -41,6 +42,7 @@ import type { RolloutPlanPort } from "../../contracts/rollout-plan.ts";
 import type { rolloutPreparation } from "./rollout-preparation.ts";
 import type { resolveRolloutMigration } from "./rollout-resolution.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
+import { parseMigrationResolutionQuery } from "../../contracts/migration-resolution.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { reserveResources, resourceHostReady, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
@@ -424,6 +426,23 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),
     resolveManagedMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.resolve(request, actor)),
+    managedMigrationAudit: (app: string, run: string, step: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
+      const query = parseMigrationResolutionQuery({ app, run, step }); if (!query.ok || indexed.protocol !== "managed-v3") throw new Error("managed migration audit scope unavailable");
+      const envelope = await store.read(); const request = envelope?.managed?.find((item) => item.run === run); if (request === undefined) throw new Error("managed migration audit request unavailable");
+      const deadline = ports.now() + 10_000;
+      const read = async (digest: string) => { const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed migration audit evidence unavailable"); return bytes; };
+      const bytes = await read(request.source); const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
+      if (bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed migration audit source binding disagrees");
+      const project = async (input: unknown) => {
+        const state = parseManagedLifecycleStore(input);
+        if (request.completion !== null && (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== request.completion.rootSnapshot || state.operation.phase !== "complete" || state.operation.outcome !== request.completion.outcome)) throw new Error("managed migration audit completion disagrees");
+        return managedMigrationAudit(state, source, query.value, { read });
+      };
+      if (request.completion !== null) return project(JSON.parse(await read(request.completion.rootSnapshot)));
+      if (indexed.managedRoot !== "ready") throw new Error("managed migration audit awaits root reconstruction");
+      const path = join(appDirectory(app), "managed"); await requireDirectory(path); const root = await journals(path, "existing");
+      try { return await project(await root.read()); } finally { await root.close(); }
+    }),
     managedDeploymentImagePins: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedImagePins(state, source, ports)),
     managedDeploymentHealth: (app: string, ports: ManagedHealthReadPort) => useManagedRead(app, ports, (state, source) => managedDeploymentHealth(state, source, ports)),
     managedDeploymentStatus: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedDeploymentStatus(state, source, ports)),

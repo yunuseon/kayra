@@ -22,6 +22,7 @@ type Ports = {
   readonly managedObservations?: Parameters<Index["publishedDeploymentHealth"]>[2] | undefined;
   readonly artifacts?: Pick<BuildPorts, "read"> | undefined;
   readonly managed?: ReturnType<typeof managedOperationControl> | undefined;
+  readonly managedAudit?: ReturnType<typeof managedOperationControl>["audit"] | undefined;
   readonly recovery?: Readonly<{ actor: MigrationResolutionActor; ports: Parameters<Index["resolveMigration"]>[3] }> | undefined;
 };
 
@@ -43,7 +44,7 @@ const completeReceipt = (app: string, root: RolloutRequest, http?: HttpOperation
 };
 
 /** Local lifecycle interface. Callers cannot supply native authority, private inputs or effect decisions. */
-export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, managed, now, recovery, artifacts, observations, managedObservations }: Ports) => async (path: string, input: unknown) => {
+export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, managed, managedAudit, now, recovery, artifacts, observations, managedObservations }: Ports) => async (path: string, input: unknown) => {
   if (path === "/deployment/migration-cleanup-audit") {
     const query = parseMigrationResolutionQuery(input); if (!query.ok) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
@@ -58,14 +59,17 @@ export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, 
     const query = parseMigrationResolutionQuery(input);
     if (!query.ok) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
+    if (await index.deploymentProtocol(query.value.app) === "managed-v3") { const audit = managedAudit ?? managed?.audit; if (audit === undefined) throw new Error("managed migration audit reader unavailable"); return audit(query.value); }
     const parsed = parseMigrationResolutionReport({ version: 1, ...query.value, audit: await index.migrationAudit(query.value.app, query.value.run, query.value.step) ?? null });
     if (!parsed.ok) throw new Error(parsed.error);
     return parsed.value;
   }
   if (path === "/deployment/migration-resolve") {
     const requested = parseMigrationResolutionRequest(input);
-    if (!requested.ok || recovery === undefined) return undefined;
+    if (!requested.ok) return undefined;
     if (!(await canAccess(requested.value.app))) throw new Error("app is outside deployment scope");
+    if (await index.deploymentProtocol(requested.value.app) === "managed-v3") { if (managed === undefined) throw new Error("managed-v3 mutation dispatch is disabled"); return managed.resolve(requested.value); }
+    if (recovery === undefined) return undefined;
     return index.resolveMigration(requested.value.app, requested.value, recovery.actor, recovery.ports);
   }
   if (path === "/deployment/health") {

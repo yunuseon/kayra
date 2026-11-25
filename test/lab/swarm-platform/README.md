@@ -2311,3 +2311,17 @@ The singleton fixture now routes prepare/cancel through `deploymentControl` and
 accepted sources from the owner. Compiler and grant callbacks remain fixtures;
 this does not enable mutations in the normal listener or establish CLI/network
 integration.
+
+Command-handler snapshot `acf6a53` passed in VM
+`kayra-volume-lab-20261119014403301113` (destroyed): 20,755 group observations,
+702 singleton effects and all four public prepare/cancel receipt paths. All
+maintenance variants passed; main maintenance schema 2 with zero violations.
+Private source, raw results, Docker events and diagnostics have verified SHA-256
+manifests.
+
+The singleton fixture additionally queries migration audit for both an original
+completed run and its current run (neither declares a migration). This verifies
+the native command/read path does not alter lifecycle state. Actual operator
+resolution remains covered by the application-ledger maintenance fixture and
+indexed command tests; this is not a normal listener or full-platform acceptance
+claim.

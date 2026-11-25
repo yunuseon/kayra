@@ -2582,3 +2582,21 @@ and an atomic transfer of the pending admission charge. A parsed description or
 build decision alone must never authorize those effects. Normal managed mutation
 dispatch remains disabled until that workflow and the remaining acceptance tests
 are complete.
+
+The private forward cleanup controller now consumes that description through
+cleanup-only ports. It drains candidate dependents before their dependencies,
+advances independent drains without waiting for a stalled peer, and records
+stop/scrub intents before runtime effects. It rechecks native migration fences
+and parent authority after intent synchronization immediately before each
+runtime write. Unknown check targets require a physical stopped/absent container
+proof after the service barrier. Final service observations must still match the
+owned scrub barriers.
+
+Restart uses the original cleanup deadline and reconciles recorded CAS intents;
+it never repeats an uncertain native write merely because its acknowledgement
+was lost. Unavailable authority, foreign migration/check ownership, or expired
+cleanup holds the operation with its existing admission charge. These are
+component-level guarantees tested with injected ports and journal interruptions;
+they are not yet an app-index-owned forward handoff or native integrated rollout
+acceptance. The parent continuation reservation and admission transfer remain
+required before this controller can be wired into normal execution.

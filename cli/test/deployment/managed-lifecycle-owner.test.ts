@@ -2,6 +2,9 @@
 import { managedVolumePreparation } from "../../src/server/deployment/managed-volume-preparation.ts";
 import type { VolumeAction, VolumeObservation } from "../../src/contracts/owned-volume.ts";
 import { managedForwardEffectSource, prepareManagedForwardEffectSource, managedForwardEffectNodes, managedForwardEffectSourceDigest } from "../../src/server/deployment/managed-forward-effect-source.ts";
+import { managedForwardEffects } from "../../src/server/deployment/managed-forward-effects.ts";
+import { parseManagedForwardEffects } from "../../src/server/deployment/managed-forward-effect-state.ts";
+import { parseCheckContainerFence } from "../../src/contracts/check-container-fence.ts";
 import { managedForwardSelection } from "../../src/server/deployment/managed-forward-selection.ts";
 import { managedHistorySelection } from "../../src/server/deployment/managed-history-selection.ts";
 import { managedDeploymentStatus } from "../../src/server/deployment/managed-deployment-status.ts";
@@ -121,7 +124,7 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
   const runtimePorts = () => ({ ...ports, ...(checkFencingEnabled ? { checkFences } : {}) });
   let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, runtimePorts());
   t.after(async () => { await journal.close(); await volumeJournal.close(); await rm(path, { recursive: true, force: true }); });
-  return { source, calls, nodes, artifacts, pauseAllocation: () => { const gate = { entered: Promise.withResolvers<undefined>(), release: Promise.withResolvers<undefined>() }; allocationPermission = gate; return { entered: gate.entered.promise, release: () => { gate.release.resolve(undefined); } }; }, volumeCalls, loseVolume: () => { loseVolume = true; }, volumeReceipts: () => allocations.receipts, checkStarts, deferQuiescence: () => { deferQuiescence = true; }, releaseDelayedTombstones: () => delayedTombstones.map((apply) => apply()), probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
+  return { source, calls, nodes, artifacts, services, jobs, pauseAllocation: () => { const gate = { entered: Promise.withResolvers<undefined>(), release: Promise.withResolvers<undefined>() }; allocationPermission = gate; return { entered: gate.entered.promise, release: () => { gate.release.resolve(undefined); } }; }, volumeCalls, loseVolume: () => { loseVolume = true; }, volumeReceipts: () => allocations.receipts, checkStarts, deferQuiescence: () => { deferQuiescence = true; }, releaseDelayedTombstones: () => delayedTombstones.map((apply) => apply()), probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
     cutUnstarted: (where: "before" | "after") => { unstartedCut = where; },
     cutResolution: (where: "before" | "after") => { resolutionCut = where; },
     enableCheckFencing: () => { checkFencingEnabled = true; }, stopPinnedCheck: () => { pinnedCheckStopped = true; }, checkFenceReads: () => checkFenceReads,
@@ -596,4 +599,72 @@ test("forward decision snapshots cannot substitute a different source under the 
   const lab = await forwardSelectionFixture(t); const changed = parseManagedLifecycleSource({ ...lab.input.source, candidate: { ...lab.input.source.candidate, commit: "f".repeat(40) } });
   await assert.rejects(lab.owner().select({ ...lab.input, source: changed }), /exact ownership/); assert.equal(await lab.owner().read(), undefined); assert.deepEqual(await lab.lab.owner().read(), lab.held);
   assert.ok(await lab.owner().select(lab.input));
+});
+
+const forwardEffectsFixture = async (t: TestContext, unknownCheck = true, dependent = false) => {
+  const lab = await fixture(t, true, true, true, true); const base = lab.source.candidate; const target = parseManagedApplicationPlan({ ...base, services: dependent ? { ...base.services, web: { ...base.services["web"], dependencies: [{ service: "worker", condition: "healthy" }] } } : base.services }); assert.ok(target.ok); const blockedSource = parseManagedLifecycleSource({ ...lab.source, candidate: target.value }); await lab.owner().begin(blockedSource); lab.checkMode(unknownCheck ? "unknown" : "fail"); const held = await lab.drive(); assert.equal(held.operation.phase, "held");
+  let clock = 2000; lab.clock(clock); const candidate = parseManagedApplicationPlan({ ...blockedSource.candidate, commit: "f".repeat(40) }); assert.ok(candidate.ok);
+  const source = await prepareManagedForwardEffectSource({ version: 1, kind: "managed-forward-effect-source", decision: "a".repeat(64), baseline: { state: held, source: blockedSource }, candidate: candidate.value, request: { run: randomUUID(), action: held.owner.incarnation + ":3", createdAt: clock, reason: "Fence candidate effects under the reserved forward continuation" }, deadline: clock + 90000 }, { ...lab.artifacts, now: () => clock, compare: () => Promise.resolve("unchanged") });
+  const path = await mkdtemp(join(tmpdir(), "kayra-forward-effects-")); let journal = await openJournal(path); let allowed = true; let stopped = !unknownCheck; let foreignContainer = false; let writes = 0; let cut: { readonly at: number; readonly when: "before" | "after" } | undefined; let lostAck = false; let delayed = false; let changeMigrationAtDispatch = false;
+  const effects: ManagedServiceAction[] = []; const deferred: (() => Promise<unknown>)[] = []; const queries: string[] = [];
+  const ports = { ...lab.artifacts, now: () => clock, jobs: lab.jobs,
+    services: { observe: lab.services.observe, tombstone: async (...args: Parameters<typeof lab.services.tombstone>) => {
+      const [action] = args; assert.equal(action.action.startsWith(source.request.action + ":quiesce:"), true); assert.notEqual(action.service, "db"); assert.equal((await lab.owner().read())?.operation.phase, "held"); effects.push(action);
+      if (delayed) { deferred.push(() => lab.services.tombstone(...args)); return "uncertain" as const; }
+      const result = await lab.services.tombstone(...args); if (lostAck) { lostAck = false; throw new Error("lost native acknowledgement"); } return result;
+    } },
+    containers: { observe: async (request: Parameters<CheckContainerFencePort["observe"]>[0]) => {
+      queries.push(request.target.container); const parsed = parseCheckContainerFence(request); assert.ok(parsed.ok); assert.equal(request.barrier.action.startsWith(source.request.action + ":quiesce:scrub:"), true);
+      if (foreignContainer) return { status: "foreign" as const }; if (!stopped) return { status: "pending" as const };
+      const observed = await lab.services.observe(request.barrier); assert.equal(observed.status, "owned"); assert.equal(observed.action, request.barrier.action);
+      return { status: "fenced" as const, kind: "stopped" as const, native: { id: observed.id, version: observed.version }, checkedAt: clock };
+    } },
+    authorize: async (value: typeof source) => { assert.deepEqual(value, source); assert.deepEqual(await lab.owner().read(), held); const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "pending"); return allowed; },
+  };
+  const open = () => managedForwardEffects({ read: journal.read, write: async (value) => { writes++; if (cut?.at === writes && cut.when === "before") throw new Error("injected before forward journal"); await journal.write(value); if (changeMigrationAtDispatch && parseManagedForwardEffects(value).nodes.some((node) => (node.barrier?.steps.length ?? 0) > 0)) { changeMigrationAtDispatch = false; lab.foreignJobs(true); } if (cut?.at === writes && cut.when === "after") throw new Error("injected after forward journal"); } }, ports);
+  let owner = open(); t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
+  return { lab, source, effects, queries, owner: () => owner, stop: () => { stopped = true; }, changeMigrationAtDispatch: () => { changeMigrationAtDispatch = true; }, deny: () => { allowed = false; }, foreignContainer: () => { foreignContainer = true; }, lostAck: () => { lostAck = true; }, defer: () => { delayed = true; }, deferred, clock: (at: number) => { clock = at; lab.clock(at); }, cut: (at: number, when: "before" | "after") => { cut = { at, when }; }, reopen: async (initialize = false) => { await journal.close(); journal = await openJournal(path, initialize ? undefined : "existing"); cut = undefined; owner = open(); },
+    drive: async () => { for (let i = 0; i < 100; i++) { const state = await owner.tick(); if (state.phase !== "fencing") return state; } throw new Error("forward effects did not finish"); },
+  };
+};
+
+test("forward cleanup stops consumers, proves pinned check cessation and survives restart without freeing data capacity", async (t) => {
+  const lab = await forwardEffectsFixture(t); const prepared = await lab.owner().prepare(lab.source); assert.equal(lab.effects.length, 0); lab.lostAck();
+  for (let i = 0; i < 80 && lab.queries.length === 0; i++) await lab.owner().tick();
+  const waiting = await lab.owner().read(); assert.equal(waiting?.phase, "fencing"); assert.ok(waiting.nodes.every((node) => node.barrier?.phase === "complete")); assert.equal(waiting.nodes.flatMap((node) => node.proofs).length, 0);
+  await lab.reopen(); lab.stop(); const complete = await lab.drive(); assert.equal(complete.phase, "complete"); assert.equal(complete.deadline, prepared.deadline); assert.equal(complete.nodes.flatMap((node) => node.proofs).length, 1); assert.equal(lab.effects.length, 4); assert.equal(new Set(lab.effects.map((effect) => effect.action + effect.service)).size, 4);
+  assert.equal(lab.lab.settleCalls(), 0); assert.equal((await lab.lab.owner().read())?.operation.phase, "held");
+  lab.clock(prepared.deadline + 1); assert.deepEqual(await lab.owner().prepare(lab.source), complete); assert.deepEqual(await lab.owner().tick(), complete);
+  assert.throws(() => parseManagedForwardEffects({ ...complete, finishedAt: complete.createdAt - 1 })); assert.throws(() => parseManagedForwardEffects({ ...complete, nodes: complete.nodes.map((node) => ({ ...node, proofs: [] })) }));
+});
+
+for (const reason of ["permission", "migration", "container", "deadline", "delayed-stop"] as const) test(`forward cleanup holds pending capacity on ${reason} without renewing its deadline`, async (t) => {
+  const lab = await forwardEffectsFixture(t); const prepared = await lab.owner().prepare(lab.source);
+  if (reason === "permission") lab.deny(); if (reason === "migration") lab.lab.foreignJobs(true); if (reason === "container") lab.foreignContainer(); if (reason === "deadline") lab.clock(prepared.deadline); if (reason === "delayed-stop") lab.defer();
+  const first = await lab.owner().tick();
+  if (reason === "delayed-stop") { for (let i = 0; i < 25; i++) await lab.owner().tick(); assert.equal(lab.effects.length, 2); lab.clock(prepared.deadline); }
+  const held = first.phase === "held" ? first : await lab.drive(); assert.equal(held.phase, "held"); assert.equal(held.deadline, prepared.deadline); assert.equal(lab.lab.settleCalls(), 0);
+  if (["permission", "migration", "deadline"].includes(reason)) assert.equal(lab.effects.length, 0);
+  await lab.reopen(); lab.stop(); assert.deepEqual(await lab.owner().tick(), held); assert.equal((await lab.lab.owner().read())?.operation.phase, "held");
+});
+
+for (const at of [1, 3, 5, 9, 12]) for (const when of ["before", "after"] as const) test(`forward cleanup reconciles interruption ${when} journal write ${String(at)}`, async (t) => {
+  const lab = await forwardEffectsFixture(t, false); lab.cut(at, when);
+  await assert.rejects(async () => { await lab.owner().prepare(lab.source); await lab.drive(); }, /write (?:is )?uncertain/);
+  await assert.rejects(lab.owner().read(), /reopen/); await lab.reopen(at === 1 && when === "before"); await lab.owner().prepare(lab.source);
+  for (let i = 0; i < 80; i++) { const current = await lab.owner().tick(); if (current.phase !== "fencing") break; }
+  const observed = await lab.owner().read(); assert.ok(observed); if (observed.phase === "fencing") { lab.clock(observed.deadline); await lab.owner().tick(); }
+  const final = await lab.owner().read(); assert.ok(final); assert.ok(["complete", "held"].includes(final.phase)); assert.equal(final.deadline, lab.source.deadline); assert.equal(new Set(lab.effects.map((effect) => effect.action + effect.service)).size, lab.effects.length); assert.equal(lab.lab.settleCalls(), 0);
+});
+
+test("forward cleanup drains candidate dependents first and checks native migration fences again before scrubbing", async (t) => {
+  const lab = await forwardEffectsFixture(t, false, true); await lab.owner().prepare(lab.source); const done = await lab.drive(); assert.equal(done.phase, "complete"); assert.deepEqual(lab.effects.map((effect) => effect.service + ":" + effect.effect), ["web:remove", "web:scrub", "worker:remove", "worker:scrub"]);
+  const interrupted = await forwardEffectsFixture(t, false); await interrupted.owner().prepare(interrupted.source);
+  for (let i = 0; i < 30 && interrupted.effects.length === 0; i++) await interrupted.owner().tick(); assert.equal(interrupted.effects.length, 1); interrupted.lab.foreignJobs(true);
+  const held = await interrupted.drive(); assert.equal(held.phase, "held"); assert.equal(interrupted.effects.length, 1); assert.equal(interrupted.lab.settleCalls(), 0);
+});
+
+test("forward cleanup rechecks migration ownership after its dispatch intent is durable", async (t) => {
+  const lab = await forwardEffectsFixture(t, false); await lab.owner().prepare(lab.source); lab.changeMigrationAtDispatch();
+  const held = await lab.drive(); assert.equal(held.phase, "held"); assert.equal(lab.effects.length, 0); assert.ok(held.nodes.some((node) => node.barrier?.steps.length === 1)); assert.equal(lab.lab.settleCalls(), 0);
 });

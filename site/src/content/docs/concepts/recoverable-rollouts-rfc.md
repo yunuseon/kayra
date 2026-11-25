@@ -2622,3 +2622,29 @@ no cleanup effects, activates no successor and completes no ticket. Cleanup
 source publication and journal initialization, followed by the actual admission
 handoff, remain separate required integration steps. Normal managed mutation
 dispatch is still disabled.
+
+### Initializing and driving reserved cleanup
+
+The indexed owner now prepares the cleanup source from the retained candidate,
+selected build and unchanged held checkpoint. It synchronizes the private child
+journal before publishing the cleanup source reference. Restart reuses the
+original source, action and deadline after either child-write or publication
+interruption. A published reference requires its existing journal; it never
+creates an empty replacement. Expired initialization records a durable hold
+without creating workload effects or changing the pending admission charge.
+
+A dedicated composition factory binds the reserved successor action to
+consumer-only stop/scrub ports on the existing native transport. It uses the
+real blocked execution context for platform-owned recovery permission, while
+checking the successor's namespace, plan, image and deadline. It exposes no
+application input materialization, workload starts, job execution, volume writes
+or admission operations. Its migration and check-container ports are read-only;
+scoped inspection may continue after expiry without extending write authority.
+The coordinator independently rechecks the accepted reservation, blocked root,
+current pending lease and native migration fences before every cleanup effect.
+
+Indexed tests now drive cleanup through this factory, including restart after
+the first consumer stop. Completion leaves the data service, held root and
+resource charge unchanged. This remains private experimental integration:
+retained readiness certification, atomic admission transfer, successor
+activation, lifecycle completion and native acceptance are still required.

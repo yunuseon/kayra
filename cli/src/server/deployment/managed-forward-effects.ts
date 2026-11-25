@@ -1,3 +1,4 @@
+import { managedForwardEffectIntent } from "./managed-forward-effect-intent.ts";
 import { createHash } from "node:crypto";
 import type { CheckContainerFencePort } from "../../contracts/check-container-fence.ts";
 import type { JobPort } from "../../contracts/one-shot-job.ts";
@@ -63,12 +64,10 @@ export const managedForwardEffects = (journal: OperationJournal, ports: Ports) =
   const hold = (state: ManagedForwardEffects, reason: "runtime" | "deadline" | "authorization") => write({ ...state, phase: "held", reason, finishedAt: null });
   return Object.freeze({
     prepare: (input: unknown) => serial(async () => {
-      const value = managedForwardEffectSource(input); const bytes = JSON.stringify(value); const identity = hash(bytes); const previous = await load();
+      const intent = managedForwardEffectIntent(input); const value = intent.source; const identity = intent.state.source; const previous = await load();
       if (previous !== undefined) { if (previous.source !== identity) throw new Error("forward effect intent conflicts"); await source(previous); return previous; }
-      if (time() < value.request.createdAt || time() >= value.deadline || await bounded(value.deadline, () => ports.retain(bytes)) !== identity || time() >= value.deadline) throw new Error("forward effect preparation expired or unavailable");
-      const nodes = managedForwardEffectNodes(value); const owner = value.baseline.state.owner;
-      return write({ version: 1, source: identity, run: value.request.run, action: value.request.action, app: owner.app, incarnation: owner.incarnation, dataOwner: owner.dataOwner, createdAt: value.request.createdAt, deadline: value.deadline, phase: "fencing", reason: null, finishedAt: null, cursor: 0,
-        nodes: nodes.map(({ name, plan, prior, waitFor, checks }) => Object.freeze({ name, plan, prior, waitFor, checks, barrier: null, proofs: Object.freeze([]) })) });
+      if (time() < value.request.createdAt || time() >= value.deadline || await bounded(value.deadline, () => ports.retain(intent.bytes)) !== identity || time() >= value.deadline) throw new Error("forward effect preparation expired or unavailable");
+      return write(intent.state);
     }),
     read: () => serial(load),
     tick: () => serial(async () => {

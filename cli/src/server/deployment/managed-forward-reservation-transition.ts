@@ -1,3 +1,4 @@
+import { managedForwardEffectSource, managedForwardEffectSourceDigest } from "./managed-forward-effect-source.ts";
 import { createHash } from "node:crypto";
 import { parseManagedApplicationPlan, managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import type { ManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
@@ -34,4 +35,22 @@ export const reserveManagedForwardEnvelope = (before: unknown, input: Input) => 
   const reserved = parseLifecycleFence({ ...fence, nextAction: fence.nextAction + 1 }); if (!reserved.ok) throw new Error(reserved.error);
   const next = parseLifecycleEnvelope({ ...current, fence: reserved.value, forward: reservation }); if (!next.ok) throw new Error(next.error);
   return Object.freeze({ state: next.value, reservation, changed: true });
+};
+
+/** Publish only a source prepared under the reserved action and original phase clock. The caller synchronizes its private child journal first. */
+export const publishManagedForwardCleanup = (before: unknown, expected: ManagedForwardReservation, sourceInput: unknown) => {
+  const parsed = parseLifecycleEnvelope(before); if (!parsed.ok) throw new Error(parsed.error); const current = parsed.value;
+  const source = managedForwardEffectSource(sourceInput); const reservation = current.forward;
+  if (reservation?.phase !== "initializing" || !same(reservation, expected) || source.request.run !== reservation.run || source.request.action !== reservation.action || source.request.createdAt !== reservation.createdAt || source.request.reason !== reservation.operator.reason || source.deadline !== reservation.deadline || source.decision !== reservation.selection.decision ||
+    hash(source.baseline.state) !== reservation.blocked.checkpoint || source.baseline.state.operation.source !== reservation.blocked.source || source.candidate.commit !== reservation.build.commit || source.candidate.artifact !== reservation.build.artifact || !same(source.candidate.infrastructure.registration, reservation.build.registration)) throw new Error("managed forward cleanup publication conflicts with its reserved intent");
+  const next = parseLifecycleEnvelope({ ...current, forward: { ...reservation, phase: "fencing", cleanup: managedForwardEffectSourceDigest(source) } }); if (!next.ok || next.value.forward === undefined) throw new Error("managed forward cleanup publication is invalid");
+  return Object.freeze({ state: next.value, reservation: next.value.forward });
+};
+
+/** Initialization expiry is durable metadata, never evidence of absent workloads or free capacity. */
+export const holdManagedForwardInitialization = (before: unknown, expected: ManagedForwardReservation, at: number) => {
+  const parsed = parseLifecycleEnvelope(before); if (!parsed.ok) throw new Error(parsed.error); const current = parsed.value;
+  if (current.forward?.phase !== "initializing" || !same(current.forward, expected) || !Number.isSafeInteger(at) || at < expected.deadline) throw new Error("forward initialization hold conflicts");
+  const next = parseLifecycleEnvelope({ ...current, forward: { ...current.forward, phase: "held", reason: "deadline", heldAt: at } }); if (!next.ok || next.value.forward === undefined) throw new Error("invalid held forward initialization");
+  return Object.freeze({ state: next.value, reservation: next.value.forward });
 };

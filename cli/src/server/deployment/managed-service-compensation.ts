@@ -17,7 +17,7 @@ const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const native = z.object({ id: z.string().regex(/^[a-z0-9]{25}$/), version: positive }).strict().readonly();
 const schema = z.object({ version: z.literal(1), action: z.unknown(), createdAt: positive, candidate: digest, previous: digest.nullable(),
-  fences: z.array(z.object({ expected: native }).strict().readonly()).max(8).readonly(), baseline: native.nullable(), prior: z.array(native).max(24).readonly(), attempts: z.array(z.unknown()).max(8).readonly(), barrier: z.unknown().nullable(),
+  fences: z.array(z.object({ expected: native }).strict().readonly()).max(8).readonly(), baseline: native.nullable(), prior: z.array(native).max(64).readonly(), attempts: z.array(z.unknown()).max(8).readonly(), barrier: z.unknown().nullable(),
   phase: z.enum(["recovering", "complete", "held"]), reason: z.enum(["deadline", "runtime", "authorization", "attempts"]).nullable(), proof: z.object({ native, at: positive }).strict().readonly().nullable(),
 }).strict().readonly();
 export const parseManagedServiceCompensation = (input: unknown) => {

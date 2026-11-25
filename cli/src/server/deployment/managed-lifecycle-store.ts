@@ -18,7 +18,8 @@ import { managedSuccessfulInventoryCarry, managedRecoveredInventoryCarry, manage
 import { managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import { parseManagedGroupCompensation } from "./managed-group-compensation.ts";
 import { managedUnstartedSource } from "./managed-unstarted-source.ts";
-import { managedRecoverySource } from "./managed-recovery-safety.ts";
+import { managedRecoverySource, managedRecoveryCheckTargets } from "./managed-recovery-safety.ts";
+import { managedRecoverySnapshot } from "./managed-recovery-description.ts";
 import type { OperationJournal } from "./operation.ts";
 
 import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
@@ -52,7 +53,10 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   const artifact = async (digest: string) => { const bytes = await metadata(() => ports.read(digest)); if (hash(bytes) !== digest) throw new Error("managed lifecycle artifact integrity failed"); return bytes; };
   const source = async (state: ManagedLifecycleStore) => {
     const bytes = await artifact(state.operation.source); const raw: unknown = JSON.parse(bytes); const value = parseManagedLifecycleSource(raw); const description = managedLifecycleDescription(value);
-    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || state.operation.previousPlan !== (description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous)) || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible || value.version === 1 && state.operation.allocation !== undefined || value.version === 2 && state.operation.admitted && state.operation.allocation === undefined) throw new Error("managed lifecycle source disagrees"); return value;
+    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || state.operation.previousPlan !== (description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous)) || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible || value.version === 1 && state.operation.allocation !== undefined || value.version === 2 && state.operation.admitted && state.operation.allocation === undefined) throw new Error("managed lifecycle source disagrees");
+    if (state.operation.recoverySource !== null) { const raw: unknown = JSON.parse(await artifact(state.operation.recoverySource)); const recovery = managedRecoverySnapshot(raw);
+      if (!same(recovery.source.candidate, value.candidate) || !same(recovery.source.checks, managedRecoveryCheckTargets(state, value))) throw new Error("managed recovery check source disagrees"); }
+    return value;
   };
   const views = new Map<string, OperationJournal>();
   const child = (name: Child, run: string) => {

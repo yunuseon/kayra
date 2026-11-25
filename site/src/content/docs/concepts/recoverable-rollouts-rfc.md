@@ -2438,3 +2438,25 @@ publishing the original actor, reason and outcome. Corrupt evidence is refused.
 Read-only migration audit is wired into the normal composition independently of
 mutation enablement. Normal managed prepare/cancel/resolve mutation ports remain
 disabled pending the remaining lifecycle and integrated acceptance work.
+
+
+#### Unknown consumer-check cessation before compensation
+
+An unknown Exec result never proves a check failed or stopped. When the accepted
+consumer certificate identifies the exact container and service version, recovery
+may first stop and scrub that owned consumer, then inspect the pinned container.
+Only an authenticated stopped/absent observation permits compensation to start.
+Retained dependencies are excluded from this automatic cessation path.
+
+The immutable recovery source binds these targets to the original check actions
+and candidate plan. The coordinator records cessation intent before effects,
+uses a distinct `checks` action namespace, and retains physical evidence before
+allowing previous-release restoration. Native CAS versions from cleanup become
+part of the subsequent restore authority. The same 90-second recovery deadline
+covers cessation and compensation and survives restart. Uncertain dispatch
+intent, missing capability, lost ownership or an unproved container stop holds
+safely; it cannot reset the deadline or release pending capacity.
+
+This proves local execution cessation only. It does not infer the result of
+external application effects, make checks replay-safe, or authorize recovery
+across an unsafe schema change. Normal managed mutation dispatch remains disabled.

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { parseManagedServicePlan, managedServiceName, managedServiceDigest } from "../../src/contracts/managed-service-plan.ts";
 import { ownedVolume } from "../../src/contracts/owned-volume.ts";
+import { parseManagedServiceAction } from "../../src/contracts/managed-swarm-service.ts";
 import type { ManagedServiceAction } from "../../src/contracts/managed-swarm-service.ts";
 import type { VolumeObservation } from "../../src/contracts/owned-volume.ts";
 import { managedSwarmService, renderNativeManagedService } from "../../src/server/runtime/managed-swarm-service.ts";
@@ -207,4 +208,11 @@ test("healthy current tasks do not hide old running containers or a missing curr
 test("unrecognized native update state cannot be normalized into an absent update", async () => {
   const f = fixture(); f.setService({ ID: f.id, Version: { Index: 100 }, Spec: f.spec, UpdateStatus: { State: "unsupported-new-state" } });
   const value = await f.adapter.observe({ app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" }); assert.equal(value.status, "owned"); assert.equal(value.update, "unknown");
+});
+
+
+test("check cessation namespace permits only stop and scrub actions", () => {
+  const { action } = fixture();
+  for (const effect of ["remove", "scrub"] as const) assert.equal(parseManagedServiceAction({ ...action, effect, action: action.action + ":checks:" + effect + ":1" }).ok, true);
+  for (const effect of ["apply", "restore", "fence"] as const) assert.equal(parseManagedServiceAction({ ...action, effect, action: action.action + ":checks:" + effect + ":1" }).ok, false);
 });

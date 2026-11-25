@@ -11,6 +11,7 @@ import type { RecordedVolumeReceiptsPort } from "../../contracts/recorded-volume
 import type { RuntimeInputsPort } from "../../contracts/service-inputs.ts";
 import type { JobPort } from "../../contracts/one-shot-job.ts";
 import type { ManagedChecksPort } from "../../contracts/container-check.ts";
+import type { CheckContainerFencePort } from "../../contracts/check-container-fence.ts";
 import type { ManagedRoutedReadinessPort } from "../../contracts/routed-readiness.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import type { ManagedDeploymentReadPort } from "../../contracts/managed-deployment-read.ts";
@@ -25,7 +26,7 @@ import { err } from "../../lib/result.ts";
 
 type Ports = ManagedDeploymentReadPort & HostObserver & { readonly retain: (bytes: string) => Promise<string>;
   readonly environment: RuntimeInputsPort; readonly receipts: RecordedVolumeReceiptsPort; readonly authority: ManagedRuntimeAuthorityPort;
-  readonly native: { readonly services: ManagedSwarmServicePort; readonly volumes: Readonly<Pick<OwnedVolumePort, "observe" | "create">>; readonly jobs: JobPort; readonly checks: ManagedChecksPort; readonly readiness: ManagedRoutedReadinessPort };
+  readonly native: { readonly services: ManagedSwarmServicePort; readonly volumes: Readonly<Pick<OwnedVolumePort, "observe" | "create">>; readonly jobs: JobPort; readonly checks: ManagedChecksPort; readonly checkFences?: CheckContainerFencePort | undefined; readonly readiness: ManagedRoutedReadinessPort };
 };
 
 /** Trusted wiring in the existing privileged process. No fleet parsing, SQL, shell execution, journal effects or runtime fallback. */
@@ -64,6 +65,7 @@ export const managedRuntime = (input: ManagedExecutionContext, ports: Ports) => 
     services: workloads(ports.receipts), managedData: { native: ports.native.volumes, workloads },
     jobs: managedJobs(context, ports.native.jobs, { now: ports.now, environment, allowed: (_, job, effect) => allowed({ kind: "job", job, effect }) }),
     checks: ports.native.checks,
+    checkFences: ports.native.checkFences,
     readiness: { check: (action, application) => known(application) && owned(action) ? ports.native.readiness.check(action, application) : Promise.resolve({ app: action.app, incarnation: action.incarnation, service: action.service, action: action.action, plan: action.plan, checkedAt: ports.now(), status: "unavailable" }) },
     requestAllowed: (source) => matches(source) ? allowed({ kind: "admission" }) : Promise.resolve(false),
     authorize: (source, effect) => matches(source) ? allowed(permission(effect)) : Promise.resolve(false),

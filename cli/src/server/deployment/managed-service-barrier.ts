@@ -13,14 +13,14 @@ const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const native = z.object({ id: z.string().regex(/^[a-z0-9]{25}$/), version: positive }).strict().readonly();
 const step = z.object({ effect: z.enum(["remove", "scrub"]), attempt: positive.max(8), expected: native.nullable() }).strict().readonly();
 const schema = z.object({ version: z.literal(1), createdAt: positive, action: z.unknown(),
-  prior: z.array(native).max(32).readonly(), nativeId: z.string().regex(/^[a-z0-9]{25}$/).nullable(), steps: z.array(step).max(16).readonly(),
+  prior: z.array(native).max(64).readonly(), nativeId: z.string().regex(/^[a-z0-9]{25}$/).nullable(), steps: z.array(step).max(16).readonly(),
   phase: z.enum(["fencing", "complete", "held"]), reason: z.enum(["deadline", "runtime", "authorization", "attempts"]).nullable(),
   proof: z.object({ native, at: positive }).strict().readonly().nullable(),
 }).strict().readonly();
 export const parseManagedServiceBarrier = (input: unknown) => {
   const checked = schema.safeParse(input); if (!checked.success) throw new Error("invalid managed service barrier");
   const value = checked.data; const action = parseManagedServiceAction(value.action);
-  if (!action.ok || action.value.effect !== "remove" || !new RegExp(`^${action.value.incarnation}:[1-9][0-9]*(?::quiesce|:recover)?$`).test(action.value.action)) throw new Error("invalid managed service barrier authority");
+  if (!action.ok || action.value.effect !== "remove" || !new RegExp(`^${action.value.incarnation}:[1-9][0-9]*(?::quiesce|:recover|:checks)?$`).test(action.value.action)) throw new Error("invalid managed service barrier authority");
   const state = Object.freeze({ ...value, action: action.value }); const previous = [...state.prior, ...state.steps.flatMap((item) => item.expected === null ? Object.freeze([]) : Object.freeze([item.expected]))];
   const proof = state.proof;
   if (state.createdAt >= state.action.deadline || state.action.deadline - state.createdAt > 90_000 ||
@@ -84,7 +84,7 @@ export const managedServiceBarrier = (journal: OperationJournal, ports: Ports) =
     return result === "refused" ? hold(intent, "runtime") : intent;
   };
   return Object.freeze({
-    prepare: (input: ManagedServicePlan, requested: ManagedServiceAction, prior: readonly ServiceVersion[], namespace?: "quiesce" | "recover") => {
+    prepare: (input: ManagedServicePlan, requested: ManagedServiceAction, prior: readonly ServiceVersion[], namespace?: "quiesce" | "recover" | "checks") => {
       const plan = parseManagedServicePlan(input); if (!plan.ok) return Promise.reject(new Error("invalid managed barrier plan"));
       const ids = new Set(prior.map((item) => item.id));
       const request = parseManagedServiceBarrier({ version: 1, createdAt: requested.deadline - 1, action: namespace === undefined ? requested : { ...requested, action: `${requested.action}:${namespace}` }, prior, nativeId: prior[0]?.id ?? null, steps: [], phase: "fencing", reason: null, proof: null });

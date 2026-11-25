@@ -13,6 +13,7 @@ import { managedRoutedReadiness } from "../platform/managed-routed-readiness.ts"
 import { ownedVolumes } from "../runtime/owned-volume.ts";
 import { managedSwarmService } from "../runtime/managed-swarm-service.ts";
 import { containerChecks } from "../runtime/container-check.ts";
+import { checkContainerFences } from "../runtime/check-container-fence.ts";
 import { oneShotJob } from "../runtime/one-shot-job.ts";
 import { observeSwarmHost } from "../runtime/swarm-host.ts";
 import { registryImages } from "../runtime/registry-images.ts";
@@ -28,7 +29,7 @@ type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof
 export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
   const { read, retain, now } = ports.builds; const environment = platformServiceInputs(paths.publicRegistrations, paths.privateRegistrations, 1000);
   const authority = platformManagedRuntimeAuthority({ ...paths, canAccess: ports.canAccess }); const volumes = ownedVolumes(ports.api, now);
-  const native = { services: managedSwarmService(ports.api, volumes), volumes, jobs: oneShotJob(ports.api, now), checks: containerChecks(ports.api, now), readiness: managedRoutedReadiness({ now }) };
+  const native = { services: managedSwarmService(ports.api, volumes), volumes, jobs: oneShotJob(ports.api, now), checks: containerChecks(ports.api, now), checkFences: checkContainerFences(ports.api, now), readiness: managedRoutedReadiness({ now }) };
   const forRun = (context: ManagedExecutionContext) => Promise.resolve(managedRuntime(context, { read, retain, now, environment, authority,
     receipts: { read: (references) => index.recordedManagedVolumes(context.owner.app, references) }, native, observeHost: (host) => observeSwarmHost(host, ports.api) }));
   const plans = platformManagedPlans(paths, { read, images: ports.images ?? registryImages() });

@@ -2325,3 +2325,13 @@ the native command/read path does not alter lifecycle state. Actual operator
 resolution remains covered by the application-ledger maintenance fixture and
 indexed command tests; this is not a normal listener or full-platform acceptance
 claim.
+
+
+The indexed singleton candidate now starts a long-running in-container check with
+a two-second declared timeout. Recovery must stop and scrub B, prove the exact
+check container has stopped, and reopen its journal before restoring A. Both
+cessation and restoration share the original recovery deadline. The app-owned
+lock history still verifies A/B/A coordination and graceful exit ordering.
+Known-failed check recovery remains covered by the maintenance recovery fixture.
+This remains an internal indexed command-path probe, not normal listener enablement
+or a guarantee about remote effects initiated by application checks.

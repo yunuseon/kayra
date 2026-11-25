@@ -5,6 +5,7 @@ import { managedImagePins } from "../../src/server/deployment/managed-image-pins
 import { strict as assert } from "node:assert";
 import { createHash, randomUUID } from "node:crypto";
 import type { ManagedChecksPort, ContainerCheckPlan } from "../../src/contracts/container-check.ts";
+import type { CheckContainerFencePort } from "../../src/contracts/check-container-fence.ts";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -107,12 +108,20 @@ const fixture = async (t: TestContext, maintenance = false, migrations: boolean 
     const auditing = parseManagedLifecycleStore(raw).operation.preparation?.sequence?.steps.some((step) => step.resolution !== undefined) ?? false;
     if (auditing && resolutionCut === "before") throw new Error("injected before audit write"); await journal.write(raw); if (unstarted && unstartedCut === "after") throw new Error("injected lost unstarted acknowledgement"); if (auditing && resolutionCut === "after") throw new Error("injected lost audit acknowledgement");
   } });
-  let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports);
+  let checkFencingEnabled = false; let pinnedCheckStopped = false; let checkFenceReads = 0;
+  const checkFences: CheckContainerFencePort = { observe: (request) => {
+    checkFenceReads++; const current = native.get(request.barrier.service); assert.ok(current); assert.equal(current.status, "owned"); assert.equal(current.action, request.barrier.action); assert.equal(current.effect, "scrub");
+    assert.equal(calls.some((item) => item.effect === "restore"), false);
+    return Promise.resolve(pinnedCheckStopped ? { status: "fenced", kind: "stopped", native: { id: current.id, version: current.version }, checkedAt: clock } : { status: "pending" });
+  } };
+  const runtimePorts = () => ({ ...ports, ...(checkFencingEnabled ? { checkFences } : {}) });
+  let owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, runtimePorts());
   t.after(async () => { await journal.close(); await volumeJournal.close(); await rm(path, { recursive: true, force: true }); });
   return { source, calls, nodes, artifacts, pauseAllocation: () => { const gate = { entered: Promise.withResolvers<undefined>(), release: Promise.withResolvers<undefined>() }; allocationPermission = gate; return { entered: gate.entered.promise, release: () => { gate.release.resolve(undefined); } }; }, volumeCalls, loseVolume: () => { loseVolume = true; }, volumeReceipts: () => allocations.receipts, checkStarts, deferQuiescence: () => { deferQuiescence = true; }, releaseDelayedTombstones: () => delayedTombstones.map((apply) => apply()), probeOutcome: (value: typeof probeOutcome) => { probeOutcome = value; }, checkMode: (value: typeof checkMode) => { checkMode = value; }, foreignJobs: (value: boolean) => { foreignJobs = value; }, failRoutes: () => { routes = false; }, loseJobStart: () => { loseJobStart = true; }, owner: () => owner, reserveCalls: () => reserveCalls, settleCalls: () => settleCalls, book: () => accounting.resources, clock: (value: number) => { clock = value; }, loseReserve: () => { loseReserve = true; }, loseSettle: () => { loseSettle = true; }, deny: () => { authorize = false; },
     cutUnstarted: (where: "before" | "after") => { unstartedCut = where; },
     cutResolution: (where: "before" | "after") => { resolutionCut = where; },
-    reopen: async () => { await volumeJournal.close(); volumeJournal = await openJournal(volumePath, "existing"); allocations = managedVolumePreparation(volumeJournal, candidate.infrastructure.ownership, { native: volumeNative, now: () => clock }); await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; unstartedCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, ports); },
+    enableCheckFencing: () => { checkFencingEnabled = true; }, stopPinnedCheck: () => { pinnedCheckStopped = true; }, checkFenceReads: () => checkFenceReads,
+    reopen: async () => { await volumeJournal.close(); volumeJournal = await openJournal(volumePath, "existing"); allocations = managedVolumePreparation(volumeJournal, candidate.infrastructure.ownership, { native: volumeNative, now: () => clock }); await journal.close(); journal = await openJournal(path, "existing"); resolutionCut = null; unstartedCut = null; owner = managedLifecycleOwner(view(), candidate.infrastructure.ownership, runtimePorts()); },
     drive: async () => { for (let i = 0; i < 100; i++) { const value = await owner.tick(); if (value?.operation.phase === "complete" || value?.operation.phase === "held") return value; } throw new Error("managed lifecycle did not settle"); },
   };
 };
@@ -266,6 +275,21 @@ test("rollback runs the previous release's declared checks under a distinct reco
 test("a possibly started unknown check cannot be bypassed by healthy services, restart or rollback compatibility", async (t) => {
   const { lab } = await checkedCandidate(t); lab.checkMode("unknown"); const failed = await lab.drive(); assert.equal(failed.operation.verification?.reason, "check-unknown");
   await lab.reopen(); lab.checkMode("pass"); assert.deepEqual(await lab.owner().tick(), failed); assert.equal(failed.operation.recoverySource, null); assert.equal(lab.calls.filter((action) => action.effect === "restore").length, 0); assert.equal(lab.checkStarts.length, 2);
+  const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "pending");
+});
+
+test("unknown check recovery fences its pinned consumer before any restoration and resumes the original recovery after restart", async (t) => {
+  const { lab, initial, source } = await checkedCandidate(t); lab.checkMode("unknown"); const held = await lab.drive(); assert.equal(held.operation.verification?.reason, "check-unknown");
+  lab.enableCheckFencing(); await lab.reopen(); const intent = await lab.owner().tick(); assert.equal(intent?.operation.phase, "recovering"); const deadline = intent.operation.recoveryDeadline;
+  for (let i = 0; i < 40 && lab.checkFenceReads() === 0; i++) await lab.owner().tick();
+  assert.ok(lab.checkFenceReads() > 0); const waiting = await lab.owner().read(); assert.equal(waiting?.operation.recovery?.phase, "fencing-checks"); assert.equal(lab.calls.some((item) => item.effect === "restore"), false); assert.equal(lab.checkStarts.filter((item) => item.run === source.run).length, 1);
+  await lab.reopen(); lab.stopPinnedCheck(); lab.checkMode("pass"); const done = await lab.drive(); assert.equal(done.operation.outcome, "rolled-back"); assert.equal(done.active?.plan, initial.active?.plan); assert.equal(done.operation.recoveryDeadline, deadline); assert.equal(done.operation.recovery?.cessation?.state?.phase, "complete"); assert.equal(lab.checkStarts.length, 3);
+});
+
+test("a pinned check that cannot be fenced holds the existing recovery deadline without restoring or releasing capacity", async (t) => {
+  const { lab } = await checkedCandidate(t); lab.checkMode("unknown"); await lab.drive(); lab.enableCheckFencing(); await lab.reopen(); const intent = await lab.owner().tick(); assert.ok(intent?.operation.recoveryDeadline);
+  for (let i = 0; i < 40 && lab.checkFenceReads() === 0; i++) await lab.owner().tick(); lab.clock(intent.operation.recoveryDeadline);
+  const held = await lab.drive(); assert.equal(held.operation.phase, "held"); assert.equal(held.operation.recoveryDeadline, intent.operation.recoveryDeadline); await lab.reopen(); lab.stopPinnedCheck(); assert.deepEqual(await lab.owner().tick(), held); assert.equal(lab.calls.some((item) => item.effect === "restore"), false);
   const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "pending");
 });
 

@@ -6,6 +6,7 @@ import { parseManagedAdmissionIdentity } from "../../contracts/managed-admission
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import type { ManagedRoutedReadinessPort } from "../../contracts/routed-readiness.ts";
 import type { ManagedChecksPort } from "../../contracts/container-check.ts";
+import type { CheckContainerFencePort } from "../../contracts/check-container-fence.ts";
 import type { ManagedServicePlan } from "../../contracts/managed-service-plan.ts";
 import type { ServiceVersion } from "../../contracts/swarm-service.ts";
 import type { ManagedServiceAction } from "../../contracts/managed-swarm-service.ts";
@@ -37,7 +38,7 @@ export type ManagedLifecycleEffect = { readonly kind: "accepted-recovery"; reado
 type Ports = { readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
   readonly admission: ManagedAdmissionPort; readonly services: ManagedWorkloadPort; readonly jobs: Parameters<typeof managedGroupPreparation>[1]["jobs"];
   readonly allocations?: ManagedVolumePreparationPort | undefined;
-  readonly readiness: ManagedRoutedReadinessPort; readonly checks?: ManagedChecksPort | undefined;
+  readonly readiness: ManagedRoutedReadinessPort; readonly checks?: ManagedChecksPort | undefined; readonly checkFences?: CheckContainerFencePort | undefined;
   /** Composition verifies registration/protocol, current operator grants and source identities without teaching the owner fleet or forge semantics. */
   readonly authorize: (source: ManagedLifecycleSource, effect: ManagedLifecycleEffect) => Promise<boolean>;
 };
@@ -64,8 +65,10 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
   const allowedRecovery = async (run: string, phase: "recovering" | "recovery-verifying", effect: ManagedLifecycleEffect) => {
     const current = await store.read(); if (current?.operation.run !== run || current.operation.phase !== phase || current.operation.preparation === null && current.operation.quiescence === null || !current.operation.admitted || (current.operation.previousPlan === null ? current.active !== null : current.active?.epoch !== current.compatibilityEpoch) || ports.now() >= current.operation.deadline) return false;
     const source = await store.source(); const prefix = current.operation.preparation;
+    const pendingChecks = current.operation.verification?.steps.some((step) => step.execution !== null && step.execution.phase !== "complete" && step.execution.executionDeadline !== null) ?? false;
+    if (pendingChecks && current.operation.recovery?.cessation?.state?.phase !== "complete" && effect.kind !== "verify" && !(effect.kind === "service" && ["remove", "scrub"].includes(effect.action.effect) && effect.action.action.startsWith(current.operation.action + ":checks:"))) return false;
     return await bounded(current.operation.deadline, () => ports.admission.observe(identity(current), managedLifecycleDescription(source).admission)) === "reserved" &&
-      await bounded(current.operation.deadline, async () => { if (prefix !== null) await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) === true && await bounded(current.operation.deadline, () => ports.authorize(source, effect.kind === "service" ? { ...effect, purpose: "cleanup" } : effect)) === true;
+      await bounded(current.operation.deadline, async () => { if (prefix !== null) await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) === true && await bounded(current.operation.deadline, () => ports.authorize(source, effect.kind === "service" ? { ...effect, purpose: "cleanup" } : effect.kind === "verify" && current.operation.recovery?.phase === "fencing-checks" ? { kind: "recovery" } : effect)) === true;
   };
   const components = new Map<string, { readonly quiescence: ReturnType<typeof managedMaintenanceQuiescence>; readonly preparation: ReturnType<typeof managedGroupPreparation>; readonly consumers: ReturnType<typeof managedConsumerRollout>; readonly verification: ReturnType<typeof managedGroupVerification>; readonly recovery: ReturnType<typeof managedGroupCompensation>; readonly recoveryVerification: ReturnType<typeof managedGroupVerification> }>();
   const forRun = (source: ManagedLifecycleSource) => {
@@ -103,7 +106,8 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
       const unstarted = (() => { try { managedUnstartedSource(current, source); return true; } catch { return false; } })();
       if (unstarted) return store.beginUnstarted(hash(JSON.stringify(current.operation)));
       if (current.operation.recoverySource !== null || source.previous !== null && ports.services.fence === undefined) return current;
-      const at = ports.now(); try { managedRecoverySource(current, source, at); } catch { return current; }
+      const at = ports.now(); const recovery = (() => { try { return managedRecoverySource(current, source, at); } catch { return undefined; } })();
+      if (recovery === undefined || recovery.source.checks !== undefined && ports.checkFences === undefined) return current;
       const prefix = current.operation.preparation;
       if (await bounded(current.operation.deadline, () => ports.admission.observe(lease, description.admission)) !== "reserved" || await bounded(current.operation.deadline, async () => { if (prefix !== null) await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) !== true || await bounded(current.operation.deadline, () => ports.authorize(source, { kind: "recovery" })) !== true) return current;
       return store.beginRecovery(hash(JSON.stringify(current.operation)), at);

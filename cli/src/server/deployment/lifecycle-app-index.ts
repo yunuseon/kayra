@@ -82,15 +82,18 @@ const syncDirectory = async (path: string) => {
   finally { await dir.close(); }
 };
 
-const prepareBeforeDeadline = async (ports: BuildPorts, registration: RegistrationGeneration, commit: string, deadline: number, runtime: Runtime) => {
+const prepareBeforeDeadline = async (ports: BuildPorts, registration: RegistrationGeneration, commit: string, deadline: number, runtime: Runtime, shutdown?: AbortSignal) => {
   const controller = new AbortController();
   const expired = Promise.withResolvers<string>();
+  const abort = () => { controller.abort(); expired.reject(new Error("managed build owner closed")); };
+  if (shutdown?.aborted) throw new Error("managed build owner closed");
+  shutdown?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => {
     controller.abort();
     expired.reject(new Error("build deadline expired"));
   }, Math.max(1, Math.min(45 * 60_000, deadline - ports.now())));
   try { return await Promise.race([ports.prepare(registration, commit, deadline, controller.signal, runtime), expired.promise]); }
-  finally { clearTimeout(timer); }
+  finally { clearTimeout(timer); shutdown?.removeEventListener("abort", abort); }
 };
 
 const openIndex = async (directory: string, mode: "initialize" | "existing", observer?: RegistrationObserver, journals = openJournal) => {
@@ -108,6 +111,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   let pendingIndex = Promise.resolve();
   const pendingApps = new Map<string, Promise<void>>();
   let closed = false;
+  const buildShutdown = new AbortController();
+  type ManagedBuildReceipt = { readonly id: string; readonly artifact: string; readonly registration: RegistrationGeneration; readonly commit: string; readonly deadline: number };
+  const pendingBuilds = new Map<string, Promise<ManagedBuildReceipt>>();
+  const buildQueues = new Map<string, Promise<void>>();
   const serialIndex = <T>(task: () => Promise<T>) => {
     const result = pendingIndex.then(task);
     pendingIndex = result.then(() => undefined, () => undefined);
@@ -286,6 +293,62 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const checked = parseDataOwnership({ version: 1, app, incarnation, dataOwner: owner.dataOwner });
     if (!checked.ok || owner.incarnation !== incarnation) throw new Error("managed data ownership disagrees with the registered application");
     return checked.value;
+  };
+
+  /** Managed builders wait outside the application writer. Only intent and authenticated receipt publication hold that writer. */
+  const prepareManagedBuild = async (app: string, commit: string, ports: BuildPorts) => {
+    const intent = await useIndexed(app, async (store, indexed) => {
+      if (indexed.protocol !== "managed-v3" || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("managed build scope unavailable");
+      const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
+      if (envelope?.registrationAllocation?.runtime !== "swarm") throw new Error("managed build requires its registered Swarm runtime");
+      if (envelope.managed?.some((request) => request.completion === null)) throw new Error("managed build is blocked while a deployment is unresolved");
+      const id = createHash("sha256").update(JSON.stringify({ registration, commit })).digest("hex");
+      return serialIndex(async () => {
+        const state = await readIndex(); const existing = state.builds.find((item) => item.id === id); if (existing !== undefined) return existing;
+        const requested = lifecycleIndexBuild.parse({ id, registration, commit, deadline: ports.now() + 45 * 60_000 });
+        await journal.write({ ...state, builds: [...state.builds, requested] }); return requested;
+      });
+    });
+    const receipt = (artifact: string) => Object.freeze({ id: intent.id, artifact, registration: intent.registration, commit: intent.commit, deadline: intent.deadline });
+    const authenticate = async (artifact: string) => {
+      const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(artifact));
+      if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== artifact) throw new Error("managed build artifact unavailable");
+      ports.images(bytes, intent.registration, intent.commit); return receipt(artifact);
+    };
+    if (intent.artifact !== null) return authenticate(intent.artifact);
+    const existing = pendingBuilds.get(intent.id); if (existing !== undefined) return existing;
+    const requireBuildWindow = () => { if (closed || ports.now() >= intent.deadline) throw new Error("managed build owner closed or original deadline expired"); };
+    const build = (buildQueues.get(app) ?? Promise.resolve()).then(async () => {
+      requireBuildWindow();
+      const content = await prepareBeforeDeadline(ports, intent.registration, intent.commit, intent.deadline, "swarm", buildShutdown.signal);
+      requireBuildWindow();
+      ports.images(content, intent.registration, intent.commit);
+      const artifact = await boundedManagedRead(intent.deadline, ports.now, () => ports.retain(content));
+      if (artifact === undefined || artifact !== createHash("sha256").update(content).digest("hex")) throw new Error("managed build artifact retention failed");
+      requireBuildWindow();
+      const selected = await useIndexed(app, async (store, indexed) => {
+        if (indexed.protocol !== "managed-v3" || JSON.stringify(verifiedRegistration(app, await store.read())) !== JSON.stringify(intent.registration)) throw new Error("managed build registration changed before receipt persistence");
+        return serialIndex(async () => {
+          const state = await readIndex(); const current = state.builds.find((item) => item.id === intent.id);
+          if (current?.deadline !== intent.deadline || JSON.stringify(current.registration) !== JSON.stringify(intent.registration)) throw new Error("managed build intent changed");
+          if (current.artifact !== null) return current.artifact;
+          requireBuildWindow();
+          await journal.write({ ...state, builds: state.builds.map((item) => item.id === intent.id ? { ...item, artifact } : item) }); return artifact;
+        });
+      });
+      return authenticate(selected);
+    });
+    const settled = build.then(() => undefined, () => undefined);
+    // eslint-disable-next-line functional/immutable-data -- preserves per-app builder serialization without holding the coordinator writer
+    buildQueues.set(app, settled);
+    // eslint-disable-next-line functional/immutable-data -- deduplicates one immutable build identity within this owner
+    pendingBuilds.set(intent.id, build);
+    try { return await build; } finally {
+      // eslint-disable-next-line functional/immutable-data -- release settled build flights without changing durable intents
+      if (pendingBuilds.get(intent.id) === build) pendingBuilds.delete(intent.id);
+      // eslint-disable-next-line functional/immutable-data -- releases only this build queue tail
+      if (buildQueues.get(app) === settled) buildQueues.delete(app);
+    }
   };
 
   const registrationProvisioning = (app: string, ticket: string, generation: string) => useIndexed(app, async (store) => {
@@ -494,7 +557,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (runtime === undefined) throw new Error("verified registration runtime is unavailable");
       return Object.freeze({ metadata, runtime });
     }),
-    prepareBuild: (app: string, commit: string, ports: BuildPorts) => useIndexed(app, async (store, indexed) => {
+    prepareBuild: async (app: string, commit: string, ports: BuildPorts) => {
+      const managed = await useIndexed(app, (_store, indexed) => Promise.resolve(indexed.protocol === "managed-v3"));
+      if (managed) return prepareManagedBuild(app, commit, ports);
+      return useIndexed(app, async (store, indexed) => {
       if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("build requires a full commit id");
       const envelope = await store.read();
       const registration = verifiedRegistration(app, envelope);
@@ -525,7 +591,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         await journal.write({ ...state, builds: state.builds.map((item) => item.id === id ? { ...item, artifact } : item) });
       });
       return Object.freeze({ id, artifact, registration, commit, deadline: intent.deadline });
-    }),
+      });
+    },
     previewPlan: (app: string, commit: string, ports: HttpPlanPort) => useReady(app, async (store) => {
       if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error("plan preview requires a full commit id");
       const envelope = await store.read();
@@ -950,6 +1017,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       useIndexed(app, (store) => store.reconcileRegistration(ticket, generation)),
     close: async () => {
       closed = true;
+      buildShutdown.abort();
+      await Promise.allSettled([...pendingBuilds.values()]);
       await Promise.all(pendingApps.values());
       await pendingIndex;
       await journal.close();

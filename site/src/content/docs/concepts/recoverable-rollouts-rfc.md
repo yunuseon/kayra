@@ -2470,3 +2470,14 @@ cessation records stay inside the deployment component. Clients display this
 progress separately from recovery outcome, release certification and current
 runtime health. A data compatibility fence continues to direct operators toward
 forward recovery and preservation of retained data.
+
+
+Managed build preparation records its immutable registration/commit intent under
+the application writer, then releases that writer while waiting for the isolated
+builder. Receipt publication reacquires the writer and rechecks registration and
+the original deadline. Same-build requests share one flight; different commits
+retain a separate per-app builder queue. Lifecycle reconciliation and reads can
+progress during a build. Shutdown cancels outstanding builder waits, and late
+output cannot publish after the owner closes. Existing Compose preparation is
+unchanged. This does not authorize builds during unresolved managed operations;
+that still requires the separate audited forward-recovery workflow.

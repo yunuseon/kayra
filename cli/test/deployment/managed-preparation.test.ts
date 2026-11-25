@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { managedIndexRuntimeFixture } from "./managed-index-runtime-fixture.ts";
+import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
 import { managedPreparation } from "../../src/server/deployment/managed-preparation.ts";
 import type { IndexedManagedRuntime } from "../../src/server/deployment/indexed-managed-lifecycle.ts";
 import type { OwnedVolumePort } from "../../src/contracts/owned-volume.ts";
@@ -94,4 +95,52 @@ test("a pending managed operation refuses legacy build entrypoints before creati
   for (let i = 0; i < 12; i++) { const state = await lab.index().tickManagedDeployment("shop", run, lab.runtime); if (state?.operation.phase === "complete") break; }
   const complete = await lab.index().managedRequestSource("shop", run, "b".repeat(40), lab.runtime); assert.ok(complete?.request.completion); lab.calls.length = 0;
   const build = await lab.index().prepareBuild("shop", "c".repeat(40), lab.ports.builds); assert.equal(build.commit, "c".repeat(40)); assert.deepEqual(lab.calls, ["builder"]);
+});
+
+test("managed builds release the app writer while preparing and deduplicate the same immutable build", { timeout: 10000 }, async (t) => {
+  const lab = await fixture(t); const entered = Promise.withResolvers<undefined>(); const output = Promise.withResolvers<string>(); let builds = 0;
+  const ports = { ...lab.ports.builds, prepare: () => { builds++; entered.resolve(undefined); return output.promise; } };
+  const first = lab.index().prepareBuild("shop", "c".repeat(40), ports); await entered.promise;
+  const second = lab.index().prepareBuild("shop", "c".repeat(40), ports);
+  try {
+    assert.equal((await lab.index().verifiedRegistration("shop")).app, "shop");
+    await lab.index().requestManagedDeployment("shop", lab.source, lab.runtime);
+    await lab.index().tickManagedDeployment("shop", lab.source.run, lab.runtime);
+    await lab.index().cancelManagedDeployment("shop", lab.source.run, lab.runtime);
+    for (let i = 0; i < 8; i++) { const value = await lab.index().tickManagedDeployment("shop", lab.source.run, lab.runtime); if (value?.operation.phase === "complete") break; }
+    assert.equal((await lab.index().managedState("shop", lab.runtime))?.operation.outcome, "absent"); assert.equal(builds, 1);
+  } finally { output.resolve(JSON.stringify({ commit: "c".repeat(40) })); }
+  const [a, b] = await Promise.all([first, second]); assert.deepEqual(a, b); assert.equal(builds, 1); assert.equal(a.deadline, 1000 + 45 * 60000);
+  assert.equal((await lab.index().managedState("shop", lab.runtime))?.active, null);
+});
+
+test("closing the managed build owner aborts an unresponsive builder and late output cannot publish a receipt", { timeout: 10000 }, async (t) => {
+  const lab = await fixture(t); const entered = Promise.withResolvers<undefined>(); const output = Promise.withResolvers<string>(); const aborted: boolean[] = [];
+  // Use the public port type to observe its cancellation signal even though this builder ignores cancellation.
+  const build = lab.index().prepareBuild("shop", "c".repeat(40), { ...lab.ports.builds, prepare: (_registration, _commit, _deadline, signal) => { signal.addEventListener("abort", () => { aborted.push(true); }, { once: true }); entered.resolve(undefined); return output.promise; } });
+  const rejected = assert.rejects(build, /owner closed/); await entered.promise; await lab.reopen(); await rejected; assert.deepEqual(aborted, [true]);
+  const before = await readFile(join(lab.directory, "state.json"), "utf8"); output.resolve(JSON.stringify({ commit: "c".repeat(40) })); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(await readFile(join(lab.directory, "state.json"), "utf8"), before);
+  const state = parseLifecycleAppIndex(JSON.parse(before));
+  const pending = state.builds.find((value) => value.commit === "c".repeat(40)); assert.ok(pending); assert.equal(pending.artifact, null);
+  const retry = await lab.index().prepareBuild("shop", "c".repeat(40), lab.ports.builds); assert.equal(retry.deadline, pending.deadline);
+});
+
+test("different managed commits keep their builder queue without blocking the coordinator or renewing queued deadlines", { timeout: 10000 }, async (t) => {
+  const lab = await fixture(t); const entered = Promise.withResolvers<undefined>(); const release = Promise.withResolvers<string>(); const commits: string[] = [];
+  const ports = { ...lab.ports.builds, prepare: (_registration: unknown, commit: string) => { commits.push(commit); if (commit === "c".repeat(40)) { entered.resolve(undefined); return release.promise; } return Promise.resolve(JSON.stringify({ commit })); } };
+  const first = lab.index().prepareBuild("shop", "c".repeat(40), ports); await entered.promise;
+  lab.clock(2000); const second = lab.index().prepareBuild("shop", "e".repeat(40), ports);
+  try { await lab.index().verifiedRegistration("shop"); await lab.index().verifiedRegistration("shop"); assert.deepEqual(commits, ["c".repeat(40)]); lab.clock(3000); }
+  finally { release.resolve(JSON.stringify({ commit: "c".repeat(40) })); }
+  const [a, b] = await Promise.all([first, second]); assert.deepEqual(commits, ["c".repeat(40), "e".repeat(40)]); assert.equal(a.deadline, 1000 + 45 * 60000); assert.equal(b.deadline, 2000 + 45 * 60000);
+});
+
+test("expired managed build intents survive restart without another builder call or scheduling window", async (t) => {
+  const lab = await fixture(t); const entered = Promise.withResolvers<undefined>(); const output = Promise.withResolvers<string>();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const build = lab.index().prepareBuild("shop", "c".repeat(40), { ...lab.ports.builds, prepare: () => { entered.resolve(undefined); return output.promise; } });
+  const rejected = assert.rejects(build, /deadline expired/); await entered.promise; lab.clock(1000 + 45 * 60000); t.mock.timers.tick(45 * 60000); await rejected; await lab.reopen();
+  lab.calls.length = 0; await assert.rejects(lab.index().prepareBuild("shop", "c".repeat(40), lab.ports.builds), /original deadline expired/); assert.deepEqual(lab.calls, []);
+  output.resolve("late output");
 });

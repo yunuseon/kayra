@@ -1,3 +1,4 @@
+import { reserveManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
 import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
 import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 import { settledMigrationPrefix } from "./migration-prefix.ts";
@@ -164,6 +165,9 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
     /** The index authenticates ownership/registration and retains artifacts before these synchronized reference-only transitions. */
     prepareManaged: (input: ManagedLifecycleSource, now: number) => serial(async () => {
       const next = prepareManagedEnvelope(await required(), input, now); if (next.changed) await persist(next.state); return next.request;
+    }),
+    reserveManagedForward: (input: Parameters<typeof reserveManagedForwardEnvelope>[1]) => serial(async () => {
+      const next = reserveManagedForwardEnvelope(await required(), input); if (next.changed) await persist(next.state); return next.reservation;
     }),
     completeManaged: (input: unknown, record: string) => serial(async () => {
       const next = completeManagedEnvelope(await required(), input, record); if (next.changed) await persist(next.state); return next.request;

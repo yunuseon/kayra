@@ -8,6 +8,7 @@ import { parseRegistrationGeneration } from "../../contracts/registration-genera
 import { httpReleasePlan, parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
+import { managedForwardReservation } from "./managed-forward-reservation.ts";
 import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
 import { parseRolloutRequest } from "./rollout-request.ts";
 
@@ -35,6 +36,7 @@ const shape = z.object({
   registrationAllocation: z.object({ generation: uuid, ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]).default("compose") }).strict().optional(),
   registrationReceipt: z.object({ ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]), metadata: z.unknown() }).strict().optional(),
   managed: z.array(z.unknown()).max(1024).optional(),
+  forward: z.unknown().optional(),
   http: z.unknown().optional(),
   rollout: z.unknown().optional(),
   rollouts: z.array(z.unknown()).max(1024).optional(),
@@ -155,10 +157,19 @@ export const parseLifecycleEnvelope = (input: unknown) => {
       return item.completion === null ? !bound.ok || bound.value.status !== "accepted" || !operations.some((operation) => operation.ticket === item.ticket && operation.action === item.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === item.plan) :
         lookup.value.status !== "expired" && (!bound.ok || bound.value.status !== "terminal" || bound.value.outcome !== item.completion.disposition);
     }) || operations.some((operation) => operation.descriptor.kind === "deploy" && !managed.some((item) => item.completion === null && item.action === operation.action && item.ticket === operation.ticket)))) return err("invalid managed lifecycle envelope");
+  const forward = (() => { try { return parsed.data.forward === undefined ? undefined : managedForwardReservation(parsed.data.forward); } catch { return null; } })();
+  if (forward === null) return err("invalid managed forward reservation");
+  if (forward !== undefined) {
+    const blocked = managed?.find((item) => item.run === forward.blocked.run); const lifecycle = fence.value?.lifecycle;
+    if (receipt?.runtime !== "swarm" || blocked?.completion !== null || JSON.stringify(blocked.owner) !== JSON.stringify(forward.owner) || blocked.source !== forward.blocked.source || managed?.some((item) => item.run === forward.run) ||
+      lifecycle?.phase !== "registered" || lifecycle.active === null || fence.value === null || lifecycleActionId(fence.value, lifecycle.active.sequence) !== blocked.action ||
+      Number(forward.action.split(":")[1]) !== fence.value.nextAction - 1 || Number(forward.action.split(":")[1]) <= lifecycle.active.sequence || JSON.stringify(receipt.metadata) !== JSON.stringify(forward.build.registration)) return err("managed forward reservation lacks its exclusive lifecycle");
+  }
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
     ...(managed === undefined ? {} : { managed: Object.freeze(managed) }),
+    ...(forward === undefined ? {} : { forward }),
     ...(http?.ok ? { http: http.value } : {}),
     ...(rollout === undefined ? {} : { rollout }),
     ...(rollouts === undefined ? {} : { rollouts: Object.freeze(rollouts) }) }));

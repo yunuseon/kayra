@@ -1,10 +1,13 @@
+import { managedForwardOperator } from "./managed-forward-reservation.ts";
+import { managedForwardRecoveryProposal } from "./managed-forward-recovery-proposal.ts";
+import { managedDeploymentEvidence } from "./managed-deployment-evidence.ts";
 import { preparedManagedForwardBuild } from "./managed-forward-build-state.ts";
 import { managedForwardSelection, managedForwardSelectionInput, managedForwardSelectionIntent, verifyManagedForwardSelectionBaseline } from "./managed-forward-selection.ts";
 import { parseManagedForwardSelectionRequest } from "../../contracts/managed-forward-selection.ts";
 import type { ManagedForwardSelectionRequest } from "../../contracts/managed-forward-selection.ts";
 import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
 import { managedMigrationAudit } from "./managed-migration-audit.ts";
-import { parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
+import { parseManagedApplicationPlan, managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import type { ManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
 import type { RetainedInputsPort } from "../../contracts/service-inputs.ts";
 import { managedSourceContext } from "./managed-source-context.ts";
@@ -18,7 +21,7 @@ import { managedDeploymentHealth } from "./managed-deployment-health.ts";
 import { managedImagePins } from "./managed-image-pins.ts";
 import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 import type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
-import { parseManagedLifecycleSource } from "./managed-lifecycle-source.ts";
+import { parseManagedLifecycleSource, managedLifecycleDescription } from "./managed-lifecycle-source.ts";
 import { indexedManagedLifecycle } from "./indexed-managed-lifecycle.ts";
 import type { IndexedManagedRuntime, IndexedManagedContext } from "./indexed-managed-lifecycle.ts";
 import { managedIndexGate, observeManagedIndexAdmission, reserveManagedIndexAdmission, settleManagedIndexAdmission } from "./managed-index-admission.ts";
@@ -70,7 +73,7 @@ import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
 
 const appName = z.string().regex(names.app.pattern);
-type ForwardSelectionUse<T> = (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown) => Promise<T>;
+type ForwardSelectionUse<T> = (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown, view: { readonly root: () => Promise<ManagedLifecycleStore>; readonly envelope: EnvelopeStore }) => Promise<T>;
 type ForwardBuildPorts = BuildPorts & { readonly authorizeSelection: ForwardSelectionPorts["authorize"] };
 type ForwardBuildContext = { readonly request: ManagedForwardSelectionRequest; readonly ports: ForwardSelectionPorts };
 type ForwardSelectionPorts = Pick<Parameters<typeof managedForwardSelection>[1], "now" | "read" | "retain" | "authorize">;
@@ -312,7 +315,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const current = async () => {
       if (root === undefined || unavailable) return undefined;
       const state = await rootState(); const envelope = await store.read(); const entry = (await serialIndex(readIndex)).apps.find((item) => item.app === app);
-      if (entry?.protocol !== "managed-v3" || entry.phase !== "ready" || entry.managedRoot !== "ready" || entry.dataOwner !== ownership.value.dataOwner || envelope?.fence?.lifecycle.phase !== "registered" || !envelope.managed?.some((item) => item.run === statement.blockedRun && item.completion === null) || state.operation.phase !== "held" || state.operation.run !== statement.blockedRun || JSON.stringify(state.owner) !== JSON.stringify(ownership.value)) return undefined;
+      if (entry?.protocol !== "managed-v3" || entry.phase !== "ready" || entry.managedRoot !== "ready" || envelope?.forward !== undefined || entry.dataOwner !== ownership.value.dataOwner || envelope?.fence?.lifecycle.phase !== "registered" || !envelope.managed?.some((item) => item.run === statement.blockedRun && item.completion === null) || state.operation.phase !== "held" || state.operation.run !== statement.blockedRun || JSON.stringify(state.owner) !== JSON.stringify(ownership.value)) return undefined;
       return Object.freeze({ status: "held" as const, checkpoint: createHash("sha256").update(JSON.stringify(state)).digest("hex"), registration: verifiedRegistration(app, envelope) });
     };
     try {
@@ -324,7 +327,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const state = await rootState(); const envelope = await store.read(); const accepted = envelope?.managed?.find((item) => item.run === statement.blockedRun);
         if (accepted?.completion !== null || state.operation.run !== accepted.run || state.operation.source !== accepted.source || envelope?.fence?.lifecycle.phase !== "registered") throw new Error("managed forward selection has no pending lifecycle request");
         const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(accepted.source)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== accepted.source) throw new Error("managed forward selection source unavailable");
-        const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source }); if (!gate.ok || bytes !== JSON.stringify(source)) throw new Error("managed forward selection source binding disagrees");
+        const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source }); if (!gate.ok || !gate.value.activeGate || bytes !== JSON.stringify(source)) throw new Error("managed forward selection source binding disagrees");
         const registration = verifiedRegistration(app, envelope); const input = managedForwardSelectionInput({ state, source, registration, request: statement, actor }); const createdAt = ports.now(); const planned = managedForwardSelectionIntent(input, createdAt);
         if (await boundedManagedRead(planned.source.preparationDeadline, ports.now, () => verifyManagedForwardSelectionBaseline(planned.source, ports)) !== true || await boundedManagedRead(planned.source.preparationDeadline, ports.now, () => ports.authorize(planned.audit)) !== true || ports.now() >= planned.source.preparationDeadline) throw new Error("managed forward selection baseline or operator authority unavailable");
         const catalog = lifecycleIndexForwardSelection.parse({ request: statement.request, identity, blockedRun: statement.blockedRun, checkpoint: createHash("sha256").update(JSON.stringify(state)).digest("hex"), blockedSource: state.operation.source, compatibilityEpoch: state.compatibilityEpoch, registration, createdAt, phase: "initializing", source: null, decision: null });
@@ -343,7 +346,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const input = prepared.input ?? (recorded === undefined ? await (async () => { const state = await rootState(); if (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== catalog.checkpoint || actor === undefined) throw new Error("managed forward selection initialization lost its baseline"); const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(catalog.blockedSource)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== catalog.blockedSource) throw new Error("managed forward selection source unavailable"); return { state, source: parseManagedLifecycleSource(JSON.parse(bytes)), registration: catalog.registration, request: statement, actor }; })() : { state: undefined, source: undefined, registration: undefined, request: statement, actor: actor ?? recorded.audit.actor });
         // Acquire owned journal handles before a timed permission callback can be abandoned.
         if (observeRoot) { try { await rootState(); } catch { unavailable = true; } }
-        return await use(selection, catalog, { ...input, createdAt: catalog.createdAt });
+        return await use(selection, catalog, { ...input, createdAt: catalog.createdAt }, { root: rootState, envelope: store });
       } finally { await child.close(); }
     } finally { if (root !== undefined) await root.close(); }
   };
@@ -501,6 +504,34 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return chosen;
       });
     },
+    reserveManagedForward: (app: string, request: ManagedForwardSelectionRequest, candidateInput: ManagedApplicationPlan, operatorInput: { readonly actor: MigrationResolutionActor; readonly reason: string }, ports: ForwardSelectionPorts & Pick<BuildPorts, "images"> & RetainedInputsPort & { readonly authorizeReservation: (decision: NonNullable<Awaited<ReturnType<ReturnType<typeof managedForwardSelection>["audit"]>>>, candidate: ManagedApplicationPlan, operator: ReturnType<typeof managedForwardOperator>) => Promise<boolean> }) => { const operator = managedForwardOperator(operatorInput); return withForwardSelection(app, request, undefined, ports, async (selection, catalog, _input, view) => {
+      const parsed = parseManagedApplicationPlan(candidateInput); if (!parsed.ok) throw new Error("invalid managed forward reservation plan"); const candidate = parsed.value;
+      const decision = await selection.audit(); const prepared = catalog.preparedBuild;
+      if (decision === undefined || prepared === undefined || catalog.source === null || catalog.decision !== decision.id || candidate.commit !== request.commit || candidate.artifact !== prepared.artifact || JSON.stringify(candidate.infrastructure.registration) !== JSON.stringify(catalog.registration)) throw new Error("managed forward reservation requires its selected prepared build");
+      const build = Object.freeze({ id: prepared.id, artifact: prepared.artifact, commit: request.commit, registration: catalog.registration, deadline: prepared.deadline }); const chosen = Object.freeze({ request: request.request, source: catalog.source, decision: decision.id });
+      const envelope = await view.envelope.read(); const existing = envelope?.forward;
+      if (existing !== undefined) {
+        if (JSON.stringify(existing.selection) !== JSON.stringify(chosen) || JSON.stringify(existing.build) !== JSON.stringify(build) || existing.candidate !== managedApplicationDigest(candidate) || JSON.stringify(existing.operator) !== JSON.stringify(operator)) throw new Error("managed forward reservation conflicts");
+        return existing;
+      }
+      const state = await view.root(); if (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== catalog.checkpoint) throw new Error("managed forward reservation held checkpoint changed");
+      const createdAt = ports.now(); const deadline = createdAt + 90_000;
+      const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(catalog.blockedSource)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== catalog.blockedSource) throw new Error("managed forward reservation source unavailable");
+      const source = parseManagedLifecycleSource(JSON.parse(bytes)); if (bytes !== JSON.stringify(source)) throw new Error("managed forward reservation source changed");
+      await managedDeploymentEvidence(state, source, { read: (digest) => boundedManagedRead(deadline, ports.now, () => ports.read(digest)).then((value) => { if (value === undefined) throw new Error("managed forward evidence unavailable"); return value; }) });
+      const artifact = await boundedManagedRead(deadline, ports.now, () => ports.read(prepared.artifact)); if (artifact === undefined || createHash("sha256").update(artifact).digest("hex") !== prepared.artifact) throw new Error("managed forward prepared artifact unavailable");
+      const images = ports.images(artifact, build.registration, build.commit); if (candidate.images.some((image) => !images.includes(image.source) && !images.includes(image.pull))) throw new Error("managed forward candidate images disagree with its build");
+      const charged = await serialIndex(async () => {
+        const index = await readIndex(); const description = managedLifecycleDescription(source); const operation = state.operation;
+        const observed = observeManagedIndexAdmission({ resources: index.resources, bindings: index.managedBindings ?? [] }, { owner: index.apps.find((item) => item.app === app), envelope, state, source }, { owner: state.owner, run: operation.run, action: operation.action, source: operation.source, plan: operation.plan, deadline: operation.admissionDeadline }, description.admission);
+        return observed.ok && observed.value === "reserved";
+      });
+      if (!charged || await boundedManagedRead(deadline, ports.now, () => ports.authorizeReservation(decision, candidate, operator)) !== true || ports.now() >= deadline) throw new Error("managed forward reservation lacks current authority or pending capacity");
+      const fence = envelope?.fence; if (fence === undefined || fence === null) throw new Error("managed forward reservation lifecycle unavailable");
+      await managedForwardRecoveryProposal(candidate, { run: request.request, action: lifecycleActionId(fence, fence.nextAction), createdAt, reason: operator.reason }, { state, source }, ports);
+      const content = JSON.stringify(candidate); if (await boundedManagedRead(deadline, ports.now, () => ports.retain(content)) !== managedApplicationDigest(candidate) || ports.now() >= deadline) throw new Error("managed forward candidate retention expired or unavailable");
+      return view.envelope.reserveManagedForward({ candidate, baseline: { state, source }, selection: chosen, build, createdAt, operator });
+    }); },
     managedForwardBuildGrant: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts) => withForwardSelection(app, request, undefined, ports, async (selection, catalog) => {
       if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
     }),

@@ -22,7 +22,7 @@ export const managedIndexScope = (input: Omit<Context, "state">) => {
     const volumesRegistered = [...Object.values(source.candidate.services), ...Object.values(source.previous?.source.application.services ?? {}), ...source.retired.map((item) => item.plan)].every((service) => service.mounts.every((mount) => entry.volumes.some((volume) => same(volume, mount.volume))));
     const completed = envelope.ok ? envelope.value.managed?.find((item) => item.run === source.run && item.source === managedLifecycleSourceDigest(source) && item.completion !== null) : undefined;
     if (entry.phase !== "ready" || entry.protocol !== "managed-v3" || !owner.ok || !same(owner.value, source.candidate.infrastructure.ownership) || !envelope.ok || !volumesRegistered || envelope.value.tickets.app !== entry.app || envelope.value.tickets.incarnation !== entry.incarnation || envelope.value.registrationReceipt?.runtime !== "swarm" || completed === undefined && !same(envelope.value.registrationReceipt.metadata, source.candidate.infrastructure.registration)) return err("managed accounting lacks indexed scope");
-    return ok(Object.freeze({ entry, owner: owner.value, source, managed: envelope.value.managed, operations: Object.freeze(envelope.value.operations.map((operation) => Object.freeze({ ...operation, descriptor: Object.freeze(operation.descriptor) }))), lifecyclePhase: envelope.value.fence?.lifecycle.phase, description }));
+    return ok(Object.freeze({ entry, owner: owner.value, source, managed: envelope.value.managed, operations: Object.freeze(envelope.value.operations.map((operation) => Object.freeze({ ...operation, descriptor: Object.freeze(operation.descriptor) }))), lifecyclePhase: envelope.value.fence?.lifecycle.phase, forwardPending: envelope.value.forward !== undefined, description }));
   } catch { return err("managed indexed scope is invalid"); }
 };
 export const managedIndexGate = (input: Omit<Context, "state">) => {
@@ -30,7 +30,7 @@ export const managedIndexGate = (input: Omit<Context, "state">) => {
   const request = scope.managed?.find((value) => value.run === source.run);
   if (request === undefined || !same(request.owner, scope.owner) || request.source !== managedLifecycleSourceDigest(source) || request.action !== source.action || request.plan !== scope.description.admission.planDigest || request.createdAt !== source.createdAt || request.admissionDeadline !== scope.description.admissionDeadline || request.deadline !== scope.description.deadline ||
     request.completion === null && !scope.operations.some((value) => value.ticket === request.ticket && value.action === request.action && value.descriptor.kind === "deploy" && value.descriptor.planDigest === request.plan)) return err("managed accounting request binding disagrees");
-  return ok(Object.freeze({ ...scope, request, activeGate: request.completion === null && scope.lifecyclePhase === "registered" }));
+  return ok(Object.freeze({ ...scope, request, activeGate: request.completion === null && scope.lifecyclePhase === "registered" && !scope.forwardPending }));
 };
 const authority = (input: Context, requested: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim) => {
   try {
@@ -39,7 +39,7 @@ const authority = (input: Context, requested: ManagedAdmissionIdentity, claim: M
       source.run !== operation.run || source.action !== operation.action || source.createdAt !== operation.createdAt || scope.request.source !== operation.source || operation.plan !== scope.description.admission.planDigest || operation.previous !== scope.description.previous || operation.previousPlan !== (scope.description.admission.previous === null ? null : managedApplicationDigest(scope.description.admission.previous)) || operation.admissionDeadline !== scope.description.admissionDeadline || operation.deadline !== scope.description.deadline ||
       managedApplicationDigest(claim.plan) !== operation.plan || claim.planDigest !== operation.plan || (claim.previous === null ? null : managedApplicationDigest(claim.previous)) !== operation.previousPlan ||
       scope.request.completion !== null && (operation.phase !== "complete" || scope.request.completion.outcome !== operation.outcome || scope.request.completion.rootSnapshot !== createHash("sha256").update(JSON.stringify(root)).digest("hex"))) return err("managed accounting lacks its indexed root");
-    return ok(Object.freeze({ root, source, activeGate: scope.activeGate }));
+    return ok(Object.freeze({ root, source, activeGate: scope.activeGate, forwardPending: scope.forwardPending }));
   } catch { return err("managed accounting context is invalid"); }
 };
 
@@ -54,7 +54,7 @@ export const reserveManagedIndexAdmission = (book: unknown, context: Context, ob
 };
 export const settleManagedIndexAdmission = (book: unknown, context: Context, identity: ManagedAdmissionIdentity, claim: ManagedAdmissionClaim, result: "target" | "previous" | "absent", unstarted: boolean) => {
   const checked = authority(context, identity, claim);
-  if (!checked.ok || !["settling", "complete"].includes(checked.value.root.operation.phase) || checked.value.root.operation.settlement !== result || (checked.value.root.operation.unstartedAt !== null) !== unstarted) return err("managed indexed settlement lacks its durable outcome");
+  if (!checked.ok || checked.value.forwardPending || !["settling", "complete"].includes(checked.value.root.operation.phase) || checked.value.root.operation.settlement !== result || (checked.value.root.operation.unstartedAt !== null) !== unstarted) return err("managed indexed settlement lacks its durable outcome");
   if (unstarted) { try { managedUnstartedSettlementSource(checked.value.root, checked.value.source); } catch { return err("managed indexed settlement lacks effect-free proof"); } return fenceUnstartedManagedAdmission(book, identity, claim); }
   return settleManagedAdmission(book, identity, claim, result);
 };

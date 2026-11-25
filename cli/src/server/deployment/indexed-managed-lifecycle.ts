@@ -44,7 +44,7 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
   const admission = context.admission(async () => { const state = await owner.read(); if (state === undefined) throw new Error("managed indexed root is missing"); return Object.freeze({ state, source: await owner.source() }); });
   const owner = managedLifecycleOwner(context.journal, context.ownership, { ...ports, admission, authorize: async (source, effect) => {
     const gate = managedIndexGate(await scope(source));
-    if (!gate.ok || gate.value.request.completion !== null) return false;
+    if (!gate.ok || gate.value.forwardPending || gate.value.request.completion !== null) return false;
     return effect.kind === "accepted-recovery" ? JSON.stringify(effect.request) === JSON.stringify(gate.value.request) : gate.value.activeGate && await ports.authorize(source, effect);
   } });
   const synchronize = async () => {
@@ -63,6 +63,7 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
     if (bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(value)) throw new Error("managed indexed source binding disagrees"); return source;
   };
   const resume = async (source: ManagedLifecycleSource, value: Awaited<ReturnType<typeof request>>) => {
+    if ((await context.envelope.read())?.forward !== undefined) throw new Error("managed forward continuation owns lifecycle");
     try { await owner.begin(source); } catch { await owner.adoptAccepted(source, value); }
     await synchronize();
   };

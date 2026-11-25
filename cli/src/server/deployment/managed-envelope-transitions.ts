@@ -15,6 +15,7 @@ export const prepareManagedEnvelope = (before: unknown, input: ManagedLifecycleS
   const source = parseManagedLifecycleSource(input); const description = managedLifecycleDescription(source); const identity = managedLifecycleSourceDigest(source);
   const existing = current.managed?.find((item) => item.run === source.run);
   if (existing !== undefined) { if (existing.source !== identity) throw new Error("managed lifecycle request conflicts"); return Object.freeze({ state: current, request: existing, changed: false }); }
+  if (current.forward !== undefined) throw new Error("managed forward continuation owns lifecycle");
   if (!Number.isSafeInteger(now) || now < source.createdAt || now >= description.admissionDeadline) throw new Error("managed lifecycle request admission expired");
   if (current.http !== undefined || current.rollout !== undefined || (current.rollouts?.length ?? 0) !== 0 || (current.managed?.length ?? 0) >= 1024 || current.registrationReceipt?.runtime !== "swarm" || JSON.stringify(current.registrationReceipt.metadata) !== JSON.stringify(source.candidate.infrastructure.registration) || source.candidate.infrastructure.ownership.app !== current.tickets.app || source.candidate.infrastructure.ownership.incarnation !== current.tickets.incarnation) throw new Error("managed lifecycle registration or protocol disagrees");
   const fence = beginLifecycleWork(current.fence, "deploy"); const reserved = reserveTicket(current.tickets); if (!fence.ok || !reserved.ok) throw new Error("managed lifecycle is busy or tickets exhausted");
@@ -26,6 +27,7 @@ export const prepareManagedEnvelope = (before: unknown, input: ManagedLifecycleS
 
 export const completeManagedEnvelope = (before: unknown, input: unknown, record: string) => {
   const current = envelope(before);
+  if (current.forward !== undefined) throw new Error("managed forward continuation owns lifecycle");
   const state = parseManagedLifecycleStore(input); const operation = state.operation; const request = current.managed?.find((item) => item.run === operation.run);
   if (request === undefined || JSON.stringify(state.owner) !== JSON.stringify(request.owner) || state.owner.app !== current.tickets.app || state.owner.incarnation !== current.tickets.incarnation || request.source !== operation.source || request.action !== operation.action || request.plan !== operation.plan || request.createdAt !== operation.createdAt || request.admissionDeadline !== operation.admissionDeadline || request.deadline !== operation.deadline || operation.phase !== "complete" || !operation.settled || operation.outcome === null || createHash("sha256").update(JSON.stringify(state)).digest("hex") !== record) throw new Error("managed completion requires its synchronized terminal root");
   const disposition = operation.cancelRequestedAt !== null ? "cancelled" as const : operation.outcome === "deployed" ? "success" as const : "failure" as const;

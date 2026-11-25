@@ -2600,3 +2600,25 @@ component-level guarantees tested with injected ports and journal interruptions;
 they are not yet an app-index-owned forward handoff or native integrated rollout
 acceptance. The parent continuation reservation and admission transfer remain
 required before this controller can be wired into normal execution.
+
+### Forward continuation reservation
+
+The owning app index can now reserve an initializing forward continuation after
+checking its audited selection, completed immutable build, held checkpoint,
+pending admission charge, current operator purpose, retained dependency
+compatibility and declared resource requirements. The candidate is retained by
+digest. The app envelope synchronizes the successor action allocation and its
+fixed 90-second preparation deadline together. It separately records the trusted
+operator and continuation reason; the build selection actor does not implicitly
+authorize recovery effects. Its active fence, accepted failed
+request, root, release pointers and admission charge remain with the held run.
+
+An initializing continuation blocks ordinary deployment, cancellation,
+migration-resolution, release settlement and new build grants for that held run.
+Read-only state, already prepared build receipts and reservation replay remain
+available. Replay authenticates the recorded decision and candidate without
+renewing the deadline or repairing a missing mutable root. A reservation grants
+no cleanup effects, activates no successor and completes no ticket. Cleanup
+source publication and journal initialization, followed by the actual admission
+handoff, remain separate required integration steps. Normal managed mutation
+dispatch is still disabled.

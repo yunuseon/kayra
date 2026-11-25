@@ -7,6 +7,11 @@ import { parseRegistrationGeneration } from "../../contracts/registration-genera
 import { parseManagedAdmissionAccounting } from "./managed-admission-binding.ts";
 
 const appName = z.string().regex(names.app.pattern);
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+export const lifecycleIndexForwardSelection = z.object({ request: z.uuid(), identity: digest, blockedRun: z.uuid(), checkpoint: digest, blockedSource: digest, compatibilityEpoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  registration: z.object({ version: z.literal(1), app: appName, incarnation: z.uuid(), actionId: z.string(), registrationGeneration: z.uuid() }).strict().readonly(),
+  createdAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), phase: z.enum(["initializing", "ready"]), source: digest.nullable(), decision: digest.nullable(),
+}).strict().refine((value) => value.request !== value.blockedRun && parseRegistrationGeneration(value.registration).ok && (value.phase === "ready" ? value.source !== null && value.decision !== null : value.source === null && value.decision === null)).readonly();
 export const lifecycleIndexEntry = z.object({
   app: appName,
   incarnation: z.uuid(),
@@ -15,8 +20,9 @@ export const lifecycleIndexEntry = z.object({
   protocol: z.literal("managed-v3").exactOptional(),
   managedVolumes: z.literal(1).exactOptional(),
   managedRoot: z.enum(["empty", "ready"]).exactOptional(),
+  forwardSelections: z.array(lifecycleIndexForwardSelection).max(128).readonly().exactOptional(),
   phase: z.enum(["initializing", "ready"]),
-}).strict().refine((owner) => (owner.protocol === "managed-v3") === (owner.managedRoot !== undefined) && (owner.protocol !== "managed-v3" || parseDataOwnership({ version: 1, app: owner.app, incarnation: owner.incarnation, dataOwner: owner.dataOwner }).ok) && (owner.managedVolumes === undefined || owner.protocol === "managed-v3") && owner.volumes.every((volume) => volume.app === owner.app && volume.dataOwner === owner.dataOwner) &&
+}).strict().refine((owner) => (owner.forwardSelections === undefined || owner.protocol === "managed-v3" && owner.phase === "ready" && owner.managedRoot === "ready" && new Set(owner.forwardSelections.map((item) => item.request)).size === owner.forwardSelections.length && owner.forwardSelections.every((item) => item.registration.app === owner.app && item.registration.incarnation === owner.incarnation)) && (owner.protocol === "managed-v3") === (owner.managedRoot !== undefined) && (owner.protocol !== "managed-v3" || parseDataOwnership({ version: 1, app: owner.app, incarnation: owner.incarnation, dataOwner: owner.dataOwner }).ok) && (owner.managedVolumes === undefined || owner.protocol === "managed-v3") && owner.volumes.every((volume) => volume.app === owner.app && volume.dataOwner === owner.dataOwner) &&
   new Set(owner.volumes.map((volume) => volume.key)).size === owner.volumes.length &&
   new Set(owner.volumes.map((volume) => volume.allocation)).size === owner.volumes.length).readonly();
 export const lifecycleIndexBuild = z.object({

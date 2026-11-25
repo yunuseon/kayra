@@ -2521,3 +2521,19 @@ This component supplies no builder or workload effects. Ordinary preparation sti
 refuses unresolved deployments; composition must authenticate the decision before
 a future guarded forward-build entrypoint can consume it. It does not authorize
 migration execution, admission transfer or successor activation.
+
+
+The app index owns decision discovery and initialization. An initializing catalog
+record pins request/actor identity, held checkpoint, data epoch, target registration
+and initiation time before creating a private child journal. A separate published
+marker pins the completed decision ID and source digest. Recovery reconciles a
+partially initialized decision using those original values; a known published
+journal that is missing or substituted is refused. Read-only historical replay
+uses the retained decision source without reopening the mutable root. Build
+permission still requires the current registered, held lifecycle. Actor denial
+or invalid baseline evidence is checked before registering a new intent.
+
+No application capacity is settled or transferred by selection. The previous
+held root, verified/historical pointers and pending charge remain unchanged.
+The index exposes this internal owner operation; normal public mutation dispatch
+and the actual guarded build consumer remain disabled.

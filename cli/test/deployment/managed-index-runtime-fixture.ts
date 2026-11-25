@@ -13,8 +13,8 @@ import { parseManagedLifecycleSource } from "../../src/server/deployment/managed
 import type { IndexedManagedRuntime } from "../../src/server/deployment/indexed-managed-lifecycle.ts";
 import { typed } from "../../src/lib/typed.ts";
 
-export const managedIndexRuntimeFixture = async (t: TestContext, failMigration = false) => {
-  const lab = await managedIndexFixture(t); const candidate = parseManagedApplicationPlan({ ...lab.plan, rollout: { ...lab.plan.rollout, migrations: lab.plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["/status"], timeout_seconds: 10 } })) } }); assert.ok(candidate.ok);
+export const managedIndexRuntimeFixture = async (t: TestContext, failMigration = false, journals?: Parameters<typeof managedIndexFixture>[1]) => {
+  const lab = await managedIndexFixture(t, journals); const candidate = parseManagedApplicationPlan({ ...lab.plan, rollout: { ...lab.plan.rollout, migrations: lab.plan.rollout.migrations.map((step) => ({ ...step, recovery: { kind: "status-probe", command: ["/status"], timeout_seconds: 10 } })) } }); assert.ok(candidate.ok);
   const source = parseManagedLifecycleSource({ ...lab.source, candidate: candidate.value }); const services = new Map<string, ServiceObservation>(); const jobs = new Map<string, ReturnType<typeof jobRuntime>>();
   const node = (job: JobPlan) => { const key = jobName(job.scope); let value = jobs.get(key); if (value === undefined) { value = jobRuntime(job); jobs.set(key, value); } return value; };
   const unreachable = () => Promise.reject(new Error("unexpected workload cleanup"));

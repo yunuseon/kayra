@@ -1,3 +1,6 @@
+import { managedForwardSelection, managedForwardSelectionInput, managedForwardSelectionIntent, verifyManagedForwardSelectionBaseline } from "./managed-forward-selection.ts";
+import { parseManagedForwardSelectionRequest } from "../../contracts/managed-forward-selection.ts";
+import type { ManagedForwardSelectionRequest } from "../../contracts/managed-forward-selection.ts";
 import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
 import { managedMigrationAudit } from "./managed-migration-audit.ts";
 import { parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
@@ -20,7 +23,7 @@ import type { IndexedManagedRuntime, IndexedManagedContext } from "./indexed-man
 import { managedIndexGate, observeManagedIndexAdmission, reserveManagedIndexAdmission, settleManagedIndexAdmission } from "./managed-index-admission.ts";
 import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 import type { ManagedAdmissionIdentity, ManagedAdmissionClaim } from "../../contracts/managed-admission.ts";
-import { parseLifecycleAppIndex, lifecycleIndexEntry, lifecycleIndexBuild } from "./lifecycle-app-index-state.ts";
+import { parseLifecycleAppIndex, lifecycleIndexEntry, lifecycleIndexBuild, lifecycleIndexForwardSelection } from "./lifecycle-app-index-state.ts";
 import type { IndexEntry } from "./lifecycle-app-index-state.ts";
 import { parseRegistrationOwnership } from "../../contracts/registration-ownership.ts";
 import { ownedVolume, ownedVolumeSchema, ownedVolumeKeySchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
@@ -42,7 +45,7 @@ import type { RolloutPlanPort } from "../../contracts/rollout-plan.ts";
 import type { rolloutPreparation } from "./rollout-preparation.ts";
 import type { resolveRolloutMigration } from "./rollout-resolution.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
-import { parseMigrationResolutionQuery } from "../../contracts/migration-resolution.ts";
+import { parseMigrationResolutionActor, parseMigrationResolutionQuery } from "../../contracts/migration-resolution.ts";
 import type { HostObserver } from "../../contracts/resource-authority.ts";
 import { reserveResources, resourceHostReady, settleResources } from "./resource-book.ts";
 import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
@@ -66,6 +69,7 @@ import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
 
 const appName = z.string().regex(names.app.pattern);
+type ForwardSelectionPorts = Pick<Parameters<typeof managedForwardSelection>[1], "now" | "read" | "retain" | "authorize">;
 type EnvelopeStore = ReturnType<typeof openLifecycleEnvelopeStore>;
 
 const missing = (error: unknown) => error && typeof error === "object" && "code" in error && error.code === "ENOENT";
@@ -295,6 +299,47 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return checked.value;
   };
 
+  const withForwardSelection = <T>(app: string, request: ManagedForwardSelectionRequest, actor: MigrationResolutionActor | undefined, ports: ForwardSelectionPorts, use: (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+    const checked = parseManagedForwardSelectionRequest(request); if (!checked.ok || checked.value.app !== app || indexed.protocol !== "managed-v3" || indexed.managedRoot !== "ready") throw new Error("managed forward selection scope unavailable");
+    const statement = checked.value; const identity = actor === undefined ? undefined : createHash("sha256").update(JSON.stringify({ request: statement, actor })).digest("hex");
+    const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner }); if (!ownership.ok) throw new Error("managed forward selection ownership unavailable");
+    const parent = join(appDirectory(app), "managed"); let root: Awaited<ReturnType<typeof journals>> | undefined;
+    const rootState = async () => { if (root === undefined) { await requireDirectory(parent); root = await journals(parent, "existing"); } return parseManagedLifecycleStore(await root.read()); };
+    const current = async () => {
+      const state = await rootState(); const envelope = await store.read(); const entry = (await serialIndex(readIndex)).apps.find((item) => item.app === app);
+      if (entry?.protocol !== "managed-v3" || entry.phase !== "ready" || entry.managedRoot !== "ready" || entry.dataOwner !== ownership.value.dataOwner || envelope?.fence?.lifecycle.phase !== "registered" || !envelope.managed?.some((item) => item.run === statement.blockedRun && item.completion === null) || state.operation.phase !== "held" || state.operation.run !== statement.blockedRun || JSON.stringify(state.owner) !== JSON.stringify(ownership.value)) return undefined;
+      return Object.freeze({ status: "held" as const, checkpoint: createHash("sha256").update(JSON.stringify(state)).digest("hex"), registration: verifiedRegistration(app, envelope) });
+    };
+    try {
+      const existing = indexed.forwardSelections?.find((item) => item.request === statement.request);
+      if (actor === undefined && existing?.phase !== "ready") throw new Error("managed forward selection is not durably published");
+      if (existing !== undefined && identity !== undefined && existing.identity !== identity) throw new Error("managed forward selection request conflicts");
+      const prepared = existing === undefined ? await (async () => {
+        if (identity === undefined || actor === undefined) throw new Error("managed forward selection requires an audited operator decision");
+        const state = await rootState(); const envelope = await store.read(); const accepted = envelope?.managed?.find((item) => item.run === statement.blockedRun);
+        if (accepted?.completion !== null || state.operation.run !== accepted.run || state.operation.source !== accepted.source || envelope?.fence?.lifecycle.phase !== "registered") throw new Error("managed forward selection has no pending lifecycle request");
+        const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(accepted.source)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== accepted.source) throw new Error("managed forward selection source unavailable");
+        const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source }); if (!gate.ok || bytes !== JSON.stringify(source)) throw new Error("managed forward selection source binding disagrees");
+        const registration = verifiedRegistration(app, envelope); const input = managedForwardSelectionInput({ state, source, registration, request: statement, actor }); const createdAt = ports.now(); const planned = managedForwardSelectionIntent(input, createdAt);
+        if (await boundedManagedRead(planned.source.preparationDeadline, ports.now, () => verifyManagedForwardSelectionBaseline(planned.source, ports)) !== true || await boundedManagedRead(planned.source.preparationDeadline, ports.now, () => ports.authorize(planned.audit)) !== true || ports.now() >= planned.source.preparationDeadline) throw new Error("managed forward selection baseline or operator authority unavailable");
+        const catalog = lifecycleIndexForwardSelection.parse({ request: statement.request, identity, blockedRun: statement.blockedRun, checkpoint: createHash("sha256").update(JSON.stringify(state)).digest("hex"), blockedSource: state.operation.source, compatibilityEpoch: state.compatibilityEpoch, registration, createdAt, phase: "initializing", source: null, decision: null });
+        await serialIndex(async () => { const snapshot = await readIndex(); const owner = snapshot.apps.find((item) => item.app === app); if (owner?.incarnation !== indexed.incarnation || (owner.forwardSelections?.length ?? 0) >= 128 || owner.forwardSelections?.some((item) => item.request === statement.request)) throw new Error("managed forward selection catalog changed or is full"); await journal.write({ ...snapshot, apps: snapshot.apps.map((item) => item.app === app ? { ...item, forwardSelections: [...(item.forwardSelections ?? []), catalog] } : item) }); });
+        return Object.freeze({ catalog, input });
+      })() : Object.freeze({ catalog: existing, input: undefined });
+      const catalog = prepared.catalog; if (catalog.blockedRun !== statement.blockedRun) throw new Error("managed forward selection blocked run conflicts");
+      await requireDirectory(parent); const group = join(parent, "forward"); const path = join(group, statement.request);
+      if (catalog.phase === "initializing") { if (await stat(group) === undefined) await mkdir(group, { mode: 0o700 }); await requireDirectory(group); await syncDirectory(parent); if (await stat(path) === undefined) await mkdir(path, { mode: 0o700 }); await requireDirectory(path); await syncDirectory(group); }
+      else { await requireDirectory(group); await requireDirectory(path); }
+      const child = await journals(path, catalog.phase === "ready" ? "existing" : "initialize");
+      try {
+        const selection = managedForwardSelection(child, { ...ports, current }); const recorded = await selection.read();
+        if (recorded !== undefined && (JSON.stringify(recorded.audit.request) !== JSON.stringify(statement) || JSON.stringify(recorded.audit.owner) !== JSON.stringify(ownership.value) || recorded.audit.blocked.checkpoint !== catalog.checkpoint || recorded.audit.blocked.source !== catalog.blockedSource || recorded.audit.blocked.compatibilityEpoch !== catalog.compatibilityEpoch || recorded.audit.createdAt !== catalog.createdAt || JSON.stringify(recorded.audit.registration) !== JSON.stringify(catalog.registration) || createHash("sha256").update(JSON.stringify({ request: recorded.audit.request, actor: recorded.audit.actor })).digest("hex") !== catalog.identity || catalog.phase === "ready" && (recorded.id !== catalog.decision || recorded.source !== catalog.source)) || catalog.phase === "ready" && recorded === undefined) throw new Error("managed forward selection catalog binding disagrees");
+        const input = prepared.input ?? (recorded === undefined ? await (async () => { const state = await rootState(); if (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== catalog.checkpoint || actor === undefined) throw new Error("managed forward selection initialization lost its baseline"); const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(catalog.blockedSource)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== catalog.blockedSource) throw new Error("managed forward selection source unavailable"); return { state, source: parseManagedLifecycleSource(JSON.parse(bytes)), registration: catalog.registration, request: statement, actor }; })() : { state: undefined, source: undefined, registration: undefined, request: statement, actor: actor ?? recorded.audit.actor });
+        return await use(selection, catalog, { ...input, createdAt: catalog.createdAt });
+      } finally { await child.close(); }
+    } finally { if (root !== undefined) await root.close(); }
+  });
+
   /** Managed builders wait outside the application writer. Only intent and authenticated receipt publication hold that writer. */
   const prepareManagedBuild = async (app: string, commit: string, ports: BuildPorts) => {
     const intent = await useIndexed(app, async (store, indexed) => {
@@ -421,6 +466,17 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return ownership.incarnation;
     })),
     deploymentProtocol: (app: string) => useIndexed(app, (_store, indexed) => Promise.resolve(indexed.protocol === "managed-v3" ? "managed-v3" as const : "legacy" as const)),
+    selectManagedForward: (app: string, request: ManagedForwardSelectionRequest, actorInput: MigrationResolutionActor, ports: ForwardSelectionPorts) => {
+      const actor = parseMigrationResolutionActor(actorInput); if (!actor.ok) return Promise.reject(new Error("invalid forward selection operator identity"));
+      return withForwardSelection(app, request, actor.value, ports, async (selection, catalog, input) => {
+        const chosen = await selection.select(input);
+        if (catalog.phase === "initializing") await serialIndex(async () => { const state = await readIndex(); const entry = state.apps.find((item) => item.app === app); const existing = entry?.forwardSelections?.find((item) => item.request === request.request); if (JSON.stringify(existing) !== JSON.stringify(catalog)) throw new Error("managed forward selection catalog changed before publication"); await journal.write({ ...state, apps: state.apps.map((item) => item.app === app ? { ...item, forwardSelections: (item.forwardSelections ?? []).map((value) => value.request === request.request ? { ...value, phase: "ready" as const, source: chosen.source, decision: chosen.id } : value) } : item) }); });
+        return chosen;
+      });
+    },
+    managedForwardBuildGrant: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts) => withForwardSelection(app, request, undefined, ports, async (selection, catalog) => {
+      if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
+    }),
     retainedManagedBuild: (app: string, commit: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
       if (indexed.protocol !== "managed-v3" || !/^[a-f0-9]{40}$/.test(commit)) throw new Error("managed build receipt scope unavailable");
       const registration = verifiedRegistration(app, await store.read()); const state = await serialIndex(readIndex);

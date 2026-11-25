@@ -539,3 +539,9 @@ test("a parent-pinned forward selection window cannot be renewed while its child
   await lab.reopen(); await assert.rejects(lab.owner().select({ ...lab.input, createdAt: 2000 }), /conflicts/); assert.deepEqual(await lab.owner().select({ ...lab.input, createdAt: 1000 }), selected);
   const expired = await forwardSelectionFixture(t); expired.clock(91000); await assert.rejects(expired.owner().select({ ...expired.input, createdAt: 1000 }), /preparation deadline expired/); assert.equal(await expired.owner().read(), undefined);
 });
+
+test("forward decision snapshots cannot substitute a different source under the same held checkpoint", async (t) => {
+  const lab = await forwardSelectionFixture(t); const changed = parseManagedLifecycleSource({ ...lab.input.source, candidate: { ...lab.input.source.candidate, commit: "f".repeat(40) } });
+  await assert.rejects(lab.owner().select({ ...lab.input, source: changed }), /exact ownership/); assert.equal(await lab.owner().read(), undefined); assert.deepEqual(await lab.lab.owner().read(), lab.held);
+  assert.ok(await lab.owner().select(lab.input));
+});

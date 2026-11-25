@@ -17,21 +17,33 @@ const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const hash = (input: unknown) => createHash("sha256").update(JSON.stringify(input)).digest("hex");
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const selectionInput = z.object({ state: z.unknown(), source: z.unknown(), registration: z.unknown(), request: z.unknown(), actor: z.unknown(), createdAt: time.optional() }).strict();
-const selection = (input: unknown) => {
+export const managedForwardSelectionInput = (input: unknown) => {
   const raw = selectionInput.parse(input);
   const state = parseManagedLifecycleStore(raw.state); const source = parseManagedLifecycleSource(raw.source); const registration = parseRegistrationGeneration(raw.registration); const request = parseManagedForwardSelectionRequest(raw.request); const actor = parseMigrationResolutionActor(raw.actor);
   if (!registration.ok || !request.ok || !actor.ok || state.owner.app !== request.value.app || state.operation.run !== request.value.blockedRun || state.operation.run === request.value.request || registration.value.app !== state.owner.app || registration.value.incarnation !== state.owner.incarnation || !same(source.candidate.infrastructure.ownership, state.owner) ||
-    state.operation.phase !== "held" || !state.operation.admitted || state.operation.settled || state.operation.recoverySource !== null || state.operation.compatibilityFencedAt === null || source.candidate.rollout.strategy !== "maintenance" || settledMigrationPrefix(state.operation.preparation?.sequence ?? null) === undefined) throw new Error("forward selection requires a resolved held maintenance data epoch and exact ownership");
+    state.operation.source !== hash(source) || state.operation.run !== source.run || state.operation.action !== source.action || state.operation.createdAt !== source.createdAt || state.operation.phase !== "held" || !state.operation.admitted || state.operation.settled || state.operation.recoverySource !== null || state.operation.compatibilityFencedAt === null || source.candidate.rollout.strategy !== "maintenance" || settledMigrationPrefix(state.operation.preparation?.sequence ?? null) === undefined) throw new Error("forward selection requires a resolved held maintenance data epoch and exact ownership");
   return Object.freeze({ state, source, registration: registration.value, request: request.value, actor: actor.value });
 };
 const source = (input: unknown) => {
-  const raw = z.object({ version: z.literal(1), selection: z.unknown(), createdAt: time, preparationDeadline: time, buildDeadline: time }).strict().readonly().parse(input); const chosen = selection(raw.selection);
+  const raw = z.object({ version: z.literal(1), selection: z.unknown(), createdAt: time, preparationDeadline: time, buildDeadline: time }).strict().readonly().parse(input); const chosen = managedForwardSelectionInput(raw.selection);
   if (raw.preparationDeadline !== raw.createdAt + 90_000 || raw.buildDeadline !== raw.createdAt + 45 * 60_000 || raw.createdAt < (chosen.state.operation.compatibilityFencedAt ?? Infinity)) throw new Error("forward selection deadlines disagree");
   return Object.freeze({ ...raw, selection: chosen });
 };
 const audit = (value: ReturnType<typeof source>) => Object.freeze({ version: 1 as const, owner: value.selection.state.owner, registration: value.selection.registration,
   blocked: Object.freeze({ run: value.selection.state.operation.run, source: value.selection.state.operation.source, checkpoint: hash(value.selection.state), compatibilityEpoch: value.selection.state.compatibilityEpoch }),
   request: value.selection.request, actor: value.selection.actor, createdAt: value.createdAt, preparationDeadline: value.preparationDeadline, buildDeadline: value.buildDeadline });
+/** Pure canonical intent, so the owning index can authorize before registering initialization. */
+export const managedForwardSelectionIntent = (input: unknown, createdAt: number) => {
+  const value = source({ version: 1, selection: managedForwardSelectionInput(input), createdAt, preparationDeadline: createdAt + 90_000, buildDeadline: createdAt + 45 * 60_000 });
+  return Object.freeze({ source: value, audit: audit(value) });
+};
+/** Read-only validation; callers bound the entire inspection before publishing any intent. */
+export const verifyManagedForwardSelectionBaseline = async (value: ReturnType<typeof managedForwardSelectionIntent>["source"], ports: { readonly read: (digest: string) => Promise<string>; readonly now: () => number }) => {
+  const chosen = value.selection; await managedDeploymentEvidence(chosen.state, chosen.source, ports);
+  const inspected = await managedHistorySelection(chosen.state, { restore: null, plan: null, commit: chosen.request.commit }, { read: ports.read, expired: () => ports.now() >= value.preparationDeadline });
+  if ("historical" in inspected && inspected.historical !== null && inspected.historical.epoch !== chosen.state.compatibilityEpoch) throw new Error("forward selection cannot choose an earlier data epoch");
+  return true;
+};
 const schema = z.object({ version: z.literal(1), source: digest, audit: z.unknown(), id: digest }).strict().readonly();
 const parseState = (input: unknown) => {
   const raw = schema.parse(input);
@@ -71,11 +83,9 @@ export const managedForwardSelection = (journal: OperationJournal, ports: Ports)
       const raw = selectionInput.parse(input); const request = parseManagedForwardSelectionRequest(raw.request); const actor = parseMigrationResolutionActor(raw.actor); if (!request.ok || !actor.ok) throw new Error("invalid managed forward selection request or actor");
       const existing = await load();
       if (existing !== undefined) { if (!same(existing.audit.request, request.value) || !same(existing.audit.actor, actor.value) || raw.createdAt !== undefined && raw.createdAt !== existing.audit.createdAt) throw new Error("forward selection request conflicts"); await retained(existing); return existing; }
-      const chosen = selection(raw);
-      const at = raw.createdAt ?? now(); if (now() < at || now() >= at + 90_000) throw new Error("forward selection preparation deadline expired"); const value = source({ version: 1, selection: chosen, createdAt: at, preparationDeadline: at + 90_000, buildDeadline: at + 45 * 60_000 }); const statement = audit(value);
-      const evidence = await bounded(value.preparationDeadline, () => managedDeploymentEvidence(chosen.state, chosen.source, { read: (identity) => ports.read(identity) })); if (evidence === undefined) throw new Error("forward selection baseline evidence unavailable");
-      const inspected = await bounded(value.preparationDeadline, () => managedHistorySelection(chosen.state, { restore: null, plan: null, commit: chosen.request.commit }, { read: ports.read, expired: () => now() >= value.preparationDeadline }));
-      if (inspected === undefined || "historical" in inspected && inspected.historical !== null && inspected.historical.epoch !== chosen.state.compatibilityEpoch) throw new Error("forward selection cannot choose an earlier data epoch or unavailable history");
+      const chosen = managedForwardSelectionInput(raw);
+      const at = raw.createdAt ?? now(); if (now() < at || now() >= at + 90_000) throw new Error("forward selection preparation deadline expired"); const planned = managedForwardSelectionIntent(chosen, at); const value = planned.source; const statement = planned.audit;
+      if (await bounded(value.preparationDeadline, () => verifyManagedForwardSelectionBaseline(value, ports)) !== true) throw new Error("forward selection baseline evidence unavailable or incompatible");
       if (!await current(statement, value.preparationDeadline) || await bounded(value.preparationDeadline, () => ports.authorize(statement)) !== true) throw new Error("forward selection lacks current operator authority");
       const bytes = JSON.stringify(value); const identity = createHash("sha256").update(bytes).digest("hex"); if (await bounded(value.preparationDeadline, () => ports.retain(bytes)) !== identity || now() >= value.preparationDeadline || !await current(statement, value.preparationDeadline)) throw new Error("forward selection preparation expired or changed");
       if (await bounded(value.preparationDeadline, () => ports.authorize(statement)) !== true || !await current(statement, value.preparationDeadline) || now() >= value.preparationDeadline) throw new Error("forward selection operator authority expired");

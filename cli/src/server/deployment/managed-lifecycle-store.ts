@@ -1,3 +1,4 @@
+import { managedHistorySelection } from "./managed-history-selection.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parseDataOwnership } from "../../contracts/owned-volume.ts";
@@ -26,7 +27,6 @@ import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 import type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 export { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 export type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
-const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const hash = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 type Ports = { readonly now: () => number; readonly retain: (bytes: string) => Promise<string>; readonly read: (digest: string) => Promise<string> };
@@ -94,24 +94,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       if (current === undefined) throw new Error("managed restore lacks verified release history");
       const selected = await metadata(async () => {
         const deadline = performance.now() + 10_000;
-        // eslint-disable-next-line functional/no-let -- follows only synchronized, content-addressed history under one metadata deadline
-        let cursor = current;
-        // eslint-disable-next-line functional/no-let -- remembers an old match while searching for any subsequently verified compatible copy
-        let historical: ManagedLifecycleStore["active"] = null;
-        for (;;) {
-          if (performance.now() >= deadline) throw new Error("managed release history inspection expired");
-          const pointers = Object.freeze([cursor.active, ...(cursor.lastGood?.record === cursor.active?.record ? [] : [cursor.lastGood])].filter((item) => item !== null));
-          for (const pointer of pointers) {
-            if (value.restore !== null) { if (pointer.record === value.restore) return pointer; continue; }
-            const bytes = await artifact(pointer.record); const release = parseManagedRelease(JSON.parse(bytes)); const application = release.source.application;
-            if (bytes !== JSON.stringify(release) || !same(application.infrastructure.ownership, owner) || managedApplicationDigest(application) !== pointer.plan || release.verification.run !== pointer.run || release.verification.verified?.at !== pointer.verifiedAt) throw new Error("managed compatibility history release disagrees");
-            if (pointer.epoch === current.compatibilityEpoch && pointer.plan === description.admission.planDigest) return pointer;
-            if (pointer.epoch < current.compatibilityEpoch && application.commit === value.candidate.commit) historical = pointer;
-          }
-          if (cursor.history === null) { if (value.restore !== null) throw new Error("unknown managed restore record"); return Object.freeze({ historical }); }
-          const bytes = await artifact(cursor.history); const raw: unknown = JSON.parse(bytes); const archive = z.object({ previous: digest.nullable(), state: z.unknown() }).strict().parse(raw); const prior = parseManagedLifecycleStore(archive.state);
-          if (!same(prior.owner, owner) || archive.previous !== prior.history || prior.sequence >= cursor.sequence || prior.compatibilityEpoch > cursor.compatibilityEpoch) throw new Error("managed restore history disagrees"); cursor = prior;
-        }
+        return managedHistorySelection(current, { restore: value.restore, plan: description.admission.planDigest, commit: value.candidate.commit }, { read: artifact, expired: () => performance.now() >= deadline });
       });
       const release = "historical" in selected ? selected.historical : selected;
       if (value.restore !== null && release !== null && release.plan !== description.admission.planDigest) throw new Error("managed restore candidate differs from its verified release");

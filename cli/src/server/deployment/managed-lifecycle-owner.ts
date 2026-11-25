@@ -1,3 +1,4 @@
+import { managedForwardRecoveryProposal } from "./managed-forward-recovery-proposal.ts";
 import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
 import type { ManagedVolumePreparationPort } from "../../contracts/managed-volume-preparation.ts";
 import type { DataOwnership } from "../../contracts/owned-volume.ts";
@@ -170,6 +171,12 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
     propose: async (candidate: Parameters<typeof managedDeploymentProposal>[0], request: Parameters<typeof managedDeploymentProposal>[2], inputs: Pick<Parameters<typeof managedDeploymentProposal>[4], "compare">) => {
       const current = await store.read(); const baseline = current === undefined ? null : Object.freeze({ state: current, source: await store.source() });
       const source = await managedDeploymentProposal(candidate, owner, request, baseline, { compare: inputs.compare, now: ports.now, read: ports.read }); await store.validate(source); return source;
+    },
+    proposeForward: async (candidate: Parameters<typeof managedForwardRecoveryProposal>[0], request: Parameters<typeof managedForwardRecoveryProposal>[1], inputs: Pick<Parameters<typeof managedForwardRecoveryProposal>[3], "compare">) => {
+      const state = await store.read(); if (state === undefined) throw new Error("forward recovery requires a held application");
+      const proposal = await managedForwardRecoveryProposal(candidate, request, { state, source: await store.source() }, { compare: inputs.compare, now: ports.now, read: ports.read });
+      if (hash(JSON.stringify(await store.read())) !== proposal.blocked.checkpoint) throw new Error("forward recovery baseline changed during preparation");
+      return proposal;
     },
     validate: (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input); capabilities(source); return store.validate(source); },
     begin: async (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input);

@@ -1,6 +1,7 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- models native effects, accounting and coordinator interruption */
 import { managedVolumePreparation } from "../../src/server/deployment/managed-volume-preparation.ts";
 import type { VolumeAction, VolumeObservation } from "../../src/contracts/owned-volume.ts";
+import { managedHistorySelection } from "../../src/server/deployment/managed-history-selection.ts";
 import { managedDeploymentStatus } from "../../src/server/deployment/managed-deployment-status.ts";
 import { managedImagePins } from "../../src/server/deployment/managed-image-pins.ts";
 import { strict as assert } from "node:assert";
@@ -218,6 +219,8 @@ test("an unsafe maintenance operation fences compatibility before application st
 for (const unsafe of [false, true]) test(`historical restore ${unsafe ? "refuses a prior data epoch even when disguised as deployment" : "accepts authenticated compatible history"}`, async (t) => {
   const lab = await fixture(t); await lab.owner().begin(lab.source); const first = await lab.drive(); assert.ok(first.active); assert.equal(first.active.epoch, 0);
   const releaseA = parseManagedRelease(JSON.parse(await lab.artifacts.read(first.active.record)));
+  let expired = false;
+  await assert.rejects(managedHistorySelection(first, { restore: null, plan: first.active.plan, commit: lab.source.candidate.commit }, { read: async (identity) => { expired = true; return lab.artifacts.read(identity); }, expired: () => expired }), /history inspection expired/);
   const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "b".repeat(40), grants: { ...lab.source.candidate.grants, maintenance: unsafe }, rollout: { ...lab.source.candidate.rollout, strategy: unsafe ? "maintenance" : "rolling", rollback_compatible: !unsafe } }); assert.ok(candidate.ok);
   const references = (release: typeof releaseA) => managedReleaseBaselines(release).filter((value) => release.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
   const secondSource = parseManagedLifecycleSource({ ...lab.source, candidate: candidate.value, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", previous: releaseA, retained: references(releaseA) });
@@ -385,7 +388,11 @@ for (const unsafe of [false, true]) test(`maintenance failure ${unsafe ? "requir
     assert.throws(() => managedRecoverySnapshot({ ...snapshot.source, preparation: { ...snapshot.source.preparation, maintenance: "e".repeat(64) } }), /maintenance evidence|scope or rollback authority/);
   }
   await lab.reopen(); const result = await lab.drive();
-  if (unsafe) { assert.equal(result.operation.phase, "held"); assert.equal(result.operation.recoverySource, null); assert.equal(result.compatibilityEpoch, 1); assert.equal(lab.calls.some((action) => action.effect === "restore"), false); }
+  if (unsafe) { assert.equal(result.operation.phase, "held"); assert.equal(result.operation.recoverySource, null); assert.equal(result.compatibilityEpoch, 1); assert.equal(lab.calls.some((action) => action.effect === "restore"), false);
+    const request = { run: randomUUID(), action: result.owner.incarnation + ":4", createdAt: 1000, reason: "Operator plans a forward maintenance fix" };
+    await assert.rejects(lab.owner().proposeForward(lab.source.candidate, request, { compare: () => Promise.resolve("unchanged") }), /earlier data epoch/);
+    const fix = parseManagedApplicationPlan({ ...source.candidate, commit: "e".repeat(40) }); assert.ok(fix.ok); const proposal = await lab.owner().proposeForward(fix.value, request, { compare: () => Promise.resolve("unchanged") }); assert.equal(proposal.previous, null); assert.equal(proposal.blocked.compatibilityEpoch, 1); assert.deepEqual(await lab.owner().read(), result);
+  }
   else { assert.equal(result.operation.outcome, "rolled-back"); assert.equal(result.operation.settlement, "previous"); assert.equal(result.active?.plan, initial.active.plan); assert.equal(result.operation.recoveryVerification?.phase, "verified"); assert.equal(result.compatibilityEpoch, 0); }
 });
 
@@ -453,4 +460,33 @@ test("proposal normalization refuses changed retained data specifications and fo
   const request = { version: 1 as const, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", createdAt: 1000 };
   let reads = 0; await assert.rejects(lab.owner().propose({ ...lab.source.candidate, infrastructure: { ...lab.source.candidate.infrastructure, ownership: { ...lab.source.candidate.infrastructure.ownership, dataOwner: randomUUID() } } }, request, { compare: () => { reads++; return Promise.resolve("unchanged"); } }), /ownership/); assert.equal(reads, 0);
   await assert.rejects(lab.owner().propose(changed.value, request, { compare: () => Promise.resolve("unchanged") }), /retained|dependency/); assert.deepEqual(await lab.owner().read(), before); assert.equal(lab.reserveCalls(), 1);
+});
+
+test("forward recovery proposals bind the held data epoch and preserve retained dependencies without authorizing effects", async (t) => {
+  const lab = await fixture(t, true, true, true, true); await lab.owner().begin(lab.source); lab.checkMode("fail"); const held = await lab.drive(); assert.equal(held.operation.phase, "held"); assert.equal(held.compatibilityEpoch, 1);
+  const candidate = parseManagedApplicationPlan({ ...lab.source.candidate, commit: "e".repeat(40) }); assert.ok(candidate.ok);
+  const request = { run: randomUUID(), action: held.owner.incarnation + ":3", createdAt: 2000, reason: "Deploy a forward fix after the unsafe migration" }; lab.clock(request.createdAt);
+  const writes = lab.calls.length; const starts = lab.checkStarts.length; const proposal = await lab.owner().proposeForward(candidate.value, request, { compare: () => Promise.resolve("unchanged") });
+  assert.equal(proposal.kind, "managed-forward-recovery-proposal"); assert.equal(proposal.blocked.run, held.operation.run); assert.equal(proposal.blocked.compatibilityEpoch, 1); assert.equal(proposal.blocked.originalDeadline, held.operation.deadline);
+  assert.equal(proposal.blocked.checkpoint, createHash("sha256").update(JSON.stringify(held)).digest("hex")); assert.equal(proposal.previous, null); assert.equal(proposal.rollbackEligible, false); assert.equal(proposal.deadline, 92000);
+  assert.deepEqual(proposal.candidate.services["db"], lab.source.candidate.services["db"]); assert.equal(proposal.migrations.outcomes[0]?.outcome, "applied");
+  assert.deepEqual(await lab.owner().read(), held); assert.equal(lab.calls.length, writes); assert.equal(lab.checkStarts.length, starts); assert.equal(lab.settleCalls(), 0);
+  assert.throws(() => parseManagedLifecycleSource(proposal));
+  await lab.reopen(); assert.deepEqual(await lab.owner().proposeForward(candidate.value, request, { compare: () => Promise.resolve("unchanged") }), proposal);
+  const db = candidate.value.services["db"]; assert.ok(db);
+  const changed = parseManagedApplicationPlan({ ...candidate.value, services: { ...candidate.value.services, db: { ...db, command: ["unsafe-engine-upgrade"] } } }); assert.ok(changed.ok);
+  await assert.rejects(lab.owner().proposeForward(changed.value, request, { compare: () => Promise.resolve("unchanged") }), /retained dependency specification changed/);
+  await assert.rejects(lab.owner().proposeForward(candidate.value, { ...request, run: held.operation.run }, { compare: () => Promise.resolve("unchanged") }), /distinct granted maintenance/);
+  await assert.rejects(lab.owner().proposeForward(candidate.value, request, { compare: () => Promise.resolve("changed") }), /retained dependency inputs changed/);
+  const entered = Promise.withResolvers<undefined>(); const release = Promise.withResolvers<undefined>();
+  const slow = lab.owner().proposeForward(candidate.value, request, { compare: async () => { entered.resolve(undefined); await release.promise; return "unchanged"; } });
+  const rejected = assert.rejects(slow, /deadline expired/); await entered.promise; lab.clock(proposal.deadline); release.resolve(undefined); await rejected; assert.deepEqual(await lab.owner().read(), held);
+});
+
+test("forward proposals refuse unresolved migration outcomes and cannot convert a compatible deployment into unsafe recovery", async (t) => {
+  const unknown = await fixture(t, true, "unknown", true); await unknown.owner().begin(unknown.source); const held = await unknown.drive(); assert.equal(held.operation.phase, "held");
+  const request = { run: randomUUID(), action: held.owner.incarnation + ":3", createdAt: 1000, reason: "Operator intends a forward maintenance recovery" };
+  await assert.rejects(unknown.owner().proposeForward(unknown.source.candidate, request, { compare: () => Promise.resolve("unchanged") }), /resolved migration outcomes/); assert.deepEqual(await unknown.owner().read(), held);
+  const compatible = await fixture(t, true, true, false, true); await compatible.owner().begin(compatible.source); compatible.checkMode("fail"); const safeHeld = await compatible.drive();
+  await assert.rejects(compatible.owner().proposeForward(compatible.source.candidate, { ...request, action: safeHeld.owner.incarnation + ":3" }, { compare: () => Promise.resolve("unchanged") }), /distinct granted maintenance/); assert.deepEqual(await compatible.owner().read(), safeHeld);
 });

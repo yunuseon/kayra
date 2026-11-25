@@ -2481,3 +2481,26 @@ progress during a build. Shutdown cancels outstanding builder waits, and late
 output cannot publish after the owner closes. Existing Compose preparation is
 unchanged. This does not authorize builds during unresolved managed operations;
 that still requires the separate audited forward-recovery workflow.
+
+
+#### Forward recovery proposal boundary
+
+A held maintenance run that crossed a data compatibility fence may describe a
+separate maintenance successor for review. The proposal pins the blocked root
+checkpoint, original deadline, current data epoch, distinct request/action,
+normalized candidate and known migration outcomes. It preserves every recorded
+retained dependency and refuses dependency upgrades, changed retained inputs,
+consumer-to-dependency conversion and historical commits from an earlier epoch.
+The shared bounded history inspector also protects ordinary restore admission.
+
+A proposal contains no previous-release rollback target. It records the remaining
+requirements: an audited operator decision, physical cessation of prior effects,
+transfer of the pending admission charge and candidate verification. Constructing
+it cannot alter the old journal, settle capacity, authorize another build or
+start a workload. Unresolved migration outcomes must be resolved first. Proposal
+preparation has its own fixed 90-second window; the original run's deadlines do
+not change. The owning coordinator rechecks the root checkpoint after preparation.
+
+This is the review boundary for the forthcoming forward-recovery operation.
+Durable operator selection, guarded build authorization, effect cessation,
+admission transfer and successor dispatch are not enabled by this proposal API.

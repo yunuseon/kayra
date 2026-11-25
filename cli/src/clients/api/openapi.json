@@ -6198,6 +6198,79 @@
                               ],
                               "additionalProperties": false
                             },
+                            "recovery": {
+                              "default": null,
+                              "anyOf": [
+                                {
+                                  "readOnly": true,
+                                  "type": "object",
+                                  "properties": {
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": [
+                                        "fencing-checks",
+                                        "restoring",
+                                        "checking-restored",
+                                        "complete",
+                                        "held"
+                                      ]
+                                    },
+                                    "reason": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "deadline",
+                                            "runtime",
+                                            "authorization",
+                                            "verification"
+                                          ]
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "deadline": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "checks": {
+                                      "readOnly": true,
+                                      "type": "object",
+                                      "properties": {
+                                        "containers": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 128
+                                        },
+                                        "stopped": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 128
+                                        }
+                                      },
+                                      "required": [
+                                        "containers",
+                                        "stopped"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "phase",
+                                    "reason",
+                                    "deadline",
+                                    "checks"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
                             "requiredAction": {
                               "type": "string",
                               "enum": [
@@ -6224,6 +6297,7 @@
                             "rollback",
                             "operation",
                             "migrations",
+                            "recovery",
                             "requiredAction",
                             "runtimeObservation"
                           ],
@@ -11971,6 +12045,79 @@
                     ],
                     "additionalProperties": false
                   },
+                  "recovery": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "readOnly": true,
+                        "type": "object",
+                        "properties": {
+                          "phase": {
+                            "type": "string",
+                            "enum": [
+                              "fencing-checks",
+                              "restoring",
+                              "checking-restored",
+                              "complete",
+                              "held"
+                            ]
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "deadline",
+                                  "runtime",
+                                  "authorization",
+                                  "verification"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "deadline": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "checks": {
+                            "readOnly": true,
+                            "type": "object",
+                            "properties": {
+                              "containers": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 128
+                              },
+                              "stopped": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 128
+                              }
+                            },
+                            "required": [
+                              "containers",
+                              "stopped"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "phase",
+                          "reason",
+                          "deadline",
+                          "checks"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "requiredAction": {
                     "type": "string",
                     "enum": [
@@ -11997,6 +12144,7 @@
                   "rollback",
                   "operation",
                   "migrations",
+                  "recovery",
                   "requiredAction",
                   "runtimeObservation"
                 ],

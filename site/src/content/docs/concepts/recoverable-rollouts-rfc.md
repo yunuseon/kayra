@@ -2460,3 +2460,13 @@ safely; it cannot reset the deadline or release pending capacity.
 This proves local execution cessation only. It does not infer the result of
 external application effects, make checks replay-safe, or authorize recovery
 across an unsafe schema change. Normal managed mutation dispatch remains disabled.
+
+
+The published managed status now distinguishes interrupted-check cessation,
+service restoration and verification of the restored release. It reports only
+counts of pinned containers and collected stop proofs, together with the original
+recovery deadline and a bounded reason for a hold. Native identities and private
+cessation records stay inside the deployment component. Clients display this
+progress separately from recovery outcome, release certification and current
+runtime health. A data compatibility fence continues to direct operators toward
+forward recovery and preservation of retained data.

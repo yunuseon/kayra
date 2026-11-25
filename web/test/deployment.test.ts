@@ -48,11 +48,15 @@ test("cancellation is offered for pending work and removed once the request is r
 });
 
 test("managed restoration reports the requested failure separately from the active release and health", () => {
-  const managed: DeploymentStatus = { version: 3, protocol: "managed-v3", runtime: "swarm", app: "shop", incarnation: status.incarnation,
+  const managed: DeploymentStatus = { recovery: null, version: 3, protocol: "managed-v3", runtime: "swarm", app: "shop", incarnation: status.incarnation,
     requested: b, desired: a, verifiedActive: { ...a, run: "23456789-1234-4234-8234-123456789abc", verifiedAt: 1000, compatibilityEpoch: 0 }, lastKnownGood: { ...a, run: "23456789-1234-4234-8234-123456789abc", verifiedAt: 1000, compatibilityEpoch: 0 },
     compatibilityEpoch: 0, rollback: "eligible", operation: { run: "23456789-1234-4234-8234-123456789abc", strategy: "rolling", phase: "complete", reason: null, outcome: "rolled-back", admissionDeadline: 90000, deadline: 900000, recoveryDeadline: 180000, cancelRequestedAt: null, admitted: true, settled: true },
     migrations: { phase: "succeeded", reason: null, step: null, resolutions: [] }, requiredAction: "none", runtimeObservation: "not-observed" };
   const view = deploymentView(managed, health); expect(view.active).toBe(a.commit); expect(view.requested).toBe(b.commit); expect(view.recovery).toBe("Previous release restored"); expect(view.phaseTone).toBe("warn"); expect(view.runtimeTone).toBe("ok"); expect(view.cancelRequest).toBeNull();
   expect(deploymentView({ ...managed, rollback: "data-fenced", operation: { ...managed.operation, phase: "held", reason: "verification", outcome: null, settled: false }, requiredAction: "inspect-and-resolve" }, null).rollback).toContain("forward recovery required");
+  const stopping: DeploymentStatus = { ...managed, operation: { ...managed.operation, phase: "recovering", outcome: null, settled: false }, recovery: { phase: "fencing-checks", reason: null, deadline: 180000, checks: { containers: 2, stopped: 1 } } };
+  expect(deploymentView(stopping).recoveryPhase).toBe("Stopping interrupted checks"); expect(deploymentView(stopping).pendingCheckContainers).toBe(1); expect(deploymentView(stopping).recovery).toBe("None recorded");
+  const blocked: DeploymentStatus = { ...stopping, operation: { ...stopping.operation, phase: "held", reason: "recovery" }, requiredAction: "inspect-and-resolve", recovery: { phase: "held", reason: "deadline", deadline: 180000, checks: { containers: 2, stopped: 1 } } };
+  expect(deploymentView(blocked).action).toContain("check containers stopped"); expect(deploymentView({ ...blocked, rollback: "data-fenced" }).action).toContain("preserve retained data");
   expect(deploymentView(managed, null).runtime).toBe("Not observed");
 });

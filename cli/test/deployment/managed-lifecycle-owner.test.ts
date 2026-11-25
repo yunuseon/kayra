@@ -1,6 +1,7 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- models native effects, accounting and coordinator interruption */
 import { managedVolumePreparation } from "../../src/server/deployment/managed-volume-preparation.ts";
 import type { VolumeAction, VolumeObservation } from "../../src/contracts/owned-volume.ts";
+import { managedDeploymentStatus } from "../../src/server/deployment/managed-deployment-status.ts";
 import { managedImagePins } from "../../src/server/deployment/managed-image-pins.ts";
 import { strict as assert } from "node:assert";
 import { createHash, randomUUID } from "node:crypto";
@@ -281,15 +282,20 @@ test("a possibly started unknown check cannot be bypassed by healthy services, r
 test("unknown check recovery fences its pinned consumer before any restoration and resumes the original recovery after restart", async (t) => {
   const { lab, initial, source } = await checkedCandidate(t); lab.checkMode("unknown"); const held = await lab.drive(); assert.equal(held.operation.verification?.reason, "check-unknown");
   lab.enableCheckFencing(); await lab.reopen(); const intent = await lab.owner().tick(); assert.equal(intent?.operation.phase, "recovering"); const deadline = intent.operation.recoveryDeadline;
+  const intentStatus = await managedDeploymentStatus(intent, await lab.owner().source(), lab.artifacts); assert.equal(intentStatus.recovery?.phase, "fencing-checks"); assert.deepEqual(intentStatus.recovery.checks, { containers: 1, stopped: 0 });
   for (let i = 0; i < 40 && lab.checkFenceReads() === 0; i++) await lab.owner().tick();
   assert.ok(lab.checkFenceReads() > 0); const waiting = await lab.owner().read(); assert.equal(waiting?.operation.recovery?.phase, "fencing-checks"); assert.equal(lab.calls.some((item) => item.effect === "restore"), false); assert.equal(lab.checkStarts.filter((item) => item.run === source.run).length, 1);
-  await lab.reopen(); lab.stopPinnedCheck(); lab.checkMode("pass"); const done = await lab.drive(); assert.equal(done.operation.outcome, "rolled-back"); assert.equal(done.active?.plan, initial.active?.plan); assert.equal(done.operation.recoveryDeadline, deadline); assert.equal(done.operation.recovery?.cessation?.state?.phase, "complete"); assert.equal(lab.checkStarts.length, 3);
+  await lab.reopen(); lab.stopPinnedCheck(); lab.checkMode("pass");
+  const phases = new Set<string>();
+  for (let i = 0; i < 100; i++) { const value = await lab.owner().tick(); assert.ok(value); const status = await managedDeploymentStatus(value, await lab.owner().source(), lab.artifacts); assert.ok(status.recovery); phases.add(status.recovery.phase); assert.equal(status.recovery.deadline, deadline); assert.equal(JSON.stringify(status).includes('"container":'), false); if (value.operation.phase === "complete") break; }
+  const done = await lab.owner().read(); assert.ok(done); assert.deepEqual([...phases], ["fencing-checks", "restoring", "checking-restored", "complete"]); assert.equal(done.operation.outcome, "rolled-back"); assert.equal(done.active?.plan, initial.active?.plan); assert.equal(done.operation.recoveryDeadline, deadline); assert.equal(done.operation.recovery?.cessation?.state?.phase, "complete"); assert.equal(lab.checkStarts.length, 3);
 });
 
 test("a pinned check that cannot be fenced holds the existing recovery deadline without restoring or releasing capacity", async (t) => {
   const { lab } = await checkedCandidate(t); lab.checkMode("unknown"); await lab.drive(); lab.enableCheckFencing(); await lab.reopen(); const intent = await lab.owner().tick(); assert.ok(intent?.operation.recoveryDeadline);
   for (let i = 0; i < 40 && lab.checkFenceReads() === 0; i++) await lab.owner().tick(); lab.clock(intent.operation.recoveryDeadline);
-  const held = await lab.drive(); assert.equal(held.operation.phase, "held"); assert.equal(held.operation.recoveryDeadline, intent.operation.recoveryDeadline); await lab.reopen(); lab.stopPinnedCheck(); assert.deepEqual(await lab.owner().tick(), held); assert.equal(lab.calls.some((item) => item.effect === "restore"), false);
+  const held = await lab.drive(); assert.equal(held.operation.phase, "held"); assert.equal(held.operation.recoveryDeadline, intent.operation.recoveryDeadline);
+  const status = await managedDeploymentStatus(held, await lab.owner().source(), lab.artifacts); assert.equal(status.recovery?.phase, "held"); assert.equal(status.recovery.reason, "deadline"); assert.deepEqual(status.recovery.checks, { containers: 1, stopped: 0 }); await lab.reopen(); lab.stopPinnedCheck(); assert.deepEqual(await lab.owner().tick(), held); assert.equal(lab.calls.some((item) => item.effect === "restore"), false);
   const book = parseResourceBook(lab.book()); assert.ok(book.ok); assert.equal(book.value.charges[0]?.result, "pending");
 });
 

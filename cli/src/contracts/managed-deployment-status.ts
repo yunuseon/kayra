@@ -23,8 +23,19 @@ const schema = z.object({
     step: z.string().max(128).nullable(),
     resolutions: z.array(z.object({ step: z.string().max(128), id: digest, outcome: z.enum(["applied", "not-applied"]), at: time }).strict().readonly()).max(128).readonly(),
   }).strict().readonly(),
+  recovery: z.object({ phase: z.enum(["fencing-checks", "restoring", "checking-restored", "complete", "held"]),
+    reason: z.enum(["deadline", "runtime", "authorization", "verification"]).nullable(), deadline: time,
+    checks: z.object({ containers: z.number().int().min(0).max(128), stopped: z.number().int().min(0).max(128) }).strict().readonly(),
+  }).strict().readonly().nullable().default(null),
   requiredAction: z.enum(["none", "inspect-and-resolve"]), runtimeObservation: z.literal("not-observed"),
 }).strict().readonly().superRefine((value, context) => {
+  const recovery = value.recovery;
+  if (recovery !== null && (recovery.deadline !== value.operation.recoveryDeadline || recovery.checks.stopped > recovery.checks.containers ||
+    (recovery.phase === "held") !== (recovery.reason !== null) || (recovery.phase === "held") !== (value.operation.phase === "held") ||
+    !["fencing-checks", "held"].includes(recovery.phase) && recovery.checks.stopped !== recovery.checks.containers ||
+    ["fencing-checks", "restoring"].includes(recovery.phase) && value.operation.phase !== "recovering" ||
+    (recovery.phase === "complete") !== (value.operation.outcome === "rolled-back" || value.operation.outcome === "absent") ||
+    recovery.phase === "checking-restored" && !["recovering", "recovery-verifying"].includes(value.operation.phase))) context.addIssue({ code: "custom", message: "inconsistent managed recovery progress" });
   if (value.requiredAction !== (value.operation.phase === "held" ? "inspect-and-resolve" : "none") ||
     (value.operation.phase === "held") !== (value.operation.reason !== null) ||
     value.operation.settled !== (value.operation.phase === "complete") ||

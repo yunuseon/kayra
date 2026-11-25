@@ -90,6 +90,20 @@ views {
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'retain cleanup proof without altering original execution evidence'
   }
 
+  dynamic view managedCheckRecovery {
+    title 'Interrupted consumer check recovery'
+    description 'Experimental managed path: physical check cessation precedes compatible restoration under the original deadline. Normal mutation dispatch remains disabled.'
+    autoLayout TopBottom
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'read accepted source, pinned check targets and original recovery deadline'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'persist check cessation intent before workload effects'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'stop and scrub exact owned consumer services'
+    plannedDelivery.trusted.adapter -> plannedDelivery.workload 'gracefully stop containers; retain dependencies and data'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'inspect each original check container after service scrub'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'retain stopped or absent proof, or hold without releasing capacity'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.adapter 'restore compatible services only after every pinned check ceased'
+    plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.projection 'publish cessation, restoration and verification progress separately from outcome'
+  }
+
   dynamic view proposedCancellation {
     title 'Preparation cancellation'
     description 'Known prefix outcomes and fenced jobs permit cancellation; ambiguity stays held without release promotion.'

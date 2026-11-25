@@ -135,6 +135,7 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
       <div class="fact"><dt>Requested release</dt><dd><Release commit={view.requested} /></dd></div>
       <div class="fact"><dt>Desired release</dt><dd><Release commit={view.desired} /></dd></div>
       {state.version === 3 ? <><div class="fact"><dt>Rollback eligibility</dt><dd>{view.rollback}</dd></div><div class="fact"><dt>Migration step</dt><dd>{state.migrations.step ?? "None pending"}{state.migrations.reason === null ? null : <> · {state.migrations.reason}</>}</dd></div></> : null}
+      {view.recoveryPhase === null ? null : <div class="fact"><dt>Recovery phase</dt><dd>{view.recoveryPhase}{view.pendingCheckContainers === 0 ? null : <> · {view.pendingCheckContainers} check containers awaiting stop proof</>}</dd></div>}
       <div class="fact"><dt>Recovery outcome</dt><dd>{view.recovery}</dd></div>
       <div class="fact"><dt>Required action</dt><dd class={state.requiredAction === "none" ? "" : "tone-bad"}>{view.action}</dd></div>
       <div class="fact"><dt>Current service health</dt><dd><Pill tone={view.runtimeTone}>{view.runtime}</Pill></dd></div>

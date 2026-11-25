@@ -2335,3 +2335,18 @@ lock history still verifies A/B/A coordination and graceful exit ordering.
 Known-failed check recovery remains covered by the maintenance recovery fixture.
 This remains an internal indexed command-path probe, not normal listener enablement
 or a guarantee about remote effects initiated by application checks.
+
+
+Unknown-check cessation snapshot `7bd3e1c` passed in VM
+`kayra-volume-lab-20261125123320058813` on 2026-11-25 (destroyed).
+The group captured 17,057 native observations; the singleton recorded 501
+application-owned A/B/A effects and proved its timed-out check container ceased
+before restoration, including a journal reopen. Maintenance, audited resolution,
+cancellation, compatible recovery and initial cleanup passed; main maintenance
+reached schema 2 with zero worker violations. The 360-entry raw archive, exact
+source and 13 private evidence files have a verified SHA-256 manifest.
+
+This run used Engine/CLI 29.10.1, API 1.57, Compose 5.8.0, Node 24.22.1,
+Ubuntu 24.04.5 ARM64 and kernel 6.8.0-147-generic. Its image digests are recorded
+in the evidence. These internal fixtures do not establish HTTP continuity,
+normal mutation dispatch, full TLS/Authelia integration or remove/purge acceptance.

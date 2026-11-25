@@ -1,3 +1,4 @@
+import { managedRecoveryProgress } from "./managed-recovery-progress.ts";
 import { parseManagedDeploymentStatus } from "../../contracts/managed-deployment-status.ts";
 import { managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import type { BuildPorts } from "../../contracts/build-artifact.ts";
@@ -20,6 +21,7 @@ export const managedDeploymentStatus = async (input: unknown, sourceInput: unkno
     migrations: { phase: operation.preparation?.sequence?.phase ?? "not-started", reason: operation.preparation?.sequence?.reason ?? null,
       step: operation.preparation?.sequence?.steps[operation.preparation.sequence.position]?.id ?? null,
       resolutions: operation.resolutionReceipts.map((receipt) => Object.freeze({ step: receipt.step, id: receipt.resolution, outcome: receipt.outcome, at: receipt.recordedAt })) },
+    recovery: managedRecoveryProgress(state),
     requiredAction: operation.phase === "held" ? "inspect-and-resolve" : "none", runtimeObservation: "not-observed",
   });
   if (!parsed.ok) throw new Error(parsed.error); return parsed.value;

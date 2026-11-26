@@ -48,3 +48,11 @@ export const managedRemovalEffectsReference = z.object({
   createdAt: time, deadline: time, journal: z.enum(["initializing", "ready"]),
 }).strict().readonly().refine((value) => value.deadline === value.createdAt + 90_000);
 export type ManagedRemovalEffectsReference = z.infer<typeof managedRemovalEffectsReference>;
+
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+
+export const managedRemovalAccountingIntent = z.object({
+  version: z.literal(1), request: z.uuid(), action: z.string().max(80),
+  inventory: digest, effects: digest, before: digest, after: digest, observedAt: time,
+}).strict().readonly();
+export type ManagedRemovalAccountingIntent = z.infer<typeof managedRemovalAccountingIntent>;

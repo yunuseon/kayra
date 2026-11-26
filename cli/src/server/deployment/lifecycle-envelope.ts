@@ -8,7 +8,7 @@ import { parseRegistrationGeneration } from "../../contracts/registration-genera
 import { httpReleasePlan, parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
-import { parseManagedRemovalIntent, managedRemovalEffectsReference } from "./managed-removal-intent.ts";
+import { parseManagedRemovalIntent, managedRemovalEffectsReference, managedRemovalAccountingIntent } from "./managed-removal-intent.ts";
 import { managedForwardReservation } from "./managed-forward-reservation.ts";
 import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
 import { parseRolloutRequest } from "./rollout-request.ts";
@@ -40,6 +40,7 @@ const shape = z.object({
   forward: z.unknown().optional(),
   removal: z.unknown().optional(),
   removalEffects: managedRemovalEffectsReference.optional(),
+  removalAccounting: managedRemovalAccountingIntent.optional(),
   http: z.unknown().optional(),
   rollout: z.unknown().optional(),
   rollouts: z.array(z.unknown()).max(1024).optional(),
@@ -190,6 +191,10 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   const removalEffects = parsed.data.removalEffects;
   if (removalEffects !== undefined && (removalEffects.request !== removal?.request ||
     removalEffects.action !== removal.action || removalEffects.createdAt < removal.createdAt)) return err("managed removal effects lack their accepted intent");
+  const removalAccounting = parsed.data.removalAccounting;
+  if (removalAccounting !== undefined && (removalEffects?.journal !== "ready" || removalAccounting.request !== removalEffects.request ||
+    removalAccounting.action !== removalEffects.action || removalAccounting.inventory !== removalEffects.inventory ||
+    removalAccounting.observedAt < removalEffects.createdAt)) return err("managed removal accounting lacks its effects journal");
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
@@ -197,6 +202,7 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     ...(forward === undefined ? {} : { forward }),
     ...(removal === undefined ? {} : { removal }),
     ...(removalEffects === undefined ? {} : { removalEffects }),
+    ...(removalAccounting === undefined ? {} : { removalAccounting }),
     ...(http?.ok ? { http: http.value } : {}),
     ...(rollout === undefined ? {} : { rollout }),
     ...(rollouts === undefined ? {} : { rollouts: Object.freeze(rollouts) }) }));

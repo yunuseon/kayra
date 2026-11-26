@@ -2711,3 +2711,10 @@ services, checks for remaining execution containers, and then stops retained
 services. It reconciles the same journal after restart and refuses a missing
 published journal. A fresh read-only completion check repeats the native
 observations before they can support accounting or tombstone publication.
+
+Accounting retirement binds the completed effects digest to the exact preimage
+and postimage of the app's charge. Under the shared writer, a fresh observation
+of cessation permits replacing that charge with an absent entry. The admission
+binding remains so stale requests cannot reclaim it. A lost acknowledgement
+reconciles the recorded postimage on restart. This transition preserves the
+registration, deployment checkpoint and owned volumes for finalization.

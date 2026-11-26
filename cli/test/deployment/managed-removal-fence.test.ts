@@ -9,6 +9,7 @@ import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { indexedForwardFixture } from "./indexed-forward-fixture.ts";
+import { parseLifecycleEnvelope } from "../../src/server/deployment/lifecycle-envelope.ts";
 import { preparedForwardFixture } from "./indexed-forward-prepared-fixture.ts";
 
 test("removal owns the lifecycle fence before a competing managed request and preserves the held charge", async (t) => {
@@ -109,8 +110,10 @@ test("removal effects stop consumers before retained services and reopen their d
     authorize: (owned: typeof intent) => Promise.resolve(owned.action === intent.action),
   };
   await assert.rejects(lab.index().tickManagedRemovalEffects("shop", request, ports), /not published/);
+  const retire = () => lab.index().retireManagedRemovalAccounting("shop", request, ports);
   const prepared = await lab.index().prepareManagedRemovalEffects("shop", request, ports);
   assert.equal(prepared.phase, "fencing-jobs");
+  await assert.rejects(retire, /lacks complete effects/);
   const tick = () => lab.index().tickManagedRemovalEffects("shop", request, ports);
   for (let i = 0; i < 25 && effects.length < 2; i++) await tick();
   assert.deepEqual(effects, ["job:fence", "web:remove"]);
@@ -131,8 +134,34 @@ test("removal effects stop consumers before retained services and reopen their d
   assert.equal(proof.effects.length, 64);
   const db = lab.services.get("db"); assert.ok(db?.status === "owned");
   lab.services.set("db", { ...db, replicas: 1 });
-  try { await assert.rejects(lab.index().observeManagedRemovalCompletion("shop", request, ports), /service or check fence changed/); }
+  try {
+    await assert.rejects(lab.index().observeManagedRemovalCompletion("shop", request, ports), /service or check fence changed/);
+    await assert.rejects(retire, /service or check fence changed/);
+    assert.deepEqual(await lab.index().resourceSnapshot(), priorResources);
+  }
   finally { lab.services.set("db", db); }
+  lab.cut("removal-accounting-after");
+  await assert.rejects(retire, /injected after removal-accounting/);
+  assert.deepEqual(await lab.index().resourceSnapshot(), priorResources);
+  await lab.reopen();
+  const envelope = parseLifecycleEnvelope(JSON.parse(await readFile(join(lab.selectionDirectory, "..", "..", "..", "state.json"), "utf8")));
+  assert.ok(envelope.ok);
+  const receipt = envelope.value.removalAccounting; assert.ok(receipt);
+  assert.equal(receipt.effects, proof.effects);
+  assert.notEqual(receipt.before, receipt.after);
+
+  lab.cut("removal-retirement-before");
+  await assert.rejects(retire, /injected before removal-retirement/);
+  assert.deepEqual(await lab.index().resourceSnapshot(), priorResources);
+  await lab.reopen();
+  lab.cut("removal-retirement-after");
+  await assert.rejects(retire, /injected after removal-retirement/);
+  await lab.reopen();
+  assert.deepEqual(await lab.index().retireManagedRemovalAccounting("shop", request, { ...ports, authorize: () => Promise.resolve(false) }), receipt);
+  const previous = priorResources?.charges.find((charge) => charge.app === "shop"); assert.ok(previous);
+  assert.deepEqual((await lab.index().resourceSnapshot())?.charges.find((charge) => charge.app === "shop"), { ...previous, result: "absent" });
+  assert.deepEqual(await lab.index().managedState("shop", lab.runtime), lab.held);
+
   const path = join(lab.selectionDirectory, "..", "..", "removal", request, "state.json");
   await rename(path, path + ".kept");
   try {

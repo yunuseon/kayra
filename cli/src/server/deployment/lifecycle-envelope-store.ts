@@ -1,4 +1,4 @@
-import { managedRemovalEffectsReference } from "./managed-removal-intent.ts";
+import { managedRemovalAccountingIntent, managedRemovalEffectsReference } from "./managed-removal-intent.ts";
 import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
 import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff, activateManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
 import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
@@ -185,6 +185,16 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       if (reference.journal !== "initializing") throw new Error("managed removal effects require initialization");
       await persist({ ...current, removalEffects: reference });
       return reference;
+    }),
+    bindManagedRemovalAccounting: (input: unknown) => serial(async () => {
+      const intent = managedRemovalAccountingIntent.parse(input);
+      const current = await required();
+      if (current.removalAccounting !== undefined) {
+        if (JSON.stringify(current.removalAccounting) !== JSON.stringify(intent)) throw new Error("managed removal accounting intent conflicts");
+        return current.removalAccounting;
+      }
+      await persist({ ...current, removalAccounting: intent });
+      return intent;
     }),
     publishManagedRemovalEffects: (input: unknown) => serial(async () => {
       const current = await required();

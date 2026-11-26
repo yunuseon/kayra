@@ -1,3 +1,4 @@
+import { managedRemovalAccounting } from "./managed-removal-accounting.ts";
 import { managedRemovalEffects, managedRemovalInventoryDigest } from "./managed-removal-effects.ts";
 import type { ManagedRemovalEffectsPorts, ManagedRemovalInventory } from "./managed-removal-effects.ts";
 import { managedRemovalInventory } from "./managed-removal-inventory.ts";
@@ -233,7 +234,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     });
   type RemovalEffectsOwner = ReturnType<typeof managedRemovalEffects>;
   type RemovalEffectsState = NonNullable<Awaited<ReturnType<RemovalEffectsOwner["read"]>>>;
-  const useRemovalEffects = <T>(app: string, request: string, ports: ManagedRemovalEffectsPorts, initialize: boolean, use: (owner: RemovalEffectsOwner, state: RemovalEffectsState) => Promise<T>) =>
+  const useRemovalEffects = <T>(app: string, request: string, ports: ManagedRemovalEffectsPorts, initialize: boolean, use: (owner: RemovalEffectsOwner, state: RemovalEffectsState, inventory: ManagedRemovalInventory, store: EnvelopeStore) => Promise<T>) =>
     useRemovalInventory(app, request, ports, async (inventory, store) => {
       const intent = inventory.intent;
       const identity = managedRemovalInventoryDigest(inventory);
@@ -271,11 +272,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           const state = await owner.prepare(reference.createdAt);
           if (state.createdAt !== reference.createdAt || state.deadline !== reference.deadline || state.phase !== "fencing-jobs") throw new Error("removal effects initialization disagrees");
           await store.publishManagedRemovalEffects(reference);
-          return await use(owner, state);
+          return await use(owner, state, inventory, store);
         }
         const state = await owner.read();
         if (state?.createdAt !== reference.createdAt || state.deadline !== reference.deadline) throw new Error("published removal journal is unavailable");
-        return await use(owner, state);
+        return await use(owner, state, inventory, store);
       } finally { await journal.close(); }
     });
   /** Published read models hold only journal ownership and read capabilities. They never initialize/resume a deployment or acquire effect authority. */
@@ -840,6 +841,38 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       useRemovalEffects(app, request, ports, true, (_owner, state) => Promise.resolve(state)),
     tickManagedRemovalEffects: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
       useRemovalEffects(app, request, ports, false, (owner) => owner.tick()),
+    retireManagedRemovalAccounting: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
+      useRemovalEffects(app, request, ports, false, async (owner, state, inventory, store) => {
+        const current = await store.read();
+        const recorded = current?.removalAccounting;
+        if (state.phase !== "complete" || recorded !== undefined && recorded.effects !== managedRemovalInventoryDigest(state)) throw new Error("managed removal accounting lacks complete effects");
+        const proposal = (snapshot: Awaited<ReturnType<typeof readIndex>>) =>
+          managedRemovalAccounting(
+            { resources: snapshot.resources, bindings: snapshot.managedBindings ?? Object.freeze([]) },
+            inventory, current?.managed ?? Object.freeze([]), recorded?.after,
+          );
+        // Reconcile a committed replacement before consulting runtime authority again.
+        if (recorded !== undefined && await serialIndex(async () => proposal(await readIndex()).before === recorded.after)) return recorded;
+
+        const deadline = ports.now() + 10_000;
+        if (await boundedManagedRead(deadline, ports.now, () => ports.authorize(inventory.intent, null)) !== true) throw new Error("managed removal accounting authority unavailable");
+        const evidence = await owner.observeCompletion();
+        return serialIndex(async () => {
+          const snapshot = await readIndex();
+          const change = proposal(snapshot);
+          const now = ports.now();
+          if (now >= deadline || now < evidence.observedAt || now - evidence.observedAt > 2000) throw new Error("managed removal accounting evidence expired");
+          const retirement = recorded ?? await store.bindManagedRemovalAccounting({
+            version: 1, request, action: inventory.intent.action, ...evidence, before: change.before, after: change.after,
+          });
+          if (retirement.inventory !== evidence.inventory || retirement.effects !== evidence.effects ||
+            retirement.before !== change.before || retirement.after !== change.after) throw new Error("managed removal accounting evidence changed");
+          const ready = ports.now();
+          if (ready >= deadline || ready < evidence.observedAt || ready - evidence.observedAt > 2000) throw new Error("managed removal accounting evidence expired");
+          if (change.before !== change.after) await journal.write({ ...snapshot, resources: change.resources });
+          return retirement;
+        });
+      }),
     observeManagedRemovalCompletion: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
       useRemovalEffects(app, request, ports, false, (owner) => owner.observeCompletion()),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),

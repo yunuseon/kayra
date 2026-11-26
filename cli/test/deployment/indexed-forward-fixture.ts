@@ -15,7 +15,7 @@ import { parseManagedLifecycleStore } from "../../src/server/deployment/managed-
 import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
 
 export const indexedForwardFixture = async (t: TestContext) => {
-  let cut: "catalog-before" | "catalog-after" | "decision-after" | "publication-before" | "publication-after" | "build-publication-before" | "build-publication-after" | "reservation-before" | "reservation-after" | "cleanup-child-before" | "cleanup-child-after" | "cleanup-publication-before" | "cleanup-publication-after" | "handoff-publication-after" | "transfer-write-before" | "transfer-write-after" | "activation-after" | "root-install-after" | undefined; let decisions = 0;
+  let cut: "catalog-before" | "catalog-after" | "decision-after" | "publication-before" | "publication-after" | "build-publication-before" | "build-publication-after" | "reservation-before" | "reservation-after" | "cleanup-child-before" | "cleanup-child-after" | "cleanup-publication-before" | "cleanup-publication-after" | "handoff-publication-after" | "removal-accounting-after" | "removal-retirement-before" | "removal-retirement-after" | "transfer-write-before" | "transfer-write-after" | "activation-after" | "root-install-after" | undefined; let decisions = 0;
   let rootGate: { readonly entered: ReturnType<typeof Promise.withResolvers<undefined>>; readonly release: ReturnType<typeof Promise.withResolvers<undefined>> } | undefined;
   const journals = async (...args: Parameters<typeof openJournal>) => {
     if (args[0].endsWith("/managed") && rootGate !== undefined) { const gate = rootGate; rootGate = undefined; gate.entered.resolve(undefined); await gate.release.promise; }
@@ -27,8 +27,10 @@ export const indexedForwardFixture = async (t: TestContext) => {
       const phase = typeof forward === "object" && forward !== null && "phase" in forward ? forward["phase"] : undefined;
       const activated = typeof value === "object" && value !== null && "managed" in value && forward === undefined &&
         (() => { const checked = parseLifecycleEnvelope(value); return checked.ok && checked.value.managed?.some((item) => item.completion?.outcome === "superseded") === true; })();
+      const retired = index?.resources?.charges.some((charge) => charge.app === "shop" && charge.result === "absent") === true;
+      const retirement = typeof value === "object" && value !== null && "removalAccounting" in value;
       const installed = args[0].endsWith("/managed") && parseManagedLifecycleStore(value).sequence === 4;
-      const point = activated ? "activation" : installed ? "root-install" : transferring ? "transfer-write" : args[0].endsWith("/effects") ? "cleanup-child" : phase === "transferring" ? "handoff-publication" :
+      const point = retired ? "removal-retirement" : retirement ? "removal-accounting" : activated ? "activation" : installed ? "root-install" : transferring ? "transfer-write" : args[0].endsWith("/effects") ? "cleanup-child" : phase === "transferring" ? "handoff-publication" :
         phase === "fencing" ? "cleanup-publication" : forward !== undefined ? "reservation" : selected?.preparedBuild !== undefined ?
         "build-publication" : selected?.phase === "initializing" ? "catalog" : selected?.phase === "ready" ? "publication" :
         args[0].includes("/managed/forward/") ? "decision" : undefined;

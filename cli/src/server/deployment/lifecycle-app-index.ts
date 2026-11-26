@@ -12,7 +12,7 @@ import { managedRemovalEffects, managedRemovalInventoryDigest, readManagedRemova
 import type { ManagedRemovalEffectsPorts, ManagedRemovalInventory } from "./managed-removal-effects.ts";
 import { managedRemovalInventory } from "./managed-removal-inventory.ts";
 import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
-import type { ManagedRemovalIntent } from "./managed-removal-intent.ts";
+import type { ManagedRemovalIntent, ManagedRemovalTombstone } from "./managed-removal-intent.ts";
 import { matchesManagedRequestCompletion } from "./managed-lifecycle-request.ts";
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { indexedManagedForward } from "./indexed-managed-forward.ts";
@@ -189,8 +189,9 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     });
     return result;
   };
-  const appDirectory = (app: string) => join(directory, createHash("sha256").update(app, "utf8").digest("hex"));
+  const originalAppDirectory = (app: string) => join(directory, createHash("sha256").update(app, "utf8").digest("hex"));
   const recreationDirectory = (incarnation: string) => join(directory, "recreation-" + incarnation);
+  const appDirectory = (owner: IndexEntry) => owner.lineage === undefined ? originalAppDirectory(owner.app) : recreationDirectory(owner.incarnation);
   const withEnvelope = async <T>(path: string, ownership: IndexEntry, use: (store: EnvelopeStore) => T | Promise<T>) => {
     await requireDirectory(path);
     const appJournal = await journals(path, ownership.phase === "ready" ? "existing" : "initialize");
@@ -213,7 +214,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const index = await readIndex();
     const ownership = index.apps.find((item) => item.app === app);
     if (ownership?.phase !== "ready") throw new Error("lifecycle app is not ready in the index");
-    return withEnvelope(appDirectory(app), ownership, (store) => use(store, ownership));
+    return withEnvelope(appDirectory(ownership), ownership, (store) => use(store, ownership));
   });
 
   /** Legacy deployment implementations never interpret a managed app's private records or mutate its workload/book. Registration and ownership queries use the shared indexed path. */
@@ -227,14 +228,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, left);
     try { return await Promise.race([Promise.resolve().then(call).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
   };
-  const readRemovalInventory = async (app: string, request: string, ports: ManagedDeploymentReadPort, store: EnvelopeStore, indexed: IndexEntry) => {
+  const readRemovalInventory = async (request: string, ports: ManagedDeploymentReadPort, store: EnvelopeStore, indexed: IndexEntry) => {
     const envelope = await store.read();
     const intent = envelope?.removal;
     if (envelope === undefined || indexed.protocol !== "managed-v3" || intent?.request !== request || intent.owner.dataOwner !== indexed.dataOwner ||
       intent.owner.incarnation !== indexed.incarnation || JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) {
       throw new Error("managed removal inventory lacks the accepted scope");
     }
-    const path = join(appDirectory(app), "managed");
+    const path = join(appDirectory(indexed), "managed");
     await requireDirectory(path);
     const deadline = ports.now() + 10_000;
     const read = async (digest: string) => {
@@ -255,12 +256,12 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return await managedRemovalInventory(intent, { state, source }, read);
     } finally { await root.close(); }
   };
-  const useRemovalInventory = <T>(app: string, request: string, ports: ManagedDeploymentReadPort, use: (inventory: ManagedRemovalInventory, store: EnvelopeStore) => Promise<T>) =>
-    useIndexed(app, async (store, indexed) => use(await readRemovalInventory(app, request, ports, store, indexed), store));
+  const useRemovalInventory = <T>(app: string, request: string, ports: ManagedDeploymentReadPort, use: (inventory: ManagedRemovalInventory, store: EnvelopeStore, indexed: IndexEntry) => Promise<T>) =>
+    useIndexed(app, async (store, indexed) => use(await readRemovalInventory(request, ports, store, indexed), store, indexed));
   type RemovalEffectsOwner = ReturnType<typeof managedRemovalEffects>;
   type RemovalEffectsState = NonNullable<Awaited<ReturnType<RemovalEffectsOwner["read"]>>>;
   const useRemovalEffects = <T>(app: string, request: string, ports: ManagedRemovalEffectsPorts, initialize: boolean, use: (owner: RemovalEffectsOwner, state: RemovalEffectsState, inventory: ManagedRemovalInventory, store: EnvelopeStore) => Promise<T>) =>
-    useRemovalInventory(app, request, ports, async (inventory, store) => {
+    useRemovalInventory(app, request, ports, async (inventory, store, indexed) => {
       const intent = inventory.intent;
       const identity = managedRemovalInventoryDigest(inventory);
       const existing = (await store.read())?.removalEffects;
@@ -275,7 +276,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (reference.inventory !== identity || reference.request !== request || reference.action !== intent.action) throw new Error("removal effects inventory changed");
       const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(reference.inventory));
       if (bytes !== JSON.stringify(inventory)) throw new Error("removal effects retained inventory unavailable");
-      const path = join(appDirectory(app), "managed", "removal");
+      const path = join(appDirectory(indexed), "managed", "removal");
       const directory = join(path, request);
       if (reference.journal === "initializing") {
         if (ports.now() >= reference.deadline) throw new Error("removal effects initialization expired");
@@ -304,6 +305,47 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return await use(owner, state, inventory, store);
       } finally { await journal.close(); }
     });
+  const recreationAuthority = async (intent: ManagedRemovalIntent, tombstone: ManagedRemovalTombstone,
+    operator: ManagedRecreationIntent["operator"], deadline: number, ports: Pick<ManagedRecreationPorts, "now" | "authorize" | "observeWithdrawal">) => {
+    if (await boundedManagedRead(deadline, ports.now, () => ports.authorize(intent, operator)) !== true) return false;
+    const result = parseRegistrationWithdrawal(await boundedManagedRead(deadline, ports.now, () => ports.observeWithdrawal(intent)));
+    const now = ports.now();
+    return result.ok && result.value.request === tombstone.request && result.value.action === tombstone.action &&
+      JSON.stringify(result.value.registration) === JSON.stringify(intent.registration) &&
+      result.value.observedAt >= tombstone.withdrawnAt && now >= result.value.observedAt &&
+      now - result.value.observedAt <= 2000 && now < deadline;
+  };
+  const inspectRecreationWorkspace = async (indexed: IndexEntry, accepted: ManagedRecreationIntent, bytes: string, ready: boolean) => {
+    const catalogState = managedRecreationVolumeCatalog(bytes, accepted, indexed.volumes);
+    const successor = lifecycleIndexEntry.parse({
+      app: indexed.app, incarnation: accepted.targetIncarnation, dataOwner: indexed.dataOwner,
+      volumes: indexed.volumes, protocol: "managed-v3", managedRoot: "empty", managedVolumes: 1,
+      phase: ready ? "ready" : "initializing",
+    });
+    const path = recreationDirectory(accepted.targetIncarnation);
+    const managed = join(path, "managed");
+    const catalogPath = join(managed, "volumes");
+    for (const folder of [path, managed, catalogPath]) {
+      if (!ready && await stat(folder) === undefined) { await mkdir(folder, { mode: 0o700 }); await syncDirectory(dirname(folder)); }
+      await requireDirectory(folder);
+    }
+    await withEnvelope(path, successor, async (workspace) => {
+      const initial = await workspace.read();
+      if (initial === undefined || initial.created || initial.tickets.nextTicket !== 1 || await stat(join(managed, "state.json")) !== undefined) {
+        throw new Error("managed recreation workspace has unexpected lifecycle state");
+      }
+    });
+    const catalog = await journals(catalogPath, ready ? "existing" : "initialize");
+    try {
+      const existing = await catalog.read();
+      if (existing === undefined && !ready) await catalog.write(catalogState);
+      else if (JSON.stringify(parseVolumeCreationCatalog(existing)) !== JSON.stringify(catalogState)) {
+        throw new Error("managed recreation workspace catalog disagrees");
+      }
+    } finally { await catalog.close(); }
+    return catalogState;
+  };
+
   const usePurgeScope = <T>(app: string, removalRequest: string, ports: ManagedPurgePorts,
     use: (scope: {
       readonly envelope: NonNullable<Awaited<ReturnType<EnvelopeStore["read"]>>>;
@@ -319,7 +361,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       envelope === undefined || intent.owner.dataOwner !== indexed.dataOwner ||
       JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) throw new Error("managed purge requires an owned removal tombstone");
     const inventory = async () => {
-      const catalog = await journals(join(appDirectory(app), "managed", "volumes"), "existing");
+      const catalog = await journals(join(appDirectory(indexed), "managed", "volumes"), "existing");
       try { return managedPurgeInventory(await catalog.read(), intent.owner, intent.volumes); }
       finally { await catalog.close(); }
     };
@@ -336,10 +378,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return use(Object.freeze({ envelope, store, inventory, allowed }));
   });
   /** Published read models hold only journal ownership and read capabilities. They never initialize/resume a deployment or acquire effect authority. */
-  const useManagedRead = <T>(app: string, ports: ManagedDeploymentReadPort, project: (state: ManagedLifecycleStore, source: ManagedLifecycleSource, forward?: ManagedForwardReservation) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+  const useManagedRead = <T>(app: string, ports: ManagedDeploymentReadPort, project: (state: ManagedLifecycleStore, source: ManagedLifecycleSource, indexed: IndexEntry, forward?: ManagedForwardReservation) => Promise<T>) => useIndexed(app, async (store, indexed) => {
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
-    const path = join(appDirectory(app), "managed"); await requireDirectory(path); const envelope = await store.read(); const request = envelope?.managed?.at(-1);
+    const path = join(appDirectory(indexed), "managed"); await requireDirectory(path); const envelope = await store.read(); const request = envelope?.managed?.at(-1);
     if (envelope?.removalTombstone !== undefined) return null;
     if (request === undefined) {
       if (indexed.managedRoot !== "empty" || await stat(join(path, "state.json")) !== undefined) throw new Error("managed reporting lacks its accepted request"); return null;
@@ -353,15 +395,15 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const bytes = await ports.read(state.operation.source); const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
         if (createHash("sha256").update(bytes).digest("hex") !== state.operation.source || bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request) ||
           request.completion !== null && (state.operation.phase !== "complete" || request.completion.outcome !== state.operation.outcome || request.completion.rootSnapshot !== createHash("sha256").update(JSON.stringify(state)).digest("hex"))) throw new Error("managed reporting lacks its shared request binding");
-        return project(state, source, envelope?.forward);
+        return project(state, source, indexed, envelope?.forward);
       });
       if (value === undefined) throw new Error("managed reporting evidence is unavailable"); return value;
     } finally { await rootJournal.close(); }
   });
 
-  const forwardCleanupHeld = async (reservation: ManagedForwardReservation) => {
+  const forwardCleanupHeld = async (indexed: IndexEntry, reservation: ManagedForwardReservation) => {
     if (reservation.phase !== "fencing") return false;
-    const path = join(appDirectory(reservation.owner.app), "managed", "forward", reservation.run, "effects");
+    const path = join(appDirectory(indexed), "managed", "forward", reservation.run, "effects");
     await requireDirectory(path);
     const journal = await journals(path, "existing");
     try {
@@ -375,13 +417,13 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     } finally { await journal.close(); }
   };
   const projectManagedStatus = (app: string, ports: ManagedDeploymentReadPort) =>
-    useManagedRead(app, ports, async (state, source, reservation) => managedDeploymentStatus(state, source, ports,
-      reservation === undefined ? undefined : { reservation, cleanupHeld: await forwardCleanupHeld(reservation) }));
+    useManagedRead(app, ports, async (state, source, indexed, reservation) => managedDeploymentStatus(state, source, ports,
+      reservation === undefined ? undefined : { reservation, cleanupHeld: await forwardCleanupHeld(indexed, reservation) }));
 
   const useManaged = <T>(app: string, ports: IndexedManagedRuntime, use: (controller: ReturnType<typeof indexedManagedLifecycle>) => Promise<T>) => useIndexed(app, async (store, indexed) => {
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
-    const path = join(appDirectory(app), "managed"); await requireDirectory(path); const rootJournal = await journals(path, indexed.managedRoot === "ready" ? "existing" : "initialize");
+    const path = join(appDirectory(indexed), "managed"); await requireDirectory(path); const rootJournal = await journals(path, indexed.managedRoot === "ready" ? "existing" : "initialize");
     let volumeJournal: Awaited<ReturnType<typeof journals>> | undefined;
     try {
       const indexedOwner = async () => { const value = (await readIndex()).apps.find((entry) => entry.app === app); if (value?.phase !== "ready" || value.protocol !== "managed-v3" || value.incarnation !== indexed.incarnation || value.dataOwner !== indexed.dataOwner) throw new Error("managed indexed ownership changed"); return value; };
@@ -484,7 +526,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const checked = parseManagedForwardSelectionRequest(request); if (!checked.ok || checked.value.app !== app || indexed.protocol !== "managed-v3" || indexed.managedRoot !== "ready") throw new Error("managed forward selection scope unavailable");
     const statement = checked.value; const identity = actor === undefined ? undefined : createHash("sha256").update(JSON.stringify({ request: statement, actor })).digest("hex");
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner }); if (!ownership.ok) throw new Error("managed forward selection ownership unavailable");
-    const parent = join(appDirectory(app), "managed"); let root: Awaited<ReturnType<typeof journals>> | undefined; let unavailable = false;
+    const parent = join(appDirectory(indexed), "managed"); let root: Awaited<ReturnType<typeof journals>> | undefined; let unavailable = false;
     const rootState = async () => { if (unavailable) throw new Error("managed forward root unavailable"); if (root === undefined) { await requireDirectory(parent); root = await journals(parent, "existing"); } return parseManagedLifecycleStore(await root.read()); };
     const current = async () => {
       if (root === undefined || unavailable) return undefined;
@@ -667,7 +709,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (saved.removalTombstone !== undefined) return Object.freeze({ ...reference, phase: "complete", reason: null });
       if (effects?.journal !== "ready") return Object.freeze({ ...reference, phase: "requested", reason: null });
       try {
-        const journal = await journals(join(appDirectory(app), "managed", "removal", removal.request), "existing");
+        const journal = await journals(join(appDirectory(indexed), "managed", "removal", removal.request), "existing");
         try {
           const observed = readManagedRemovalProgress(await journal.read(), effects);
           if (observed.phase !== "complete") return Object.freeze({ ...reference, ...observed });
@@ -697,8 +739,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   return {
     prepareApp: (app: string, protocol?: "managed-v3") => serialApp(app, () => serialIndex(async () => {
       const index = await readIndex();
-      const path = appDirectory(app);
       const existing = index.apps.find((item) => item.app === app);
+      const path = existing === undefined ? originalAppDirectory(app) : appDirectory(existing);
       if (existing?.recreation !== undefined) throw new Error("managed recreation owns the next registration");
       if (protocol === "managed-v3" && existing !== undefined && existing.protocol !== "managed-v3") throw new Error("existing application protocol conversion is unsupported");
       if (existing?.phase === "ready") {
@@ -926,7 +968,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const artifact = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(candidate.artifact)); if (artifact === undefined || createHash("sha256").update(artifact).digest("hex") !== candidate.artifact) throw new Error("managed proposal build evidence unavailable");
       const fence = envelope.fence; if (fence?.lifecycle.phase !== "registered") throw new Error("managed proposal lifecycle is not registered");
       const request = { run, action: indexed.incarnation + ":" + String(fence.nextAction), createdAt: ports.now(), restore };
-      const path = join(appDirectory(app), "managed"); await requireDirectory(path); const accepted = envelope.managed?.at(-1);
+      const path = join(appDirectory(indexed), "managed"); await requireDirectory(path); const accepted = envelope.managed?.at(-1);
       if (indexed.managedRoot === "empty") {
         if (accepted !== undefined || await stat(join(path, "state.json")) !== undefined) throw new Error("managed proposal is awaiting root reconstruction");
         return managedDeploymentProposal(candidate, ownership.value, request, null, ports);
@@ -1048,7 +1090,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const actor = parseMigrationResolutionActor(actorInput);
         if (!actor.ok) throw new Error("invalid managed recreation operator");
         const operator = Object.freeze({ actor: actor.value, reason: request.reason });
-        const prior = indexed.recreation;
+        const installed = indexed.lineage?.reservation;
+        const prior = installed?.request === request.request ? installed : indexed.recreation;
         if (prior !== undefined) {
           if (prior.request !== request.request || prior.removal !== request.removal || prior.targetGeneration !== request.generation ||
             JSON.stringify(prior.operator) !== JSON.stringify(operator)) throw new Error("managed recreation request conflicts");
@@ -1064,19 +1107,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const createdAt = ports.now();
         const deadline = createdAt + 90_000;
         const bounded = <T>(call: () => Promise<T>) => boundedManagedRead(deadline, ports.now, call);
-        const inventory = await readRemovalInventory(app, request.removal, ports, store, indexed);
-        const withdrawalsMatch = async () => {
-          if (await bounded(() => ports.authorize(inventory.intent, operator)) !== true) return false;
-          const result = parseRegistrationWithdrawal(await bounded(() => ports.observeWithdrawal(inventory.intent)));
-          const now = ports.now();
-          return result.ok && result.value.request === tombstone.request && result.value.action === tombstone.action &&
-            JSON.stringify(result.value.registration) === JSON.stringify(inventory.intent.registration) &&
-            result.value.observedAt >= tombstone.withdrawnAt && now >= result.value.observedAt &&
-            now - result.value.observedAt <= 2000 && now < deadline;
-        };
+        const inventory = await readRemovalInventory(request.removal, ports, store, indexed);
+        const withdrawalsMatch = () => recreationAuthority(inventory.intent, tombstone, operator, deadline, ports);
         if (!await withdrawalsMatch()) throw new Error("managed recreation lacks current withdrawal authority");
 
-        const path = join(appDirectory(app), "managed", "volumes");
+        const path = join(appDirectory(indexed), "managed", "volumes");
         await requireDirectory(path);
         const catalog = await journals(path, "existing");
         const volumes = await (async () => {
@@ -1120,6 +1155,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       }),
     prepareManagedRecreationWorkspace: (app: string, request: string, ports: ManagedDeploymentReadPort & Pick<ManagedRecreationPorts, "authorize">) =>
       useIndexed(app, async (store, indexed) => {
+        const installed = indexed.lineage?.reservation;
+        if (installed?.request === request) return installed;
         const accepted = indexed.recreation;
         const envelope = await store.read();
         const removal = envelope?.removal;
@@ -1133,33 +1170,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         if (!ready && !await allowed()) throw new Error("managed recreation workspace authorization or deadline expired");
         const bytes = await boundedManagedRead((ready ? ports.now() + 10_000 : accepted.deadline), ports.now, () => ports.read(accepted.volumes));
         if (bytes === undefined) throw new Error("managed recreation workspace volume evidence unavailable");
-        const catalogState = managedRecreationVolumeCatalog(bytes, accepted, indexed.volumes);
-        const successor = lifecycleIndexEntry.parse({
-          app, incarnation: accepted.targetIncarnation, dataOwner: indexed.dataOwner,
-          volumes: indexed.volumes, protocol: "managed-v3", managedRoot: "empty", managedVolumes: 1,
-          phase: ready ? "ready" : "initializing",
-        });
-        const path = recreationDirectory(accepted.targetIncarnation);
-        const managed = join(path, "managed");
-        const catalogPath = join(managed, "volumes");
-        for (const folder of [path, managed, catalogPath]) {
-          if (!ready && await stat(folder) === undefined) { await mkdir(folder, { mode: 0o700 }); await syncDirectory(dirname(folder)); }
-          await requireDirectory(folder);
-        }
-        await withEnvelope(path, successor, async (workspace) => {
-          const initial = await workspace.read();
-          if (initial === undefined || initial.created || initial.tickets.nextTicket !== 1 || await stat(join(managed, "state.json")) !== undefined) {
-            throw new Error("managed recreation workspace has unexpected lifecycle state");
-          }
-        });
-        const catalog = await journals(catalogPath, ready ? "existing" : "initialize");
-        try {
-          const existing = await catalog.read();
-          if (existing === undefined && !ready) await catalog.write(catalogState);
-          else if (JSON.stringify(parseVolumeCreationCatalog(existing)) !== JSON.stringify(catalogState)) {
-            throw new Error("managed recreation workspace catalog disagrees");
-          }
-        } finally { await catalog.close(); }
+        await inspectRecreationWorkspace(indexed, accepted, bytes, ready);
         if (ready) return accepted;
         if (!await allowed()) throw new Error("managed recreation workspace authorization or deadline expired");
         return serialIndex(async () => {
@@ -1169,6 +1180,71 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           const published = Object.freeze({ ...accepted, workspace: "ready" as const });
           await journal.write({ ...snapshot, apps: snapshot.apps.map((item) => item.app === app ? { ...item, recreation: published } : item) });
           return published;
+        });
+      }),
+    switchManagedRecreationOwnership: (app: string, request: string, ports: ManagedRecreationPorts) =>
+      useIndexed(app, async (store, indexed) => {
+        const installed = indexed.lineage;
+        if (installed?.reservation.request === request) return installed;
+        const accepted = indexed.recreation;
+        const envelope = await store.read();
+        if (envelope === undefined) throw new Error("managed recreation handoff lacks its retired owner");
+        const tombstone = envelope.removalTombstone;
+        const removal = envelope.removal;
+        if (accepted?.request !== request || accepted.workspace !== "ready" || removal?.request !== accepted.removal ||
+          tombstone?.checkpoint !== accepted.checkpoint || envelope.removalAccounting?.after !== accepted.accounting ||
+          envelope.managedPurge !== undefined) throw new Error("managed recreation handoff lacks its retired owner");
+        const allowed = () => recreationAuthority(removal, tombstone, accepted.operator, accepted.deadline, ports);
+        if (!await allowed()) throw new Error("managed recreation handoff authorization or deadline expired");
+        const bytes = await boundedManagedRead(accepted.deadline, ports.now, () => ports.read(accepted.volumes));
+        if (bytes === undefined) throw new Error("managed recreation handoff volume evidence unavailable");
+        const catalog = await inspectRecreationWorkspace(indexed, accepted, bytes, true);
+        const detached = await boundedManagedRead(accepted.deadline, ports.now, async () => {
+          const observed = await Promise.all(catalog.allocations.map(({ volume, inherited }) =>
+            inspectManagedPurgeVolume({ volume, birth: inherited?.receipt ?? null }, ports.native)));
+          return catalog.allocations.every(({ inherited }, position) => observed[position] === (inherited === undefined ? "absent" : "owned"));
+        });
+        if (detached !== true) throw new Error("managed recreation handoff requires detached, recorded data");
+        const inventory = await readRemovalInventory(removal.request, ports, store, indexed);
+        if (inventory.checkpoint !== accepted.checkpoint || inventory.blocked.state.active?.record !== accepted.release) {
+          throw new Error("managed recreation handoff changed the retired release");
+        }
+        const requests = envelope.managed ?? [];
+        const archiveBytes = (snapshot: Awaited<ReturnType<typeof readIndex>>) => {
+          const entry = snapshot.apps.find((item) => item.app === app);
+          const bindings = snapshot.managedBindings ?? [];
+          const retired = managedRemovalAccounting({ resources: snapshot.resources, bindings }, inventory, requests, accepted.accounting);
+          if (JSON.stringify(entry) !== JSON.stringify(indexed) || retired.before !== accepted.accounting || retired.after !== accepted.accounting) {
+            throw new Error("managed recreation handoff changed retired accounting");
+          }
+          return JSON.stringify({
+            version: 1, entry, builds: snapshot.builds.filter((item) => item.registration.app === app),
+            withdrawal: { version: 1, request: removal.request, action: removal.action, registration: removal.registration },
+            binding: bindings.find((binding) => binding.owner.app === app) ?? null,
+            charge: snapshot.resources?.charges.find((charge) => charge.app === app) ?? null,
+          });
+        };
+        const archive = await serialIndex(async () => archiveBytes(await readIndex()));
+        const digest = createHash("sha256").update(archive).digest("hex");
+        if (await boundedManagedRead(accepted.deadline, ports.now, () => ports.retain(archive)) !== digest || !await allowed()) {
+          throw new Error("managed recreation handoff archive unavailable or expired");
+        }
+        return serialIndex(async () => {
+          const snapshot = await readIndex();
+          if (archiveBytes(snapshot) !== archive || ports.now() >= accepted.deadline) throw new Error("managed recreation handoff changed before publication");
+          const lineage = Object.freeze({ archive: digest, reservation: accepted });
+          const successor = lifecycleIndexEntry.parse({
+            app, incarnation: accepted.targetIncarnation, dataOwner: indexed.dataOwner, volumes: indexed.volumes,
+            protocol: "managed-v3", managedRoot: "empty", managedVolumes: 1, phase: "ready", lineage,
+          });
+          const resources = snapshot.resources === null ? null : { ...snapshot.resources, charges: snapshot.resources.charges.filter((item) => item.app !== app) };
+          const next = parseLifecycleAppIndex({
+            ...snapshot, resources, builds: snapshot.builds.filter((item) => item.registration.app !== app),
+            managedBindings: snapshot.managedBindings?.filter((binding) => binding.owner.app !== app) ?? [],
+            apps: snapshot.apps.map((item) => item.app === app ? successor : item),
+          });
+          await journal.write(next);
+          return lineage;
         });
       }),
     managedPurgeIntent: (app: string, removal: string, ports: ManagedPurgePorts) =>
@@ -1225,7 +1301,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return project(JSON.parse(await read(request.completion.rootSnapshot)));
       }
       if (indexed.managedRoot !== "ready") throw new Error("managed migration audit awaits root reconstruction");
-      const path = join(appDirectory(app), "managed"); await requireDirectory(path); const root = await journals(path, "existing");
+      const path = join(appDirectory(indexed), "managed"); await requireDirectory(path); const root = await journals(path, "existing");
       try { return await project(await root.read()); } finally { await root.close(); }
     }),
     managedDeploymentImagePins: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedImagePins(state, source, ports)),
@@ -1240,12 +1316,12 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const envelope = await store.read();
         const reservation = envelope?.forward;
         if (envelope?.fence?.lifecycle.phase !== "registered" || reservation === undefined || reservation.phase === "held") return undefined;
-        if (await forwardCleanupHeld(reservation).catch(() => false)) return undefined;
+        if (await forwardCleanupHeld(current, reservation).catch(() => false)) return undefined;
         const catalog = current.forwardSelections?.find((item) => item.request === reservation.run);
         if (catalog?.phase !== "ready" || catalog.source !== reservation.selection.source || catalog.decision !== reservation.selection.decision || catalog.checkpoint !== reservation.blocked.checkpoint) {
           throw new Error("pending forward work lacks its published selection");
         }
-        const path = join(appDirectory(entry.app), "managed", "forward", reservation.run);
+        const path = join(appDirectory(current), "managed", "forward", reservation.run);
         await requireDirectory(path);
         const journal = await journals(path, "existing");
         try {
@@ -1277,7 +1353,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const requested = z.array(ownedVolumeSchema).max(32).readonly().safeParse(volumes); if (!requested.success || new Set(requested.data.map((volume) => volume.allocation)).size !== requested.data.length) return undefined;
       const entry = (await serialIndex(readIndex)).apps.find((item) => item.app === app); const owner = entry === undefined ? undefined : parseDataOwnership({ version: 1, app, incarnation: entry.incarnation, dataOwner: entry.dataOwner });
       if (entry?.phase !== "ready" || entry.managedVolumes !== 1 || owner === undefined || !owner.ok || volumes.some((volume) => !entry.volumes.some((known) => JSON.stringify(known) === JSON.stringify(volume)))) return undefined;
-      const path = join(appDirectory(app), "managed", "volumes"); await requireDirectory(path); const catalog = await journals(path, "existing");
+      const path = join(appDirectory(entry), "managed", "volumes"); await requireDirectory(path); const catalog = await journals(path, "existing");
       try { return await volumeCatalogReceipts(await catalog.read(), owner.value, entry.volumes).read(volumes); } finally { await catalog.close(); }
     },
     dataOwnership: (app: string) => useIndexed(app, async (store) => {
@@ -1736,7 +1812,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const requests = run === undefined ? (envelope.managed ?? []).slice(-20).toReversed() : (envelope.managed ?? []).filter((item) => item.run === run);
         const open = async () => {
           if (indexed.managedRoot !== "ready" || !requests.some((item) => item.completion === null)) return undefined;
-          const path = join(appDirectory(app), "managed"); await requireDirectory(path);
+          const path = join(appDirectory(indexed), "managed"); await requireDirectory(path);
           const root = await journals(path, "existing");
           try { return parseManagedLifecycleStore(await root.read()); } finally { await root.close(); }
         };
@@ -1832,7 +1908,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     },
     registrationProvisioning,
     registrationOwnership: async (app: string, ticket: string, generation: string) => (await registrationProvisioning(app, ticket, generation)).reference,
-    reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useIndexed(app, (store, owner) => { if (owner.protocol === "managed-v3" && runtime !== "swarm") throw new Error("managed-v3 registration requires Swarm"); return store.reserveRegistration(generation, runtime); }),
+    reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useIndexed(app, (store, owner) => {
+      if (owner.protocol === "managed-v3" && runtime !== "swarm") throw new Error("managed-v3 registration requires Swarm");
+      if (owner.lineage !== undefined) throw new Error("managed recreation owns the successor registration");
+      return store.reserveRegistration(generation, runtime);
+    }),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useIndexed(app, (store) => store.submitRegistration(ticket, generation)),
     reconcileRegistration: (app: string, ticket: string, generation: string) =>

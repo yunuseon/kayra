@@ -1,9 +1,10 @@
 /* eslint-disable functional/no-let, functional/immutable-data -- fixture simulates native state and a lost journal acknowledgement */
 import { strict as assert } from "node:assert";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { z } from "zod";
 import { parseManagedApplicationPlan } from "../../src/contracts/managed-application-plan.ts";
 import type { VolumeObservation } from "../../src/contracts/owned-volume.ts";
 import type { IndexedManagedRuntime } from "../../src/server/deployment/indexed-managed-lifecycle.ts";
@@ -20,7 +21,8 @@ test("a retired verified app reserves its exact data custody and fences purge ac
     const journal = await openJournal(...args);
     return { ...journal, write: async (value) => {
       await journal.write(value);
-      if (args[0] === indexDirectory && fail && parseLifecycleAppIndex(value).apps.some((entry) => entry.recreation !== undefined)) {
+      if (args[0] === indexDirectory && fail &&
+        parseLifecycleAppIndex(value).apps.some((entry) => entry.recreation !== undefined || entry.lineage !== undefined)) {
         fail = false;
         throw new Error("lost recreation acknowledgement");
       }
@@ -132,7 +134,7 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   }), /volume evidence changed/);
   fail = true;
   await assert.rejects(prepare(), /lost recreation acknowledgement/);
-  await lab.reopen(); lab.clock(100_000);
+  await lab.reopen(); lab.clock(4_000);
   const workspace = await lab.index().prepareManagedRecreationWorkspace("shop", request.request, {
     ...ports, authorize: () => Promise.resolve(false),
   });
@@ -153,4 +155,34 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   const stagingStatus = await lab.index().publishedDeploymentStatus("shop");
   assert.equal(stagingStatus?.version, 1);
   assert.equal(stagingStatus.lifecycle, "removed");
+
+  const oldEnvelope = join(lab.directory, createHash("sha256").update("shop").digest("hex"), "state.json");
+  const oldBytes = await readFile(oldEnvelope, "utf8");
+  const handoff = () => lab.index().switchManagedRecreationOwnership("shop", request.request, ports);
+  volumeState = { status: "absent" };
+  await assert.rejects(handoff(), /handoff requires detached, recorded data/);
+  volumeState = previous;
+  fail = true;
+  await assert.rejects(handoff(), /lost recreation acknowledgement/);
+  await lab.reopen(); lab.clock(100_000);
+  const installed = await lab.index().switchManagedRecreationOwnership("shop", request.request, {
+    ...ports, authorize: () => Promise.resolve(false), observeWithdrawal: unreachable,
+  });
+  assert.deepEqual(installed.reservation, workspace);
+  assert.deepEqual(await reserve(), workspace);
+  assert.deepEqual(await prepare(), workspace);
+  const archived = z.object({
+    entry: z.object({ incarnation: z.uuid() }),
+    charge: z.object({ result: z.literal("absent") }),
+    builds: z.array(z.object({ registration: z.object({ incarnation: z.uuid() }) })),
+  }).parse(JSON.parse(await lab.artifacts.read(installed.archive)));
+  assert.equal(archived.entry.incarnation, lab.incarnation);
+  assert.equal(archived.charge.result, "absent");
+  assert.equal(archived.builds[0]?.registration.incarnation, lab.incarnation);
+  assert.equal(await readFile(oldEnvelope, "utf8"), oldBytes);
+  assert.equal(await lab.index().prepareApp("shop", "managed-v3"), workspace.targetIncarnation);
+  assert.deepEqual(await lab.index().recordedManagedVolumes("shop", lab.volumes), births);
+  assert.deepEqual((await lab.index().resourceSnapshot())?.charges, []);
+  assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
+  await assert.rejects(lab.index().reserveRegistration("shop", request.generation, "swarm"), /owns the successor registration/);
 });

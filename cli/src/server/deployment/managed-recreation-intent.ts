@@ -38,6 +38,10 @@ export const managedRecreationIntentSchema = schema.transform((raw, context) => 
   return Object.freeze({ ...raw, predecessor: predecessor.value, operator: Object.freeze({ ...raw.operator, actor: actor.value }) });
 });
 export type ManagedRecreationIntent = z.infer<typeof managedRecreationIntentSchema>;
+export const managedRecreationLineageSchema = z.object({
+  archive: digest,
+  reservation: managedRecreationIntentSchema,
+}).strict().readonly().refine((value) => value.reservation.workspace === "ready");
 
 export const managedRecreationRequestSchema = z.object({
   request: z.uuid(),

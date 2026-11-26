@@ -5,7 +5,7 @@ import { names } from "../../lib/names.ts";
 import { ownedVolumeSchema, parseDataOwnership } from "../../contracts/owned-volume.ts";
 import { parseRegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { parseManagedAdmissionAccounting } from "./managed-admission-binding.ts";
-import { managedRecreationIntentSchema } from "./managed-recreation-intent.ts";
+import { managedRecreationIntentSchema, managedRecreationLineageSchema } from "./managed-recreation-intent.ts";
 
 const appName = z.string().regex(names.app.pattern);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -23,11 +23,15 @@ export const lifecycleIndexEntry = z.object({
   managedVolumes: z.literal(1).exactOptional(),
   managedRoot: z.enum(["empty", "ready"]).exactOptional(),
   recreation: managedRecreationIntentSchema.exactOptional(),
+  lineage: managedRecreationLineageSchema.exactOptional(),
   forwardSelections: z.array(lifecycleIndexForwardSelection).max(128).readonly().exactOptional(),
   phase: z.enum(["initializing", "ready"]),
 }).strict().refine((owner) => (owner.forwardSelections === undefined || owner.protocol === "managed-v3" && owner.phase === "ready" && owner.managedRoot === "ready" && new Set(owner.forwardSelections.map((item) => item.request)).size === owner.forwardSelections.length && owner.forwardSelections.every((item) => item.registration.app === owner.app && item.registration.incarnation === owner.incarnation)) && (owner.protocol === "managed-v3") === (owner.managedRoot !== undefined) && (owner.protocol !== "managed-v3" || parseDataOwnership({ version: 1, app: owner.app, incarnation: owner.incarnation, dataOwner: owner.dataOwner }).ok) && (owner.managedVolumes === undefined || owner.protocol === "managed-v3") && owner.volumes.every((volume) => volume.app === owner.app && volume.dataOwner === owner.dataOwner) &&
   new Set(owner.volumes.map((volume) => volume.key)).size === owner.volumes.length &&
   new Set(owner.volumes.map((volume) => volume.allocation)).size === owner.volumes.length &&
+  (owner.lineage === undefined || owner.protocol === "managed-v3" && owner.phase === "ready" && owner.managedVolumes === 1 &&
+    owner.lineage.reservation.predecessor.app === owner.app && owner.lineage.reservation.predecessor.dataOwner === owner.dataOwner &&
+    owner.lineage.reservation.targetIncarnation === owner.incarnation) &&
   (owner.recreation === undefined || owner.protocol === "managed-v3" && owner.phase === "ready" && owner.managedRoot === "ready" && owner.managedVolumes === 1 &&
     owner.recreation.predecessor.app === owner.app && owner.recreation.predecessor.incarnation === owner.incarnation && owner.recreation.predecessor.dataOwner === owner.dataOwner)).readonly();
 export const lifecycleIndexBuild = z.object({

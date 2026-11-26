@@ -2816,5 +2816,9 @@ volume catalog under that reservation. The retired app remains the current
 tombstone during staging. The successor uses the same data owner and allocation
 identities, and every inherited birth carries the predecessor's retirement
 identity. A lost acknowledgement reopens the reserved workspace and its
-original deadline. Switching the current ownership, publishing a new
-registration, and activating the release are separate transitions.
+original deadline. The index can then switch the current owner in one journal
+replacement, after checking the workspace and exact detached volumes again.
+That replacement points to the validated new journal, preserves the old
+journal at its existing path, and retains its build receipts and settled
+charge as immutable archive evidence. Publication of the successor's
+registration and activation of its release remain separate transitions.

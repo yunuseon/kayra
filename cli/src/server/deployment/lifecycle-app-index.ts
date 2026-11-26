@@ -656,7 +656,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         if (reservation === undefined) {
           const old = envelope?.managed?.find((item) => item.run === request.blockedRun);
           const installed = envelope?.managed?.find((item) => item.run === request.request);
-          if (old?.completion?.outcome !== "superseded" || old.completion.successor !== installed?.run || installed === undefined) throw new Error("forward activation intent unavailable");
+          if (old?.completion?.outcome !== "superseded" || old.completion.successor !== installed?.run) throw new Error("forward activation intent unavailable");
           return installed;
         }
         if (reservation.phase !== "transferring") throw new Error("forward activation requires its published intent");

@@ -162,6 +162,6 @@ test("the global admission writer transfers capacity exactly once after fresh ha
   assert.equal(nextSelection.audit.blocked.compatibilityEpoch, lab.held.compatibilityEpoch);
   const status = await lab.index().managedDeploymentStatus("shop", lab.runtime);
   assert.equal(status?.rollback, "data-fenced");
-  assert.equal(status?.verifiedActive, null);
+  assert.equal(status.verifiedActive, null);
   assert.equal(lab.effects.length, 4);
 });

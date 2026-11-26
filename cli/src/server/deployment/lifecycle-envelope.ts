@@ -1,3 +1,4 @@
+import { parseManagedPurge } from "./managed-purge-state.ts";
 /* Private state validation grants no workload authority. The indexed writer
  * authenticates registration, fences lifecycle work and reserves resources;
  * runtime observations separately establish effect and release outcomes. */
@@ -42,6 +43,7 @@ const shape = z.object({
   removalEffects: managedRemovalEffectsReference.optional(),
   removalAccounting: managedRemovalAccountingIntent.optional(),
   removalTombstone: managedRemovalTombstone.optional(),
+  managedPurge: z.unknown().optional(),
   http: z.unknown().optional(),
   rollout: z.unknown().optional(),
   rollouts: z.array(z.unknown()).max(1024).optional(),
@@ -184,10 +186,10 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     const fenceState = fence.value;
     const lifecycle = fenceState?.lifecycle;
     const sequence = lifecycle?.phase === "removal-requested" ? lifecycle.removal :
-      lifecycle?.phase === "removed" ? lifecycle.tombstone.removal : undefined;
+      lifecycle?.phase === "removed" || lifecycle?.phase === "purging" || lifecycle?.phase === "purged" ? lifecycle.tombstone.removal : undefined;
     const acceptedRemoval = operations.some((item) => item.ticket === removal.ticket && item.action === removal.action &&
       item.descriptor.kind === "remove" && item.descriptor.ownershipGeneration === removal.owner.dataOwner);
-    const terminalRemoval = lifecycle?.phase === "removed" && removalTombstone !== undefined &&
+    const terminalRemoval = lifecycle !== undefined && "tombstone" in lifecycle && removalTombstone !== undefined &&
       JSON.stringify(lifecycle.tombstone.volumes) === JSON.stringify(removal.volumes.map((volume) => volume.name)) &&
       (() => {
         const ticket = admitTicket(tickets.value, removal.ticket, { kind: "remove", ownershipGeneration: removal.owner.dataOwner });
@@ -211,6 +213,25 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     removalTombstone.withdrawnAt < removalAccounting.observedAt) ||
     managed?.some((item) => item.completion?.outcome === "removed" && (item.completion.removal !== removalTombstone?.request || item.completion.rootSnapshot !== null &&
       item.completion.rootSnapshot !== removalTombstone.checkpoint))) return err("managed removal tombstone evidence disagrees");
+  const managedPurge = (() => {
+    try { return parsed.data.managedPurge === undefined ? undefined : parseManagedPurge(parsed.data.managedPurge); }
+    catch { return null; }
+  })();
+  if (managedPurge === null) return err("invalid managed purge state");
+  const purging = current?.phase === "purging" || current?.phase === "purged";
+  if (removalTombstone !== undefined && purging !== (managedPurge !== undefined)) return err("managed purge lacks its lifecycle fence");
+  if (managedPurge !== undefined) {
+    if (removal === undefined || removalTombstone === undefined || fence.value === null || !purging ||
+      managedPurge.removal !== removalTombstone.request || managedPurge.action !== lifecycleActionId(fence.value, current.purge) ||
+      managedPurge.createdAt < removalTombstone.withdrawnAt || (current.phase === "purged") !== (managedPurge.phase === "complete") ||
+      JSON.stringify(managedPurge.entries.map((entry) => entry.volume)) !== JSON.stringify(removal.volumes)) return err("managed purge ownership disagrees");
+    const descriptor = { kind: "purge" as const, ownershipGeneration: removal.owner.dataOwner };
+    const ticket = admitTicket(tickets.value, managedPurge.ticket, descriptor);
+    if (!ticket.ok || (current.phase === "purged" ? ticket.value.status !== "terminal" || ticket.value.outcome !== "success" :
+      ticket.value.status !== "accepted" || !operations.some((operation) => operation.action === managedPurge.action &&
+        operation.ticket === managedPurge.ticket && operation.descriptor.kind === "purge" &&
+        operation.descriptor.ownershipGeneration === removal.owner.dataOwner))) return err("managed purge lacks its accepted ticket");
+  }
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
@@ -220,6 +241,7 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     ...(removalEffects === undefined ? {} : { removalEffects }),
     ...(removalAccounting === undefined ? {} : { removalAccounting }),
     ...(removalTombstone === undefined ? {} : { removalTombstone }),
+    ...(managedPurge === undefined ? {} : { managedPurge }),
     ...(http?.ok ? { http: http.value } : {}),
     ...(rollout === undefined ? {} : { rollout }),
     ...(rollouts === undefined ? {} : { rollouts: Object.freeze(rollouts) }) }));

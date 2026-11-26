@@ -1,3 +1,6 @@
+import { beginManagedPurgeEnvelope, updateManagedPurgeEnvelope } from "./managed-purge-transition.ts";
+import type { ManagedPurgeInventory } from "./managed-purge-inventory.ts";
+import type { ManagedPurge } from "./managed-purge-state.ts";
 import { managedRemovalAccountingIntent, managedRemovalEffectsReference } from "./managed-removal-intent.ts";
 import { completeManagedRemovalEnvelope, requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
 import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff, activateManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
@@ -185,6 +188,20 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       if (reference.journal !== "initializing") throw new Error("managed removal effects require initialization");
       await persist({ ...current, removalEffects: reference });
       return reference;
+    }),
+    beginManagedPurge: (request: string, removal: string, createdAt: number, operator: ManagedPurge["operator"], inventory: ManagedPurgeInventory) => serial(async () => {
+      const current = await required();
+      const next = beginManagedPurgeEnvelope(current, request, removal, createdAt, operator, inventory);
+      if (current.managedPurge !== undefined) return current.managedPurge;
+      const purge = (await persist(next)).managedPurge;
+      if (purge === undefined) throw new Error("managed purge intent did not persist");
+      return purge;
+    }),
+    updateManagedPurge: (prior: ManagedPurge, state: ManagedPurge) => serial(async () => {
+      const next = updateManagedPurgeEnvelope(await required(), prior, state);
+      const purge = (await persist(next)).managedPurge;
+      if (purge === undefined) throw new Error("managed purge progress did not persist");
+      return purge;
     }),
     completeManagedRemoval: (input: unknown, checkpointRun: string | null) => serial(async () => {
       const current = await required();

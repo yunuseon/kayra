@@ -2741,3 +2741,12 @@ under the publisher lock, and asks the coordinator to seal the tombstone.
 Retries discover the existing action. The same lab opt-in selects managed
 registration for new Swarm apps. Existing Compose registration retains the
 established path, and a change of protocol for an existing app is refused.
+
+Guarded purge accepts a separate audited action under the app writer after
+removal and withdrawal. It binds the complete retained volume inventory to
+recorded creation receipts, refuses unresolved creation, and checks all
+service and container attachments before selecting any delete. Each native
+delete has a durable intent, uses the exact birth receipt and uses Docker's
+non-forced deletion. Observed absence settles the action after a lost reply.
+The original purge deadline and the removal ownership tombstone survive
+restart.

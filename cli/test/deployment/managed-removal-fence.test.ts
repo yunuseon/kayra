@@ -240,6 +240,31 @@ test("removal of a registered app with no deployment retains its data identities
     }),
   });
   assert.equal(tombstone.checkpoint, null);
+  const purge = randomUUID();
+  const operator = { actor: { kind: "operator-control" as const, identity: "fixture-operator" }, reason: "Purge the explicitly removed registration" };
+  const purgePorts = {
+    now: lab.runtime.now, authorize, native: {
+      observe: () => Promise.resolve({ status: "absent" as const }),
+      attachments: () => Promise.resolve({ status: "observed" as const, containers: Object.freeze([]), services: Object.freeze([]) }),
+      remove: unreachable,
+    },
+    observeWithdrawal: () => Promise.resolve({
+      version: 1, status: "withdrawn", request, action: intent.action, registration: intent.registration, observedAt: lab.runtime.now(),
+    }),
+  };
+  await assert.rejects(lab.index().requestManagedPurge("shop", randomUUID(), purge, operator, purgePorts), /owned removal tombstone/);
+  const accepted = await lab.index().requestManagedPurge("shop", request, purge, operator, purgePorts);
+  assert.equal(accepted.phase, "preflight");
+  assert.equal(accepted.entries[0]?.birth, null);
+  await lab.reopen();
+  const tick = () => lab.index().tickManagedPurge("shop", request, purge, purgePorts);
+  assert.equal((await tick()).phase, "deleting");
+  assert.equal((await tick()).entries[0]?.phase, "absent");
+  const done = await tick();
+  assert.equal(done.phase, "complete");
+  assert.equal(done.deadline, accepted.deadline);
+  await lab.reopen();
+  assert.deepEqual(await tick(), done);
   assert.deepEqual((await lab.index().managedRemovalTombstone("shop"))?.volumes, lab.volumes);
   assert.equal(await lab.index().resourceSnapshot(), null);
 });

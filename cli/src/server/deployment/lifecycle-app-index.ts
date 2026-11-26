@@ -1,3 +1,7 @@
+import { managedPurgeInventory } from "./managed-purge-inventory.ts";
+import { reconcileManagedPurge } from "./managed-purge-effects.ts";
+import type { ManagedPurgeEffectsPorts } from "./managed-purge-effects.ts";
+import type { ManagedPurge } from "./managed-purge-state.ts";
 import { parseRegistrationWithdrawal } from "../../contracts/registration-withdrawal.ts";
 import { managedRemovalAccounting } from "./managed-removal-accounting.ts";
 import { managedRemovalEffects, managedRemovalInventoryDigest } from "./managed-removal-effects.ts";
@@ -100,6 +104,10 @@ type ForwardTransferPorts = ForwardSelectionPorts & RetainedInputsPort & HostObs
   readonly authorizeTransfer: (source: ManagedLifecycleSource) => Promise<boolean>;
 };
 type ForwardSelectionPorts = Pick<Parameters<typeof managedForwardSelection>[1], "now" | "read" | "retain" | "authorize">;
+type ManagedPurgePorts = Pick<ManagedPurgeEffectsPorts, "now" | "native"> & {
+  readonly observeWithdrawal: (intent: ManagedRemovalIntent) => Promise<unknown>;
+  readonly authorize: (intent: ManagedRemovalIntent, operator: ManagedPurge["operator"]) => Promise<boolean>;
+};
 type EnvelopeStore = ReturnType<typeof openLifecycleEnvelopeStore>;
 
 const missing = (error: unknown) => error && typeof error === "object" && "code" in error && error.code === "ENOENT";
@@ -280,6 +288,36 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return await use(owner, state, inventory, store);
       } finally { await journal.close(); }
     });
+  const usePurgeScope = <T>(app: string, removalRequest: string, ports: ManagedPurgePorts,
+    use: (scope: {
+      readonly envelope: NonNullable<Awaited<ReturnType<EnvelopeStore["read"]>>>;
+      readonly store: EnvelopeStore;
+      readonly inventory: () => Promise<ReturnType<typeof managedPurgeInventory>>;
+      readonly allowed: (operator: ManagedPurge["operator"]) => Promise<boolean>;
+    }) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+    const envelope = await store.read();
+    const intent = envelope?.removal;
+    const tombstone = envelope?.removalTombstone;
+    if (indexed.protocol !== "managed-v3" || indexed.managedVolumes !== 1 || intent === undefined || tombstone?.request !== removalRequest ||
+      envelope === undefined || intent.owner.dataOwner !== indexed.dataOwner ||
+      JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) throw new Error("managed purge requires an owned removal tombstone");
+    const inventory = async () => {
+      const catalog = await journals(join(appDirectory(app), "managed", "volumes"), "existing");
+      try { return managedPurgeInventory(await catalog.read(), intent.owner, intent.volumes); }
+      finally { await catalog.close(); }
+    };
+    const allowed = async (operator: ManagedPurge["operator"]) => {
+      const deadline = ports.now() + 10_000;
+      if (await boundedManagedRead(deadline, ports.now, () => ports.authorize(intent, operator)) !== true) return false;
+      const observation = parseRegistrationWithdrawal(await boundedManagedRead(deadline, ports.now, () => ports.observeWithdrawal(intent)));
+      const now = ports.now();
+      return observation.ok && observation.value.request === removalRequest && observation.value.action === intent.action &&
+        JSON.stringify(observation.value.registration) === JSON.stringify(intent.registration) &&
+        observation.value.observedAt >= tombstone.withdrawnAt && now < deadline &&
+        now >= observation.value.observedAt && now - observation.value.observedAt <= 2000;
+    };
+    return use(Object.freeze({ envelope, store, inventory, allowed }));
+  });
   /** Published read models hold only journal ownership and read capabilities. They never initialize/resume a deployment or acquire effect authority. */
   const useManagedRead = <T>(app: string, ports: ManagedDeploymentReadPort, project: (state: ManagedLifecycleStore, source: ManagedLifecycleSource) => Promise<T>) => useIndexed(app, async (store, indexed) => {
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
@@ -915,6 +953,28 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         JSON.stringify(indexed.volumes) !== JSON.stringify(volumes)) throw new Error("managed removal tombstone lacks indexed ownership");
       return Object.freeze({ owner, volumes, ...envelope.removalTombstone });
     }),
+    requestManagedPurge: (app: string, removal: string, request: string, operator: ManagedPurge["operator"], ports: ManagedPurgePorts) =>
+      usePurgeScope(app, removal, ports, async ({ envelope, store, inventory, allowed }) => {
+        const prior = envelope.managedPurge;
+        if (prior !== undefined) {
+          if (prior.request !== request || JSON.stringify(prior.operator) !== JSON.stringify(operator)) throw new Error("managed purge request conflicts");
+          return prior;
+        }
+        if (!z.uuid().safeParse(request).success || request === removal || !await allowed(operator)) throw new Error("managed purge authority unavailable");
+        return store.beginManagedPurge(request, removal, ports.now(), operator, await inventory());
+      }),
+    tickManagedPurge: (app: string, removal: string, request: string, ports: ManagedPurgePorts) =>
+      usePurgeScope(app, removal, ports, async ({ envelope, store, inventory, allowed }) => {
+        const state = envelope.managedPurge;
+        if (state?.request !== request) throw new Error("managed purge request is unavailable");
+        if (state.phase === "complete" || state.phase === "held") return state;
+        const births = state.entries.map(({ volume, birth }) => ({ volume, birth }));
+        if (JSON.stringify(births) !== JSON.stringify(await inventory())) throw new Error("managed purge birth evidence changed");
+        return reconcileManagedPurge(state, {
+          now: ports.now, native: ports.native, allowed: () => allowed(state.operator),
+          persist: (next) => store.updateManagedPurge(state, next),
+        });
+      }),
     observeManagedRemovalCompletion: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
       useRemovalEffects(app, request, ports, false, (owner) => owner.observeCompletion()),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),

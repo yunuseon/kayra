@@ -1,4 +1,4 @@
-// Native reserved-action cleanup only; no successor activation or HTTP continuity claim.
+// Native reserved-action cleanup and verified successor handoff.
 import { strict as assert } from 'node:assert';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -8,11 +8,12 @@ import { parseManagedApplicationPlan } from '../../../cli/src/contracts/managed-
 import { managedForwardCleanupRuntime } from '../../../cli/src/server/composition/managed-forward-cleanup-runtime.ts';
 import { checkContainerFences } from '../../../cli/src/server/runtime/check-container-fence.ts';
 import { ownedVolumes } from '../../../cli/src/server/runtime/owned-volume.ts';
+import { observeSwarmHost } from '../../../cli/src/server/runtime/swarm-host.ts';
 import { oneShotJob } from '../../../cli/src/server/runtime/one-shot-job.ts';
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const wait = async (check, deadline, description) => { while (Date.now() < deadline) { const value = await check(); if (value) return value; await pause(100); } throw new Error('forward cleanup fixture deadline: ' + description); };
-export const probeManagedForwardSingleton = async ({ app, image, api, swarm, incarnation, dataOwner, path, planA, builds, proposalPorts, lifecycle, reopen, currentIndex, native, allocation, receipt }) => {
+export const probeManagedForwardSingleton = async ({ app, image, api, swarm, incarnation, dataOwner, path, planA, builds, proposalPorts, lifecycle, reopen, currentIndex, native, allocation, receipt, runtimeFor }) => {
   const build = await currentIndex().prepareBuild(app, 'c'.repeat(40), builds);
   const checked = parseManagedApplicationPlan({ ...planA, commit: build.commit, artifact: build.artifact, grants: { ...planA.grants, maintenance: true },
     services: { leader: { ...planA.services.leader, inputs: { ...planA.services.leader.inputs, environment: { RELEASE: { kind: 'literal', value: 'C' } } } } },
@@ -47,6 +48,47 @@ export const probeManagedForwardSingleton = async ({ app, image, api, swarm, inc
   const history = execFileSync('docker', ['run', '--rm', '--read-only', '--network', 'none', '--memory', '128m', '--cpus', '0.25', '--mount', 'type=volume,source=' + allocation.value.name + ',target=/data,readonly', '--entrypoint', 'node', image, '--eval', "process.stdout.write(require('node:fs').readFileSync('/data/history','utf8'))"], { encoding: 'utf8', timeout: 30000 });
   const records = history.trim().split('\n').map((line) => JSON.parse(line)); assert.ok(records.some((event) => event.release === 'C' && event.event === 'effect')); assert.ok(records.some((event) => event.release === 'C' && event.event === 'released')); assert.deepEqual(records.filter((event) => event.event === 'acquired').map((event) => event.release), ['A', 'B', 'A', 'C']); assert.ok(!records.some((event) => event.release === 'D'));
   const shared = JSON.parse(await readFile(join(path, 'app-index', createHash('sha256').update(app).digest('hex'), 'state.json'), 'utf8')); assert.equal(shared.forward.action, reservation.action); assert.equal(shared.fence.lifecycle.active.sequence, 6); assert.equal(shared.fence.nextAction, 8); assert.equal(shared.managed.at(-1).completion, null);
-  const result = { passed: true, scope: 'native reserved-action singleton cleanup through the indexed owner and dedicated capability factory; fixture builds/compiler/grants, private command path, no successor activation, retained dependency, HTTP, SIGKILL or production runtime claim', blockedRun: held.operation.run, unknownCheckExec: held.operation.verification.steps[0].execution.id, request: request.request, sourceAction: source.action, reservedAction: reservation.action, deadline: reservation.deadline, originalDeadlinePreserved: true, separateOperatorAudit: true, consumerStopReopened: true, pinnedCheckPhysicallyStopped: true, unsafeDataEpoch: held.compatibilityEpoch, heldRootUnchanged: true, admissionUnsettledAndUnchanged: true, noSuccessorActivated: true, service: stopped.id, nativeWrites: writes.length, stoppedCheckContainers: complete.nodes.flatMap((node) => node.proofs).length, coordinationVolumeUnchanged: true, retainedDataEvents: records.length, receipt };
+  const unavailableRetained = async () => { throw new Error('singleton has no separate retained dependency'); };
+  const handoff = await currentIndex().prepareManagedForwardHandoff(app, request, ports, runtime, unavailableRetained);
+  const lease = await currentIndex().transferManagedForwardAdmission(app, request, {
+    ...ports, observeHost: (host) => observeSwarmHost(host, api),
+    authorizeTransfer: async (source) => source.forward.decision === selection.id && source.run === request.request && source.candidate.grants.maintenance,
+  }, runtime, unavailableRetained);
+  assert.equal(lease.source, handoff.reservation.handoff.source);
+  const transferred = await currentIndex().resourceSnapshot();
+  assert.equal(transferred.charges[0].sequence, 7);
+  assert.equal(transferred.charges[0].result, 'pending');
+  await reopen();
+  const installed = await currentIndex().installManagedForwardRoot(app, request, ports, runtime, unavailableRetained);
+  assert.equal(installed.operation.phase, 'allocating');
+  assert.equal(installed.active, null);
+  assert.deepEqual(installed.lastGood, held.lastGood);
+  const beforeSwitch = await native.observe({ app, incarnation, dataOwner, service: 'leader' });
+  assert.equal(beforeSwitch.status, 'owned'); assert.equal(beforeSwitch.replicas, 0);
+  const activationAt = Date.now();
+  const accepted = await currentIndex().activateManagedForward(app, request, ports, runtime, unavailableRetained);
+  assert.equal(accepted.run, request.request);
+  const successor = await currentIndex().managedExecutionContext(app, accepted.run, { ...ports });
+  assert.ok(successor); assert.equal(successor.action, reservation.action);
+  const composed = runtimeFor(successor);
+  const verified = await wait(async () => {
+    const state = await currentIndex().tickManagedDeployment(app, accepted.run, composed);
+    assert.notEqual(state.operation.phase, 'held', JSON.stringify(state.operation));
+    return state.operation.phase === 'complete' ? state : false;
+  }, accepted.deadline, 'verify successor singleton');
+  assert.equal(verified.active.run, accepted.run); assert.equal(verified.compatibilityEpoch, held.compatibilityEpoch);
+  assert.equal((await currentIndex().resourceSnapshot()).charges[0].result, 'target');
+  assert.deepEqual(await currentIndex().recordedManagedVolumes(app, [allocation.value]), [receipt]);
+  const after = await native.observe({ app, incarnation, dataOwner, service: 'leader' });
+  assert.equal(after.status, 'owned'); assert.equal(after.id, original.id); assert.equal(after.replicas, 1);
+  const task = after.tasks.find((item) => item.state === 'running' && item.desired === 'running'); assert.ok(task);
+  const container = (await api.request('GET', '/tasks/' + task.id)).value.Status.ContainerStatus.ContainerID;
+  const forwardedHistory = execFileSync('docker', ['exec', container, 'node', '--eval', "process.stdout.write(require('node:fs').readFileSync('/data/history','utf8'))"], { encoding: 'utf8', timeout: 10000 });
+  assert.deepEqual(forwardedHistory.trim().split('\n').map((line) => JSON.parse(line)).filter((event) => event.event === 'acquired').map((event) => event.release), ['A','B','A','C','D']);
+  const finalEnvelope = JSON.parse(await readFile(join(path, 'app-index', createHash('sha256').update(app).digest('hex'), 'state.json'), 'utf8'));
+  assert.equal(finalEnvelope.managed.find((item) => item.run === held.operation.run).completion.outcome, 'superseded');
+  assert.equal(finalEnvelope.managed.find((item) => item.run === held.operation.run).completion.successor, accepted.run);
+  await writeFile(join(path, 'forward-successor-history.json'), forwardedHistory);
+  const result = { passed: true, scope: 'native indexed forward handoff and verified singleton activation with fixture builds/compiler/grants and a preserved coordination volume', blockedRun: held.operation.run, unknownCheckExec: held.operation.verification.steps[0].execution.id, request: request.request, sourceAction: source.action, reservedAction: reservation.action, deadline: reservation.deadline, originalDeadlinePreserved: true, separateOperatorAudit: true, consumerStopReopened: true, pinnedCheckPhysicallyStopped: true, unsafeDataEpoch: held.compatibilityEpoch, heldRootUnchanged: true, admissionUnsettledAndUnchanged: true, successorVerified: true, successorAdmissionSettled: true, activationAt, successorRun: accepted.run, service: stopped.id, nativeWrites: writes.length, stoppedCheckContainers: complete.nodes.flatMap((node) => node.proofs).length, coordinationVolumeUnchanged: true, retainedDataEvents: records.length, receipt };
   await writeFile(join(path, 'forward-history.json'), history); await writeFile(join(path, 'forward-writes.json'), JSON.stringify(writes, null, 2)); await writeFile(join(path, 'forward-cleanup-state.json'), JSON.stringify(complete, null, 2)); await writeFile(join(path, 'forward-cleanup-result.json'), JSON.stringify(result, null, 2)); return result;
 };

@@ -542,6 +542,21 @@ class GenerationTest(unittest.TestCase):
         self.assertEqual(command.remove_managed(self.fd, GID, app, ctl), {"status": "removed", "request": request})
         self.assertEqual(calls, ["remove-step", "remove-finalize"] * 2)
 
+    def test_host_managed_purge_only_polls_the_explicit_request(self):
+        request = "12345678-1111-4111-8111-123456789abc"
+        app = self.meta["app"]
+        responses = [{"status": "purging", "request": request, "deadline": 91000},
+                     {"status": "purged", "request": request}]
+        def ctl(operation, target):
+            self.assertEqual((operation, target), ("purge-step", app))
+            return responses.pop(0)
+
+        with mock.patch.object(command.time, "sleep"):
+            self.assertEqual(command.purge_managed(app, ctl), {"status": "purged", "request": request})
+        self.assertFalse(responses)
+        with self.assertRaisesRegex(storage.RegistrationError, "requires operator intervention"):
+            command.purge_managed(app, lambda *_: {"status": "held", "request": request, "reason": "attachments"})
+
     def test_invalid_ownership_is_refused_before_publication(self):
         self.swarm_registration()
         owner = self.ownership()

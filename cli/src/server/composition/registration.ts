@@ -198,10 +198,11 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
-      if (route === "/deployment/remove-step" || route === "/deployment/remove-finalize") {
+      if (route === "/deployment/remove-step" || route === "/deployment/remove-finalize" || route === "/deployment/purge-step") {
         if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
         if (typeof input !== "object" || input === null || Array.isArray(input) || !("app" in input) || typeof input.app !== "string" ||
           !appName(input.app).ok) return undefined;
+        if (route === "/deployment/purge-step") return Object.keys(input).length === 1 ? managed.purge(input.app) : undefined;
         if (route === "/deployment/remove-step") return Object.keys(input).length === 1 ? managed.removal.step(input.app) : undefined;
         return Object.keys(input).length === 2 && "request" in input && typeof input.request === "string" &&
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.request) ? managed.removal.finalize(input.app, input.request) : undefined;

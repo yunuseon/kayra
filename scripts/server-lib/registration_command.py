@@ -149,6 +149,29 @@ def remove_managed(root, gid, app, ctl):
     raise storage.RegistrationError("managed removal did not converge; reconcile the same request")
 
 
+def purge_managed(app, ctl):
+    """Poll the owning coordinator. Only its admitted native adapter may delete data."""
+    deadline = time.monotonic() + 120
+    request_id = None
+    while time.monotonic() < deadline:
+        reply = ctl("purge-step", app)
+        storage._require(type(reply) is dict, "invalid managed purge response")
+        status, request = reply.get("status"), reply.get("request")
+        storage._require(type(request) is str and bool(storage._UUID.fullmatch(request)) and request_id in (None, request),
+                         "managed purge response changed request")
+        request_id = request
+        if status == "purged":
+            storage._require(set(reply) == {"status", "request"}, "invalid managed purge receipt")
+            return reply
+        if status == "held":
+            raise storage.RegistrationError("managed purge requires operator intervention")
+        storage._require(status == "purging" and set(reply) == {"status", "request", "deadline"} and
+                         type(reply["deadline"]) is int and 0 < reply["deadline"] < 2**53,
+                         "invalid managed purge progress")
+        time.sleep(0.25)
+    raise storage.RegistrationError("managed purge did not converge; reconcile the same request")
+
+
 def register(root, gid, request, ctl, platform_ctl=None):
     generation = execute(root, "stage", gid, request)["generation"]
     app = request["app"]
@@ -250,7 +273,7 @@ def admit_runtime(registration, authority_directory="/var/lib/kayra/swarm", obse
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("stage", "publish", "verify", "register", "remove"))
+    parser.add_argument("mode", choices=("stage", "publish", "verify", "register", "remove", "purge"))
     parser.add_argument("--root", required=True)
     parser.add_argument("--private-gid", type=int, required=True)
     parser.add_argument("--platform-dir")
@@ -261,10 +284,10 @@ def main():
         storage._require(len(raw) <= storage.MAX_STAGED_BYTES, "registration request too large")
         request = storage._decode(raw)
         with trusted_root(args.root) as root:
-            if args.mode == "remove":
+            if args.mode in ("remove", "purge"):
                 storage._require(args.platform_dir is not None and os.path.isabs(args.platform_dir),
-                                 "remove requires an absolute platform directory")
-                storage._require(type(request) is dict and set(request) == {"app"}, "invalid managed removal request")
+                                 "managed lifecycle requires an absolute platform directory")
+                storage._require(type(request) is dict and set(request) == {"app"}, "invalid managed lifecycle request")
                 app = request["app"]
                 with app_platform_lock(args.platform_dir, app, create=False) as platform:
                     claims = os.open(platform / "managed-apps", storage._DIR_FLAGS)
@@ -273,8 +296,9 @@ def main():
                         storage._read_file(claims, app + ".json", 0o444)
                     finally:
                         os.close(claims)
-                    result = remove_managed(root, args.private_gid, app,
-                                            lambda *values: _docker_control(args.platform_dir, "lifecycle", 20, *values))
+                    def ctl(*values):
+                        return _docker_control(args.platform_dir, "lifecycle", 20, *values)
+                    result = remove_managed(root, args.private_gid, app, ctl) if args.mode == "remove" else purge_managed(app, ctl)
             elif args.mode == "register":
                 storage._require(args.platform_dir is not None and os.path.isabs(args.platform_dir),
                                  "register requires an absolute platform directory")

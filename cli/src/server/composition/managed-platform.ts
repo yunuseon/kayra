@@ -29,7 +29,7 @@ import { typed } from "../../lib/typed.ts";
 
 type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts" |
   "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval" |
-  "managedRemovalIntent" | "managedRemovalTombstone">>;
+  "managedRemovalIntent" | "managedRemovalTombstone" | "managedPurgeIntent" | "requestManagedPurge" | "tickManagedPurge">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
 type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined; readonly actor?: MigrationResolutionActor | undefined };
 
@@ -89,8 +89,26 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
       return Object.freeze({ status: "removed" as const, request: receipt.request });
     },
   });
+  const purge = async (app: string) => {
+    const actor = ports.actor;
+    if (actor === undefined || !await ports.canAccess(app)) throw new Error("app is outside managed purge scope");
+    const tombstone = await index.managedRemovalTombstone(app);
+    if (tombstone === undefined) throw new Error("managed purge requires completed application removal");
+    const runtime = Object.freeze({
+      now, observeWithdrawal, authorize: (intent: ManagedRemovalIntent) => ports.canAccess(intent.owner.app),
+      native: { observe: volumes.observe, attachments: volumes.attachments, remove: volumes.remove },
+    });
+    const accepted = await index.managedPurgeIntent(app, tombstone.request, runtime) ??
+      await index.requestManagedPurge(app, tombstone.request, randomUUID(), {
+        actor, reason: "Purge the retained data of this explicitly removed managed application",
+      }, runtime);
+    const state = await index.tickManagedPurge(app, tombstone.request, accepted.request, runtime);
+    if (state.phase === "complete") return Object.freeze({ status: "purged" as const, request: state.request });
+    if (state.phase === "held") return Object.freeze({ status: "held" as const, request: state.request, reason: state.reason });
+    return Object.freeze({ status: "purging" as const, request: state.request, deadline: state.deadline });
+  };
   return Object.freeze({
-    prepare, removal,
+    prepare, removal, purge,
     commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, forRun, actor: ports.actor }),
     work: Object.freeze({ read, now, forRun }),
     health,

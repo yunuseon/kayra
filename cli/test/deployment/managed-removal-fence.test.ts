@@ -253,6 +253,12 @@ test("removal of a registered app with no deployment retains its data identities
     }),
   };
   await assert.rejects(lab.index().requestManagedPurge("shop", randomUUID(), purge, operator, purgePorts), /owned removal tombstone/);
+  await assert.rejects(lab.index().requestManagedPurge("shop", request, purge, operator, {
+    ...purgePorts, native: { ...purgePorts.native, attachments: () => Promise.resolve({
+      status: "observed", containers: Object.freeze(["a".repeat(64)]), services: Object.freeze([]),
+    }) },
+  }), /current attachments/);
+  assert.equal(await lab.index().managedPurgeIntent("shop", request, purgePorts), undefined);
   const accepted = await lab.index().requestManagedPurge("shop", request, purge, operator, purgePorts);
   assert.equal(accepted.phase, "preflight");
   assert.equal(accepted.entries[0]?.birth, null);

@@ -12,6 +12,19 @@ export type ManagedPurgeEffectsPorts = {
 type Entry = ManagedPurge["entries"][number];
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 
+type VolumeRead = Readonly<Pick<OwnedVolumePort, "observe" | "attachments">>;
+type VolumeEvidence = "owned" | "absent" | "runtime" | "ownership" | "attachments";
+
+export const inspectManagedPurgeVolume = async (entry: Pick<Entry, "volume" | "birth">, ports: VolumeRead): Promise<VolumeEvidence> => {
+  const owned = await ports.observe(entry.volume);
+  if (owned.status === "unavailable") return "runtime";
+  if (owned.status === "foreign" || owned.status === "owned" && !same(owned.receipt, entry.birth)) return "ownership";
+  const attachments = await ports.attachments(entry.volume);
+  if (attachments.status !== "observed") return "runtime";
+  if (attachments.containers.length !== 0 || attachments.services.length !== 0) return "attachments";
+  return owned.status === "owned" ? "owned" : "absent";
+};
+
 /** One bounded reconciliation step. The app writer must span observation, intent and dispatch. */
 export const reconcileManagedPurge = async (input: ManagedPurge, ports: ManagedPurgeEffectsPorts) => {
   const state = parseManagedPurge(input);
@@ -29,15 +42,8 @@ export const reconcileManagedPurge = async (input: ManagedPurge, ports: ManagedP
   const persistEntry = (entry: Entry, phase: Entry["phase"]) =>
     ports.persist(Object.freeze({ ...state, entries: Object.freeze(state.entries.map((known) => known === entry ? Object.freeze({ ...entry, phase }) : known)) }));
 
-  const preflight = async (entry: Entry) => {
-    const owned = await bounded(() => ports.native.observe(entry.volume));
-    if (owned === undefined || owned.status === "unavailable") return "runtime";
-    if (owned.status === "foreign" || owned.status === "owned" && !same(owned.receipt, entry.birth)) return "ownership";
-    const attachments = await bounded(() => ports.native.attachments(entry.volume));
-    if (attachments?.status !== "observed") return "runtime";
-    if (attachments.containers.length !== 0 || attachments.services.length !== 0) return "attachments";
-    return owned.status === "owned" ? "owned" : "absent";
-  };
+  const preflight = async (entry: Entry) =>
+    await bounded(() => inspectManagedPurgeVolume(entry, ports.native)) ?? "runtime";
 
   if (!timely()) return hold("deadline");
   if (await bounded(ports.allowed) !== true) return hold(timely() ? "registration" : "deadline");

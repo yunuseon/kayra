@@ -31,6 +31,7 @@ test("managed removal requires the current owned platform registration before it
     canAccess: () => Promise.resolve(true), actor: { kind: "operator-control", identity: "fixture-operator" },
   });
   await assert.rejects(owner.removal.step("shop"), /authority unavailable/);
+  await assert.rejects(owner.purge("shop"), /requires completed application removal/);
   assert.deepEqual(api, []);
   assert.deepEqual(await lab.index().verifiedRegistration("shop"), lab.plan.infrastructure.registration);
 });
@@ -59,5 +60,6 @@ test("the configured deployer starts and closes managed recovery without enablin
   t.after(async () => { await control.close(); await rm(path, { recursive: true, force: true }); });
   assert.deepEqual(await control.health(), []); assert.deepEqual(await control.handle("/registration/initialize", {}), { status: "ready" }); assert.deepEqual(await control.health(), []);
   assert.equal(await control.handle("/deployment/remove-step", { app: "shop" }), undefined);
+  assert.equal(await control.handle("/deployment/purge-step", { app: "shop" }), undefined);
   await assert.rejects(control.handle("/deployment/prepare", { app: "shop", request: randomUUID(), commit: "a".repeat(40) }), /unavailable or outside scope/);
 });

@@ -1,5 +1,5 @@
 import { managedPurgeInventory } from "./managed-purge-inventory.ts";
-import { reconcileManagedPurge } from "./managed-purge-effects.ts";
+import { inspectManagedPurgeVolume, reconcileManagedPurge } from "./managed-purge-effects.ts";
 import type { ManagedPurgeEffectsPorts } from "./managed-purge-effects.ts";
 import type { ManagedPurge } from "./managed-purge-state.ts";
 import { parseRegistrationWithdrawal } from "../../contracts/registration-withdrawal.ts";
@@ -953,6 +953,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         JSON.stringify(indexed.volumes) !== JSON.stringify(volumes)) throw new Error("managed removal tombstone lacks indexed ownership");
       return Object.freeze({ owner, volumes, ...envelope.removalTombstone });
     }),
+    managedPurgeIntent: (app: string, removal: string, ports: ManagedPurgePorts) =>
+      usePurgeScope(app, removal, ports, ({ envelope }) => Promise.resolve(envelope.managedPurge)),
     requestManagedPurge: (app: string, removal: string, request: string, operator: ManagedPurge["operator"], ports: ManagedPurgePorts) =>
       usePurgeScope(app, removal, ports, async ({ envelope, store, inventory, allowed }) => {
         const prior = envelope.managedPurge;
@@ -961,7 +963,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           return prior;
         }
         if (!z.uuid().safeParse(request).success || request === removal || !await allowed(operator)) throw new Error("managed purge authority unavailable");
-        return store.beginManagedPurge(request, removal, ports.now(), operator, await inventory());
+        const entries = await inventory();
+        const deadline = ports.now() + 10_000;
+        const observations = await Promise.all(entries.map((entry) => boundedManagedRead(deadline, ports.now,
+          () => inspectManagedPurgeVolume(entry, ports.native))));
+        if (observations.includes("attachments")) throw new Error("managed purge refuses volumes with current attachments");
+        if (ports.now() >= deadline || observations.some((value) => value !== "owned" && value !== "absent")) throw new Error("managed purge volume ownership is unavailable");
+        if (!await allowed(operator)) throw new Error("managed purge authority changed before acceptance");
+        return store.beginManagedPurge(request, removal, ports.now(), operator, entries);
       }),
     tickManagedPurge: (app: string, removal: string, request: string, ports: ManagedPurgePorts) =>
       usePurgeScope(app, removal, ports, async ({ envelope, store, inventory, allowed }) => {

@@ -146,15 +146,15 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     return 0;
   },
   lifecycle: async ([operation, app, commit, request, extra]) => {
-    if (operation === "remove-step" || operation === "remove-finalize") {
-      const step = operation === "remove-step";
+    if (operation === "remove-step" || operation === "remove-finalize" || operation === "purge-step") {
+      const step = operation !== "remove-finalize";
       if (app === undefined || request !== undefined || (step ? commit !== undefined : commit === undefined)) {
-        return fail("usage: ctl lifecycle remove-step <app> | remove-finalize <app> <request-uuid>");
+        return fail("usage: ctl lifecycle remove-step <app> | remove-finalize <app> <request-uuid> | purge-step <app>");
       }
       const response = await fetch(`http://127.0.0.1:8091/deployment/${operation}`, {
         method: "POST", body: JSON.stringify(step ? { app } : { app, request: commit }), signal: AbortSignal.timeout(15_000),
       }).catch(() => undefined);
-      if (!response?.ok) return fail("managed removal control unavailable; retry under the same application fence");
+      if (!response?.ok) return fail("managed lifecycle control unavailable; retry under the same application fence");
       console.log(await response.text());
       return 0;
     }

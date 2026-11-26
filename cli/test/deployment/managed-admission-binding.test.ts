@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { managedPlanFixture } from "./managed-plan-fixture.ts";
 import { managedAdmissionDescription } from "../../src/server/deployment/managed-transition.ts";
 import { parseManagedAdmissionIdentity } from "../../src/contracts/managed-admission.ts";
-import { fenceUnstartedManagedAdmission, observeManagedAdmission, parseManagedAdmissionAccounting, reserveManagedAdmission, settleManagedAdmission } from "../../src/server/deployment/managed-admission-binding.ts";
+import { fenceUnstartedManagedAdmission, observeManagedAdmission, parseManagedAdmissionAccounting, reserveManagedAdmission, settleManagedAdmission, transferManagedAdmission } from "../../src/server/deployment/managed-admission-binding.ts";
 import { reserveResources } from "../../src/server/deployment/resource-book.ts";
 
 const fixture = async () => {
@@ -111,4 +111,62 @@ test("unstarted fencing needs no candidate capacity and cannot adopt legacy or f
   assert.equal(fenceUnstartedManagedAdmission(reserved.value, { ...identity, run: randomUUID() }, claim).ok, false);
   assert.equal(fenceUnstartedManagedAdmission(reserved.value, { ...identity, action: identity.owner.incarnation + ":3" }, claim).ok, false);
   assert.equal(fenceUnstartedManagedAdmission(closed.value, { ...identity, action: identity.owner.incarnation + ":1" }, claim).ok, false);
+});
+
+const forwardFixture = async () => {
+  const { plan, identity, observation } = await fixture();
+  const maintenance = {
+    ...plan,
+    grants: { ...plan.grants, maintenance: true },
+    rollout: { ...plan.rollout, strategy: "maintenance" as const, rollback_compatible: false },
+  };
+  const oldClaim = managedAdmissionDescription(maintenance, null); assert.ok(oldClaim.ok);
+  const blocked = { identity: { ...identity, plan: oldClaim.value.planDigest }, claim: oldClaim.value };
+  const nextClaim = managedAdmissionDescription({ ...maintenance, commit: "f".repeat(40) }, null); assert.ok(nextClaim.ok);
+  const successor = { identity: { ...identity, action: identity.owner.incarnation + ":3", run: randomUUID(), source: "f".repeat(64), plan: nextClaim.value.planDigest, deadline: 200000 }, claim: nextClaim.value };
+  const old = reserveManagedAdmission(nullAccounting, observation, blocked.identity, blocked.claim, 1000); assert.ok(old.ok);
+  return { old: old.value, blocked, successor, observation };
+};
+const nullAccounting = Object.freeze({ resources: null, bindings: Object.freeze([]) });
+
+test("forward transfer replaces the exact pending charge and binding without settling the blocked run", async () => {
+  const { old, blocked, successor, observation } = await forwardFixture();
+  const moved = transferManagedAdmission(old, observation, blocked, successor, 110000); assert.ok(moved.ok);
+  assert.deepEqual(moved.value.bindings, [successor.identity]);
+  assert.equal(moved.value.resources?.charges.length, 1);
+  assert.equal(moved.value.resources.charges[0]?.result, "pending");
+  assert.deepEqual(observeManagedAdmission(moved.value, blocked.identity, blocked.claim), { ok: true, value: "foreign" });
+  assert.equal(settleManagedAdmission(moved.value, blocked.identity, blocked.claim, "absent").ok, false);
+  assert.deepEqual(transferManagedAdmission(moved.value, { status: "unavailable" }, blocked, successor, 999999), moved);
+});
+
+test("forward transfer rejects wrong bindings, stale windows and absent retained dependencies", async () => {
+  const { old, blocked, successor, observation } = await forwardFixture();
+  for (const now of [109999, 200000]) assert.equal(transferManagedAdmission(old, observation, blocked, successor, now).ok, false);
+  assert.equal(transferManagedAdmission(old, { status: "unavailable" }, blocked, successor, 110000).ok, false);
+  assert.equal(transferManagedAdmission(old, observation, { ...blocked, identity: { ...blocked.identity, run: randomUUID() } }, successor, 110000).ok, false);
+  const settled = settleManagedAdmission(old, blocked.identity, blocked.claim, "target"); assert.ok(settled.ok);
+  assert.equal(transferManagedAdmission(settled.value, observation, blocked, successor, 110000).ok, false);
+  const candidate = successor.claim.plan;
+  const db = candidate.services["db"]; assert.ok(db);
+  const changed = managedAdmissionDescription({ ...candidate, services: { ...candidate.services, db: { ...db, command: ["different-engine"] } } }, null); assert.ok(changed.ok);
+  assert.deepEqual(transferManagedAdmission(old, observation, blocked, { identity: { ...successor.identity, plan: changed.value.planDigest }, claim: changed.value }, 110000), { ok: false, error: "managed admission transfer changes retained workload accounting" });
+});
+
+test("forward admission counts other apps against the replacement peak and leaves their charges intact", async () => {
+  const { old, blocked, successor, observation } = await forwardFixture();
+  const book = old.resources; assert.ok(book);
+  const existing = book.charges[0]; assert.ok(existing);
+  const cpu = observation.capacity.cpu - observation.standing.cpu - existing.peak.cpu;
+  const budget = { cpu, memory: 1 };
+  const legacy = reserveResources(book, book.host, observation, { app: "legacy", incarnation: randomUUID(), sequence: 1, target: { plan: "b".repeat(64), budget }, previous: null, peak: budget, deadline: 91000, result: "pending" }, 1000); assert.ok(legacy.ok);
+  const combined = { ...old, resources: legacy.value };
+  const moved = transferManagedAdmission(combined, observation, blocked, successor, 110000); assert.ok(moved.ok);
+  assert.deepEqual(moved.value.resources?.charges.find((item) => item.app === "legacy"), legacy.value.charges.find((item) => item.app === "legacy"));
+
+  const plan = successor.claim.plan;
+  const worker = plan.services["worker"]; assert.ok(worker);
+  const bigger = managedAdmissionDescription({ ...plan, services: { ...plan.services, worker: { ...worker, resources: { ...worker.resources, nanoCpus: worker.resources.nanoCpus + 10000000 } } } }, null); assert.ok(bigger.ok);
+  assert.equal(transferManagedAdmission(combined, observation, blocked, { identity: { ...successor.identity, plan: bigger.value.planDigest }, claim: bigger.value }, 110000).ok, false);
+  assert.deepEqual(observeManagedAdmission(combined, blocked.identity, blocked.claim), { ok: true, value: "reserved" });
 });

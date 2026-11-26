@@ -1,3 +1,5 @@
+import { observeManagedForwardHandoff } from "./managed-forward-handoff-evidence.ts";
+import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { createHash } from "node:crypto";
 import { parseManagedApplicationPlan, managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import { parseManagedForwardCleanupContext } from "../../contracts/managed-forward-cleanup-context.ts";
@@ -83,6 +85,19 @@ export const indexedManagedForward = (context: Context, ports: Ports) => {
       } finally { await journal.close(); }
     },
     context: async () => { const record = await reservation(); const journal = await context.openEffects("existing"); try { const proof = await ready(record, journal); return execution(record, proof.source); } finally { await journal.close(); } },
+    inspectHandoff: async (factory: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort, retained: ManagedWorkloadPort["observeDesired"]) => {
+      const record = await reservation();
+      const journal = await context.openEffects("existing");
+      try {
+        const proof = await ready(record, journal);
+        const input = execution(record, proof.source);
+        const runtime = factory(input);
+        if (!same(runtime.context, input) || !await live(record, proof.source.baseline.source)) throw new Error("forward handoff lost its pending admission");
+        const evidence = await observeManagedForwardHandoff(proof.source, proof.state, ports.now() + 10_000, { ...runtime, ...ports, retained });
+        if (!await live(record, proof.source.baseline.source)) throw new Error("forward handoff lost its pending admission");
+        return evidence;
+      } finally { await journal.close(); }
+    },
     tick: async (factory: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort) => {
       const record = await reservation(); const journal = await context.openEffects("existing");
       try {

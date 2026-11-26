@@ -29,6 +29,16 @@ test("indexed forward cleanup synchronizes its child before publication and keep
   for (let i = 0; i < 60; i++) { const state = await lab.index().tickManagedForwardCleanup("shop", lab.request, lab.ports, lab.factory); if (state.phase !== "fencing") { assert.equal(state.phase, "complete"); break; } }
   const complete = await lab.index().prepareManagedForwardCleanup("shop", lab.request, { ...lab.ports, compare: () => Promise.reject(new Error("published cleanup must not prepare another source")) }); assert.ok(complete.state); assert.equal(complete.state.phase, "complete"); assert.equal(complete.state.deadline, lab.reservation.deadline); assert.equal(lab.effects.length, 4); assert.equal(new Set(lab.effects.map((action) => action.action + action.service)).size, 4);
   assert.ok(lab.effects.every((action) => action.action.startsWith(lab.reservation.action + ":quiesce:") && action.service !== "db")); assert.deepEqual(lab.services.get("db"), db); assert.deepEqual(await lab.index().resourceSnapshot(), resources); assert.deepEqual(await lab.index().managedState("shop", lab.runtime), lab.held);
+  const inspect = (retained = lab.runtime.services.observeDesired) =>
+    lab.index().inspectManagedForwardHandoff("shop", lab.request, lab.ports, lab.factory, retained);
+  const evidence = await inspect();
+  assert.deepEqual(evidence.retained.map((reference) => reference.name), ["db"]);
+  assert.equal(evidence.retained[0]?.native.id, db?.status === "owned" ? db.id : undefined);
+  await assert.rejects(inspect(() => Promise.resolve({ status: "unavailable" })), /retained dependency is not ready/);
+  const worker = lab.services.get("worker"); assert.ok(worker?.status === "owned");
+  lab.services.set("worker", { ...worker, replicas: 1 });
+  try { await assert.rejects(inspect(), /consumer fence changed/); } finally { lab.services.set("worker", worker); }
+  assert.deepEqual(await lab.index().resourceSnapshot(), resources);
   await lab.reopen(); lab.clock(lab.reservation.deadline + 1); assert.deepEqual(await lab.index().tickManagedForwardCleanup("shop", lab.request, lab.ports, lab.factory), complete.state); assert.equal(lab.effects.length, 4);
 });
 

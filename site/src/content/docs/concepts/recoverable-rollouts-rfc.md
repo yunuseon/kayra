@@ -2648,3 +2648,19 @@ the first consumer stop. Completion leaves the data service, held root and
 resource charge unchanged. This remains private experimental integration:
 retained readiness certification, atomic admission transfer, successor
 activation, lifecycle completion and native acceptance are still required.
+
+The native singleton probe exercised cleanup under a separately audited
+continuation on Docker Engine and CLI 29.10.1 (API 1.57), Compose 5.8.0, Node
+24.22.1 and Ubuntu 24.04.5 ARM64. It reopened after the first stop, used two
+native writes, and proved physical cessation of the pinned check container.
+The event stream recorded one check start and zero successor starts. The
+coordination volume, held root and pending capacity charge were preserved.
+Reproduce with `caffeinate -i python3 test/lab/swarm-platform/volume-lab.py --platform-inputs --volume-state --managed-group --egress-mtu 1280`.
+
+The indexed owner can inspect fresh handoff evidence after cleanup completes.
+It checks the original migration fences, current zero replica consumer
+barriers, pinned check containers, and unchanged healthy retained services.
+The resource book can calculate an atomic replacement of the exact pending
+charge and binding while accounting for other apps. The durable handoff must
+authenticate this evidence at the write boundary and install the successor
+under the same reserved action before it can start.

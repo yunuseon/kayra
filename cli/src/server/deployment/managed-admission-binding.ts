@@ -5,7 +5,8 @@ import type { SwarmHostObservation } from "../../contracts/resource-authority.ts
 import { all, err, ok } from "../../lib/result.ts";
 import { managedAdmissionDescription, reserveManagedTransition } from "./managed-transition.ts";
 import { managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
-import { parseResourceBook, settleResources } from "./resource-book.ts";
+import { managedServiceDigest } from "../../contracts/managed-service-plan.ts";
+import { parseResourceBook, resourceHostReady, settleResources } from "./resource-book.ts";
 
 const schema = z.object({ resources: z.unknown().nullable(), bindings: z.array(z.unknown()).max(1024).readonly() }).strict().readonly();
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -53,6 +54,53 @@ export const reserveManagedAdmission = (input: unknown, observation: SwarmHostOb
   const identity = checked.value.identity;
   const next = reserveManagedTransition(state.value.resources, observation, checked.value.claim, sequence(identity), identity.deadline, now);
   return next.ok ? parseManagedAdmissionAccounting({ resources: next.value, bindings: [...state.value.bindings.filter((value) => value.owner.app !== identity.owner.app), identity] }) : next;
+};
+
+/**
+ * Replaces a pending charge and its binding in one snapshot. The owning index must authenticate the
+ * continuation and verify current consumer cessation, retained readiness and operator grants before
+ * synchronizing this result. This function does not settle the blocked run or activate the successor.
+ */
+export const transferManagedAdmission = (input: unknown, observation: SwarmHostObservation, blocked: { readonly identity: ManagedAdmissionIdentity; readonly claim: ManagedAdmissionClaim }, successor: { readonly identity: ManagedAdmissionIdentity; readonly claim: ManagedAdmissionClaim }, now: number) => {
+  const state = parseManagedAdmissionAccounting(input);
+  const before = claimFor(blocked.identity, blocked.claim);
+  const after = claimFor(successor.identity, successor.claim);
+  if (!state.ok || state.value.resources === null || !before.ok || !after.ok) return err("invalid managed admission transfer");
+  const book = state.value.resources;
+  const old = before.value.identity;
+  const next = after.value.identity;
+  const source = before.value.claim.plan;
+  const target = after.value.claim.plan;
+  if (!same(old.owner, next.owner) || next.run === old.run || sequence(next) <= sequence(old) ||
+    next.source === old.source || after.value.claim.previous !== null ||
+    source.rollout.strategy !== "maintenance" || target.rollout.strategy !== "maintenance" ||
+    !same(source.host, target.host) || !same(book.host, target.host) ||
+    !same(source.infrastructure.overlay, target.infrastructure.overlay)) return err("managed admission transfer scope disagrees");
+
+  const previousServices = Object.values(before.value.claim.previous?.services ?? {});
+  const live = [...Object.values(source.services), ...previousServices];
+  if (live.some((service) => {
+    const retained = target.services[service.service];
+    return service.role === "retained-dependency" && (retained === undefined || managedServiceDigest(service) !== managedServiceDigest(retained)) ||
+      service.role !== "retained-dependency" && retained?.role === "retained-dependency";
+  })) return err("managed admission transfer changes retained workload accounting");
+
+  const observed = observeManagedAdmission(state.value, next, after.value.claim);
+  if (observed.ok && observed.value === "reserved") return state;
+  const prior = observeManagedAdmission(state.value, old, before.value.claim);
+  if (!prior.ok || prior.value !== "reserved") return err("managed admission transfer requires the exact pending blocked charge");
+  if (!Number.isSafeInteger(now) || now < next.deadline - 90_000 || now >= next.deadline ||
+    !resourceHostReady(book.host, observation)) return err("managed admission transfer requires a current host and scheduling window");
+
+  const replacement = Object.freeze({
+    app: next.owner.app, incarnation: next.owner.incarnation, sequence: sequence(next),
+    previous: null, target: { plan: next.plan, budget: after.value.claim.resources.target },
+    peak: after.value.claim.resources.peak, deadline: next.deadline, result: "pending",
+  });
+  return parseManagedAdmissionAccounting({
+    resources: { ...book, charges: book.charges.map((item) => item.app === old.owner.app ? replacement : item) },
+    bindings: state.value.bindings.map((item) => item.owner.app === old.owner.app ? next : item),
+  });
 };
 
 /** Only the lifecycle owner may supply the verified terminal outcome. Expiry alone never permits settlement or removes the run binding. */

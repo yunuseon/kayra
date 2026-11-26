@@ -1,3 +1,4 @@
+import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { indexedManagedForward } from "./indexed-managed-forward.ts";
 import type { ManagedForwardCleanupContext, ManagedForwardCleanupRuntimePort } from "../../contracts/managed-forward-cleanup-context.ts";
 import { managedForwardOperator } from "./managed-forward-reservation.ts";
@@ -556,6 +557,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     prepareManagedForwardCleanup: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort) => useForwardCleanup(app, request, ports, (owner) => owner.prepare()),
     managedForwardCleanupContext: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort) => useForwardCleanup(app, request, ports, (owner) => owner.context()),
     tickManagedForwardCleanup: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort) => useForwardCleanup(app, request, ports, (owner) => owner.tick(runtime)),
+    inspectManagedForwardHandoff: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort, retained: ManagedWorkloadPort["observeDesired"]) =>
+      useForwardCleanup(app, request, ports, (owner) => owner.inspectHandoff(runtime, retained)),
     managedForwardBuildGrant: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts) => withForwardSelection(app, request, undefined, ports, async (selection, catalog) => {
       if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
     }),

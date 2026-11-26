@@ -361,7 +361,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const owner = indexedManagedForward({ envelope: view.envelope, root: view.root, selection: chosen,
       openEffects: async (mode) => {
         const record = (await view.envelope.read())?.forward;
-        if (record?.run !== request.request || JSON.stringify(record.selection) !== JSON.stringify(chosen) || record.phase !== (mode === "initialize" ? "initializing" : "fencing")) throw new Error("forward cleanup journal opening lacks its initialization owner");
+        if (record?.run !== request.request || JSON.stringify(record.selection) !== JSON.stringify(chosen) || (mode === "initialize" ? record.phase !== "initializing" : record.phase !== "fencing" && record.phase !== "transferring")) throw new Error("forward cleanup journal opening lacks its initialization owner");
         const path = join(view.directory, "effects");
         if (mode === "initialize" && await stat(path) === undefined) { await mkdir(path, { mode: 0o700 }); await syncDirectory(view.directory); }
         await requireDirectory(path); return journals(path, mode);
@@ -559,6 +559,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     tickManagedForwardCleanup: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort) => useForwardCleanup(app, request, ports, (owner) => owner.tick(runtime)),
     inspectManagedForwardHandoff: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort, retained: ManagedWorkloadPort["observeDesired"]) =>
       useForwardCleanup(app, request, ports, (owner) => owner.inspectHandoff(runtime, retained)),
+    prepareManagedForwardHandoff: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort, retained: ManagedWorkloadPort["observeDesired"]) =>
+      useForwardCleanup(app, request, ports, (owner) => owner.prepareHandoff(runtime, retained)),
     managedForwardBuildGrant: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts) => withForwardSelection(app, request, undefined, ports, async (selection, catalog) => {
       if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
     }),

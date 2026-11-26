@@ -12,7 +12,13 @@ const initial = z.object({ version: z.literal(1), phase: z.literal("initializing
   candidate: digest, operator: z.unknown(),
 }).strict().readonly();
 
-const schema = z.union([initial, initial.unwrap().extend({ phase: z.literal("fencing"), cleanup: digest }).strict().readonly(), initial.unwrap().extend({ phase: z.literal("held"), reason: z.literal("deadline"), heldAt: time }).strict().readonly()]);
+const fencing = initial.unwrap().extend({ phase: z.literal("fencing"), cleanup: digest }).strict().readonly();
+const transferring = fencing.unwrap().extend({
+  phase: z.literal("transferring"),
+  handoff: z.object({ source: digest, cleanupState: digest, createdAt: time, deadline: time }).strict().readonly(),
+}).strict().readonly();
+const held = initial.unwrap().extend({ phase: z.literal("held"), reason: z.literal("deadline"), heldAt: time }).strict().readonly();
+const schema = z.discriminatedUnion("phase", [initial, fencing, transferring, held]);
 
 /** Trusted actor comes from the control transport, separately from the public reason and build selection. */
 export const managedForwardOperator = (input: unknown) => {
@@ -24,6 +30,9 @@ export const managedForwardOperator = (input: unknown) => {
 export const managedForwardReservation = (input: unknown) => {
   const raw = schema.parse(input); const owner = parseDataOwnership(raw.owner); const registration = parseRegistrationGeneration(raw.build.registration);
   if (!owner.ok || !registration.ok || registration.value.app !== owner.value.app || registration.value.incarnation !== owner.value.incarnation || raw.phase === "held" && raw.heldAt < raw.deadline || raw.run !== raw.selection.request || raw.run === raw.blocked.run || raw.deadline !== raw.createdAt + 90_000 || !new RegExp(`^${owner.value.incarnation}:[1-9][0-9]*$`).test(raw.action) || !Number.isSafeInteger(Number(raw.action.split(":")[1]))) throw new Error("invalid managed forward reservation scope");
+  if (raw.phase === "transferring" && (raw.handoff.createdAt < raw.createdAt || raw.handoff.deadline !== raw.handoff.createdAt + 90_000)) {
+    throw new Error("invalid forward admission handoff window");
+  }
   return Object.freeze({ ...raw, operator: managedForwardOperator(raw.operator), owner: owner.value, build: Object.freeze({ ...raw.build, registration: registration.value }) });
 };
 export type ManagedForwardReservation = ReturnType<typeof managedForwardReservation>;

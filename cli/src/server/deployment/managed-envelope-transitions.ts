@@ -13,6 +13,7 @@ const envelope = (input: unknown) => { const value = parseLifecycleEnvelope(inpu
 export const prepareManagedEnvelope = (before: unknown, input: ManagedLifecycleSource, now: number) => {
   const current = envelope(before);
   const source = parseManagedLifecycleSource(input); const description = managedLifecycleDescription(source); const identity = managedLifecycleSourceDigest(source);
+  if (source.version === 3) throw new Error("managed forward source requires the owning admission handoff");
   const existing = current.managed?.find((item) => item.run === source.run);
   if (existing !== undefined) { if (existing.source !== identity) throw new Error("managed lifecycle request conflicts"); return Object.freeze({ state: current, request: existing, changed: false }); }
   if (current.forward !== undefined) throw new Error("managed forward continuation owns lifecycle");

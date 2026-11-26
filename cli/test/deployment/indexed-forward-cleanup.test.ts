@@ -1,5 +1,6 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- observes native effects and injects interruption or ownership loss */
 import { strict as assert } from "node:assert";
+import { managedLifecycleSourceDigest, parseManagedLifecycleSource } from "../../src/server/deployment/managed-lifecycle-source.ts";
 import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -39,7 +40,28 @@ test("indexed forward cleanup synchronizes its child before publication and keep
   lab.services.set("worker", { ...worker, replicas: 1 });
   try { await assert.rejects(inspect(), /consumer fence changed/); } finally { lab.services.set("worker", worker); }
   assert.deepEqual(await lab.index().resourceSnapshot(), resources);
-  await lab.reopen(); lab.clock(lab.reservation.deadline + 1); assert.deepEqual(await lab.index().tickManagedForwardCleanup("shop", lab.request, lab.ports, lab.factory), complete.state); assert.equal(lab.effects.length, 4);
+  const prepareHandoff = () => lab.index().prepareManagedForwardHandoff("shop", lab.request, lab.ports, lab.factory, lab.runtime.services.observeDesired);
+  lab.cut("handoff-publication-after");
+  await assert.rejects(prepareHandoff(), /injected/);
+  const published = (await lab.readEnvelope()).forward;
+  assert.equal(published?.phase, "transferring");
+  assert.equal(published.handoff.createdAt, 2000);
+  assert.equal(published.handoff.deadline, 92000);
+  await lab.reopen(); lab.clock(93000);
+  const handoff = await lab.index().prepareManagedForwardHandoff("shop", lab.request, lab.ports,
+    () => { throw new Error("published intent must replay without new observations"); }, lab.runtime.services.observeDesired);
+  assert.deepEqual(handoff.reservation, published);
+  const successor = handoff.source;
+  assert.equal(managedLifecycleSourceDigest(successor), published.handoff.source);
+  assert.deepEqual(parseManagedLifecycleSource(JSON.parse(JSON.stringify(successor))), successor);
+  assert.equal(successor.retained[0]?.kind, "forward");
+  assert.deepEqual(successor.retained[0].native, evidence.retained[0]?.native);
+  assert.throws(() => parseManagedLifecycleSource({ ...successor, version: 2 }), /successor source/);
+  assert.throws(() => parseManagedLifecycleSource({ ...successor, previous: lab.source.previous }), /successor source/);
+  await assert.rejects(lab.index().requestManagedDeployment("shop", successor, lab.runtime), /owning admission handoff/);
+  assert.deepEqual(await lab.index().resourceSnapshot(), resources);
+  assert.deepEqual(await lab.index().managedState("shop", lab.runtime), lab.held);
+  await lab.reopen(); assert.deepEqual(await lab.index().tickManagedForwardCleanup("shop", lab.request, lab.ports, lab.factory), complete.state); assert.equal(lab.effects.length, 4);
 });
 
 for (const point of ["cleanup-child-before", "cleanup-child-after", "cleanup-publication-before", "cleanup-publication-after"] as const) test(`indexed forward initialization recovers ${point} without fresh deadlines or native writes`, async (t) => {

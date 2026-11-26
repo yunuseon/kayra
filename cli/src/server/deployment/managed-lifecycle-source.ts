@@ -12,10 +12,17 @@ import { hasRecordedRetainedMount } from "../../contracts/managed-retained-mount
 
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const native = z.object({ id: z.string().regex(/^[a-z0-9]{25}$/), version: positive }).strict().readonly();
-const schema = z.object({ version: z.union([z.literal(1), z.literal(2)]), run: z.uuid(), action: z.string().max(80), createdAt: positive,
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const forwardCertificate = z.object({
+  version: z.literal(1),
+  blocked: z.object({ run: z.uuid(), action: z.string().max(80), source: digest, checkpoint: digest, epoch: positive }).strict().readonly(),
+  reservation: digest, decision: digest, cleanupSource: digest, cleanupState: digest,
+}).strict().readonly();
+const schema = z.object({ version: z.union([z.literal(1), z.literal(2), z.literal(3)]), run: z.uuid(), action: z.string().max(80), createdAt: positive,
   restore: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
   candidate: z.unknown(), previous: z.unknown().nullable(),
-  retained: z.array(z.object({ name: z.string(), kind: z.enum(["active", "barrier"]), action: z.unknown(), native }).strict().readonly()).max(32).readonly(),
+  retained: z.array(z.object({ name: z.string(), kind: z.enum(["active", "barrier", "forward"]), action: z.unknown(), native }).strict().readonly()).max(32).readonly(),
+  forward: forwardCertificate.optional(),
   retired: z.array(z.object({ plan: z.unknown(), barrier: z.unknown() }).strict().readonly()).max(32).readonly(),
 }).strict().readonly();
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -28,8 +35,19 @@ export const parseManagedLifecycleSource = (input: unknown) => {
   const admission = managedAdmissionDescription(candidate.value, previousPlan); if (!admission.ok) throw new Error(admission.error);
   const plan = admission.value.plan; const owner = plan.infrastructure.ownership;
   if (!new RegExp(`^${owner.incarnation}:[1-9][0-9]*$`).test(raw.action) || !Number.isSafeInteger(Number(raw.action.split(":")[1]))) throw new Error("invalid managed lifecycle action");
+  const forward = raw.forward;
+  if ((raw.version === 3) !== (forward !== undefined) ||
+    forward !== undefined && (previous !== null || raw.restore !== null || plan.rollout.strategy !== "maintenance" ||
+      forward.blocked.run === raw.run || !new RegExp(`^${owner.incarnation}:[1-9][0-9]*$`).test(forward.blocked.action) ||
+      !Number.isSafeInteger(Number(forward.blocked.action.split(":")[1])) ||
+      Number(forward.blocked.action.split(":")[1]) >= Number(raw.action.split(":")[1]))) {
+    throw new Error("managed forward successor source disagrees");
+  }
   const previousBaselines = previous === null ? Object.freeze([]) : managedReleaseBaselines(previous);
-  const recordedMounts = [...Object.values(previousPlan?.services ?? {}), ...raw.retired.flatMap((value) => { const spec = parseManagedServicePlan(value.plan); return Object.freeze(spec.ok ? [spec.value] : []); })];
+  const inherited = raw.retained.filter((item) => item.kind === "forward").flatMap((item) => {
+    const service = plan.services[item.name]; return service === undefined ? Object.freeze([]) : Object.freeze([service]);
+  });
+  const recordedMounts = [...inherited, ...Object.values(previousPlan?.services ?? {}), ...raw.retired.flatMap((value) => { const spec = parseManagedServicePlan(value.plan); return Object.freeze(spec.ok ? [spec.value] : []); })];
   if (raw.createdAt < (previous?.verification.verified?.at ?? 0) || previousBaselines.some((value) => Number(value.action.action.split(":")[1]) >= Number(raw.action.split(":")[1]))) throw new Error("managed lifecycle action does not fence the previous release");
   const retired = Object.freeze(raw.retired.map((value) => {
     const spec = parseManagedServicePlan(value.plan); const barrier = parseManagedServiceBarrier(value.barrier);
@@ -45,21 +63,23 @@ export const parseManagedLifecycleSource = (input: unknown) => {
     const step = retirement?.barrier.steps.at(-1); const proof = retirement?.barrier.proof;
     if (!action.ok || spec?.role !== "retained-dependency" || action.value.app !== owner.app || action.value.incarnation !== owner.incarnation || action.value.dataOwner !== owner.dataOwner || action.value.service !== value.name || action.value.plan !== managedServiceDigest(spec) || Number(action.value.action.split(":")[1]) >= Number(raw.action.split(":")[1]) ||
       (value.kind === "active" ? old === undefined || action.value.effect !== "apply" && action.value.effect !== "restore" || retirement !== undefined || !same(old.action, action.value) || value.native.id !== old.native.id || value.native.version < old.native.version :
+        value.kind === "forward" ? forward === undefined || retirement !== undefined || action.value.effect !== "apply" && action.value.effect !== "restore" ||
+          Number(action.value.action.split(":")[1]) > Number(forward.blocked.action.split(":")[1]) :
         retirement === undefined || proof === null || proof === undefined || step?.effect !== "scrub" || action.value.effect !== "scrub" || action.value.action !== serviceEffectAction(retirement.barrier.action.action, "scrub", step.attempt) || value.native.id !== proof.native.id || value.native.version < proof.native.version || managedServiceDigest(retirement.plan) !== action.value.plan)) throw new Error("managed lifecycle retained baseline disagrees");
     return Object.freeze({ ...value, action: action.value });
   }));
   if (new Set(retained.map((value) => value.name)).size !== retained.length || new Set(retired.map((value) => value.plan.service)).size !== retired.length ||
     Object.values(previousPlan?.services ?? {}).some((service) => service.role === "retained-dependency" && !retained.some((value) => value.name === service.service)) ||
     retired.some((value) => plan.services[value.plan.service] !== undefined && !retained.some((reference) => reference.name === value.plan.service && reference.kind === "barrier"))) throw new Error("managed lifecycle retained coverage disagrees");
-  const deadline = raw.createdAt + duration(plan, previousPlan) + (raw.version === 2 ? 90_000 : 0);
+  const deadline = raw.createdAt + duration(plan, previousPlan) + (raw.version === 1 ? 0 : 90_000);
   if (!Number.isSafeInteger(deadline)) throw new Error("managed lifecycle deadline exceeds clock range");
-  return Object.freeze({ version: raw.version, run: raw.run, action: raw.action, createdAt: raw.createdAt, restore: raw.restore, candidate: plan, previous, retained, retired });
+  return Object.freeze({ version: raw.version, run: raw.run, action: raw.action, createdAt: raw.createdAt, restore: raw.restore, candidate: plan, previous, retained, retired, ...(forward === undefined ? {} : { forward }) });
 };
 export type ManagedLifecycleSource = ReturnType<typeof parseManagedLifecycleSource>;
 export const managedLifecycleSourceDigest = (input: ManagedLifecycleSource) => createHash("sha256").update(JSON.stringify(parseManagedLifecycleSource(input))).digest("hex");
 export const managedLifecycleDescription = (input: ManagedLifecycleSource) => {
   const source = parseManagedLifecycleSource(input); const previous = source.previous?.source.application ?? null; const checked = managedAdmissionDescription(source.candidate, previous); if (!checked.ok) throw new Error(checked.error);
-  const deadline = source.createdAt + duration(source.candidate, previous) + (source.version === 2 ? 90_000 : 0);
+  const deadline = source.createdAt + duration(source.candidate, previous) + (source.version === 1 ? 0 : 90_000);
   return Object.freeze({ source, admission: checked.value, previous: source.previous === null ? null : managedReleaseDigest(source.previous), admissionDeadline: source.createdAt + 90_000, deadline,
     baselines: Object.freeze((source.previous === null ? [] : managedReleaseBaselines(source.previous)).filter((value) => previous?.services[value.name]?.role !== "retained-dependency")),
   });

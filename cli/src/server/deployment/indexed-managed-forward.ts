@@ -1,4 +1,5 @@
 import { observeManagedForwardHandoff } from "./managed-forward-handoff-evidence.ts";
+import { serviceEffectAction } from "../../contracts/swarm-service.ts";
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { createHash } from "node:crypto";
 import { parseManagedApplicationPlan, managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
@@ -18,9 +19,9 @@ import type { ManagedForwardEffects } from "./managed-forward-effect-state.ts";
 import { managedForwardEffects } from "./managed-forward-effects.ts";
 import { managedSourceContext } from "./managed-source-context.ts";
 import { managedRecoveryCheckTargets } from "./managed-recovery-safety.ts";
-import { parseManagedLifecycleSource } from "./managed-lifecycle-source.ts";
+import { parseManagedLifecycleSource, managedLifecycleSourceDigest } from "./managed-lifecycle-source.ts";
 
-type Context = { readonly envelope: Readonly<Pick<ReturnType<typeof openLifecycleEnvelopeStore>, "read" | "publishManagedForwardCleanup" | "holdManagedForwardInitialization">>;
+type Context = { readonly envelope: Readonly<Pick<ReturnType<typeof openLifecycleEnvelopeStore>, "read" | "publishManagedForwardCleanup" | "holdManagedForwardInitialization" | "publishManagedForwardHandoff">>;
   readonly root: () => Promise<ManagedLifecycleStore>; readonly selection: ManagedForwardReservation["selection"];
   readonly openEffects: (mode: "initialize" | "existing") => Promise<OperationJournal & { readonly close: () => Promise<void> }>;
   readonly reserved: (state: ManagedLifecycleStore, source: ManagedLifecycleSource) => Promise<boolean> };
@@ -47,7 +48,7 @@ export const indexedManagedForward = (context: Context, ports: Ports) => {
     return hash(JSON.stringify(root)) === record.blocked.checkpoint && root.operation.source === record.blocked.source && root.operation.run === record.blocked.run && await context.reserved(root, source);
   };
   const ready = async (record: ManagedForwardReservation, journal: OperationJournal) => {
-    if (record.phase !== "fencing") throw new Error("forward cleanup source is not published");
+    if (record.phase !== "fencing" && record.phase !== "transferring") throw new Error("forward cleanup source is not published");
     const bytes = await artifact(record.cleanup); const raw: unknown = JSON.parse(bytes); const intent = managedForwardEffectIntent(raw);
     const state = parseManagedForwardEffects(await journal.read()); const source = intent.source;
     if (bytes !== intent.bytes || state.source !== record.cleanup || state.run !== record.run || state.action !== record.action || state.createdAt !== record.createdAt || state.deadline !== record.deadline || state.app !== record.owner.app || state.incarnation !== record.owner.incarnation || state.dataOwner !== record.owner.dataOwner ||
@@ -55,8 +56,9 @@ export const indexedManagedForward = (context: Context, ports: Ports) => {
     return Object.freeze({ source, state });
   };
   const execution = (record: ManagedForwardReservation, source: ManagedForwardEffectSource) => {
-    if (record.phase !== "fencing") throw new Error("forward cleanup context is not published");
-    const value = parseManagedForwardCleanupContext({ version: 1, protocol: "managed-v3", runtime: "swarm", kind: "forward-cleanup", blocked: managedSourceContext(source.baseline.source), run: record.run, action: record.action, source: record.cleanup, reservation: hash(JSON.stringify(record)), createdAt: record.createdAt, deadline: record.deadline,
+    if (record.phase !== "fencing" && record.phase !== "transferring") throw new Error("forward cleanup context is not published");
+    const fencing = record.phase === "fencing" ? record : { ...record, phase: "fencing", handoff: undefined };
+    const value = parseManagedForwardCleanupContext({ version: 1, protocol: "managed-v3", runtime: "swarm", kind: "forward-cleanup", blocked: managedSourceContext(source.baseline.source), run: record.run, action: record.action, source: record.cleanup, reservation: hash(JSON.stringify(fencing)), createdAt: record.createdAt, deadline: record.deadline,
       checks: managedRecoveryCheckTargets(source.baseline.state, source.baseline.source) ?? Object.freeze([]),
     }); if (!value.ok) throw new Error(value.error); return value.value;
   };
@@ -64,7 +66,7 @@ export const indexedManagedForward = (context: Context, ports: Ports) => {
     prepare: async () => {
       const record = await reservation();
       if (record.phase === "held") return Object.freeze({ reservation: record, source: null, state: null });
-      if (record.phase === "fencing") { const journal = await context.openEffects("existing"); try { return Object.freeze({ reservation: record, ...await ready(record, journal) }); } finally { await journal.close(); } }
+      if (record.phase === "fencing" || record.phase === "transferring") { const journal = await context.openEffects("existing"); try { return Object.freeze({ reservation: record, ...await ready(record, journal) }); } finally { await journal.close(); } }
       if (ports.now() < record.createdAt) throw new Error("forward cleanup initialization clock moved backwards");
       if (ports.now() >= record.deadline) return Object.freeze({ reservation: await context.envelope.holdManagedForwardInitialization(record, ports.now()), source: null, state: null });
       const raw: unknown = JSON.parse(await artifact(record.candidate)); const candidate = parseManagedApplicationPlan(raw);
@@ -96,6 +98,66 @@ export const indexedManagedForward = (context: Context, ports: Ports) => {
         const evidence = await observeManagedForwardHandoff(proof.source, proof.state, ports.now() + 10_000, { ...runtime, ...ports, retained });
         if (!await live(record, proof.source.baseline.source)) throw new Error("forward handoff lost its pending admission");
         return evidence;
+      } finally { await journal.close(); }
+    },
+    prepareHandoff: async (factory: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort, retained: ManagedWorkloadPort["observeDesired"]) => {
+      const record = await reservation();
+      if (record.phase !== "fencing" && record.phase !== "transferring") throw new Error("forward handoff requires published cleanup");
+      const journal = await context.openEffects("existing");
+      try {
+        const proof = await ready(record, journal);
+        const cleanupState = hash(JSON.stringify(proof.state));
+        if (record.phase === "transferring") {
+          const bytes = await artifact(record.handoff.source);
+          const source = parseManagedLifecycleSource(JSON.parse(bytes));
+          if (bytes !== JSON.stringify(source) || source.version !== 3 || source.run !== record.run || source.action !== record.action ||
+            source.createdAt !== record.handoff.createdAt || source.forward?.cleanupState !== cleanupState || record.handoff.cleanupState !== cleanupState ||
+            source.forward.reservation !== execution(record, proof.source).reservation || source.forward.cleanupSource !== record.cleanup ||
+            source.forward.blocked.checkpoint !== record.blocked.checkpoint || source.forward.blocked.source !== record.blocked.source ||
+            source.forward.blocked.run !== record.blocked.run || source.forward.decision !== record.selection.decision ||
+            !same(source.candidate, proof.source.candidate)) {
+            throw new Error("forward handoff source binding disagrees");
+          }
+          return Object.freeze({ reservation: record, source });
+        }
+
+        const input = execution(record, proof.source);
+        const runtime = factory(input);
+        const createdAt = ports.now();
+        const deadline = createdAt + 90_000;
+        if (!same(runtime.context, input) || !await live(record, proof.source.baseline.source)) throw new Error("forward handoff lost its pending admission");
+        const evidence = await observeManagedForwardHandoff(proof.source, proof.state, deadline, { ...ports, ...runtime, retained });
+        const blocked = proof.source.baseline.source;
+        const retired = blocked.retired.filter((item) => blocked.candidate.services[item.plan.service] === undefined);
+        const reactivating = retired.filter((item) => proof.source.candidate.services[item.plan.service] !== undefined).map(({ plan, barrier }) => {
+          const proof = barrier.proof;
+          const step = barrier.steps.at(-1);
+          if (proof === null || step?.effect !== "scrub") throw new Error("forward retired dependency lacks its scrub proof");
+          return Object.freeze({
+            name: plan.service, kind: "barrier" as const, native: proof.native,
+            action: Object.freeze({ ...barrier.action, effect: "scrub" as const, action: serviceEffectAction(barrier.action.action, "scrub", step.attempt) }),
+          });
+        });
+        const source = parseManagedLifecycleSource({
+          version: 3, run: record.run, action: record.action, createdAt, candidate: proof.source.candidate,
+          previous: null, retired, retained: [...evidence.retained.map((item) => Object.freeze({ ...item, kind: "forward" as const })), ...reactivating],
+          forward: {
+            version: 1,
+            blocked: { run: record.blocked.run, action: blocked.action, source: record.blocked.source, checkpoint: record.blocked.checkpoint, epoch: record.blocked.compatibilityEpoch },
+            reservation: input.reservation, decision: record.selection.decision, cleanupSource: record.cleanup, cleanupState,
+          },
+        });
+        const snapshots = Object.freeze([
+          Object.freeze({ bytes: JSON.stringify(proof.state), identity: cleanupState }),
+          Object.freeze({ bytes: JSON.stringify(proof.source.baseline.state), identity: record.blocked.checkpoint }),
+          Object.freeze({ bytes: JSON.stringify(source), identity: managedLifecycleSourceDigest(source) }),
+        ]);
+        for (const snapshot of snapshots) {
+          if (await bounded(deadline, () => ports.retain(snapshot.bytes)) !== snapshot.identity) throw new Error("forward handoff evidence retention failed");
+        }
+        if (!await live(record, blocked) || ports.now() >= deadline) throw new Error("forward handoff lost its pending admission or deadline");
+        const next = await context.envelope.publishManagedForwardHandoff(record, source);
+        return Object.freeze({ reservation: next, source });
       } finally { await journal.close(); }
     },
     tick: async (factory: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort) => {

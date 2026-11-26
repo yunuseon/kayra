@@ -85,9 +85,11 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   };
   /** Reuses exactly the admission/history checks without retaining artifacts or changing either journal. */
   const validate = async (input: ManagedLifecycleSource, held?: "deadline" | "authorization") => {
-  const value = parseManagedLifecycleSource(input); const description = managedLifecycleDescription(value); const identity = managedLifecycleSourceDigest(value);
+  const value = parseManagedLifecycleSource(input);
+  const description = managedLifecycleDescription(value); const identity = managedLifecycleSourceDigest(value);
   if (!same(value.candidate.infrastructure.ownership, owner)) throw new Error("managed lifecycle source ownership disagrees");
     const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return Object.freeze({ value, description, identity, current, at: current.operation.enteredAt, existing: true }); }
+    if (value.version === 3) throw new Error("managed forward source requires the owning admission handoff");
     if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || (current.active?.record ?? null) !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
     const carried = current?.operation.unstartedAt !== null && current?.operation.unstartedAt !== undefined ? managedUnstartedInventoryCarry(await source(current), value) : current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
     if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {

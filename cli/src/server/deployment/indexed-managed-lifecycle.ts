@@ -72,6 +72,7 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
     prepare: async (input: ManagedLifecycleSource) => {
       const source = parseManagedLifecycleSource(input); const existing = (await context.envelope.read())?.managed?.find((item) => item.run === source.run);
       if (existing !== undefined) { if (existing.source !== managedLifecycleSourceDigest(source)) throw new Error("managed indexed request conflicts"); if (existing.completion === null) await resume(source, existing); return existing; }
+      if (source.version === 3) throw new Error("managed forward source requires the owning admission handoff");
       if (ports.managedData !== undefined && source.version !== 2) throw new Error("new indexed catalog deployments require allocation source version 2");
       const deadline = source.createdAt + 90_000; const checked = managedIndexScope(await scope(source));
       if (!checked.ok || await bounded(deadline, () => ports.requestAllowed(source)) !== true || await bounded(deadline, () => context.preparedBuild(source)) !== true || await bounded(deadline, () => owner.validate(source)) === undefined) throw new Error("managed indexed request preflight refused");

@@ -54,3 +54,28 @@ export const holdManagedForwardInitialization = (before: unknown, expected: Mana
   const next = parseLifecycleEnvelope({ ...current, forward: { ...current.forward, phase: "held", reason: "deadline", heldAt: at } }); if (!next.ok || next.value.forward === undefined) throw new Error("invalid held forward initialization");
   return Object.freeze({ state: next.value, reservation: next.value.forward });
 };
+
+/** Record the one successor source eligible for the pending charge transfer. No capacity is written here. */
+export const publishManagedForwardHandoff = (before: unknown, expected: ManagedForwardReservation, input: unknown) => {
+  const parsed = parseLifecycleEnvelope(before);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const current = parsed.value;
+  const reservation = current.forward;
+  const source = parseManagedLifecycleSource(input);
+  const certificate = source.forward;
+  if (reservation?.phase !== "fencing" || !same(reservation, expected) || source.version !== 3 || certificate === undefined ||
+    source.run !== reservation.run || source.action !== reservation.action || source.candidate.commit !== reservation.build.commit ||
+    source.candidate.artifact !== reservation.build.artifact || !same(source.candidate.infrastructure.registration, reservation.build.registration) ||
+    certificate.reservation !== hash(reservation) || certificate.cleanupSource !== reservation.cleanup || certificate.decision !== reservation.selection.decision ||
+    certificate.blocked.run !== reservation.blocked.run || certificate.blocked.source !== reservation.blocked.source ||
+    certificate.blocked.checkpoint !== reservation.blocked.checkpoint || certificate.blocked.epoch !== reservation.blocked.compatibilityEpoch ||
+    !current.managed?.some((item) => item.run === certificate.blocked.run && item.action === certificate.blocked.action && item.completion === null)) {
+    throw new Error("managed handoff source conflicts with its reservation");
+  }
+  const next = parseLifecycleEnvelope({ ...current, forward: {
+    ...reservation, phase: "transferring",
+    handoff: { source: managedLifecycleSourceDigest(source), cleanupState: certificate.cleanupState, createdAt: source.createdAt, deadline: source.createdAt + 90_000 },
+  } });
+  if (!next.ok || next.value.forward?.phase !== "transferring") throw new Error("invalid managed admission handoff");
+  return Object.freeze({ state: next.value, reservation: next.value.forward });
+};

@@ -7,7 +7,7 @@ import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 /** Only absence of every workload-effect intent permits metadata-only settlement. An empty maintenance child is safe only when the authenticated previous application has no consumers. */
 const effectFree = (state: ManagedLifecycleStore, source: ManagedLifecycleSource) => {
   const operation = state.operation; const description = managedLifecycleDescription(source);
-  if (operation.recoverySource !== null || operation.compatibilityFencedAt !== null ||
+  if (source.version === 3 || operation.recoverySource !== null || operation.compatibilityFencedAt !== null ||
     operation.preparation !== null || operation.consumers !== null || operation.verification !== null || operation.recovery !== null || operation.recoveryVerification !== null ||
     operation.quiescence !== null && (operation.quiescence.nodes.length !== 0 || Object.values(source.previous?.source.application.services ?? {}).some((service) => service.role !== "retained-dependency")) ||
     JSON.stringify(state.owner) !== JSON.stringify(source.candidate.infrastructure.ownership) || source.createdAt !== operation.createdAt || description.admissionDeadline !== operation.admissionDeadline || operation.previousPlan !== (source.previous === null ? null : managedApplicationDigest(source.previous.source.application)) ||

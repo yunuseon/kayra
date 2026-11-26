@@ -2664,3 +2664,12 @@ The resource book can calculate an atomic replacement of the exact pending
 charge and binding while accounting for other apps. The durable handoff must
 authenticate this evidence at the write boundary and install the successor
 under the same reserved action before it can start.
+
+Before admission transfer, the index now retains the held root snapshot, completed
+cleanup state, and successor source. It publishes their references and the
+successor admission deadline in the app envelope. The successor source keeps
+pointers to prior evidence and carries live retained service identities, without
+embedding prior forward history. A restart after publication reads the same
+source and deadline. Ordinary deploy and effect-free cleanup paths refuse this
+source. Activation requires the dedicated handoff, and automatic initial cleanup
+cannot release inherited data capacity.

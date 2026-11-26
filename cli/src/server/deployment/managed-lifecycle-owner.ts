@@ -150,7 +150,10 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
         if (current.operation.quiescence !== null && bytes === undefined) return store.hold("quiescence");
         const raw: unknown = bytes === undefined ? undefined : JSON.parse(bytes);
         const proof = current.operation.quiescence === null ? undefined : { certificate: current.operation.quiescence, source: raw };
-        await child.preparation.prepare(source.candidate, source.run, source.action, source.retained, proof, current.operation.enteredAt); return store.read();
+        const baselines = Object.freeze(source.retained.map((reference) => Object.freeze({
+          ...reference, kind: reference.kind === "forward" ? "active" as const : reference.kind,
+        })));
+        await child.preparation.prepare(source.candidate, source.run, source.action, baselines, proof, current.operation.enteredAt); return store.read();
       }
       const result = await child.preparation.tick(); return result.phase === "ready" && result.consumerDeadline !== null ? store.enter("preparing", "updating", result.consumerDeadline - 90_000) : result.phase === "held" ? store.hold("preparation") : store.read();
     }

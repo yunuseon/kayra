@@ -13,15 +13,17 @@ import { openJournal } from "../../src/server/deployment/journal.ts";
 import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
 
 export const indexedForwardFixture = async (t: TestContext) => {
-  let cut: "catalog-before" | "catalog-after" | "decision-after" | "publication-before" | "publication-after" | "build-publication-before" | "build-publication-after" | "reservation-before" | "reservation-after" | "cleanup-child-before" | "cleanup-child-after" | "cleanup-publication-before" | "cleanup-publication-after" | "handoff-publication-after" | undefined; let decisions = 0;
+  let cut: "catalog-before" | "catalog-after" | "decision-after" | "publication-before" | "publication-after" | "build-publication-before" | "build-publication-after" | "reservation-before" | "reservation-after" | "cleanup-child-before" | "cleanup-child-after" | "cleanup-publication-before" | "cleanup-publication-after" | "handoff-publication-after" | "transfer-write-before" | "transfer-write-after" | undefined; let decisions = 0;
   let rootGate: { readonly entered: ReturnType<typeof Promise.withResolvers<undefined>>; readonly release: ReturnType<typeof Promise.withResolvers<undefined>> } | undefined;
   const journals = async (...args: Parameters<typeof openJournal>) => {
     if (args[0].endsWith("/managed") && rootGate !== undefined) { const gate = rootGate; rootGate = undefined; gate.entered.resolve(undefined); await gate.release.promise; }
     const base = await openJournal(...args); return { ...base, write: async (value: Parameters<typeof base.write>[0]) => {
-      const selected = typeof value === "object" && value !== null && "apps" in value ? parseLifecycleAppIndex(value).apps.find((item) => item.app === "shop")?.forwardSelections?.[0] : undefined;
+      const index = typeof value === "object" && value !== null && "apps" in value ? parseLifecycleAppIndex(value) : undefined;
+      const selected = index?.apps.find((item) => item.app === "shop")?.forwardSelections?.[0];
+      const transferring = index?.managedBindings?.some((binding) => binding.run === selected?.request) === true;
       const forward = typeof value === "object" && value !== null && "forward" in value ? value["forward"] : undefined;
       const phase = typeof forward === "object" && forward !== null && "phase" in forward ? forward["phase"] : undefined;
-      const point = args[0].endsWith("/effects") ? "cleanup-child" : phase === "transferring" ? "handoff-publication" :
+      const point = transferring ? "transfer-write" : args[0].endsWith("/effects") ? "cleanup-child" : phase === "transferring" ? "handoff-publication" :
         phase === "fencing" ? "cleanup-publication" : forward !== undefined ? "reservation" : selected?.preparedBuild !== undefined ?
         "build-publication" : selected?.phase === "initializing" ? "catalog" : selected?.phase === "ready" ? "publication" :
         args[0].includes("/managed/forward/") ? "decision" : undefined;

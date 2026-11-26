@@ -24,10 +24,11 @@ import { managedDeploymentHealth } from "./managed-deployment-health.ts";
 import { managedImagePins } from "./managed-image-pins.ts";
 import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 import type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
-import { parseManagedLifecycleSource, managedLifecycleDescription } from "./managed-lifecycle-source.ts";
+import { parseManagedLifecycleSource, managedLifecycleDescription, managedLifecycleSourceDigest } from "./managed-lifecycle-source.ts";
 import { indexedManagedLifecycle } from "./indexed-managed-lifecycle.ts";
 import type { IndexedManagedRuntime, IndexedManagedContext } from "./indexed-managed-lifecycle.ts";
-import { managedIndexGate, observeManagedIndexAdmission, reserveManagedIndexAdmission, settleManagedIndexAdmission } from "./managed-index-admission.ts";
+import { observeManagedAdmission, transferManagedAdmission } from "./managed-admission-binding.ts";
+import { managedIndexScope, managedIndexGate, observeManagedIndexAdmission, reserveManagedIndexAdmission, settleManagedIndexAdmission } from "./managed-index-admission.ts";
 import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 import type { ManagedAdmissionIdentity, ManagedAdmissionClaim } from "../../contracts/managed-admission.ts";
 import { parseLifecycleAppIndex, lifecycleIndexEntry, lifecycleIndexBuild, lifecycleIndexForwardSelection } from "./lifecycle-app-index-state.ts";
@@ -79,6 +80,10 @@ const appName = z.string().regex(names.app.pattern);
 type ForwardSelectionUse<T> = (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown, view: { readonly root: () => Promise<ManagedLifecycleStore>; readonly envelope: EnvelopeStore; readonly directory: string }) => Promise<T>;
 type ForwardBuildPorts = BuildPorts & { readonly authorizeSelection: ForwardSelectionPorts["authorize"] };
 type ForwardBuildContext = { readonly request: ManagedForwardSelectionRequest; readonly ports: ForwardSelectionPorts };
+type ForwardCleanupRuntime = (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort;
+type ForwardTransferPorts = ForwardSelectionPorts & RetainedInputsPort & HostObserver & {
+  readonly authorizeTransfer: (source: ManagedLifecycleSource) => Promise<boolean>;
+};
 type ForwardSelectionPorts = Pick<Parameters<typeof managedForwardSelection>[1], "now" | "read" | "retain" | "authorize">;
 type EnvelopeStore = ReturnType<typeof openLifecycleEnvelopeStore>;
 
@@ -355,7 +360,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   };
   const withForwardSelection = <T>(app: string, request: ManagedForwardSelectionRequest, actor: MigrationResolutionActor | undefined, ports: ForwardSelectionPorts, use: ForwardSelectionUse<T>, observeRoot = actor === undefined) =>
     useIndexed(app, (store, indexed) => forwardSelectionHeld(store, indexed, app, request, actor, ports, use, observeRoot));
-  const useForwardCleanup = <T>(app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, use: (owner: ReturnType<typeof indexedManagedForward>) => Promise<T>) => withForwardSelection(app, request, undefined, ports, async (selection, catalog, _input, view) => {
+  const useForwardCleanup = <T>(app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, use: (owner: ReturnType<typeof indexedManagedForward>, envelope: EnvelopeStore, root: () => Promise<ManagedLifecycleStore>) => Promise<T>) => withForwardSelection(app, request, undefined, ports, async (selection, catalog, _input, view) => {
     const audit = await selection.audit(); if (audit === undefined || catalog.source === null || catalog.decision !== audit.id || catalog.preparedBuild === undefined) throw new Error("forward cleanup lacks its audited prepared selection");
     const chosen = Object.freeze({ request: request.request, source: catalog.source, decision: audit.id });
     const owner = indexedManagedForward({ envelope: view.envelope, root: view.root, selection: chosen,
@@ -372,7 +377,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return observed.ok && observed.value === "reserved";
       }),
     }, ports);
-    return use(owner);
+    return use(owner, view.envelope, view.root);
   });
   const forwardGrantHeld = (store: EnvelopeStore, indexed: IndexEntry, app: string, forward: ForwardBuildContext) => forwardSelectionHeld(store, indexed, app, forward.request, undefined, forward.ports, async (selection, catalog) => {
     if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
@@ -561,6 +566,59 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       useForwardCleanup(app, request, ports, (owner) => owner.inspectHandoff(runtime, retained)),
     prepareManagedForwardHandoff: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort, retained: ManagedWorkloadPort["observeDesired"]) =>
       useForwardCleanup(app, request, ports, (owner) => owner.prepareHandoff(runtime, retained)),
+    transferManagedForwardAdmission: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardTransferPorts, runtime: ForwardCleanupRuntime, retained: ManagedWorkloadPort["observeDesired"]) =>
+      useForwardCleanup(app, request, ports, async (owner, envelope, root) => {
+        const recorded = (await envelope.read())?.forward;
+        if (recorded?.phase !== "transferring") throw new Error("forward admission transfer requires its published intent");
+        const prepared = await owner.prepareHandoff(runtime, retained);
+        const target = prepared.source;
+        const targetDescription = managedLifecycleDescription(target);
+        const targetIdentity = Object.freeze({
+          owner: target.candidate.infrastructure.ownership, run: target.run, action: target.action,
+          source: managedLifecycleSourceDigest(target), plan: targetDescription.admission.planDigest, deadline: targetDescription.admissionDeadline,
+        });
+        const accounting = (snapshot: Awaited<ReturnType<typeof readIndex>>) => ({ resources: snapshot.resources, bindings: snapshot.managedBindings ?? [] });
+        const observeTransferred = async () => {
+          const current = observeManagedAdmission(accounting(await readIndex()), targetIdentity, targetDescription.admission);
+          return current.ok && current.value === "reserved";
+        };
+        if (await serialIndex(observeTransferred)) return targetIdentity;
+
+        const deadline = recorded.handoff.deadline;
+        if (targetIdentity.source !== recorded.handoff.source || targetIdentity.deadline !== deadline || ports.now() >= deadline) throw new Error("forward admission transfer expired or changed");
+        const blocked = await root();
+        if (createHash("sha256").update(JSON.stringify(blocked)).digest("hex") !== recorded.blocked.checkpoint) throw new Error("forward admission transfer blocked checkpoint changed");
+        const oldBytes = await boundedManagedRead(deadline, ports.now, () => ports.read(recorded.blocked.source));
+        if (oldBytes === undefined || createHash("sha256").update(oldBytes).digest("hex") !== recorded.blocked.source) throw new Error("forward admission transfer blocked source unavailable");
+        const old = parseManagedLifecycleSource(JSON.parse(oldBytes));
+        if (oldBytes !== JSON.stringify(old)) throw new Error("forward admission transfer blocked source changed");
+        const operation = blocked.operation;
+        const blockedIdentity = Object.freeze({ owner: blocked.owner, run: operation.run, action: operation.action, source: operation.source, plan: operation.plan, deadline: operation.admissionDeadline });
+        const host = await boundedManagedRead(deadline, ports.now, () => ports.observeHost(target.candidate.host));
+        if (host === undefined) throw new Error("forward admission transfer host unavailable");
+        const evidence = await owner.inspectHandoff(runtime, retained);
+        const inherited = target.retained.filter((item) => item.kind === "forward");
+        if (evidence.retained.length !== inherited.length || inherited.some((item) => !evidence.retained.some((current) =>
+          current.name === item.name && current.native.id === item.native.id && current.native.version >= item.native.version &&
+          JSON.stringify(current.action) === JSON.stringify(item.action)))) throw new Error("forward admission transfer retained identity changed");
+        if (await boundedManagedRead(deadline, ports.now, () => ports.authorizeTransfer(target)) !== true) throw new Error("forward admission transfer authority unavailable");
+
+        return serialIndex(async () => {
+          const snapshot = await readIndex();
+          const entry = snapshot.apps.find((item) => item.app === app);
+          const current = await envelope.read();
+          const now = ports.now();
+          if (JSON.stringify(current?.forward) !== JSON.stringify(recorded) || now < evidence.observedAt || now - evidence.observedAt > 2000 ||
+            !managedIndexScope({ owner: entry, envelope: current, source: target }).ok) throw new Error("forward admission transfer lost current evidence or indexed ownership");
+          const oldClaim = managedLifecycleDescription(old).admission;
+          const owned = observeManagedIndexAdmission(accounting(snapshot), { owner: entry, envelope: current, state: blocked, source: old }, blockedIdentity, oldClaim);
+          if (!owned.ok || owned.value !== "reserved") throw new Error("forward admission transfer lost the exact pending blocked charge");
+          const next = transferManagedAdmission(accounting(snapshot), host, { identity: blockedIdentity, claim: oldClaim }, { identity: targetIdentity, claim: targetDescription.admission }, now);
+          if (!next.ok) throw new Error(next.error);
+          await journal.write({ ...snapshot, resources: next.value.resources, managedBindings: next.value.bindings });
+          return targetIdentity;
+        });
+      }),
     managedForwardBuildGrant: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts) => withForwardSelection(app, request, undefined, ports, async (selection, catalog) => {
       if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
     }),

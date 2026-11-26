@@ -2718,3 +2718,9 @@ of cessation permits replacing that charge with an absent entry. The admission
 binding remains so stale requests cannot reclaim it. A lost acknowledgement
 reconciles the recorded postimage on restart. This transition preserves the
 registration, deployment checkpoint and owned volumes for finalization.
+
+The managed removal composition uses the existing Docker transport and
+requires the current platform registration and ownership record. It receives
+only stop and scrub, migration cleanup and pinned check observations. It
+cannot apply a workload, start a migration, materialize inputs or delete a
+volume. The ordinary deployer command listener does not yet dispatch removal.

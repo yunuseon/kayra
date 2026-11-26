@@ -21,6 +21,20 @@ test("platform composition creates no transport, runtime, journal or private-inp
   await assert.rejects(owner.prepare("shop", randomUUID(), "a".repeat(40)), /outside managed/); assert.deepEqual(api, []); assert.deepEqual(builds, []); assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
 });
 
+test("managed removal requires the current owned platform registration before it can fence the app", async (t) => {
+  const lab = await managedIndexFixture(t);
+  const api: string[] = [];
+  const owner = managedPlatform(lab.index(), { publicRegistrations: "missing", privateRegistrations: "missing",
+    swarmAuthority: "missing", migrationPolicy: "missing", domain: "lab.test" }, {
+    api: { request: (method) => { api.push(method); return Promise.reject(new Error("unexpected Docker request")); } },
+    builds: { ...lab.artifacts, now: lab.runtime.now, prepare: () => Promise.reject(new Error("unexpected build")), images: () => [] },
+    canAccess: () => Promise.resolve(true), actor: { kind: "operator-control", identity: "fixture-operator" },
+  });
+  await assert.rejects(owner.removal.request("shop", randomUUID(), "Remove the application while preserving its data"), /authority unavailable/);
+  assert.deepEqual(api, []);
+  assert.deepEqual(await lab.index().verifiedRegistration("shop"), lab.plan.infrastructure.registration);
+});
+
 test("empty managed health snapshots do not inspect Docker or borrow unregistered application contexts", async (t) => {
   const lab = await managedIndexFixture(t); const unreachable = () => Promise.reject(new Error("unexpected external effect"));
   const owner = managedPlatform(lab.index(), { publicRegistrations: "missing", privateRegistrations: "missing", swarmAuthority: "missing", migrationPolicy: "missing", domain: "lab.test" }, {

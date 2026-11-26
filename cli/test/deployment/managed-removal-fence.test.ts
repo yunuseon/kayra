@@ -1,4 +1,5 @@
 /* eslint-disable functional/no-let, functional/prefer-immutable-types, functional/immutable-data -- drives native fixture effects and records their order */
+import { managedRemovalRuntime } from "../../src/server/composition/managed-removal-runtime.ts";
 import { jobPlanDigest } from "../../src/contracts/one-shot-job.ts";
 import type { JobCleanupPort } from "../../src/contracts/job-cleanup.ts";
 import { readFile, rename } from "node:fs/promises";
@@ -79,36 +80,46 @@ test("removal effects stop consumers before retained services and reopen their d
   const jobArtifact = inventory.jobs[0]; assert.ok(jobArtifact);
   let jobFenced = false;
   const effects: string[] = [];
-  const ports = {
+  const ports = managedRemovalRuntime(inventory, {
     ...lab.artifacts, now: lab.runtime.now,
-    services: {
-      observe: lab.runtime.services.observe,
-      tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null) => {
-        effects.push(action.service + ":" + action.effect);
-        return lab.runtime.services.tombstone(action, expected);
+    native: {
+      services: {
+        observe: lab.runtime.services.observe,
+        tombstone: (action: ManagedServiceAction, expected: ServiceVersion | null) => {
+          effects.push(action.service + ":" + action.effect);
+          return lab.runtime.services.tombstone(action, expected);
+        },
       },
+      jobs: {
+        observe: (async (job) => {
+          if (jobPlanDigest(job) !== jobArtifact) return lab.runtime.jobs.observe(job);
+          return {
+            status: "owned", id: (jobFenced ? "f" : "e").repeat(64), barrier: jobFenced, plan: jobArtifact,
+            state: jobFenced ? "created" : "running", exitCode: null, probe: null, finishedAt: null,
+          };
+        }) satisfies JobCleanupPort["observe"],
+        fence: ((job, authority, container) => {
+          assert.equal(jobPlanDigest(job), jobArtifact);
+          assert.equal(authority.action, request);
+          assert.equal(container, "e".repeat(64));
+          assert.equal(jobFenced, false);
+          jobFenced = true;
+          effects.push("job:fence");
+          return Promise.resolve("acknowledged");
+        }) satisfies JobCleanupPort["fence"],
+      },
+      containers: { observe: () => Promise.reject(new Error("fixture has no pending check")) },
     },
-    jobs: {
-      observe: (async (job) => {
-        if (jobPlanDigest(job) !== jobArtifact) return lab.runtime.jobs.observe(job);
-        return {
-          status: "owned", id: (jobFenced ? "f" : "e").repeat(64), barrier: jobFenced, plan: jobArtifact,
-          state: jobFenced ? "created" : "running", exitCode: null, probe: null, finishedAt: null,
-        };
-      }) satisfies JobCleanupPort["observe"],
-      fence: ((job, authority, container) => {
-        assert.equal(jobPlanDigest(job), jobArtifact);
-        assert.equal(authority.action, request);
-        assert.equal(container, "e".repeat(64));
-        assert.equal(jobFenced, false);
-        jobFenced = true;
-        effects.push("job:fence");
-        return Promise.resolve("acknowledged");
-      }) satisfies JobCleanupPort["fence"],
-    },
-    containers: { observe: () => Promise.reject(new Error("fixture has no pending check")) },
-    authorize: (owned: typeof intent) => Promise.resolve(owned.action === intent.action),
-  };
+    authorize: (owned) => Promise.resolve(owned.action === intent.action),
+  });
+  const web = inventory.services.find((item) => item.name === "web"); assert.ok(web);
+  const scope = { app: intent.owner.app, incarnation: intent.owner.incarnation, dataOwner: intent.owner.dataOwner, service: "web" };
+  const service = { ...scope, action: intent.action + ":remove:1", effect: "remove" as const, plan: web.digest, deadline: intent.createdAt + 90_000 };
+  assert.deepEqual(await ports.services.observe({ ...scope, service: "unrelated" }), { status: "foreign" });
+  assert.equal(await ports.services.tombstone({ ...service, action: intent.action + ":apply:1", effect: "apply" }, null, web.plan.image), "refused");
+  assert.equal(await ports.services.tombstone(service, null, "unrelated"), "refused");
+  assert.equal(await ports.services.tombstone({ ...service, deadline: intent.createdAt }, null, web.plan.image), "refused");
+  assert.deepEqual(effects, []);
   await assert.rejects(lab.index().tickManagedRemovalEffects("shop", request, ports), /not published/);
   const retire = () => lab.index().retireManagedRemovalAccounting("shop", request, ports);
   const prepared = await lab.index().prepareManagedRemovalEffects("shop", request, ports);

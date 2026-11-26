@@ -41,7 +41,7 @@
       vars:
         stage_source_root: "{{ kayra_root }}"
         stage_source_destination: "{{ volume_source.path }}"
-        stage_source_paths: "{{ ['cli/src', 'package.json', 'node_modules/zod', 'test/lab/swarm-platform'] + (['node_modules/yaml'] if platform_input_probe | default(false) | bool else []) }}"
+        stage_source_paths: "{{ ['cli/src', 'package.json', 'node_modules/zod', 'test/lab/swarm-platform'] + (['node_modules/yaml'] if (platform_input_probe | default(false) | bool or managed_group_probe | default(false) | bool) else []) + (['scripts/server-lib/registration_generation.py'] if managed_group_probe | default(false) | bool else []) }}"
         stage_source_manifest: "{{ report_path }}.source.json"
 
     - name: Copy the image's Node binary without running a socket holder

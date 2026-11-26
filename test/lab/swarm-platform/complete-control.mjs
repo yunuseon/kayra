@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import os from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { jobName } from '../../../cli/src/contracts/one-shot-job.ts';
+import { runCompleteHttpCases } from './complete-http-cases.mjs';
 import { nativeHttpIntent } from './http-intent.mjs';
 import { request, traffic } from './http-probe.mjs';
 import { prematureCandidateRequests } from './http-observations.mjs';
@@ -22,6 +23,14 @@ const env = { ...process.env, COMPOSE_FILE: 'docker-compose.yml:docker-compose.c
 const docker = async (...args) => (await run('docker', args, { cwd: '/opt/platform', env, timeout: 20000, maxBuffer: 1024 * 1024 })).stdout.trim();
 const ctl = async (...args) => JSON.parse(await docker('compose', 'exec', '-T', 'deployer', 'kayra-deployer', 'ctl', ...args));
 const status = () => ctl('lifecycle', 'status', manifest.app);
+const readNativePlan = async () => {
+  const services = (await docker('service', 'ls', '-q', '--filter', 'label=com.kayra.app=' + manifest.app)).split('\n');
+  assert.equal(services.length, 1);
+  const [service] = JSON.parse(await docker('service', 'inspect', services[0]));
+  const plan = service.Spec.TaskTemplate.ContainerSpec.Labels['com.kayra.plan'];
+  assert.match(plan, /^[a-f0-9]{64}$/);
+  return plan;
+};
 const ledger = async () => JSON.parse(await docker('exec', manifest.ledger, 'node', '--input-type=module', '--eval', 'console.log(await (await fetch("http://127.0.0.1:8080/snapshot")).text())'));
 const trace = []; const requests = []; const events = []; const metrics = []; let phase = 'initial'; let stop; let sampler; let stream; let streamExit; let eventError; let bytes = 0;
 const event = (kind, value) => { const entry = { at: Date.now(), phase, kind, value }; trace.push(entry); console.log(JSON.stringify(entry)); };
@@ -31,14 +40,14 @@ const wait = async (condition, label, timeout = 180000) => {
   throw new Error('timed out: ' + label);
 };
 const currentOperation = (value) => managed ? value?.operation : value?.operation ?? value?.preparation;
-const terminal = (receipt) => wait(async () => {
+const terminal = (receipt, outcomes = ['deployed']) => wait(async () => {
   const value = await status(); const current = currentOperation(value);
-  if (current === undefined) return undefined;
-  assert.equal(managed ? current.run : current.request, receipt.request);
+  if (current == null || (managed ? current.run : current.request) !== receipt.request) return undefined;
   event('status', value); assert.ok(!['held', 'failed', 'cancelled'].includes(current.phase), 'fixture rollout did not converge');
   if (!managed) return current.phase === 'succeeded' ? value : undefined;
   if (current.phase !== 'complete') return undefined;
-  assert.equal(current.outcome, 'deployed'); assert.equal(current.settled, true);
+  assert.ok(outcomes.includes(current.outcome), 'unexpected terminal outcome: ' + current.outcome);
+  assert.equal(current.settled, true);
   return value;
 }, 'verified release ' + receipt.request);
 const submit = async (release) => {
@@ -93,11 +102,7 @@ try {
   if (managed) {
     assert.equal(replay.outcome, 'deployed');
     assert.equal(replay.admissionDeadline, b.receipt.admissionDeadline);
-    const services = (await docker('service', 'ls', '-q', '--filter', 'label=com.kayra.app=' + manifest.app)).split('\n');
-    assert.equal(services.length, 1);
-    const [service] = JSON.parse(await docker('service', 'inspect', services[0]));
-    b.nativePlan = service.Spec.TaskTemplate.ContainerSpec.Labels['com.kayra.plan'];
-    assert.match(b.nativePlan, /^[a-f0-9]{64}$/);
+    b.nativePlan = await readNativePlan();
   }
   phase = 'stable'; await pause(30000); await stop(); stop = undefined;
   const snapshot = await ledger(); for (const identity of [a.receipt.request, b.receipt.request]) { assert.equal(snapshot.calls[identity + ':schema'], 1); assert.equal(snapshot.effects[identity + ':schema'], 1); }
@@ -116,6 +121,10 @@ try {
   const probeFinished = events.find((value) => value.Action === 'die' && value.Actor?.ID === probeStart?.Actor.ID && value.Actor.Attributes.exitCode === '0');
   const candidateStarted = events.find((value) => value.Action === 'start' && !value.Actor?.Attributes?.['com.kayra.job'] && value.Actor?.Attributes?.['com.kayra.plan'] === b.nativePlan);
   assert.ok(failedMigration && probeFinished && candidateStarted); assert.ok(failedMigration.timeNano < probeStart.timeNano && probeFinished.timeNano < candidateStarted.timeNano);
+  const replacement = managed && manifest.commits.C !== undefined
+    ? await runCompleteHttpCases({ manifest, target, submit, terminal, readNativePlan, events, requests, event,
+      setPhase: (value) => { phase = value; }, baseline: b })
+    : null;
   phase = 'complete'; stream.kill('SIGTERM'); await streamExit; clearInterval(sampler); sampler = undefined;
   const versions = JSON.parse(await docker('version', '--format', '{{json .}}'));
   const sharedImages = {};
@@ -126,8 +135,10 @@ try {
   const ledgerImage = await docker('inspect', manifest.ledger, '--format', '{{.Image}}');
   const ledgerImageReference = await docker('inspect', manifest.ledger, '--format', '{{.Config.Image}}');
   const result = { passed: true, protocol: managed ? 'managed-v3' : 'complete-v2', scope: 'real registered builder artifacts, app-owned HTTP ledger, migration/probe containers, coordinator restart and routed TLS HTTP; no SQL engine or retained-volume acceptance',
-    a, b, initial: activeA, interrupted, final: activeB, replay, ledger: snapshot, migrationContinuedWithoutCoordinator: true, migrationStarts: 2, probeStarts: 1,
-    requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, appProbeRecoveredFailure: true, previousReleaseDrainingResponses: requests.filter((value) => value.release === 'A' && value.ready === false).length, versions, sharedImages, ledgerImage, ledgerImageReference, compose: await docker('compose', 'version', '--short'), node: process.version, os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
+    a, b, initial: activeA, interrupted, final: replacement?.final ?? activeB, replay, ledger: snapshot, migrationContinuedWithoutCoordinator: true, migrationStarts: 2, probeStarts: 1,
+    replacementCases: replacement?.results ?? [], requests: requests.filter((value) => value.kind === 'short').length,
+    failedRequests: failures.length + (replacement?.results.reduce((total, value) => total + value.requests.failed, 0) ?? 0),
+    prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, appProbeRecoveredFailure: true, previousReleaseDrainingResponses: requests.filter((value) => value.release === 'A' && value.ready === false).length, versions, sharedImages, ledgerImage, ledgerImageReference, compose: await docker('compose', 'version', '--short'), node: process.version, os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); event('passed', result);
 } catch (error) {
   await writeFile(join(output, 'failure.json'), JSON.stringify({ error: String(error), phase, manifest }, null, 2)); console.error(JSON.stringify({ error: String(error), output })); process.exitCode = 1;

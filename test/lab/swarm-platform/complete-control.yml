@@ -98,20 +98,26 @@
       changed_when: true
       when: kayra_lab_managed_rollouts | default(false) | bool
 
-    - name: Retain the second immutable build through the real builder
+    - name: Retain each replacement's immutable build through the real builder
       ansible.builtin.command:
-        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ fixture_app }}", "{{ fixture_commits.B }}"]
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ fixture_app }}", "{{ item.value }}"]
         chdir: /opt/platform
       environment: "{{ compose_env }}"
-      register: complete_second_build
+      loop: "{{ fixture_commits | dict2items | rejectattr('key', 'equalto', 'A') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: complete_replacement_builds
       changed_when: true
 
-    - name: Require a retained build for the requested exact commit
+    - name: Require retained builds for the requested exact commits
       ansible.builtin.assert:
         that:
-          - (complete_second_build.stdout | from_json).commit == fixture_commits.B
-          - (complete_second_build.stdout | from_json).artifact is match('^[0-9a-f]{64}$')
+          - (item.stdout | from_json).commit == item.item.value
+          - (item.stdout | from_json).artifact is match('^[0-9a-f]{64}$')
         quiet: true
+      loop: "{{ complete_replacement_builds.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
 
     - name: Allocate an isolated observer source directory
       ansible.builtin.tempfile:

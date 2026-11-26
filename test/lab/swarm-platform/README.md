@@ -2360,3 +2360,11 @@ compares routed HTTPS traffic before and after release promotion. The observer
 keeps the same fresh and persistent connection measurement and checks the
 original admission and operation deadlines. It retains the per-request data,
 Docker events, state trace, resource samples and exact versions.
+
+The managed stage also retains four replacement builds before starting traffic.
+It verifies a 15-second readiness delay, a candidate that never becomes
+healthy, an automatic recovery after a candidate becomes healthy and exits, and
+a 20-second request accepted by the previous release. Each case records at
+least 30 seconds of traffic after convergence. The post-readiness failure
+records failed requests, sampled disruption intervals, and elapsed time from
+the native crash to verified recovery separately from the continuity cases.

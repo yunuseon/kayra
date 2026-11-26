@@ -21,11 +21,12 @@ export type RegistrationPorts = {
   readonly index: AppIndex;
   readonly canRegister: (app: string) => Promise<boolean>;
   readonly builds?: BuildPorts | undefined;
+  readonly managedSwarm?: boolean | undefined;
   readonly runtimeEnabled?: ((runtime: Runtime) => Promise<boolean>) | undefined;
   readonly rollouts?: RolloutPlanPort | undefined;
   readonly plans?: HttpPlanPort | undefined;
 };
-export const registrationControl = ({ index, canRegister, builds, runtimeEnabled = (runtime) => Promise.resolve(runtime === "compose"), plans, rollouts }: RegistrationPorts) => async (path: string, input: unknown) => {
+export const registrationControl = ({ index, canRegister, builds, managedSwarm = false, runtimeEnabled = (runtime) => Promise.resolve(runtime === "compose"), plans, rollouts }: RegistrationPorts) => async (path: string, input: unknown) => {
   switch (path) {
     case "/registration/preview": {
       const parsed = z.object({ app: z.string().regex(names.app.pattern), commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().safeParse(input);
@@ -63,7 +64,7 @@ export const registrationControl = ({ index, canRegister, builds, runtimeEnabled
       const { app, generation, runtime } = parsed.data;
       if (!(await runtimeEnabled(runtime))) throw new Error("selected registration runtime is not enabled");
       if (!(await canRegister(app))) throw new Error("app is outside initial registration scope");
-      const incarnation = await index.prepareApp(app);
+      const incarnation = await index.prepareApp(app, managedSwarm && runtime === "swarm" ? "managed-v3" : undefined);
       const ticket = await index.reserveRegistration(app, generation, runtime);
       return Object.freeze({ incarnation, ticket });
     }

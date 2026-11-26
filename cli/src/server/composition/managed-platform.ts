@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { BuildPorts } from "../../contracts/build-artifact.ts";
 import type { ManagedExecutionContext } from "../../contracts/managed-execution-context.ts";
 import type { ManagedHealthReadPort } from "../../contracts/managed-deployment-read.ts";
@@ -27,7 +28,8 @@ import { managedRuntime } from "./managed-runtime.ts";
 import { typed } from "../../lib/typed.ts";
 
 type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts" |
-  "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval">>;
+  "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval" |
+  "managedRemovalIntent" | "managedRemovalTombstone">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
 type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined; readonly actor?: MigrationResolutionActor | undefined };
 
@@ -64,17 +66,28 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
   };
   const observeWithdrawal = registrationWithdrawalObservation(paths.publicRegistrations, now);
   const removal = Object.freeze({
-    request: (app: string, request: string, reason: string) => {
-      const actor = ports.actor;
-      if (actor === undefined) throw new Error("managed removal operator is unavailable");
-      return index.requestManagedRemoval(app, request, { actor, reason }, { now, authorize: authorizeRemoval });
+    step: async (app: string) => {
+      if (!await ports.canAccess(app) || ports.actor === undefined) throw new Error("app is outside managed removal scope");
+      const removed = await index.managedRemovalTombstone(app);
+      if (removed !== undefined) return Object.freeze({ status: "removed" as const, request: removed.request });
+      const intent = await index.managedRemovalIntent(app) ?? await index.requestManagedRemoval(app, randomUUID(), {
+        actor: ports.actor, reason: "Remove the managed application and retain its owned data",
+      }, { now, authorize: authorizeRemoval });
+      const runtime = await forRemoval(app, intent.request);
+      const prepared = await index.prepareManagedRemovalEffects(app, intent.request, runtime);
+      const state = prepared.phase === "complete" || prepared.phase === "held" ? prepared :
+        await index.tickManagedRemovalEffects(app, intent.request, runtime);
+      if (state.phase === "held") return Object.freeze({ status: "held" as const, request: intent.request, reason: state.reason });
+      if (state.phase !== "complete") return Object.freeze({ status: "removing" as const, request: intent.request, deadline: state.deadline });
+      await index.retireManagedRemovalAccounting(app, intent.request, runtime);
+      return Object.freeze({ status: "withdraw-registration" as const, withdrawal: Object.freeze({
+        version: 1 as const, request: intent.request, action: intent.action, registration: intent.registration,
+      }) });
     },
-    prepare: async (app: string, request: string) => index.prepareManagedRemovalEffects(app, request, await forRemoval(app, request)),
-    tick: async (app: string, request: string) => index.tickManagedRemovalEffects(app, request, await forRemoval(app, request)),
-    retireAccounting: async (app: string, request: string) => index.retireManagedRemovalAccounting(app, request, await forRemoval(app, request)),
-    finalize: async (app: string, request: string) => index.completeManagedRemoval(app, request, {
-      ...await forRemoval(app, request), observeWithdrawal,
-    }),
+    finalize: async (app: string, request: string) => {
+      const receipt = await index.completeManagedRemoval(app, request, { ...await forRemoval(app, request), observeWithdrawal });
+      return Object.freeze({ status: "removed" as const, request: receipt.request });
+    },
   });
   return Object.freeze({
     prepare, removal,

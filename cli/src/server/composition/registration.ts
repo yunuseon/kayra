@@ -50,9 +50,10 @@ export type RegistrationComposition = {
   readonly swarmAuthority?: string | undefined;
   readonly privateRegistrations?: string | undefined;
   readonly domain?: string | undefined;
+  readonly managedSwarm?: boolean | undefined;
 };
 export const startRegistrationControl = async ({ platformDirectory: platform, registrationObservations: observations,
-  publicRegistrations, builderUrl: builder = "http://builder:8081", swarmAuthority, migrationPolicy, privateRegistrations, domain = "localhost" }: RegistrationComposition) => {
+  publicRegistrations, builderUrl: builder = "http://builder:8081", swarmAuthority, migrationPolicy, privateRegistrations, domain = "localhost", managedSwarm = false }: RegistrationComposition) => {
   const path = join(platform, "lifecycle", "app-index");
   const observer = registrationObservation(observations);
   const present = await lstat(path).catch((error: unknown) => {
@@ -197,6 +198,14 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
+      if (route === "/deployment/remove-step" || route === "/deployment/remove-finalize") {
+        if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
+        if (typeof input !== "object" || input === null || Array.isArray(input) || !("app" in input) || typeof input.app !== "string" ||
+          !appName(input.app).ok) return undefined;
+        if (route === "/deployment/remove-step") return Object.keys(input).length === 1 ? managed.removal.step(input.app) : undefined;
+        return Object.keys(input).length === 2 && "request" in input && typeof input.request === "string" &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.request) ? managed.removal.finalize(input.app, input.request) : undefined;
+      }
       if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, managedAudit: managed?.commands.audit, managedObservations: route === "/deployment/health" ? await managed?.healthSnapshot() : undefined, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
@@ -204,7 +213,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         recovery: artifacts === undefined ? undefined : { actor: { kind: "operator-control", identity: "local-control:uid:" + String(process.getuid?.() ?? "unknown") },
           ports: { read: artifacts.read, now: Date.now, native: oneShotJob(api) } },
       })(route, input);
-      return registrationControl({ index: await opening, canRegister, builds, plans, rollouts,
+      return registrationControl({ index: await opening, canRegister, builds, plans, rollouts, managedSwarm,
         runtimeEnabled: async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok),
       })(route, input);
     },

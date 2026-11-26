@@ -837,6 +837,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         }
         return store.requestManagedRemoval(owner, request, operator, proposed.removal.createdAt);
       }),
+    managedRemovalIntent: (app: string) => useIndexed(app, async (store, indexed) => {
+      if (indexed.protocol !== "managed-v3") throw new Error("application does not own managed removal");
+      return (await store.read())?.removal;
+    }),
     inspectManagedRemoval: (app: string, request: string, ports: ManagedDeploymentReadPort) =>
       useRemovalInventory(app, request, ports, (inventory) => Promise.resolve(inventory)),
     prepareManagedRemovalEffects: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>

@@ -501,6 +501,47 @@ class GenerationTest(unittest.TestCase):
         with self.assertRaisesRegex(storage.RegistrationError, "conflict"):
             storage.withdraw_managed(self.fd, {**requested, "action": self.meta["incarnation"] + ":3"}, GID)
 
+    def test_host_remove_waits_for_coordinator_and_recovers_after_pointer_withdrawal(self):
+        self.swarm_registration()
+        storage.publish(self.fd, self.meta, self.fixture["registration"], self.fixture["configuration"], self.fixture["secrets"],
+                        GID, ownership=self.ownership())
+        app = self.meta["app"]
+        request = "12345678-1111-4111-8111-123456789abc"
+        withdrawal = {"version": 1, "request": request, "action": self.meta["incarnation"] + ":2", "registration": self.meta}
+        current = self.root / "public" / self.key / "current.json"
+
+        with self.assertRaisesRegex(storage.RegistrationError, "operator intervention"):
+            command.remove_managed(self.fd, GID, app, lambda *_: {"status": "held", "request": request})
+        self.assertTrue(current.exists())
+        with self.assertRaisesRegex(storage.RegistrationError, "changed scope"):
+            command.remove_managed(self.fd, GID, app, lambda *_: {
+                "status": "withdraw-registration", "withdrawal": {
+                    **withdrawal, "registration": {**self.meta, "app": "other"},
+                },
+            })
+        self.assertTrue(current.exists())
+
+        calls = []
+        lose_ack = True
+        def ctl(operation, selected, *args):
+            nonlocal lose_ack
+            self.assertEqual(selected, app)
+            calls.append(operation)
+            if operation == "remove-step":
+                return {"status": "withdraw-registration", "withdrawal": withdrawal}
+            self.assertEqual((operation, args), ("remove-finalize", (request,)))
+            self.assertFalse(current.exists())
+            if lose_ack:
+                lose_ack = False
+                raise storage.RegistrationError("lost finale acknowledgement")
+            return {"status": "removed", "request": request}
+
+        with self.assertRaisesRegex(storage.RegistrationError, "lost finale acknowledgement"):
+            command.remove_managed(self.fd, GID, app, ctl)
+        self.assertFalse(current.exists())
+        self.assertEqual(command.remove_managed(self.fd, GID, app, ctl), {"status": "removed", "request": request})
+        self.assertEqual(calls, ["remove-step", "remove-finalize"] * 2)
+
     def test_invalid_ownership_is_refused_before_publication(self):
         self.swarm_registration()
         owner = self.ownership()

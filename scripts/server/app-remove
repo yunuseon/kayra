@@ -32,8 +32,18 @@ if ! flock -n 9; then
     exit 1
 fi
 if [ -e "${platform_dir}/managed-apps/${app}.json" ]; then
-    echo "ERROR: the deployment coordinator owns ${app}." >&2
-    exit 1
+    adapter="${platform_dir}/registration-lib/registration_command.py"
+    root_file="${platform_dir}/registration-lib/root"
+    if [ ! -r "$adapter" ] || [ ! -r "$root_file" ]; then
+        echo "ERROR: the deployment coordinator owns ${app}, but managed removal is unavailable." >&2
+        exit 1
+    fi
+    registration_root="$(cat "$root_file")"
+    # The platform command takes this same lock and verifies the managed claim.
+    flock -u 9
+    exec 9>&-
+    printf '{"app":"%s"}\n' "$app" | python3 -B "$adapter" remove --root "$registration_root" --private-gid 1000 --platform-dir "$platform_dir"
+    exit
 fi
 pending="${platform_dir}/removing/${app}.json"
 apps_dir="$(sed -n 's/^APPS_DIR=//p' "${platform_dir}/.env")"

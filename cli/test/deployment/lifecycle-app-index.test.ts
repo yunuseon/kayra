@@ -295,5 +295,16 @@ test("control refuses Swarm reservation without a platform capability and publis
     await enabled("/registration/submit", { app: "shop", generation, ticket: reserved.ticket });
     await enabled("/registration/reconcile", { app: "shop", generation, ticket: reserved.ticket });
     assert.deepEqual(await disabled("/registration/policy", { app: "shop" }), await index.registrationPolicy("shop"));
+    const managed = registrationControl({ index, canRegister: () => Promise.resolve(true), runtimeEnabled: () => Promise.resolve(true), managedSwarm: true });
+    await assert.rejects(managed("/registration/reserve", { app: "shop", generation, runtime: "swarm" }), /protocol conversion is unsupported/);
+    const clean = { app: "new-swarm", generation, runtime: "swarm" };
+    const newRegistration = await managed("/registration/reserve", clean);
+    assert.ok(newRegistration !== undefined && "ticket" in newRegistration);
+    await managed("/registration/submit", { app: clean.app, generation, ticket: newRegistration.ticket });
+    await managed("/registration/reconcile", { app: clean.app, generation, ticket: newRegistration.ticket });
+    assert.equal(await index.managedRemovalIntent(clean.app), undefined);
+
+    await managed("/registration/reserve", { app: "new-compose", generation, runtime: "compose" });
+    await assert.rejects(index.managedRemovalIntent("new-compose"), /does not own managed removal/);
   } finally { await index.close(); }
 });

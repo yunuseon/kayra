@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 import stat
 import subprocess
 import sys
+import time
 
 import registration_generation as storage
 
@@ -73,12 +74,12 @@ def legacy_objects(app):
 
 
 @contextlib.contextmanager
-def claim_experimental_app(platform_dir, app, inspect=legacy_objects, inspect_native=None):
-    """Fence all cooperating legacy writers before an indexed app uses the name."""
+def app_platform_lock(platform_dir, app, create=True):
     storage._require(type(app) is str and bool(storage._APP.fullmatch(app)), "invalid staged app name")
     platform = Path(platform_dir)
     path = platform / "removal-locks" / (app + ".lock")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+    flags = os.O_WRONLY | os.O_NOFOLLOW | (os.O_CREAT if create else 0)
+    fd = os.open(path, flags, 0o644)
     try:
         info = os.fstat(fd)
         storage._require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1, "invalid host app lock")
@@ -86,6 +87,15 @@ def claim_experimental_app(platform_dir, app, inspect=legacy_objects, inspect_na
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise storage.RegistrationError("another operation holds the app lock") from None
+        yield platform
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def claim_experimental_app(platform_dir, app, inspect=legacy_objects, inspect_native=None):
+    """Fence all cooperating legacy writers before an indexed app uses the name."""
+    with app_platform_lock(platform_dir, app) as platform:
         legacy = (platform / "apps" / (app + ".json"), platform / "removing" / (app + ".json"),
                   platform / "runs" / app, platform / "releases" / app, platform / "app-secrets" / app)
         storage._require(not any(os.path.lexists(item) for item in legacy) and not inspect(app),
@@ -103,8 +113,40 @@ def claim_experimental_app(platform_dir, app, inspect=legacy_objects, inspect_na
         finally:
             os.close(directory)
         yield
-    finally:
-        os.close(fd)
+
+
+def remove_managed(root, gid, app, ctl):
+    """Drive the accepted coordinator removal using the platform publisher only when authorized to withdraw."""
+    deadline = time.monotonic() + 120
+    request_id = None
+    while time.monotonic() < deadline:
+        reply = ctl("remove-step", app)
+        storage._require(type(reply) is dict, "invalid managed removal response")
+        status = reply.get("status")
+        if status == "withdraw-registration":
+            storage._require(set(reply) == {"status", "withdrawal"}, "invalid managed removal withdrawal")
+            withdrawal = storage._withdrawal_identity(reply["withdrawal"])
+            request = withdrawal["request"]
+            storage._require(withdrawal["registration"]["app"] == app and request_id in (None, request),
+                             "managed removal response changed scope")
+            storage.withdraw_managed(root, withdrawal, gid)
+            receipt = ctl("remove-finalize", app, request)
+            storage._require(receipt == {"status": "removed", "request": request}, "managed removal awaits finalization")
+            return receipt
+        request = reply.get("request")
+        storage._require(type(request) is str and bool(storage._UUID.fullmatch(request)) and request_id in (None, request),
+                         "managed removal response changed request")
+        request_id = request
+        if status == "removed":
+            storage._require(set(reply) == {"status", "request"}, "invalid managed removal receipt")
+            return reply
+        if status == "held":
+            raise storage.RegistrationError("managed removal requires operator intervention")
+        storage._require(status == "removing" and set(reply) == {"status", "request", "deadline"} and
+                         type(reply["deadline"]) is int and 0 < reply["deadline"] < 2**53,
+                         "invalid managed removal progress")
+        time.sleep(0.25)
+    raise storage.RegistrationError("managed removal did not converge; reconcile the same request")
 
 
 def register(root, gid, request, ctl, platform_ctl=None):
@@ -208,7 +250,7 @@ def admit_runtime(registration, authority_directory="/var/lib/kayra/swarm", obse
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("stage", "publish", "verify", "register"))
+    parser.add_argument("mode", choices=("stage", "publish", "verify", "register", "remove"))
     parser.add_argument("--root", required=True)
     parser.add_argument("--private-gid", type=int, required=True)
     parser.add_argument("--platform-dir")
@@ -219,7 +261,21 @@ def main():
         storage._require(len(raw) <= storage.MAX_STAGED_BYTES, "registration request too large")
         request = storage._decode(raw)
         with trusted_root(args.root) as root:
-            if args.mode == "register":
+            if args.mode == "remove":
+                storage._require(args.platform_dir is not None and os.path.isabs(args.platform_dir),
+                                 "remove requires an absolute platform directory")
+                storage._require(type(request) is dict and set(request) == {"app"}, "invalid managed removal request")
+                app = request["app"]
+                with app_platform_lock(args.platform_dir, app, create=False) as platform:
+                    claims = os.open(platform / "managed-apps", storage._DIR_FLAGS)
+                    try:
+                        storage._check(claims, 0o755, 0, True)
+                        storage._read_file(claims, app + ".json", 0o444)
+                    finally:
+                        os.close(claims)
+                    result = remove_managed(root, args.private_gid, app,
+                                            lambda *values: _docker_control(args.platform_dir, "lifecycle", 20, *values))
+            elif args.mode == "register":
                 storage._require(args.platform_dir is not None and os.path.isabs(args.platform_dir),
                                  "register requires an absolute platform directory")
                 app = registration_request(request)

@@ -306,6 +306,7 @@ export const serveDeployer = async (env: NodeJS.ProcessEnv) => {
       : await (await import("./registration-startup.ts")).startRegistrationControl({
         platformDirectory: s.platformDir, registrationObservations: observations, publicRegistrations: env["KAYRA_PUBLIC_REGISTRATIONS_DIR"],
         builderUrl: s.builder, swarmAuthority: env["KAYRA_SWARM_AUTHORITY"], migrationPolicy: env["KAYRA_MIGRATION_POLICY"], privateRegistrations: env["KAYRA_PRIVATE_REGISTRATIONS_DIR"], domain: s.domain,
+        managedSwarm: env["KAYRA_MANAGED_ROLLOUTS"] === "true",
       });
     if (registration !== undefined) process.once("exit", () => { void registration.close(); });
     abandonInterruptedRuns(runsDir(s), () => new Date().toISOString());

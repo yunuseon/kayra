@@ -2733,3 +2733,11 @@ checkpoint reference for audit. The ownership tombstone preserves the data
 owner and volume allocations. Removed apps are excluded from active
 deployment and runtime health reporting. Withdrawal publication and guarded
 purge still require their respective platform and runtime integrations.
+
+The explicitly enabled host control now forwards managed removal through
+`app-remove`. It asks the coordinator to advance the current removal, receives
+an exact withdrawal identity after accounting retires, withdraws the pointer
+under the publisher lock, and asks the coordinator to seal the tombstone.
+Retries discover the existing action. The same lab opt-in selects managed
+registration for new Swarm apps. Existing Compose registration retains the
+established path, and a change of protocol for an existing app is refused.

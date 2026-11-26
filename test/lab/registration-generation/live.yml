@@ -48,6 +48,14 @@
         - registration_command.py
         - registration_generation.py
 
+    - name: Publish the disposable host registration root for lifecycle helpers
+      ansible.builtin.copy:
+        dest: "{{ platform_dir }}/registration-lib/root"
+        content: "{{ registration_root }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Write the explicit lab Compose override
       ansible.builtin.copy:
         dest: "{{ platform_dir }}/registration-lab.yml"
@@ -64,6 +72,7 @@
                 KAYRA_REGISTRATION_EVIDENCE_DIR: /run/kayra-registration/observations
                 KAYRA_PUBLIC_REGISTRATIONS_DIR: /run/kayra-registration/public
                 KAYRA_PRIVATE_REGISTRATIONS_DIR: /run/kayra-registration/private
+                KAYRA_MANAGED_ROLLOUTS: "{{ kayra_lab_managed_rollouts | default(false) | bool | ternary('true', 'false') }}"
           {% if kayra_lab_swarm | default(false) | bool %}
                 NODE_EXTRA_CA_CERTS: /run/kayra-platform/lab-ca.pem
           {% endif %}

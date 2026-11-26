@@ -20,17 +20,27 @@ export const managedForwardOperation = (index: Index, ports: Ports) => async (in
   if (!checked.ok || actor === undefined || !await ports.canAccess(checked.value.app)) throw new Error("managed forward command is unavailable or outside scope");
   const request = checked.value; const { app } = request;
   const selected = await index.selectManagedForward(app, request, actor, ports);
-  const accepted = await index.acceptedManagedRequest(app, request.request, ports);
-  if (accepted !== undefined) {
+  const activated = async () => {
+    const accepted = await index.acceptedManagedRequest(app, request.request, ports);
+    if (accepted === undefined) return undefined;
     if (accepted.source.candidate.commit !== request.commit || accepted.source.forward?.decision !== selected.id) throw new Error("managed forward request conflicts");
     return Object.freeze({ version: 1 as const, request: request.request, decision: selected.id, phase: "activated" as const, deploymentDeadline: accepted.request.deadline });
+  };
+  const accepted = await activated();
+  if (accepted !== undefined) return accepted;
+  try {
+    const { build } = await index.prepareManagedForwardBuild(app, request, { ...ports.builds, authorizeSelection: ports.authorize });
+    const keys = await ports.plans.volumeKeys(build.registration, build.commit, build.artifact);
+    const volumes = await index.reserveDataVolumeIdentities(app, keys);
+    const candidate = await ports.plans.preview(build.registration, build.commit, build.artifact, volumes);
+    const reserved = await index.reserveManagedForward(app, request, candidate, { actor, reason: request.reason }, ports);
+    return Object.freeze({ version: 1 as const, request: reserved.run, decision: selected.id, phase: reserved.phase, cleanupDeadline: reserved.deadline,
+      ...(reserved.phase === "transferring" ? { admissionDeadline: reserved.handoff.deadline } : {}),
+    });
+  } catch (error) {
+    // The reconciliation loop may have activated this exact decision while the caller was preparing its retry.
+    const recovered = await activated();
+    if (recovered !== undefined) return recovered;
+    throw error;
   }
-  const { build } = await index.prepareManagedForwardBuild(app, request, { ...ports.builds, authorizeSelection: ports.authorize });
-  const keys = await ports.plans.volumeKeys(build.registration, build.commit, build.artifact);
-  const volumes = await index.reserveDataVolumeIdentities(app, keys);
-  const candidate = await ports.plans.preview(build.registration, build.commit, build.artifact, volumes);
-  const reserved = await index.reserveManagedForward(app, request, candidate, { actor, reason: request.reason }, ports);
-  return Object.freeze({ version: 1 as const, request: reserved.run, decision: selected.id, phase: reserved.phase, cleanupDeadline: reserved.deadline,
-    ...(reserved.phase === "transferring" ? { admissionDeadline: reserved.handoff.deadline } : {}),
-  });
 };

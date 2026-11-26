@@ -2784,3 +2784,20 @@ commit and an operation UUID with `kayra app deployment prepare`. Use
 activation. Fleet pruning includes incomplete managed removals and preserves
 their volumes. The explicit purge command requires the recorded removal and
 current ownership and attachment evidence.
+
+### Audited forward recovery
+
+On an opted-in host, `kayra app deployment forward SERVER APP BLOCKED_RUN
+COMMIT REQUEST --reason REASON` accepts a full commit and a stable request
+UUID for a held maintenance deployment. The actor, reason, blocked checkpoint
+and exact target are recorded before the isolated build is authorized. The
+current fleet registration must still grant maintenance. Resolve any ambiguous
+migration outcome before requesting forward recovery. An accepted request
+reports its recorded cleanup, admission or deployment deadline as it advances.
+
+The existing deployer process resumes cleanup of stopped consumers from the
+indexed reservation. It rechecks retained dependencies, transfers the recorded
+capacity charge and activates the successor once the new root is durable.
+Forward cleanup and ordinary rollouts use independent observer loops in that
+process. Restart and replay use the same request and original deadlines. The
+successor becomes active only after workload convergence and required checks.

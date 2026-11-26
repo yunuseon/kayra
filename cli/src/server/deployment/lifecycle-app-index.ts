@@ -15,6 +15,7 @@ import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { indexedManagedForward } from "./indexed-managed-forward.ts";
 import type { ManagedForwardCleanupContext, ManagedForwardCleanupRuntimePort } from "../../contracts/managed-forward-cleanup-context.ts";
 import { managedForwardOperator } from "./managed-forward-reservation.ts";
+import { parseManagedForwardEffects } from "./managed-forward-effect-state.ts";
 import type { ManagedForwardReservation } from "./managed-forward-reservation.ts";
 import { managedForwardRecoveryProposal } from "./managed-forward-recovery-proposal.ts";
 import { managedDeploymentEvidence } from "./managed-deployment-evidence.ts";
@@ -346,6 +347,25 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (value === undefined) throw new Error("managed reporting evidence is unavailable"); return value;
     } finally { await rootJournal.close(); }
   });
+
+  const forwardCleanupHeld = async (reservation: ManagedForwardReservation) => {
+    if (reservation.phase !== "fencing") return false;
+    const path = join(appDirectory(reservation.owner.app), "managed", "forward", reservation.run, "effects");
+    await requireDirectory(path);
+    const journal = await journals(path, "existing");
+    try {
+      const state = parseManagedForwardEffects(await journal.read());
+      if (state.source !== reservation.cleanup || state.run !== reservation.run || state.action !== reservation.action ||
+        state.app !== reservation.owner.app || state.incarnation !== reservation.owner.incarnation ||
+        state.dataOwner !== reservation.owner.dataOwner || state.createdAt !== reservation.createdAt || state.deadline !== reservation.deadline) {
+        throw new Error("forward reporting lacks its cleanup binding");
+      }
+      return state.phase === "held";
+    } finally { await journal.close(); }
+  };
+  const projectManagedStatus = (app: string, ports: ManagedDeploymentReadPort) =>
+    useManagedRead(app, ports, async (state, source, reservation) => managedDeploymentStatus(state, source, ports,
+      reservation === undefined ? undefined : { reservation, cleanupHeld: await forwardCleanupHeld(reservation) }));
 
   const useManaged = <T>(app: string, ports: IndexedManagedRuntime, use: (controller: ReturnType<typeof indexedManagedLifecycle>) => Promise<T>) => useIndexed(app, async (store, indexed) => {
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
@@ -1069,7 +1089,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     }),
     managedDeploymentImagePins: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedImagePins(state, source, ports)),
     managedDeploymentHealth: (app: string, ports: ManagedHealthReadPort) => useManagedRead(app, ports, (state, source) => managedDeploymentHealth(state, source, ports)),
-    managedDeploymentStatus: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source, forward) => managedDeploymentStatus(state, source, ports, forward)),
+    managedDeploymentStatus: projectManagedStatus,
     managedState: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.read()),
     pendingManagedForwardRequests: async (ports: ManagedDeploymentReadPort) => {
       if (closed) throw new Error("lifecycle app index is closed");
@@ -1079,6 +1099,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const envelope = await store.read();
         const reservation = envelope?.forward;
         if (envelope?.fence?.lifecycle.phase !== "registered" || reservation === undefined || reservation.phase === "held") return undefined;
+        if (await forwardCleanupHeld(reservation).catch(() => false)) return undefined;
         const catalog = current.forwardSelections?.find((item) => item.request === reservation.run);
         if (catalog?.phase !== "ready" || catalog.source !== reservation.selection.source || catalog.decision !== reservation.selection.decision || catalog.checkpoint !== reservation.blocked.checkpoint) {
           throw new Error("pending forward work lacks its published selection");
@@ -1563,7 +1584,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const retirement = await managedRetirementStatus(app);
       if (retirement !== undefined) return retirement;
       if (ports === undefined) throw new Error("managed deployment reporting is unavailable");
-      return useManagedRead(app, ports, (state, source, forward) => managedDeploymentStatus(state, source, ports, forward));
+      return projectManagedStatus(app, ports);
     },
     publishedDeploymentRuns: async (app: string, run: string | undefined, ports: ManagedDeploymentReadPort) => {
       if (!(await managedReporting(app))) return null;

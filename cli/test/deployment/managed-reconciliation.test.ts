@@ -30,6 +30,35 @@ test("runtime inputs load outside the app writer and one unavailable run does no
   const results = await reconcileManagedWork(mixed, ports); assert.equal(results[0]?.outcome, "unavailable"); assert.equal(results[1]?.outcome, "preparing");
 });
 
+test("the forward observer keeps ticking while a regular rollout waits for runtime inputs", async (t) => {
+  const lab = await managedIndexFixture(t);
+  await lab.index().requestManagedDeployment("shop", lab.source, lab.runtime);
+  const entered = Promise.withResolvers<undefined>();
+  const runtime = Promise.withResolvers<typeof lab.runtime>();
+  const observed = Promise.withResolvers<undefined>();
+  const forward = { app: "another", run: lab.source.run, outcome: "fencing" };
+  let observations = 0;
+  const controller = startManagedController(lab.index(), {
+    ...lab.runtime,
+    forRun: async () => { entered.resolve(undefined); return runtime.promise; },
+    reconcileForward: async () => { await entered.promise; return [forward]; },
+  }, (report) => {
+    if (report.status === "ready" && report.work.some((item) => item.app === forward.app)) {
+      observations++;
+      if (observations === 2) observed.resolve(undefined);
+    }
+  }, 10);
+  const timeout = setTimeout(() => { observed.reject(new Error("forward observer waited for the regular rollout")); }, 2000);
+  try {
+    await observed.promise;
+    assert.equal(lab.hostCalls(), 0);
+  } finally {
+    clearTimeout(timeout);
+    runtime.resolve(lab.runtime);
+    await controller.close();
+  }
+});
+
 test("a restarted observer completes an accepted rollout with its original deadlines and no duplicate job Start", async (t) => {
   const lab = await managedIndexRuntimeFixture(t); await lab.index().requestManagedDeployment("shop", lab.source, lab.runtime); const ports = { ...lab.runtime, forRun: () => Promise.resolve(lab.runtime) }; let controller: ReturnType<typeof startManagedController> | undefined;
   t.after(async () => { await controller?.close(); });

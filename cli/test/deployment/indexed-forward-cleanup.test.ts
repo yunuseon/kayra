@@ -51,6 +51,22 @@ test("forward dispatcher reopens an accepted reservation and activates it withou
   assert.equal(new Set(lab.effects.map((item) => item.action + item.service)).size, 4);
 });
 
+test("the owner reports an expired cleanup as held and stops polling that request", async (t) => {
+  const lab = await fixture(t);
+  const index = lab.index();
+  await index.prepareManagedForwardCleanup("shop", lab.request, lab.ports);
+  lab.clock(lab.reservation.deadline);
+  const runtime = () => reconcileManagedForwardWork(index, { ...lab.ports, runtime: lab.factory,
+    retained: () => lab.runtime.services.observeDesired, observeHost: lab.runtime.observeHost, authorizeTransfer: () => Promise.resolve(true),
+  });
+  assert.equal((await runtime())[0]?.outcome, "held");
+  const status = await index.publishedDeploymentStatus("shop", lab.ports);
+  assert.ok(status?.version === 3);
+  assert.deepEqual(status.forwardRecovery, { request: lab.request.request, phase: "held", deadline: lab.reservation.deadline });
+  assert.deepEqual(await runtime(), []);
+  assert.equal(lab.effects.length, 0);
+});
+
 test("forward control binds the explicit operator reason and exact build before queuing reconciliation", async (t) => {
   const lab = await preparedForwardFixture(t);
   const command = () => managedForwardOperation(lab.index(), { ...lab.ports, actor: lab.actor, canAccess: (app) => Promise.resolve(app === "shop"),
@@ -70,6 +86,30 @@ test("forward control binds the explicit operator reason and exact build before 
   await lab.reopen();
   assert.deepEqual(await command()(lab.request), initial);
   await assert.rejects(command()({ ...lab.request, reason: "a different recorded decision" }), /conflicts/);
+});
+
+test("a same-request retry survives activation during plan preparation", async (t) => {
+  const lab = await fixture(t);
+  const index = lab.index();
+  const dispatch = () => reconcileManagedForwardWork(index, { ...lab.ports, runtime: lab.factory,
+    retained: () => lab.runtime.services.observeDesired, observeHost: lab.runtime.observeHost, authorizeTransfer: () => Promise.resolve(true),
+  });
+  const command = managedForwardOperation(index, { ...lab.ports,
+    actor: lab.actor, canAccess: () => Promise.resolve(true),
+    builds: { ...lab.ports, prepare: () => Promise.reject(new Error("retained forward build must be reused")) },
+    plans: { volumeKeys: () => Promise.resolve(lab.volumes.map((volume) => volume.key)), preview: async () => {
+      for (let i = 0; i < 60 && (await index.pendingManagedForwardRequests(lab.ports)).length > 0; i++) await dispatch();
+      const accepted = await index.acceptedManagedRequest("shop", lab.request.request, lab.ports);
+      assert.ok(accepted);
+      return lab.candidate;
+    } },
+  });
+  const result = await command(lab.request);
+  const accepted = await index.acceptedManagedRequest("shop", lab.request.request, lab.ports);
+  assert.ok(accepted);
+  assert.deepEqual(result, { version: 1, request: lab.request.request, decision: lab.selected.id, phase: "activated",
+    deploymentDeadline: accepted.request.deadline });
+  assert.deepEqual(await command(lab.request), result);
 });
 
 test("indexed forward cleanup synchronizes its child before publication and keeps the held root, data service and charge", async (t) => {

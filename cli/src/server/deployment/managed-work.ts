@@ -7,7 +7,6 @@ type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "p
 export type ManagedWorkPorts = ManagedDeploymentReadPort & {
   /** Called before entering the app writer. Bind immutable job inputs and current platform capabilities here, never recursively from a runtime effect. */
   readonly forRun: (context: ManagedExecutionContext) => Promise<IndexedManagedRuntime | undefined>;
-  readonly reconcileForward?: () => Promise<readonly { readonly app: string; readonly run: string; readonly outcome: string }[]>;
 };
 /** Reconciliation never rebuilds a branch or invents another execution window. One unavailable application must not starve the others. */
 export const reconcileManagedWork = async (index: Index, ports: ManagedWorkPorts) => {
@@ -16,13 +15,11 @@ export const reconcileManagedWork = async (index: Index, ports: ManagedWorkPorts
     try { return await Promise.race([Promise.resolve().then(() => ports.forRun(context)).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
   };
   const pending = await index.pendingManagedDeployments();
-  const ordinary = await Promise.all(pending.map(async (item) => {
+  return Object.freeze(await Promise.all(pending.map(async (item) => {
     try {
       const context = await index.managedExecutionContext(item.app, item.run, ports); if (context === undefined) return Object.freeze({ ...item, outcome: "settled" as const });
       const runtime = await loadRuntime(context); if (runtime === undefined) return Object.freeze({ ...item, outcome: "unavailable" as const });
       const state = await index.tickManagedDeployment(item.app, item.run, runtime); return Object.freeze({ ...item, outcome: state?.operation.phase ?? "unavailable" });
     } catch { return Object.freeze({ ...item, outcome: "unavailable" as const }); }
-  }));
-  const forwards = await ports.reconcileForward?.() ?? [];
-  return Object.freeze([...ordinary, ...forwards]);
+  })));
 };

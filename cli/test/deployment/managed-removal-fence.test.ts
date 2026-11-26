@@ -95,14 +95,14 @@ test("removal effects stop consumers before retained services and reopen their d
           state: jobFenced ? "created" : "running", exitCode: null, probe: null, finishedAt: null,
         };
       }) satisfies JobCleanupPort["observe"],
-      fence: (async (job, authority, container) => {
+      fence: ((job, authority, container) => {
         assert.equal(jobPlanDigest(job), jobArtifact);
         assert.equal(authority.action, request);
         assert.equal(container, "e".repeat(64));
         assert.equal(jobFenced, false);
         jobFenced = true;
         effects.push("job:fence");
-        return "acknowledged";
+        return Promise.resolve("acknowledged");
       }) satisfies JobCleanupPort["fence"],
     },
     containers: { observe: () => Promise.reject(new Error("fixture has no pending check")) },

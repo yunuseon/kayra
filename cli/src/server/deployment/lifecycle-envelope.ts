@@ -188,7 +188,7 @@ export const parseLifecycleEnvelope = (input: unknown) => {
         item.descriptor.ownershipGeneration === removal.owner.dataOwner)) return err("managed removal lacks its lifecycle fence");
   }
   const removalEffects = parsed.data.removalEffects;
-  if (removalEffects !== undefined && (removal === undefined || removalEffects.request !== removal.request ||
+  if (removalEffects !== undefined && (removalEffects.request !== removal?.request ||
     removalEffects.action !== removal.action || removalEffects.createdAt < removal.createdAt)) return err("managed removal effects lack their accepted intent");
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),

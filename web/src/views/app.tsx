@@ -122,6 +122,7 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
   if (state === null) return <><p class="tone-muted">No deployment has been requested.</p><button class="button small" onClick={refresh}>Refresh deployment</button></>;
   const view = deploymentView(state, health?.ok === true ? health.value : undefined);
   const { cancelRequest, migrationResolution: resolution } = view;
+  const previousRelease = state.version === 3 ? state.previousRelease : undefined;
   return <>
     <div class="actions"><button class="button small" onClick={() => { refresh(); refreshHealth(); }}>Refresh deployment</button></div>
     <dl class="facts deployment-facts">
@@ -147,6 +148,9 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
       {view.services.map((service) => <tr key={service.name}><td>{service.name}</td><td>{service.state}</td><td>{service.healthyTasks ?? "unknown"} / {service.currentTasks ?? "unknown"}</td><td>{service.ignoredHistoricalTasks ?? "unknown"}</td></tr>)}
     </tbody></table>}
     {cancelRequest === null ? null : <button class="button" onClick={() => { show({ name: "app.deployment.cancel", server, app, request: cancelRequest }); }}>Cancel this rollout</button>}
+    {previousRelease === undefined ? null : <button class="button" onClick={() => {
+      show({ name: "app.deployment.restore", server, app, record: previousRelease.record, request: crypto.randomUUID() });
+    }}>Restore verified release {previousRelease.commit.slice(0, 12)}</button>}
     {resolution === null || state.requiredAction !== "inspect-and-resolve" ? null : <button class="button" onClick={() => { openOperation("app.migration.resolve", { server, app, run: resolution.run, step: resolution.step }); }}>Record migration recovery decision</button>}
   </>;
 };

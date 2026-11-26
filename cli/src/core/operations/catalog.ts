@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deploymentCancellationSchema, deploymentRequestSchema } from "../../contracts/deployment-request.ts";
+import { deploymentCancellationSchema, deploymentRequestSchema, deploymentRestoreSchema } from "../../contracts/deployment-request.ts";
 import { migrationCleanupRequestSchema } from "../../contracts/migration-cleanup.ts";
 import { migrationResolutionRequestSchema } from "../../contracts/migration-resolution.ts";
 import { valueKeySchema } from "../app-values/model.ts";
@@ -164,6 +164,11 @@ export const operations = {
     summary: "Request an experimental rollout of a retained build under a stable request identity.",
     scope: "app", effect: "changes", kind: "plan", bare: true,
     input: deploymentRequestSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.deployment.restore": {
+    summary: "Restore a verified managed release from the current data compatibility epoch under a stable request identity.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: deploymentRestoreSchema.unwrap().extend({ server }).strict().readonly(),
   },
   "app.deployment.health": {
     summary: "Observe current runtime service health separately from release certification and historical task failures.",

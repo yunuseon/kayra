@@ -4,6 +4,7 @@ import { managedVerificationSnapshot } from "./managed-verification-source.ts";
 import { parseManagedGroupVerification } from "./managed-group-verification.ts";
 import { describeManagedCheck } from "./managed-check-description.ts";
 import { containerCheckDigest } from "../../contracts/container-check.ts";
+import { parseManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
 import { routedHttp } from "./http-convergence.ts";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -32,6 +33,14 @@ export const parseManagedRelease = (input: unknown) => {
 };
 export type ManagedRelease = ReturnType<typeof parseManagedRelease>;
 export const managedReleaseDigest = (input: ManagedRelease) => hash(parseManagedRelease(input));
+/** Historical release restoration reuses the exact workload and checks without rerunning migration commands. */
+export const managedRestorePlan = (release: ManagedRelease) => {
+  const application = parseManagedRelease(release).source.application;
+  if (!application.rollout.rollback_compatible) throw new Error("managed restore requires application rollback compatibility");
+  const restore = parseManagedApplicationPlan({ ...application, rollout: { ...application.rollout, migrations: [] } });
+  if (!restore.ok) throw new Error(restore.error);
+  return restore.value;
+};
 /** Immutable prior workload references are reconstructed from verified evidence, never filenames or a moving branch. */
 export const managedReleaseBaselines = (input: ManagedRelease) => {
   const release = parseManagedRelease(input); const snapshot = managedVerificationSnapshot(release.source); const observations = release.verification.verified;

@@ -8,6 +8,20 @@ import { parseManagedRelease } from "./managed-release.ts";
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const request = z.object({ restore: digest.nullable(), plan: digest.nullable(), commit: z.string().regex(/^[a-f0-9]{40}$/) }).strict().readonly();
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const historyArchive = z.object({ previous: digest.nullable(), state: z.unknown() }).strict().readonly();
+const readPrior = (bytes: string, cursor: ManagedLifecycleStore) => {
+  const archive = historyArchive.parse(JSON.parse(bytes));
+  const prior = parseManagedLifecycleStore(archive.state);
+  if (!same(prior.owner, cursor.owner) || archive.previous !== prior.history || prior.sequence >= cursor.sequence || prior.compatibilityEpoch > cursor.compatibilityEpoch) throw new Error("managed restore history disagrees");
+  return prior;
+};
+export const readManagedHistoryRelease = (bytes: string, owner: ManagedLifecycleStore["owner"], pointer: NonNullable<ManagedLifecycleStore["active"]>) => {
+  const release = parseManagedRelease(JSON.parse(bytes));
+  if (createHash("sha256").update(bytes).digest("hex") !== pointer.record || bytes !== JSON.stringify(release) ||
+    !same(release.source.application.infrastructure.ownership, owner) || managedApplicationDigest(release.source.application) !== pointer.plan ||
+    release.verification.run !== pointer.run || release.verification.verified?.at !== pointer.verifiedAt) throw new Error("managed compatibility history release disagrees");
+  return release;
+};
 /** Metadata only: a historical commit cannot disguise an old data epoch as a fresh deployment. */
 export const managedHistorySelection = async (input: ManagedLifecycleStore, selection: z.input<typeof request>, ports: { readonly read: (digest: string) => Promise<string>; readonly expired: () => boolean }) => {
   const current = parseManagedLifecycleStore(input); const selected = request.parse(selection); const owner = current.owner;
@@ -21,13 +35,37 @@ export const managedHistorySelection = async (input: ManagedLifecycleStore, sele
     const pointers = Object.freeze([cursor.active, ...(cursor.lastGood?.record === cursor.active?.record ? [] : [cursor.lastGood])].filter((item) => item !== null));
     for (const pointer of pointers) {
       if (selected.restore !== null) { if (pointer.record === selected.restore) return pointer; continue; }
-      const bytes = await artifact(pointer.record); const release = parseManagedRelease(JSON.parse(bytes)); const application = release.source.application;
-      if (bytes !== JSON.stringify(release) || !same(application.infrastructure.ownership, owner) || managedApplicationDigest(application) !== pointer.plan || release.verification.run !== pointer.run || release.verification.verified?.at !== pointer.verifiedAt) throw new Error("managed compatibility history release disagrees");
+      const release = readManagedHistoryRelease(await artifact(pointer.record), owner, pointer);
+      const application = release.source.application;
       if (pointer.epoch === current.compatibilityEpoch && pointer.plan === selected.plan) return pointer;
       if (pointer.epoch < current.compatibilityEpoch && application.commit === selected.commit) historical = pointer;
     }
     if (cursor.history === null) { if (selected.restore !== null) throw new Error("unknown managed restore record"); return Object.freeze({ historical }); }
-    const bytes = await artifact(cursor.history); const archive = z.object({ previous: digest.nullable(), state: z.unknown() }).strict().parse(JSON.parse(bytes)); const prior = parseManagedLifecycleStore(archive.state);
-    if (!same(prior.owner, owner) || archive.previous !== prior.history || prior.sequence >= cursor.sequence || prior.compatibilityEpoch > cursor.compatibilityEpoch) throw new Error("managed restore history disagrees"); cursor = prior;
+    cursor = readPrior(await artifact(cursor.history), cursor);
   }
+};
+
+/** Offer the most recent distinct verified release in the active data epoch. Admission rechecks the exact record. */
+export const previousManagedRelease = async (current: ManagedLifecycleStore, active: ReturnType<typeof parseManagedRelease>, read: (digest: string) => Promise<string>) => {
+  if (current.operation.phase !== "complete" || current.active?.epoch !== current.compatibilityEpoch || !active.source.application.rollout.rollback_compatible) return undefined;
+  const deadline = performance.now() + 2000;
+  // eslint-disable-next-line functional/no-let -- walks a bounded number of immutable archive links
+  let cursor = current;
+  for (const _ of Array.from({ length: 16 })) {
+    if (cursor.history === null || performance.now() >= deadline) return undefined;
+    const bytes = await read(cursor.history);
+    if (performance.now() >= deadline) return undefined;
+    if (createHash("sha256").update(bytes).digest("hex") !== cursor.history) throw new Error("managed release history artifact integrity failed");
+    cursor = readPrior(bytes, cursor);
+    if (cursor.compatibilityEpoch !== current.compatibilityEpoch) return undefined;
+    const pointer = cursor.active;
+    if (pointer?.epoch !== current.compatibilityEpoch || pointer.plan === current.active.plan) continue;
+    const release = readManagedHistoryRelease(await read(pointer.record), current.owner, pointer);
+    const app = release.source.application;
+    if (performance.now() >= deadline) return undefined;
+    if (app.rollout.rollback_compatible && same(app.infrastructure.registration, active.source.application.infrastructure.registration)) {
+      return Object.freeze({ record: pointer.record, commit: app.commit, run: pointer.run, verifiedAt: pointer.verifiedAt });
+    }
+  }
+  return undefined;
 };

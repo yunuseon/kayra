@@ -109,7 +109,7 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
   };
   return Object.freeze({
     prepare, removal, purge,
-    commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, forRun, actor: ports.actor }),
+    commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, restore: preparation.restore, forRun, actor: ports.actor }),
     work: Object.freeze({ read, now, forRun }),
     health,
     healthSnapshot: async () => {

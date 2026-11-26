@@ -133,6 +133,15 @@ irreversible or uncertain change, data is preserved and forward recovery is
 required instead of automatically restoring old application images. Kayra does
 not execute down-migrations or promise exactly-once delivery.
 
+An operator can request a restore of a verified managed release with
+`kayra app deployment restore SERVER APP RELEASE_RECORD REQUEST_UUID`. The
+deployment status exposes the most recent distinct compatible release it finds
+within 16 archived operations. The coordinator rechecks the exact record,
+current registration, grants, retained inputs and data compatibility epoch at
+admission. The restored release uses the recorded images, workload inputs and
+post-rollout checks. The restore runs no migration commands. Retrying with the
+same request UUID keeps the original intent and deadlines.
+
 Migrations are individually identified, admitted one-shot app containers
 with automatic restart disabled, a stable operation identity and retained
 runtime evidence. After interruption the coordinator first observes an existing

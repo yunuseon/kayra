@@ -1,4 +1,4 @@
-import { managedHistorySelection } from "./managed-history-selection.ts";
+import { managedHistorySelection, readManagedHistoryRelease } from "./managed-history-selection.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parseDataOwnership } from "../../contracts/owned-volume.ts";
@@ -10,7 +10,7 @@ import { parseManagedGroupPreparation } from "./managed-group-preparation.ts";
 import { parseManagedConsumerState } from "./managed-consumer-state.ts";
 import { parseManagedGroupVerification } from "./managed-group-verification.ts";
 import { managedVerificationSnapshot } from "./managed-verification-source.ts";
-import { parseManagedRelease, managedReleaseDigest } from "./managed-release.ts";
+import { parseManagedRelease, managedReleaseDigest, managedRestorePlan } from "./managed-release.ts";
 import { claimJournal } from "./journal-claim.ts";
 import { resolveManagedPreparationMigration } from "./managed-migration-resolution.ts";
 import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
@@ -97,13 +97,20 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
     const carried = current?.operation.unstartedAt !== null && current?.operation.unstartedAt !== undefined ? managedUnstartedInventoryCarry(await source(current), value) : current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
     if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
       if (current === undefined) throw new Error("managed restore lacks verified release history");
-      const selected = await metadata(async () => {
+      const selection = await metadata(async () => {
         const deadline = performance.now() + 10_000;
-        return managedHistorySelection(current, { restore: value.restore, plan: description.admission.planDigest, commit: value.candidate.commit }, { read: artifact, expired: () => performance.now() >= deadline });
+        const expired = () => performance.now() >= deadline;
+        const selected = await managedHistorySelection(current, { restore: value.restore, plan: description.admission.planDigest, commit: value.candidate.commit }, { read: artifact, expired });
+        const pointer = "historical" in selected ? selected.historical : selected;
+        if (value.restore === null || pointer?.epoch !== current.compatibilityEpoch) return Object.freeze({ pointer, matches: false });
+        const bytes = await artifact(pointer.record);
+        return Object.freeze({ pointer, matches: !expired() && same(managedRestorePlan(readManagedHistoryRelease(bytes, owner, pointer)), value.candidate) });
       });
-      const release = "historical" in selected ? selected.historical : selected;
-      if (value.restore !== null && release !== null && release.plan !== description.admission.planDigest) throw new Error("managed restore candidate differs from its verified release");
-      if (release !== null && release.epoch !== current.compatibilityEpoch) throw new Error("managed restore crosses a data compatibility fence; forward recovery is required");
+      if (selection.pointer !== null && selection.pointer.epoch !== current.compatibilityEpoch) throw new Error("managed restore crosses a data compatibility fence; forward recovery is required");
+      if (value.restore !== null) {
+        if (value.previous?.source.application.rollout.rollback_compatible !== true) throw new Error("managed restore requires a rollback-compatible verified active release");
+        if (!selection.matches) throw new Error("managed restore candidate differs from its verified release");
+      }
     }
     if (current?.active !== null && current?.active !== undefined && current.active.epoch !== current.compatibilityEpoch && value.candidate.rollout.strategy === "rolling") throw new Error("managed rolling baseline crosses a data compatibility fence");
     const at = time(value.createdAt); if (held === "deadline" && at < description.admissionDeadline) throw new Error("managed lifecycle accepted deadline has not expired"); if (at >= description.admissionDeadline && held === undefined) throw new Error("managed lifecycle admission deadline expired");

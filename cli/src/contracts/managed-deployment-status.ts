@@ -10,6 +10,7 @@ const schema = z.object({
   version: z.literal(3), protocol: z.literal("managed-v3"), runtime: z.literal("swarm"),
   app: z.string().max(48).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), incarnation: z.uuid(),
   requested: target.readonly(), desired: target.readonly().nullable(), verifiedActive: verified.nullable(), lastKnownGood: verified.nullable(),
+  previousRelease: z.object({ record: digest, commit: target.shape.commit, run: z.uuid(), verifiedAt: time }).strict().readonly().exactOptional(),
   compatibilityEpoch: epoch, rollback: z.enum(["eligible", "no-previous-release", "application-incompatible", "data-fenced"]),
   operation: z.object({ run: z.uuid(), strategy: z.enum(["rolling", "maintenance"]),
     phase: z.enum(["admitting", "allocating", "quiescing", "preparing", "updating", "verifying", "recovering", "recovery-verifying", "settling", "complete", "held"]),
@@ -36,7 +37,8 @@ const schema = z.object({
     ["fencing-checks", "restoring"].includes(recovery.phase) && value.operation.phase !== "recovering" ||
     (recovery.phase === "complete") !== (value.operation.outcome === "rolled-back" || value.operation.outcome === "absent") ||
     recovery.phase === "checking-restored" && !["recovering", "recovery-verifying"].includes(value.operation.phase))) context.addIssue({ code: "custom", message: "inconsistent managed recovery progress" });
-  if (value.requiredAction !== (value.operation.phase === "held" ? "inspect-and-resolve" : "none") ||
+  if (value.previousRelease !== undefined && (value.operation.phase !== "complete" || value.verifiedActive === null || value.previousRelease.verifiedAt > value.verifiedActive.verifiedAt || value.previousRelease.run === value.verifiedActive.run) ||
+    value.requiredAction !== (value.operation.phase === "held" ? "inspect-and-resolve" : "none") ||
     (value.operation.phase === "held") !== (value.operation.reason !== null) ||
     value.operation.settled !== (value.operation.phase === "complete") ||
     (value.operation.outcome !== null) !== ["settling", "complete"].includes(value.operation.phase) ||

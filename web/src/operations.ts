@@ -26,6 +26,7 @@ export const reaches = {
   "app.purge": { label: "Purge app data", icon: "×" },
   "app.build": { label: "Retain experimental build", icon: "⚙" },
   "app.deployment.prepare": { label: "Request experimental rollout", icon: "▶" },
+  "app.deployment.restore": { label: "Restore verified release", icon: "↶" },
   "app.deployment.health": { label: "Runtime health", icon: "≡" },
   "app.deployment.pins": { label: "Deployment image pins", icon: "≡" },
   "app.deployment.status": { label: "Deployment state", icon: "≡" },

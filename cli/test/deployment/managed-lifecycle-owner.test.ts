@@ -34,7 +34,7 @@ import { managedRecoverySource } from "../../src/server/deployment/managed-recov
 import { managedRecoverySnapshot } from "../../src/server/deployment/managed-recovery-description.ts";
 import { managedLifecycleOwner } from "../../src/server/deployment/managed-lifecycle-owner.ts";
 import { parseManagedLifecycleStore } from "../../src/server/deployment/managed-lifecycle-store.ts";
-import { parseManagedRelease, managedReleaseBaselines } from "../../src/server/deployment/managed-release.ts";
+import { parseManagedRelease, managedReleaseBaselines, managedRestorePlan } from "../../src/server/deployment/managed-release.ts";
 import { fenceUnstartedManagedAdmission, observeManagedAdmission, reserveManagedAdmission, settleManagedAdmission } from "../../src/server/deployment/managed-admission-binding.ts";
 import type { ManagedAdmissionAccounting } from "../../src/server/deployment/managed-admission-binding.ts";
 import { parseResourceBook } from "../../src/server/deployment/resource-book.ts";
@@ -221,8 +221,8 @@ test("an unsafe maintenance operation fences compatibility before application st
   await lab.reopen(); const done = await lab.drive(); assert.equal(done.operation.phase, "complete"); assert.equal(done.compatibilityEpoch, 1); assert.equal(done.active?.epoch, 1); assert.equal(done.operation.compatibilityFencedAt, before.operation.compatibilityFencedAt);
 });
 
-for (const unsafe of [false, true]) test(`historical restore ${unsafe ? "refuses a prior data epoch even when disguised as deployment" : "accepts authenticated compatible history"}`, async (t) => {
-  const lab = await fixture(t); await lab.owner().begin(lab.source); const first = await lab.drive(); assert.ok(first.active); assert.equal(first.active.epoch, 0);
+for (const unsafe of [false, true]) test(`historical restore ${unsafe ? "refuses a prior data epoch even when disguised as deployment" : "accepts authenticated compatible history without rerunning migrations"}`, async (t) => {
+  const lab = await fixture(t, false, !unsafe); await lab.owner().begin(lab.source); const first = await lab.drive(); assert.ok(first.active); assert.equal(first.active.epoch, 0);
   const releaseA = parseManagedRelease(JSON.parse(await lab.artifacts.read(first.active.record)));
   let expired = false;
   await assert.rejects(managedHistorySelection(first, { restore: null, plan: first.active.plan, commit: lab.source.candidate.commit }, { read: async (identity) => { expired = true; return lab.artifacts.read(identity); }, expired: () => expired }), /history inspection expired/);
@@ -230,6 +230,8 @@ for (const unsafe of [false, true]) test(`historical restore ${unsafe ? "refuses
   const references = (release: typeof releaseA) => managedReleaseBaselines(release).filter((value) => release.source.application.services[value.name]?.role === "retained-dependency").map((value) => ({ ...value, kind: "active" as const }));
   const secondSource = parseManagedLifecycleSource({ ...lab.source, candidate: candidate.value, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":3", previous: releaseA, retained: references(releaseA) });
   await lab.owner().begin(secondSource); const second = await lab.drive(); assert.equal(second.operation.phase, "complete"); assert.ok(second.active); assert.equal(second.active.epoch, unsafe ? 1 : 0);
+  const report = await managedDeploymentStatus(second, secondSource, lab.artifacts);
+  assert.deepEqual(report.previousRelease, unsafe ? undefined : { record: first.active.record, commit: releaseA.source.application.commit, run: first.active.run, verifiedAt: first.active.verifiedAt });
   const releaseB = parseManagedRelease(JSON.parse(await lab.artifacts.read(second.active.record))); await lab.reopen();
   const restore = parseManagedLifecycleSource({ ...lab.source, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":4", previous: releaseB, retained: references(releaseB), restore: first.active.record });
   if (unsafe) {
@@ -241,7 +243,18 @@ for (const unsafe of [false, true]) test(`historical restore ${unsafe ? "refuses
     const currentPlan = parseManagedLifecycleSource({ ...secondSource, run: randomUUID(), action: lab.source.candidate.infrastructure.ownership.incarnation + ":4", previous: releaseB, retained: references(releaseB) });
     assert.equal((await lab.owner().begin(currentPlan)).operation.phase, "admitting");
 
-  } else { const accepted = await lab.owner().begin(restore); assert.equal(accepted.compatibilityEpoch, 0); assert.equal(accepted.operation.phase, "admitting"); }
+  } else {
+    const before = [...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0);
+    assert.ok(before > 0);
+    await assert.rejects(lab.owner().begin(restore), /differs from its verified release/);
+    const exact = parseManagedLifecycleSource({ ...restore, candidate: managedRestorePlan(releaseA) });
+    const accepted = await lab.owner().begin(exact);
+    assert.equal(accepted.compatibilityEpoch, 0); assert.equal(accepted.operation.phase, "admitting");
+    await lab.reopen();
+    const done = await lab.drive();
+    assert.equal(done.operation.outcome, "deployed"); assert.equal(done.active?.run, restore.run); assert.equal(done.operation.preparation?.sequence, null);
+    assert.equal([...lab.nodes.values()].reduce((sum, node) => sum + node.executions(), 0), before);
+  }
 });
 
 for (const cancel of [false, true]) test(`connected rolling recovery verifies and promotes A before settling previous capacity${cancel ? " after cancellation" : " after candidate failure"}`, async (t) => {

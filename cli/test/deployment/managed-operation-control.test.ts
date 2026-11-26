@@ -17,7 +17,7 @@ const fixture = async (t: TestContext) => {
   const runtime = typed<IndexedManagedRuntime>({ ...lab.runtime, managedData: { native: { observe: () => Promise.resolve({ status: "absent" }), create: () => Promise.reject(new Error("unexpected volume creation")) }, workloads: () => lab.runtime.services } });
   const preparation = managedPreparation(lab.index(), { builds: { ...lab.artifacts, now: lab.runtime.now, images: () => [], prepare: () => { calls.push("builder"); return Promise.reject(new Error("unexpected build")); } },
     inputs: { compare: () => Promise.resolve("unchanged") }, plans: { volumeKeys: () => Promise.resolve(lab.volumes.map((volume) => volume.key)), preview: () => Promise.resolve(lab.plan) }, runtime: () => Promise.resolve(runtime) });
-  const ports = { ...lab.artifacts, now: lab.runtime.now, canAccess: () => Promise.resolve(true), prepare: preparation.prepare, forRun: () => { calls.push("runtime"); return Promise.resolve(runtime); } };
+  const ports = { ...lab.artifacts, now: lab.runtime.now, canAccess: () => Promise.resolve(true), prepare: preparation.prepare, restore: preparation.restore, forRun: () => { calls.push("runtime"); return Promise.resolve(runtime); } };
   return { ...lab, runtime, calls, ports, commands: () => managedOperationControl(lab.index(), ports) };
 };
 
@@ -44,6 +44,20 @@ test("persisted managed protocol cannot fall back to legacy rollout ports or be 
   const control = deploymentControl({ index: lab.index(), now: lab.runtime.now, enabled: () => Promise.resolve(true), canAccess: () => Promise.resolve(true), plans: { now: lab.runtime.now, retain: lab.artifacts.retain, preview: () => Promise.reject(new Error("unexpected legacy compilation")) } });
   await assert.rejects(control("/deployment/prepare", input), /managed-v3 mutation dispatch is disabled/); await assert.rejects(control("/deployment/cancel", { app: "shop", request: input.request }), /managed-v3 mutation dispatch is disabled/);
   assert.equal(await control("/deployment/prepare", { ...input, protocol: "legacy" }), undefined); assert.deepEqual(lab.calls, []); assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
+  await assert.rejects(control("/deployment/restore", { app: "shop", request: input.request, record: "a".repeat(64) }), /restore is unavailable/);
+});
+
+test("managed restore refuses unknown history or a deployment request reused as a restore before reaching the builder", async (t) => {
+  const lab = await fixture(t);
+  const control = deploymentControl({ index: lab.index(), now: lab.runtime.now, enabled: () => Promise.resolve(true), canAccess: () => Promise.resolve(true), managed: lab.commands() });
+  const request = randomUUID();
+  assert.equal(await control("/deployment/restore", { app: "shop", request, record: lab.plan.commit }), undefined);
+  const restore = { app: "shop", request, record: "a".repeat(64) };
+  await assert.rejects(control("/deployment/restore", restore), /lacks verified release history/);
+  assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
+  await lab.commands().prepare({ app: "shop", request, commit: lab.plan.commit });
+  await assert.rejects(control("/deployment/restore", restore), /request identity conflicts/);
+  assert.deepEqual(lab.calls, []);
 });
 
 test("scope and input validation precede all managed command state access", async (t) => {

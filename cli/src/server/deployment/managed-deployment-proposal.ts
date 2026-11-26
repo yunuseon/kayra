@@ -14,7 +14,9 @@ import { managedSuccessfulInventoryCarry, managedRecoveredInventoryCarry, manage
 import { prepareManagedTransition } from "./managed-transition.ts";
 import { typed } from "../../lib/typed.ts";
 
-const requestSchema = z.object({ version: z.union([z.literal(1), z.literal(2)]).default(2), run: z.uuid(), action: z.string().max(80), createdAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict().readonly();
+const requestSchema = z.object({ version: z.union([z.literal(1), z.literal(2)]).default(2), run: z.uuid(), action: z.string().max(80), createdAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  restore: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
+}).strict().readonly();
 type Request = z.input<typeof requestSchema>;
 type Baseline = { readonly state: ManagedLifecycleStore; readonly source: ManagedLifecycleSource };
 type Ports = RetainedInputsPort & { readonly now: () => number; readonly read: (digest: string) => Promise<string> };
@@ -27,7 +29,7 @@ export const managedDeploymentProposal = async (input: ManagedApplicationPlan, e
   const evidence = baseline === null ? null : await managedDeploymentEvidence(baseline.state, baseline.source, ports);
   if (evidence !== null && !same(evidence.state.owner, owner.value)) throw new Error("managed proposal baseline ownership disagrees");
   if (evidence?.state.operation.run === request.run) {
-    if (evidence.source.candidate.commit !== candidate.value.commit || evidence.source.candidate.artifact !== candidate.value.artifact || evidence.source.action !== request.action) throw new Error("managed proposal request identity conflicts");
+    if (evidence.source.candidate.commit !== candidate.value.commit || evidence.source.candidate.artifact !== candidate.value.artifact || evidence.source.action !== request.action || evidence.source.restore !== request.restore) throw new Error("managed proposal request identity conflicts");
     return evidence.source;
   }
   const now = ports.now(); const deadline = request.createdAt + 90_000;

@@ -1,4 +1,4 @@
-import { parseDeploymentCancellation, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
+import { deploymentRestoreSchema, parseDeploymentCancellation, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
 import type { ManagedExecutionContext } from "../../contracts/managed-execution-context.ts";
 import type { ManagedDeploymentReadPort } from "../../contracts/managed-deployment-read.ts";
 import type { IndexedManagedRuntime } from "./indexed-managed-lifecycle.ts";
@@ -10,7 +10,7 @@ import { parseMigrationResolutionRequest, parseMigrationResolutionQuery, parseMi
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 
 type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "acceptedManagedRequest" | "retainedManagedBuild" | "cancelManagedDeployment" | "resolveManagedMigration" | "managedMigrationAudit">>;
-type Ports = ManagedDeploymentReadPort & { readonly actor?: MigrationResolutionActor | undefined; readonly canAccess: (app: string) => Promise<boolean>; readonly prepare: ReturnType<typeof managedPreparation>["prepare"]; readonly forRun: (context: ManagedExecutionContext) => Promise<IndexedManagedRuntime | undefined> };
+type Ports = ManagedDeploymentReadPort & { readonly actor?: MigrationResolutionActor | undefined; readonly canAccess: (app: string) => Promise<boolean>; readonly prepare: ReturnType<typeof managedPreparation>["prepare"]; readonly restore?: ReturnType<typeof managedPreparation>["restore"]; readonly forRun: (context: ManagedExecutionContext) => Promise<IndexedManagedRuntime | undefined> };
 
 /** Owner commands publish validated receipts; clients cannot provide plans, runtime ports, grants or recovery evidence. The transport authenticates app scope independently. */
 export const managedOperationControl = (index: Index, ports: Ports) => {
@@ -27,6 +27,16 @@ export const managedOperationControl = (index: Index, ports: Ports) => {
       if (existing === undefined) await index.retainedManagedBuild(app, commit, ports);
       else if (existing.source.candidate.commit !== commit) throw new Error("managed operation commit disagrees");
       await ports.prepare(app, request, commit); const value = await retained(app, request); if (value.source.candidate.commit !== commit) throw new Error("managed operation commit disagrees");
+      return managedReceipt(value.source, value.request);
+    },
+    restore: async (input: unknown) => {
+      const checked = deploymentRestoreSchema.safeParse(input);
+      if (!checked.success || ports.restore === undefined) throw new Error("managed restore unavailable or invalid");
+      const { app, request, record } = checked.data;
+      if (!await ports.canAccess(app)) throw new Error("app is outside managed operation scope");
+      await ports.restore(app, request, record);
+      const value = await retained(app, request);
+      if (value.source.restore !== record) throw new Error("managed restore record disagrees");
       return managedReceipt(value.source, value.request);
     },
     cancel: async (input: unknown) => {

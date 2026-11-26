@@ -7,6 +7,7 @@ const commit = z.string().regex(/^[0-9a-f]{40}$/);
 export const deploymentRequestSchema = z.object({ app: app.max(48), request: z.uuid(), commit }).strict().readonly();
 const query = z.object({ app }).strict().readonly();
 export const deploymentCancellationSchema = z.object({ app, request: z.uuid() }).strict().readonly();
+export const deploymentRestoreSchema = z.object({ app: app.max(48), request: z.uuid(), record: z.string().regex(/^[0-9a-f]{64}$/) }).strict().readonly();
 const receipt = deploymentRequestSchema.unwrap().extend({ version: z.literal(1), plan: z.string().regex(/^[0-9a-f]{64}$/), deadline: z.number().int().positive(),
   cancelRequestedAt: z.number().int().positive().nullable().default(null),
   phase: z.enum(["prepared", "admitted", "applying", "verifying", "recovering", "held", "succeeded", "failed", "cancelled"]),

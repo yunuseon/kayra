@@ -3,7 +3,7 @@ import type { RolloutRequest } from "./rollout-request.ts";
 import { parseMigrationCleanupRequest, parseMigrationCleanupReport } from "../../contracts/migration-cleanup.ts";
 import type { HttpPlanPort } from "../../contracts/http-plan.ts";
 import type { BuildPorts } from "../../contracts/build-artifact.ts";
-import { parseCompleteDeploymentReceipt, parseDeploymentCancellation, parseDeploymentQuery, parseDeploymentReceipt, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
+import { deploymentRestoreSchema, parseCompleteDeploymentReceipt, parseDeploymentCancellation, parseDeploymentQuery, parseDeploymentReceipt, parseDeploymentRequest } from "../../contracts/deployment-request.ts";
 import type { HttpOperation } from "./http-state.ts";
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { parseMigrationResolutionQuery, parseMigrationResolutionRequest, parseMigrationResolutionReport } from "../../contracts/migration-resolution.ts";
@@ -87,6 +87,13 @@ export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, 
     if (!query.ok) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
     return index.publishedDeploymentStatus(query.value.app, artifacts === undefined ? undefined : { read: artifacts.read, now });
+  }
+  if (path === "/deployment/restore") {
+    const requested = deploymentRestoreSchema.safeParse(input);
+    if (!requested.success) return undefined;
+    const { app } = requested.data;
+    if (managed === undefined || !await enabled() || !await canAccess(app) || await index.deploymentProtocol(app) !== "managed-v3") throw new Error("managed restore is unavailable or outside scope");
+    return managed.restore(requested.data);
   }
   if (path === "/deployment/cancel") {
     const requested = parseDeploymentCancellation(input);

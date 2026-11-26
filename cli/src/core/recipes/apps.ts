@@ -76,6 +76,7 @@ export const appPurge = (engine: Engine, server: Server, app: AppName) =>
 export type DeployerCommand =
   | { readonly kind: "build"; readonly app: AppName; readonly commit: string }
   | { readonly kind: "lifecycle-prepare"; readonly app: AppName; readonly commit: string; readonly request: string }
+  | { readonly kind: "lifecycle-restore"; readonly app: AppName; readonly record: string; readonly request: string }
   | { readonly kind: "runs" | "logs" | "deploy" | "rollback"; readonly app: AppName; readonly more: string | undefined }
   | { readonly kind: "lifecycle"; readonly app: AppName; readonly operation: "health" | "pins" | "status" | "cancel"; readonly request: string | undefined }
   | { readonly kind: "migration"; readonly app: AppName; readonly operation: "resolve" | "audit" | "cleanup" | "cleanup-audit"; readonly payload: Readonly<Record<string, string | number>> }
@@ -90,6 +91,8 @@ const ctlCall = (server: Server, command: DeployerCommand) => {
       return typed<CtlCall>({ title: `Retain build of ${command.app}`, args: ["build", command.app, command.commit], stdout: "show" });
     case "lifecycle-prepare":
       return typed<CtlCall>({ title: `Request rollout of ${command.app}`, args: ["lifecycle", "prepare", command.app, command.commit, command.request], stdout: "show" });
+    case "lifecycle-restore":
+      return typed<CtlCall>({ title: `Restore a verified release of ${command.app}`, args: ["lifecycle", "restore", command.app, command.record, command.request], stdout: "show" });
     case "lifecycle":
       return typed<CtlCall>({ title: `Deployment ${command.operation} for ${command.app}`, args: ["lifecycle", command.operation, command.app, ...(command.request === undefined ? [] : [command.request])], stdout: "show" });
     case "migration":

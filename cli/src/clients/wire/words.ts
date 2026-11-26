@@ -7,6 +7,8 @@ const extra = (call: Invocation) => {
       return [call.input.commit];
     case "app.deployment.prepare":
       return [call.input.commit, call.input.request];
+    case "app.deployment.restore":
+      return [call.input.record, call.input.request];
     case "app.deployment.cancel":
       return [call.input.request];
     case "app.migration.cleanup":

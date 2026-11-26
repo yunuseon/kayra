@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[3])
@@ -90,7 +91,19 @@ try:
     cloud = work / 'cloud-init.yml'
     cloud.write_text('#cloud-config\n' + json.dumps({'users': ['default', {'name': 'deploy', 'groups': 'sudo', 'shell': '/bin/bash', 'sudo': ['ALL=(ALL) NOPASSWD:ALL'], 'ssh_authorized_keys': [key.with_suffix('.pub').read_text().strip()]}], 'package_update': True, 'packages': ['python3-debian', 'ca-certificates', 'curl', 'apparmor']}))
     run(['multipass', 'launch', '24.04', '--name', vm, '--cpus', '2', '--memory', '4G', '--disk', '20G', '--cloud-init', str(cloud)])
-    run(['multipass', 'exec', vm, '--', 'cloud-init', 'status', '--wait'])
+    # Multipass can report launch complete just before the guest's SSH route becomes usable.
+    ssh_deadline = time.monotonic() + 90
+    ssh_probe = ['multipass', 'exec', vm, '--', 'true']
+    while time.monotonic() < ssh_deadline:
+        try:
+            if subprocess.run(ssh_probe, stdout=log, stderr=subprocess.STDOUT, timeout=10).returncode == 0:
+                break
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(2)
+    else:
+        raise RuntimeError(f'SSH did not become reachable for {vm}')
+    run(['multipass', 'exec', vm, '--', 'cloud-init', 'status', '--wait'], timeout=180)
     info = json.loads(subprocess.check_output(['multipass', 'info', vm, '--format', 'json'], text=True))
     address = info['info'][vm]['ipv4'][0]
     inventory = work / 'inventory.ini'

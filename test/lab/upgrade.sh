@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--egress-mtu <1280-1500>] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -36,6 +36,7 @@ keep=false
 indexed_registration=false
 swarm_host=false
 managed_rollouts=false
+egress_mtu=""
 vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -44,10 +45,15 @@ while [ $# -gt 0 ]; do
         --indexed-registration) indexed_registration=true; shift ;;
         --swarm-host) swarm_host=true; shift ;;
         --managed-rollouts) managed_rollouts=true; indexed_registration=true; swarm_host=true; shift ;;
+        --egress-mtu) [ $# -ge 2 ] || { echo "--egress-mtu requires a value" >&2; exit 2; }; egress_mtu="$2"; shift 2 ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--egress-mtu <1280-1500>] [--keep]" >&2; exit 2 ;;
     esac
 done
+if [ -n "$egress_mtu" ] && { ! [[ "$egress_mtu" =~ ^[0-9]{4}$ ]] || [ "$egress_mtu" -lt 1280 ] || [ "$egress_mtu" -gt 1500 ]; }; then
+    echo "invalid lab egress MTU: $egress_mtu" >&2
+    exit 2
+fi
 [[ "$vm_name" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { echo "invalid Multipass VM name: ${vm_name}" >&2; exit 2; }
 if multipass info "$vm_name" >/dev/null 2>&1; then
     echo "Multipass VM ${vm_name} already exists; choose a different --vm-name" >&2
@@ -262,6 +268,14 @@ step "1  kayra ${from}: provision, deploy, the first webhook deploy"
 kayra_cmd provision "$server" >> "$log" 2>&1 || die "kayra provision (${from})"
 address="$(awk '{for (i = 1; i <= NF; i++) if (index($i, "ansible_host=") == 1) print substr($i, 14)}' "servers/${server}/inventory.ini")"
 echo "VM at ${address}"
+if [ -n "$egress_mtu" ]; then
+    multipass exec "$vm_name" -- sh -ec '
+        device=$(ip -4 route show default | awk "NR == 1 {print \$5}")
+        test -n "$device"
+        sudo ip link set dev "$device" mtu "$1"
+        ip link show dev "$device"
+    ' sh "$egress_mtu" >> "$log" 2>&1 || die "setting the disposable VM egress MTU"
+fi
 kayra_cmd deploy "$server" >> "$log" 2>&1 || die "kayra deploy (${from})"
 first_deploy() {
     local before run

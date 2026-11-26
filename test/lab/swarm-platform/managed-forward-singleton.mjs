@@ -115,6 +115,7 @@ finally:
       hosts: [], secrets: [], grants: target.value.grants },
   });
   const removalWrites = [];
+  const purgeWrites = [];
   let lostRemove = false;
   const removalApi = { request: async (...args) => {
     const result = await api.request(...args);
@@ -123,12 +124,17 @@ finally:
       removalWrites.push({ action, at: Date.now(), status: result.status });
       if (!lostRemove && action.endsWith(':remove:1') && result.status === 200) { lostRemove = true; throw new Error('lost native removal acknowledgement'); }
     }
+    if (args[0] === 'DELETE') {
+      purgeWrites.push({ path: args[1], at: Date.now(), status: result.status });
+      if (purgeWrites.length === 1 && result.status === 204) throw new Error('lost native purge acknowledgement');
+    }
     return result;
   } };
-  const removal = () => managedPlatform(currentIndex(), {
+  const platform = () => managedPlatform(currentIndex(), {
     publicRegistrations: join(registrationRoot, 'public'), privateRegistrations: join(registrationRoot, 'private'),
     swarmAuthority: join(registrationRoot, 'unused-host.json'), migrationPolicy: join(registrationRoot, 'unused-policy.json'), domain: 'lab.test',
-  }, { api: removalApi, builds, canAccess: async (name) => name === app, actor }).removal;
+  }, { api: removalApi, builds, canAccess: async (name) => name === app, actor });
+  const removal = () => platform().removal;
   const step = () => removal().step(app);
   const removalDeadline = Date.now() + 90000;
   const beforeStop = await wait(async () => {
@@ -152,6 +158,7 @@ finally:
   assert.equal(finalNative.status, 'owned'); assert.equal(finalNative.id, original.id);
   assert.equal(finalNative.replicas, 0); assert.equal(finalNative.containersStopped, true); assert.equal(finalNative.retainedInputsCleared, true);
   await assert.rejects(removal().finalize(app, withdrawal.request), /withdrawal is unverified/);
+  await assert.rejects(platform().purge(app), /requires completed application removal/);
   storage('withdraw', withdrawal);
   await reopen();
   const removed = await removal().finalize(app, withdrawal.request);
@@ -168,6 +175,56 @@ finally:
   await writeFile(join(path, 'removal-state.json'), JSON.stringify({ tombstone, writes: removalWrites, lostRemove, finalNative }, null, 2));
   await writeFile(join(path, 'removal-retained-history.json'), retainedHistory);
 
-  const result = { passed: true, scope: 'native indexed forward handoff and verified singleton activation with fixture builds/compiler/grants and a preserved coordination volume', blockedRun: held.operation.run, unknownCheckExec: held.operation.verification.steps[0].execution.id, request: request.request, sourceAction: source.action, reservedAction: reservation.action, deadline: reservation.deadline, originalDeadlinePreserved: true, separateOperatorAudit: true, consumerStopReopened: true, pinnedCheckPhysicallyStopped: true, unsafeDataEpoch: held.compatibilityEpoch, heldRootUnchanged: true, admissionUnsettledAndUnchanged: true, successorVerified: true, successorCompatibilityEpoch: verified.compatibilityEpoch, successorAdmissionSettled: true, removal: { removed, nativeWrites: removalWrites.length, lostAcknowledgement: lostRemove, retainedVolume: true, originalDeadline: beforeStop.deadline, actualPlatformWithdrawal: true }, activationAt, successorRun: accepted.run, service: stopped.id, nativeWrites: writes.length, stoppedCheckContainers: complete.nodes.flatMap((node) => node.proofs).length, coordinationVolumeUnchanged: true, retainedDataEvents: records.length, receipt };
+  const mount = 'type=volume,source=' + allocation.value.name + ',target=/data,readonly';
+  const unrelated = 'kayra-lab-unrelated-' + randomUUID();
+  const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', timeout: 30000 }).trim();
+  const reader = ['--read-only', '--network', 'none', '--memory', '128m', '--cpus', '0.25'];
+  docker('volume', 'create', unrelated);
+  const unrelatedMount = 'type=volume,source=' + unrelated + ',target=/data';
+  docker('run', '--rm', ...reader, '--mount', unrelatedMount, '--entrypoint', 'node', image, '--eval',
+    "require('node:fs').writeFileSync('/data/proof','unrelated fixture data')");
+  const unrelatedBefore = JSON.parse(docker('volume', 'inspect', unrelated))[0];
+  const attachment = docker('create', ...reader, '--mount', mount, '--entrypoint', 'node', image, '--version');
+  try {
+    const observation = await volumes.attachments(allocation.value);
+    assert.equal(observation.status, 'observed');
+    assert.ok(observation.containers.includes(attachment));
+    await assert.rejects(platform().purge(app), /refuses volumes with current attachments/);
+    assert.equal(purgeWrites.length, 0);
+    assert.equal((await currentIndex().publishedDeploymentStatus(app)).retirement.phase, 'complete');
+    assert.deepEqual(await volumes.observe(allocation.value), originalVolume);
+  } finally {
+    docker('rm', attachment);
+  }
+  const firstPurge = await platform().purge(app);
+  assert.equal(firstPurge.status, 'purging');
+  const purgeStep = () => platform().purge(app);
+  await wait(async () => {
+    const progress = await purgeStep(); assert.equal(progress.status, 'purging');
+    assert.equal(progress.request, firstPurge.request); assert.equal(progress.deadline, firstPurge.deadline);
+    return purgeWrites.length > 0;
+  }, firstPurge.deadline, 'native volume delete with lost acknowledgement');
+  assert.deepEqual(await volumes.observe(allocation.value), { status: 'absent' });
+  await reopen();
+  const purged = await wait(async () => {
+    const progress = await purgeStep(); assert.notEqual(progress.status, 'held', JSON.stringify(progress));
+    assert.equal(progress.request, firstPurge.request);
+    if (progress.status === 'purged') return progress;
+    assert.equal(progress.deadline, firstPurge.deadline);
+    return false;
+  }, firstPurge.deadline, 'reconcile the observed native volume absence');
+  assert.deepEqual(await purgeStep(), purged);
+  assert.deepEqual(purgeWrites.map(({ path, status }) => ({ path, status })),
+    [{ path: '/volumes/' + allocation.value.name + '?force=false', status: 204 }]);
+  assert.deepEqual(await currentIndex().managedRemovalTombstone(app), tombstone);
+  const retirement = (await currentIndex().publishedDeploymentStatus(app)).retirement;
+  assert.deepEqual(retirement, { protocol: 'managed-v3', request: purged.request, kind: 'purge', phase: 'complete', deadline: firstPurge.deadline, reason: null, remainingVolumes: 0 });
+  assert.deepEqual(JSON.parse(docker('volume', 'inspect', unrelated))[0], unrelatedBefore);
+  assert.equal(docker('run', '--rm', ...reader, '--mount', unrelatedMount + ',readonly', '--entrypoint', 'node', image, '--eval',
+    "process.stdout.write(require('node:fs').readFileSync('/data/proof','utf8'))"), 'unrelated fixture data');
+  const purge = { purged, originalDeadline: firstPurge.deadline, attachedVolumeRefused: true, unrelatedDataPreserved: true, nativeWrites: purgeWrites.length, lostAcknowledgement: true };
+  await writeFile(join(path, 'purge-state.json'), JSON.stringify({ purge, retirement, writes: purgeWrites }, null, 2));
+
+  const result = { passed: true, scope: 'native indexed forward handoff, verified singleton activation and recorded volume retirement with fixture builds/compiler/grants', blockedRun: held.operation.run, unknownCheckExec: held.operation.verification.steps[0].execution.id, request: request.request, sourceAction: source.action, reservedAction: reservation.action, deadline: reservation.deadline, originalDeadlinePreserved: true, separateOperatorAudit: true, consumerStopReopened: true, pinnedCheckPhysicallyStopped: true, unsafeDataEpoch: held.compatibilityEpoch, heldRootUnchanged: true, admissionUnsettledAndUnchanged: true, successorVerified: true, successorCompatibilityEpoch: verified.compatibilityEpoch, successorAdmissionSettled: true, removal: { removed, nativeWrites: removalWrites.length, lostAcknowledgement: lostRemove, retainedVolume: true, originalDeadline: beforeStop.deadline, actualPlatformWithdrawal: true }, purge, activationAt, successorRun: accepted.run, service: stopped.id, nativeWrites: writes.length, stoppedCheckContainers: complete.nodes.flatMap((node) => node.proofs).length, coordinationVolumeUnchanged: true, retainedDataEvents: records.length, receipt };
   await writeFile(join(path, 'forward-history.json'), history); await writeFile(join(path, 'forward-writes.json'), JSON.stringify(writes, null, 2)); await writeFile(join(path, 'forward-cleanup-state.json'), JSON.stringify(complete, null, 2)); await writeFile(join(path, 'forward-cleanup-result.json'), JSON.stringify(result, null, 2)); return result;
 };

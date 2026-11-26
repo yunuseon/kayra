@@ -51,7 +51,8 @@ export const previousManagedRelease = async (current: ManagedLifecycleStore, act
   const deadline = performance.now() + 2000;
   // eslint-disable-next-line functional/no-let -- walks a bounded number of immutable archive links
   let cursor = current;
-  for (const _ of Array.from({ length: 16 })) {
+  // eslint-disable-next-line functional/no-let -- cap the number of archived releases inspected
+  for (let inspected = 0; inspected < 16; inspected++) {
     if (cursor.history === null || performance.now() >= deadline) return undefined;
     const bytes = await read(cursor.history);
     if (performance.now() >= deadline) return undefined;

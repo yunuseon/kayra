@@ -9,6 +9,7 @@ import type { ServiceVersion } from "../../src/contracts/swarm-service.ts";
 import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { managedIndexFixture } from "./managed-index-fixture.ts";
 import { indexedForwardFixture } from "./indexed-forward-fixture.ts";
 import { parseLifecycleEnvelope } from "../../src/server/deployment/lifecycle-envelope.ts";
 import { preparedForwardFixture } from "./indexed-forward-prepared-fixture.ts";
@@ -121,9 +122,14 @@ test("removal effects stop consumers before retained services and reopen their d
   assert.equal(await ports.services.tombstone({ ...service, deadline: intent.createdAt }, null, web.plan.image), "refused");
   assert.deepEqual(effects, []);
   await assert.rejects(lab.index().tickManagedRemovalEffects("shop", request, ports), /not published/);
+  const withdrawal = { version: 1, status: "withdrawn", request, action: intent.action, registration: intent.registration, observedAt: lab.runtime.now() };
+  const finalize = (observed: unknown = withdrawal) => lab.index().completeManagedRemoval("shop", request, {
+    ...ports, observeWithdrawal: () => Promise.resolve(observed),
+  });
   const retire = () => lab.index().retireManagedRemovalAccounting("shop", request, ports);
   const prepared = await lab.index().prepareManagedRemovalEffects("shop", request, ports);
   assert.equal(prepared.phase, "fencing-jobs");
+  await assert.rejects(finalize(), /lacks complete effects/);
   await assert.rejects(retire, /lacks complete effects/);
   const tick = () => lab.index().tickManagedRemovalEffects("shop", request, ports);
   for (let i = 0; i < 25 && effects.length < 2; i++) await tick();
@@ -161,6 +167,7 @@ test("removal effects stop consumers before retained services and reopen their d
   assert.equal(receipt.effects, proof.effects);
   assert.notEqual(receipt.before, receipt.after);
 
+  await assert.rejects(finalize(), /awaits accounting/);
   lab.cut("removal-retirement-before");
   await assert.rejects(retire, /injected before removal-retirement/);
   assert.deepEqual(await lab.index().resourceSnapshot(), priorResources);
@@ -179,4 +186,60 @@ test("removal effects stop consumers before retained services and reopen their d
     await assert.rejects(lab.index().prepareManagedRemovalEffects("shop", request, ports), /missing|journal|exist/);
     await assert.rejects(readFile(path), /ENOENT/);
   } finally { await rename(path + ".kept", path); }
+
+  await assert.rejects(finalize({ ...withdrawal, request: randomUUID() }), /withdrawal is unverified/);
+  assert.equal(await lab.index().managedRemovalTombstone("shop"), undefined);
+  assert.equal((await lab.index().managedDeploymentStatus("shop", lab.runtime))?.operation.phase, "held");
+
+  lab.cut("removal-tombstone-after");
+  await assert.rejects(finalize(), /injected after removal-tombstone/);
+  await lab.reopen();
+  const tombstone = await finalize({ status: "unavailable" });
+  assert.equal(tombstone.checkpoint, inventory.checkpoint);
+  const recorded = await lab.index().managedRemovalTombstone("shop"); assert.ok(recorded);
+  assert.deepEqual(recorded.volumes, intent.volumes);
+  assert.deepEqual(recorded.owner, intent.owner);
+  const removed = parseLifecycleEnvelope(JSON.parse(await readFile(join(lab.selectionDirectory, "..", "..", "..", "state.json"), "utf8")));
+  assert.ok(removed.ok);
+  assert.equal(removed.value.fence?.lifecycle.phase, "removed");
+  assert.deepEqual(removed.value.operations, []);
+  assert.deepEqual(removed.value.managed?.at(-1)?.completion, {
+    outcome: "removed", disposition: "cancelled", rootSnapshot: inventory.checkpoint, removal: request,
+  });
+  assert.equal(await lab.index().managedDeploymentStatus("shop", lab.runtime), null);
+  assert.deepEqual(await lab.index().managedHealthContexts(lab.runtime), []);
+  assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
+  await assert.rejects(lab.index().verifiedRegistration("shop"), /registration has not been verified/);
+});
+
+test("removal of a registered app with no deployment retains its data identities without creating a resource charge", async (t) => {
+  const lab = await managedIndexFixture(t);
+  const request = randomUUID();
+  const authorize = () => Promise.resolve(true);
+  const intent = await lab.index().requestManagedRemoval("shop", request, {
+    actor: { kind: "operator-control", identity: "fixture-operator" }, reason: "Remove the unused registration while retaining its data ownership",
+  }, { now: lab.runtime.now, authorize });
+  const inventory = await lab.index().inspectManagedRemoval("shop", request, lab.runtime);
+  assert.deepEqual(inventory.services, []);
+  assert.equal(inventory.checkpoint, null);
+  const unreachable = () => Promise.reject(new Error("unused app cannot dispatch native effects"));
+  const ports = managedRemovalRuntime(inventory, {
+    ...lab.artifacts, now: lab.runtime.now, authorize,
+    native: { services: { observe: unreachable, tombstone: unreachable }, jobs: { observe: unreachable, fence: unreachable },
+      containers: { observe: unreachable } },
+  });
+  await lab.index().prepareManagedRemovalEffects("shop", request, ports);
+  assert.equal((await lab.index().tickManagedRemovalEffects("shop", request, ports)).phase, "stopping");
+  assert.equal((await lab.index().tickManagedRemovalEffects("shop", request, ports)).phase, "complete");
+  const retirement = await lab.index().retireManagedRemovalAccounting("shop", request, ports);
+  assert.equal(retirement.before, retirement.after);
+  assert.equal(await lab.index().resourceSnapshot(), null);
+  const tombstone = await lab.index().completeManagedRemoval("shop", request, {
+    ...ports, observeWithdrawal: () => Promise.resolve({
+      version: 1, status: "withdrawn", request, action: intent.action, registration: intent.registration, observedAt: lab.runtime.now(),
+    }),
+  });
+  assert.equal(tombstone.checkpoint, null);
+  assert.deepEqual((await lab.index().managedRemovalTombstone("shop"))?.volumes, lab.volumes);
+  assert.equal(await lab.index().resourceSnapshot(), null);
 });

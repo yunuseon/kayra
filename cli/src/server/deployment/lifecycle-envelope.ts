@@ -8,7 +8,7 @@ import { parseRegistrationGeneration } from "../../contracts/registration-genera
 import { httpReleasePlan, parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
-import { parseManagedRemovalIntent, managedRemovalEffectsReference, managedRemovalAccountingIntent } from "./managed-removal-intent.ts";
+import { parseManagedRemovalIntent, managedRemovalEffectsReference, managedRemovalAccountingIntent, managedRemovalTombstone } from "./managed-removal-intent.ts";
 import { managedForwardReservation } from "./managed-forward-reservation.ts";
 import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
 import { parseRolloutRequest } from "./rollout-request.ts";
@@ -41,6 +41,7 @@ const shape = z.object({
   removal: z.unknown().optional(),
   removalEffects: managedRemovalEffectsReference.optional(),
   removalAccounting: managedRemovalAccountingIntent.optional(),
+  removalTombstone: managedRemovalTombstone.optional(),
   http: z.unknown().optional(),
   rollout: z.unknown().optional(),
   rollouts: z.array(z.unknown()).max(1024).optional(),
@@ -178,15 +179,25 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     catch { return null; }
   })();
   if (removal === null) return err("invalid managed removal intent");
+  const removalTombstone = parsed.data.removalTombstone;
   if (removal !== undefined) {
     const fenceState = fence.value;
     const lifecycle = fenceState?.lifecycle;
-    if (fenceState === null || lifecycle?.phase !== "removal-requested" || forward !== undefined || receipt?.runtime !== "swarm" ||
+    const sequence = lifecycle?.phase === "removal-requested" ? lifecycle.removal :
+      lifecycle?.phase === "removed" ? lifecycle.tombstone.removal : undefined;
+    const acceptedRemoval = operations.some((item) => item.ticket === removal.ticket && item.action === removal.action &&
+      item.descriptor.kind === "remove" && item.descriptor.ownershipGeneration === removal.owner.dataOwner);
+    const terminalRemoval = lifecycle?.phase === "removed" && removalTombstone !== undefined &&
+      JSON.stringify(lifecycle.tombstone.volumes) === JSON.stringify(removal.volumes.map((volume) => volume.name)) &&
+      (() => {
+        const ticket = admitTicket(tickets.value, removal.ticket, { kind: "remove", ownershipGeneration: removal.owner.dataOwner });
+        return ticket.ok && ticket.value.status === "terminal" && ticket.value.outcome === "success";
+      })();
+    if (fenceState === null || sequence === undefined || forward !== undefined || receipt?.runtime !== "swarm" ||
       http !== undefined || history.length !== 0 || removal.owner.app !== fenceState.app || removal.owner.incarnation !== fenceState.generation ||
-      removal.action !== lifecycleActionId(fenceState, lifecycle.removal) || JSON.stringify(removal.registration) !== JSON.stringify(receipt.metadata) ||
+      removal.action !== lifecycleActionId(fenceState, sequence) || JSON.stringify(removal.registration) !== JSON.stringify(receipt.metadata) ||
       managed?.some((item) => item.owner.dataOwner !== removal.owner.dataOwner) ||
-      !operations.some((item) => item.ticket === removal.ticket && item.action === removal.action && item.descriptor.kind === "remove" &&
-        item.descriptor.ownershipGeneration === removal.owner.dataOwner)) return err("managed removal lacks its lifecycle fence");
+      (removalTombstone === undefined ? !acceptedRemoval : !terminalRemoval)) return err("managed removal lacks its lifecycle fence");
   }
   const removalEffects = parsed.data.removalEffects;
   if (removalEffects !== undefined && (removalEffects.request !== removal?.request ||
@@ -195,6 +206,11 @@ export const parseLifecycleEnvelope = (input: unknown) => {
   if (removalAccounting !== undefined && (removalEffects?.journal !== "ready" || removalAccounting.request !== removalEffects.request ||
     removalAccounting.action !== removalEffects.action || removalAccounting.inventory !== removalEffects.inventory ||
     removalAccounting.observedAt < removalEffects.createdAt)) return err("managed removal accounting lacks its effects journal");
+  if (removalTombstone !== undefined && (removalTombstone.request !== removalAccounting?.request ||
+    removalTombstone.action !== removalAccounting.action || removalTombstone.effects !== removalAccounting.effects ||
+    removalTombstone.withdrawnAt < removalAccounting.observedAt) ||
+    managed?.some((item) => item.completion?.outcome === "removed" && (item.completion.removal !== removalTombstone?.request || item.completion.rootSnapshot !== null &&
+      item.completion.rootSnapshot !== removalTombstone.checkpoint))) return err("managed removal tombstone evidence disagrees");
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
@@ -203,6 +219,7 @@ export const parseLifecycleEnvelope = (input: unknown) => {
     ...(removal === undefined ? {} : { removal }),
     ...(removalEffects === undefined ? {} : { removalEffects }),
     ...(removalAccounting === undefined ? {} : { removalAccounting }),
+    ...(removalTombstone === undefined ? {} : { removalTombstone }),
     ...(http?.ok ? { http: http.value } : {}),
     ...(rollout === undefined ? {} : { rollout }),
     ...(rollouts === undefined ? {} : { rollouts: Object.freeze(rollouts) }) }));

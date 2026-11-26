@@ -1,3 +1,4 @@
+import { parseRegistrationWithdrawal } from "../../contracts/registration-withdrawal.ts";
 import { managedRemovalAccounting } from "./managed-removal-accounting.ts";
 import { managedRemovalEffects, managedRemovalInventoryDigest } from "./managed-removal-effects.ts";
 import type { ManagedRemovalEffectsPorts, ManagedRemovalInventory } from "./managed-removal-effects.ts";
@@ -284,6 +285,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
     const path = join(appDirectory(app), "managed"); await requireDirectory(path); const envelope = await store.read(); const request = envelope?.managed?.at(-1);
+    if (envelope?.removalTombstone !== undefined) return null;
     if (request === undefined) {
       if (indexed.managedRoot !== "empty" || await stat(join(path, "state.json")) !== undefined) throw new Error("managed reporting lacks its accepted request"); return null;
     }
@@ -578,7 +580,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   const executionContext = (app: string, ports: ManagedDeploymentReadPort, run?: string, pendingOnly = true) => useIndexed(app, async (store, indexed) => {
     if (indexed.protocol !== "managed-v3" || run !== undefined && !z.uuid().safeParse(run).success) throw new Error("managed execution scope unavailable");
     const envelope = await store.read(); const request = run === undefined ? envelope?.managed?.at(-1) : envelope?.managed?.find((item) => item.run === run);
-    if (request === undefined || pendingOnly && request.completion !== null) return undefined;
+    if (envelope?.removalTombstone !== undefined || request === undefined || pendingOnly && request.completion !== null) return undefined;
     const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(request.source));
     if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== request.source) throw new Error("managed execution source unavailable");
     const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
@@ -873,6 +875,42 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           return retirement;
         });
       }),
+    completeManagedRemoval: (app: string, request: string, ports: ManagedRemovalEffectsPorts & {
+      readonly observeWithdrawal: (intent: ManagedRemovalIntent) => Promise<unknown>;
+    }) => useRemovalEffects(app, request, ports, false, async (_owner, state, inventory, store) => {
+      const current = await store.read();
+      const retirement = current?.removalAccounting;
+      if (state.phase !== "complete" || retirement?.effects !== managedRemovalInventoryDigest(state)) throw new Error("managed removal finalization lacks complete effects");
+      await serialIndex(async () => {
+        const snapshot = await readIndex();
+        const accounting = managedRemovalAccounting(
+          { resources: snapshot.resources, bindings: snapshot.managedBindings ?? Object.freeze([]) },
+          inventory, current?.managed ?? Object.freeze([]), retirement.after,
+        );
+        if (accounting.before !== retirement.after) throw new Error("managed removal finalization awaits accounting");
+      });
+      if (current?.removalTombstone !== undefined) return current.removalTombstone;
+      const deadline = ports.now() + 10_000;
+      const { intent, blocked, checkpoint } = inventory;
+      if (blocked !== null && await boundedManagedRead(deadline, ports.now, () => ports.retain(JSON.stringify(blocked.state))) !== checkpoint) throw new Error("managed removal checkpoint retention failed");
+      const withdrawal = parseRegistrationWithdrawal(await boundedManagedRead(deadline, ports.now, () => ports.observeWithdrawal(intent)));
+      const now = ports.now();
+      if (!withdrawal.ok || withdrawal.value.request !== request || withdrawal.value.action !== intent.action ||
+        JSON.stringify(withdrawal.value.registration) !== JSON.stringify(intent.registration) ||
+        withdrawal.value.observedAt < retirement.observedAt || now < withdrawal.value.observedAt ||
+        now - withdrawal.value.observedAt > 2000 || now >= deadline) throw new Error("managed removal registration withdrawal is unverified");
+      return store.completeManagedRemoval({
+        version: 1, request, action: intent.action, checkpoint, effects: retirement.effects, withdrawnAt: withdrawal.value.observedAt,
+      }, blocked?.state.operation.run ?? null);
+    }),
+    managedRemovalTombstone: (app: string) => useIndexed(app, async (store, indexed) => {
+      const envelope = await store.read();
+      if (envelope?.removalTombstone === undefined || envelope.removal === undefined) return undefined;
+      const { owner, volumes } = envelope.removal;
+      if (indexed.protocol !== "managed-v3" || indexed.dataOwner !== owner.dataOwner ||
+        JSON.stringify(indexed.volumes) !== JSON.stringify(volumes)) throw new Error("managed removal tombstone lacks indexed ownership");
+      return Object.freeze({ owner, volumes, ...envelope.removalTombstone });
+    }),
     observeManagedRemovalCompletion: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
       useRemovalEffects(app, request, ports, false, (owner) => owner.observeCompletion()),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
@@ -891,7 +929,10 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         if (request.completion !== null && !matchesManagedRequestCompletion(request.completion, state)) throw new Error("managed migration audit completion disagrees");
         return managedMigrationAudit(state, source, query.value, { read });
       };
-      if (request.completion !== null) return project(JSON.parse(await read(request.completion.rootSnapshot)));
+      if (request.completion !== null) {
+        if (request.completion.rootSnapshot === null) return undefined;
+        return project(JSON.parse(await read(request.completion.rootSnapshot)));
+      }
       if (indexed.managedRoot !== "ready") throw new Error("managed migration audit awaits root reconstruction");
       const path = join(appDirectory(app), "managed"); await requireDirectory(path); const root = await journals(path, "existing");
       try { return await project(await root.read()); } finally { await root.close(); }

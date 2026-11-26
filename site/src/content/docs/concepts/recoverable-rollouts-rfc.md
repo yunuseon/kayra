@@ -2724,3 +2724,12 @@ requires the current platform registration and ownership record. It receives
 only stop and scrub, migration cleanup and pinned check observations. It
 cannot apply a workload, start a migration, materialize inputs or delete a
 volume. The ordinary deployer command listener does not yet dispatch removal.
+
+Finalization requires that the accounting postimage is durable and that a
+trusted platform observer confirms withdrawal of the exact registration for
+the accepted removal action. The envelope then atomically completes the
+remove ticket, closes any pending deployment as removed, and keeps its
+checkpoint reference for audit. The ownership tombstone preserves the data
+owner and volume allocations. Removed apps are excluded from active
+deployment and runtime health reporting. Withdrawal publication and guarded
+purge still require their respective platform and runtime integrations.

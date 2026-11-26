@@ -10,6 +10,7 @@ const schema = z.object({ version: z.literal(1), protocol: z.literal("managed-v3
   completion: z.union([
     z.object({ rootSnapshot: digest, outcome: z.enum(["deployed", "rolled-back", "absent", "unchanged"]), disposition: z.enum(["success", "failure", "cancelled"]) }).strict().readonly(),
     z.object({ rootSnapshot: digest, outcome: z.literal("superseded"), disposition: z.literal("failure"), successor: z.uuid() }).strict().readonly(),
+    z.object({ rootSnapshot: digest.nullable(), outcome: z.literal("removed"), disposition: z.literal("cancelled"), removal: z.uuid() }).strict().readonly(),
   ]).nullable(),
 }).strict().readonly();
 /** Private references only. The indexed writer authenticates the retained source and root snapshot; this record never authorizes runtime effects. */
@@ -26,6 +27,7 @@ export type ManagedLifecycleRequest = ReturnType<typeof parseManagedLifecycleReq
 export const matchesManagedRequestCompletion = (completion: NonNullable<ManagedLifecycleRequest["completion"]>, state: ManagedLifecycleStore) => {
   if (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== completion.rootSnapshot) return false;
   const operation = state.operation;
+  if (completion.outcome === "removed") return true;
   return completion.outcome === "superseded"
     ? operation.phase === "held" && operation.admitted && !operation.settled
     : operation.phase === "complete" && operation.settled && operation.outcome === completion.outcome;

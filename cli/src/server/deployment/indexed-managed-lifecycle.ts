@@ -100,7 +100,9 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
       const statement = parseMigrationResolutionRequest(input); const identity = parseMigrationResolutionActor(actor); if (!statement.ok || !identity.ok) throw new Error("invalid indexed migration resolution");
       const value = await request(input.run); const source = await retainedSource(value);
       if (value.completion === null) { await resume(source, value); return owner.resolveMigration(statement.value, identity.value); }
-      const completion = value.completion; const bytes = await bounded(ports.now() + 10_000, () => ports.read(completion.rootSnapshot));
+      const completion = value.completion; const snapshot = completion.rootSnapshot;
+      if (snapshot === null) throw new Error("removed managed run never opened a checkpoint");
+      const bytes = await bounded(ports.now() + 10_000, () => ports.read(snapshot));
       if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== completion.rootSnapshot) throw new Error("completed managed audit snapshot is unavailable");
       const raw: unknown = JSON.parse(bytes); const root = parseManagedLifecycleStore(raw); const operation = root.operation;
       const audit = operation.preparation?.sequence?.steps.find((step) => step.id === statement.value.step)?.resolution; const receipt = operation.resolutionReceipts.find((item) => item.step === statement.value.step);

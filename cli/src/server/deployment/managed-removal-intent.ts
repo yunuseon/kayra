@@ -56,3 +56,9 @@ export const managedRemovalAccountingIntent = z.object({
   inventory: digest, effects: digest, before: digest, after: digest, observedAt: time,
 }).strict().readonly();
 export type ManagedRemovalAccountingIntent = z.infer<typeof managedRemovalAccountingIntent>;
+
+export const managedRemovalTombstone = z.object({
+  version: z.literal(1), request: z.uuid(), action: z.string().max(80),
+  effects: digest, checkpoint: digest.nullable(), withdrawnAt: time,
+}).strict().readonly();
+export type ManagedRemovalTombstone = z.infer<typeof managedRemovalTombstone>;

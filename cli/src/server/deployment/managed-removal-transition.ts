@@ -1,8 +1,9 @@
 import { parseDataOwnership } from "../../contracts/owned-volume.ts";
 import { parseLifecycleEnvelope } from "./lifecycle-envelope.ts";
-import { lifecycleActionId, requestLifecycleRemoval } from "./lifecycle-fence.ts";
-import { admitTicket, reserveTicket } from "./lifecycle-tickets.ts";
-import { parseManagedRemovalIntent } from "./managed-removal-intent.ts";
+import { completeLifecycleRemoval, lifecycleActionId, requestLifecycleRemoval, settleLifecycleWork, startLifecycleRemoval } from "./lifecycle-fence.ts";
+import { admitTicket, completeTicket, reserveTicket } from "./lifecycle-tickets.ts";
+import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
+import { managedRemovalTombstone, parseManagedRemovalIntent } from "./managed-removal-intent.ts";
 import type { ManagedRemovalIntent } from "./managed-removal-intent.ts";
 import type { IndexEntry } from "./lifecycle-app-index-state.ts";
 
@@ -45,4 +46,41 @@ export const requestManagedRemovalEnvelope = (input: unknown, indexed: IndexEntr
   });
   if (!next.ok || next.value.removal === undefined) throw new Error("managed removal envelope is invalid");
   return Object.freeze({ state: next.value, removal: next.value.removal, changed: true });
+};
+
+/** Custody ends only after the owner settles runtime accounting and verifies the platform withdrawal of this registration. */
+// eslint-disable-next-line functional/prefer-immutable-types -- the validated lifecycle envelope is shallow-frozen and transitions do not mutate it
+export const completeManagedRemovalEnvelope = (input: unknown, observed: unknown, checkpointRun: string | null) => {
+  const parsed = parseLifecycleEnvelope(input);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const current = parsed.value;
+  const tombstone = managedRemovalTombstone.parse(observed);
+  const { removal, removalAccounting: accounting, fence } = current;
+  if (current.removalTombstone !== undefined) {
+    if (!same(current.removalTombstone, tombstone)) throw new Error("managed removal tombstone conflicts");
+    return current;
+  }
+  if (removal?.request !== tombstone.request || accounting?.effects !== tombstone.effects || fence?.lifecycle.phase !== "removal-requested") throw new Error("managed removal finalization lacks the owning action");
+  const active = fence.lifecycle.active;
+  const pending = current.managed?.find((item) => item.completion === null);
+  if ((active === null) !== (pending === undefined) || active !== null && (active.kind !== "deploy" ||
+    pending?.action !== lifecycleActionId(fence, active.sequence))) throw new Error("managed removal cannot reconcile pending work");
+  const inactive = pending === undefined ? { ok: true as const, value: fence } : settleLifecycleWork(fence, pending.action);
+  if (!inactive.ok) throw new Error("managed removal lost pending ownership");
+  const removing = startLifecycleRemoval(inactive.value, Object.freeze(removal.volumes.map((volume) => volume.name)));
+  if (!removing.ok) throw new Error(removing.error);
+  const removed = completeLifecycleRemoval(removing.value, removal.action);
+  const settled = pending === undefined ? { ok: true as const, value: current.tickets } : completeTicket(current.tickets, pending.ticket, "cancelled");
+  if (!removed.ok || !settled.ok) throw new Error("managed removal cannot settle lifecycle");
+  const tickets = completeTicket(settled.value, removal.ticket, "success");
+  if (!tickets.ok) throw new Error(tickets.error);
+  const managed = pending === undefined ? current.managed : current.managed?.map((item) =>
+    item === pending ? parseManagedLifecycleRequest({ ...item, completion: {
+      outcome: "removed", disposition: "cancelled", rootSnapshot: pending.run === checkpointRun ? tombstone.checkpoint : null, removal: removal.request,
+    } }) : item);
+  const next = parseLifecycleEnvelope({
+    ...current, tickets: tickets.value, fence: removed.value, operations: Object.freeze([]), managed, removalTombstone: tombstone,
+  });
+  if (!next.ok) throw new Error(next.error);
+  return next.value;
 };

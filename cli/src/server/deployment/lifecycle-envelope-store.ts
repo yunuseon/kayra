@@ -1,5 +1,5 @@
 import { managedRemovalAccountingIntent, managedRemovalEffectsReference } from "./managed-removal-intent.ts";
-import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
+import { completeManagedRemovalEnvelope, requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
 import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff, activateManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
 import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
 import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
@@ -185,6 +185,14 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       if (reference.journal !== "initializing") throw new Error("managed removal effects require initialization");
       await persist({ ...current, removalEffects: reference });
       return reference;
+    }),
+    completeManagedRemoval: (input: unknown, checkpointRun: string | null) => serial(async () => {
+      const current = await required();
+      const next = completeManagedRemovalEnvelope(current, input, checkpointRun);
+      if (current.removalTombstone !== undefined) return current.removalTombstone;
+      const receipt = (await persist(next)).removalTombstone;
+      if (receipt === undefined) throw new Error("managed removal tombstone did not persist");
+      return receipt;
     }),
     bindManagedRemovalAccounting: (input: unknown) => serial(async () => {
       const intent = managedRemovalAccountingIntent.parse(input);

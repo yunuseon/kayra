@@ -83,3 +83,39 @@ test("expired initialization and revoked native cleanup authority preserve the o
   const revoked = await fixture(t); await revoked.index().prepareManagedForwardCleanup("shop", revoked.request, revoked.ports); revoked.denyCleanup();
   const held = await revoked.index().tickManagedForwardCleanup("shop", revoked.request, revoked.ports, revoked.factory); assert.equal(held.phase, "held"); assert.equal(held.deadline, revoked.reservation.deadline); assert.equal(revoked.effects.length, 0); assert.deepEqual(await revoked.index().managedState("shop", revoked.runtime), revoked.held);
 });
+
+test("the global admission writer transfers capacity exactly once after fresh handoff evidence", async (t) => {
+  const lab = await fixture(t);
+  const original = await lab.index().resourceSnapshot();
+  await lab.index().prepareManagedForwardCleanup("shop", lab.request, lab.ports);
+  for (let i = 0; i < 60; i++) {
+    const state = await lab.index().tickManagedForwardCleanup("shop", lab.request, lab.ports, lab.factory);
+    if (state.phase !== "fencing") { assert.equal(state.phase, "complete"); break; }
+  }
+  const retained = lab.runtime.services.observeDesired;
+  const transfer = (authorize = true) => lab.index().transferManagedForwardAdmission("shop", lab.request,
+    { ...lab.ports, observeHost: lab.runtime.observeHost, authorizeTransfer: () => Promise.resolve(authorize) }, lab.factory, retained);
+  await assert.rejects(transfer(), /requires its published intent/);
+  const prepared = await lab.index().prepareManagedForwardHandoff("shop", lab.request, lab.ports, lab.factory, retained);
+  assert.equal(prepared.reservation.phase, "transferring");
+  await assert.rejects(transfer(false), /authority unavailable/);
+  lab.cut("transfer-write-before");
+  await assert.rejects(transfer(), /injected before/);
+  await lab.reopen();
+  assert.deepEqual(await lab.index().resourceSnapshot(), original);
+  lab.cut("transfer-write-after");
+  await assert.rejects(transfer(), /injected after/);
+  await lab.reopen();
+
+  lab.clock(prepared.reservation.handoff.deadline + 1);
+  const moved = await transfer(false);
+  assert.equal(moved.source, prepared.reservation.handoff.source);
+  assert.equal(moved.deadline, prepared.reservation.handoff.deadline);
+  const resources = await lab.index().resourceSnapshot();
+  assert.equal(resources?.charges.length, 1);
+  assert.equal(resources.charges[0]?.sequence, 4);
+  assert.equal(resources.charges[0]?.result, "pending");
+  assert.deepEqual(await lab.index().managedState("shop", lab.runtime), lab.held);
+  assert.equal((await lab.readEnvelope()).fence?.lifecycle.phase, "registered");
+  assert.equal(lab.effects.length, 4);
+});

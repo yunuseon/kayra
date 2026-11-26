@@ -2673,3 +2673,9 @@ embedding prior forward history. A restart after publication reads the same
 source and deadline. Ordinary deploy and effect-free cleanup paths refuse this
 source. Activation requires the dedicated handoff, and automatic initial cleanup
 cannot release inherited data capacity.
+
+The shared accounting writer can now commit that transfer under the published
+intent. It rechecks the old lease, current host, successor authority, consumer
+cessation and retained readiness before replacing the charge and its binding in
+one write. A lost acknowledgement recovers the exact pending successor lease.
+The envelope and held root still fence execution during this stage.

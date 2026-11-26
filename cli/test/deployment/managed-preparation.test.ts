@@ -8,6 +8,7 @@ import type { TestContext } from "node:test";
 import { managedIndexRuntimeFixture } from "./managed-index-runtime-fixture.ts";
 import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
 import { managedPreparation } from "../../src/server/deployment/managed-preparation.ts";
+import { registrationControl } from "../../src/server/deployment/registration-control.ts";
 import type { IndexedManagedRuntime } from "../../src/server/deployment/indexed-managed-lifecycle.ts";
 import type { OwnedVolumePort } from "../../src/contracts/owned-volume.ts";
 import { typed } from "../../src/lib/typed.ts";
@@ -52,6 +53,24 @@ test("a compiler cannot replace the commit or bundle receipt before acceptance",
   const lab = await fixture(t); const run = randomUUID();
   await assert.rejects(managedPreparation(lab.index(), { ...lab.ports, plans: { ...lab.ports.plans, preview: () => Promise.resolve(lab.plan) } }).prepare("shop", run, "b".repeat(40)), /compiler changed/);
   assert.deepEqual(await lab.index().pendingManagedDeployments(), []); assert.equal(lab.calls.includes("runtime"), false); assert.equal(lab.hostCalls(), 0);
+});
+
+test("managed preview reads only its retained build and known volume allocations", async (t) => {
+  const lab = await fixture(t);
+  const file = join(lab.directory, "state.json");
+  const before = await readFile(file, "utf8");
+  const owner = managedPreparation(lab.index(), lab.ports);
+  const control = registrationControl({ index: lab.index(), canRegister: () => Promise.resolve(true), managedSwarm: true, managedPreview: owner.preview });
+  const input = { app: "shop", commit: lab.plan.commit };
+  const result = await control("/registration/preview", input);
+  assert.deepEqual(result, { admitted: false, plan: lab.source.candidate });
+  assert.deepEqual(lab.calls, ["keys", "compiler"]);
+  await assert.rejects(owner.preview("shop", "b".repeat(40)), /requires a retained build/);
+  const unknownVolume = managedPreparation(lab.index(), { ...lab.ports, plans: { ...lab.ports.plans, volumeKeys: () => Promise.resolve(["another"]) } });
+  await assert.rejects(unknownVolume.preview(input.app, input.commit), /requires recorded volume identities/);
+  assert.equal(await readFile(file, "utf8"), before);
+  assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
+  assert.equal(lab.hostCalls(), 0);
 });
 
 test("invalid identities fail before immutable build preparation", async (t) => {

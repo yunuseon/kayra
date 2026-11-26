@@ -295,12 +295,14 @@
                 that:
                   - not (preview.stdout | from_json).admitted
                   - preview_workload.commit == fixture_commit
-                  - preview_workload.registration == (pointer.content | b64decode | from_json)
+                  - (preview_workload.infrastructure.registration if preview_workload.version == 3 else preview_workload.registration) == (pointer.content | b64decode | from_json)
                   - preview_workload.grants == build_registration.grants
-                  - preview_workload.services.web.environment.GREETING == {'kind':'secret','key':'GREETING'}
-                  - preview_workload.services.web.environment.MODE == {'kind':'configuration','key':'MODE'}
+                  - preview_environment.GREETING == {'kind':'secret','key':'GREETING'}
+                  - preview_environment.MODE == {'kind':'configuration','key':'MODE'}
                   - request.secrets.GREETING not in preview.stdout
                 quiet: true
+              vars:
+                preview_environment: "{{ preview_workload.services.web.inputs.environment if preview_workload.version == 3 else preview_workload.services.web.environment }}"
               no_log: true
           always:
             - name: Restore the fixture's hidden secret

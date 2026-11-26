@@ -5,6 +5,7 @@ import type { BuildPorts } from "../../contracts/build-artifact.ts";
 import { z } from "zod";
 import { names } from "../../lib/names.ts";
 import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
+import type { managedPreparation } from "./managed-preparation.ts";
 import { registrationGenerationId } from "./lifecycle-envelope.ts";
 
 const request = z.object({
@@ -15,7 +16,7 @@ const reserveRequest = request.extend({ runtime: z.enum(["compose", "swarm"]).de
 const ticketRequest = request.extend({ ticket: z.string().max(80) });
 
 type AppIndex = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>,
-  "registrationOwnership" | "previewRolloutPlan" | "previewPlan" | "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
+  "registrationOwnership" | "deploymentProtocol" | "previewRolloutPlan" | "previewPlan" | "registrationPolicy" | "imagePins" | "prepareBuild" | "verifiedRegistration" | "prepareApp" | "reserveRegistration" | "submitRegistration" | "reconcileRegistration">>;
 
 export type RegistrationPorts = {
   readonly index: AppIndex;
@@ -25,13 +26,18 @@ export type RegistrationPorts = {
   readonly runtimeEnabled?: ((runtime: Runtime) => Promise<boolean>) | undefined;
   readonly rollouts?: RolloutPlanPort | undefined;
   readonly plans?: HttpPlanPort | undefined;
+  readonly managedPreview?: ReturnType<typeof managedPreparation>["preview"] | undefined;
 };
-export const registrationControl = ({ index, canRegister, builds, managedSwarm = false, runtimeEnabled = (runtime) => Promise.resolve(runtime === "compose"), plans, rollouts }: RegistrationPorts) => async (path: string, input: unknown) => {
+export const registrationControl = ({ index, canRegister, builds, managedSwarm = false, runtimeEnabled = (runtime) => Promise.resolve(runtime === "compose"), plans, rollouts, managedPreview }: RegistrationPorts) => async (path: string, input: unknown) => {
   switch (path) {
     case "/registration/preview": {
       const parsed = z.object({ app: z.string().regex(names.app.pattern), commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().safeParse(input);
-      if (!parsed.success || plans === undefined && rollouts === undefined) return undefined;
+      if (!parsed.success || plans === undefined && rollouts === undefined && managedPreview === undefined) return undefined;
       if (!(await canRegister(parsed.data.app))) throw new Error("app is outside preview scope");
+      if (await index.deploymentProtocol(parsed.data.app) === "managed-v3") {
+        if (!managedSwarm || managedPreview === undefined) throw new Error("managed preview is unavailable");
+        return Object.freeze({ admitted: false, plan: await managedPreview(parsed.data.app, parsed.data.commit) });
+      }
       const plan = rollouts !== undefined ? await index.previewRolloutPlan(parsed.data.app, parsed.data.commit, rollouts) :
         plans === undefined ? undefined : await index.previewPlan(parsed.data.app, parsed.data.commit, plans);
       return Object.freeze({ admitted: false, plan });

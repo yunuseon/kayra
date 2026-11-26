@@ -219,7 +219,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         recovery: artifacts === undefined ? undefined : { actor: { kind: "operator-control", identity: "local-control:uid:" + String(process.getuid?.() ?? "unknown") },
           ports: { read: artifacts.read, now: Date.now, native: oneShotJob(api) } },
       })(route, input);
-      return registrationControl({ index: await opening, canRegister, builds, plans, rollouts, managedSwarm,
+      return registrationControl({ index: await opening, canRegister, builds, plans, rollouts, managedSwarm, managedPreview: managed?.preview,
         runtimeEnabled: async (runtime) => runtime === "compose" || (swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok),
       })(route, input);
     },

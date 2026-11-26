@@ -8,7 +8,7 @@ import type { openLifecycleAppIndex } from "./lifecycle-app-index.ts";
 import { managedSourceContext } from "./managed-source-context.ts";
 import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "acceptedManagedRequest" | "managedRequestSource" | "managedRestoreCandidate" | "prepareBuild" | "registrationPolicy" | "reserveDataVolumeIdentities" | "proposeManagedDeployment" | "requestManagedDeployment">>;
+type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "acceptedManagedRequest" | "retainedManagedBuild" | "managedRequestSource" | "managedRestoreCandidate" | "managedPreviewVolumes" | "prepareBuild" | "registrationPolicy" | "reserveDataVolumeIdentities" | "proposeManagedDeployment" | "requestManagedDeployment">>;
 type Ports = { readonly builds: BuildPorts; readonly plans: ManagedPlanPort; readonly inputs: RetainedInputsPort;
   readonly runtime: (context: ManagedExecutionContext) => Promise<IndexedManagedRuntime | undefined> };
 
@@ -59,5 +59,15 @@ export const managedPreparation = (index: Index, ports: Ports) => {
     })();
     return accept(app, source, lookup);
   };
-  return Object.freeze({ prepare, restore });
+  const preview = async (app: string, commit: string) => {
+    const build = await index.retainedManagedBuild(app, commit, ports.builds);
+    const keys = await bounded(() => ports.plans.volumeKeys(build.registration, commit, build.artifact));
+    const volumes = await index.managedPreviewVolumes(app, keys);
+    const candidate = await bounded(() => ports.plans.preview(build.registration, commit, build.artifact, volumes));
+    if (candidate.commit !== commit || candidate.artifact !== build.artifact || JSON.stringify(candidate.infrastructure.registration) !== JSON.stringify(build.registration)) {
+      throw new Error("managed compiler changed the requested build identity");
+    }
+    return candidate;
+  };
+  return Object.freeze({ prepare, restore, preview });
 };

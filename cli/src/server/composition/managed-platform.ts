@@ -108,7 +108,7 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
     return Object.freeze({ status: "purging" as const, request: state.request, deadline: state.deadline });
   };
   return Object.freeze({
-    prepare, removal, purge,
+    prepare, preview: preparation.preview, removal, purge,
     commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, restore: preparation.restore, forRun, actor: ports.actor }),
     work: Object.freeze({ read, now, forRun }),
     health,

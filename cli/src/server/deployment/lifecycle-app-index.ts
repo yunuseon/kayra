@@ -1091,6 +1091,16 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       return ownershipReference(app, registration.incarnation);
     }),
+    managedPreviewVolumes: (app: string, requested: readonly string[]) => useIndexed(app, async (store, owner) => {
+      const registration = verifiedRegistration(app, await store.read());
+      const keys = z.array(ownedVolumeKeySchema).max(32).safeParse(requested);
+      if (owner.protocol !== "managed-v3" || owner.incarnation !== registration.incarnation || !keys.success || new Set(keys.data).size !== keys.data.length) {
+        throw new Error("managed preview volume scope is unavailable");
+      }
+      const volumes = owner.volumes.filter((volume) => keys.data.includes(volume.key));
+      if (volumes.length !== keys.data.length) throw new Error("managed preview requires recorded volume identities");
+      return Object.freeze(volumes);
+    }),
     reserveDataVolumeIdentities: (app: string, requested: readonly string[]) => useIndexed(app, async (store) => {
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       if (envelope?.registrationReceipt?.runtime !== "swarm") throw new Error("managed volume identities require an explicitly registered Swarm application");

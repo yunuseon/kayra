@@ -856,7 +856,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const root = await journals(path, "existing");
       try { const state = parseManagedLifecycleStore(await root.read()); const source = await readSource(state.operation.source); const gate = managedIndexGate({ owner: indexed, envelope, source });
         if (!gate.ok || state.operation.run !== accepted.run || state.operation.phase !== "complete" || accepted.completion.rootSnapshot !== createHash("sha256").update(JSON.stringify(state)).digest("hex")) throw new Error("managed proposal baseline lacks its completed request");
-        if (source.version !== 2) throw new Error("managed allocation protocol conversion requires an explicit operation");
+        if (source.version === 1) throw new Error("managed allocation protocol conversion requires an explicit operation");
         return await managedDeploymentProposal(candidate, ownership.value, request, { state, source }, ports);
       } finally { await root.close(); }
     }),

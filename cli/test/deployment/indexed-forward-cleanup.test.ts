@@ -1,4 +1,5 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- observes native effects and injects interruption or ownership loss */
+import { parseManagedApplicationPlan } from "../../src/contracts/managed-application-plan.ts";
 import { randomUUID } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { managedLifecycleSourceDigest, parseManagedLifecycleSource } from "../../src/server/deployment/managed-lifecycle-source.ts";
@@ -164,4 +165,38 @@ test("the global admission writer transfers capacity exactly once after fresh ha
   assert.equal(status?.rollback, "data-fenced");
   assert.equal(status.verifiedActive, null);
   assert.equal(lab.effects.length, 4);
+});
+
+test("a verified forward successor becomes the baseline for ordinary proposals", async (t) => {
+  const lab = await fixture(t);
+  await lab.index().prepareManagedForwardCleanup("shop", lab.request, lab.ports);
+  for (let i = 0; i < 60; i++) {
+    const state = await lab.index().tickManagedForwardCleanup("shop", lab.request, lab.ports, lab.factory);
+    if (state.phase !== "fencing") { assert.equal(state.phase, "complete"); break; }
+  }
+  const retained = lab.runtime.services.observeDesired;
+  await lab.index().prepareManagedForwardHandoff("shop", lab.request, lab.ports, lab.factory, retained);
+  await lab.index().transferManagedForwardAdmission("shop", lab.request,
+    { ...lab.ports, observeHost: lab.runtime.observeHost, authorizeTransfer: () => Promise.resolve(true) }, lab.factory, retained);
+  await lab.index().installManagedForwardRoot("shop", lab.request, lab.ports, lab.factory, retained);
+  const successor = await lab.index().activateManagedForward("shop", lab.request, lab.ports, lab.factory, retained);
+  const runtime = { ...lab.runtime, allocations: { reconcile: () => Promise.resolve("ready" as const) } };
+  for (let i = 0; i < 100; i++) {
+    const state = await lab.index().tickManagedDeployment("shop", successor.run, runtime);
+    assert.notEqual(state?.operation.phase, "held");
+    if (state?.operation.phase === "complete") break;
+  }
+  const status = await lab.index().managedDeploymentStatus("shop", runtime);
+  assert.equal(status?.operation.phase, "complete");
+  assert.equal(status.verifiedActive?.run, successor.run);
+
+  const build = await lab.index().prepareBuild("shop", "9".repeat(40), {
+    ...lab.artifacts, now: lab.runtime.now, images: lab.ports.images, prepare: () => Promise.resolve(JSON.stringify({ commit: "9".repeat(40) })),
+  });
+  const next = parseManagedApplicationPlan({ ...lab.candidate, commit: build.commit, artifact: build.artifact });
+  assert.ok(next.ok);
+  const source = await lab.index().proposeManagedDeployment("shop", next.value, randomUUID(), lab.ports);
+  assert.equal(source.version, 2);
+  assert.deepEqual(source.previous?.source.application, lab.candidate);
+  assert.equal(source.retained[0]?.kind, "active");
 });

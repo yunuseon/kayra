@@ -341,6 +341,129 @@
       "additionalProperties": {},
       "description": "The server's own compose stacks: their directory on the server and the names under stacks/ to run."
     },
+    "restic_backup": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "restore_test_schedule": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restore_test_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keep": {
+          "type": "object",
+          "properties": {
+            "daily": {
+              "type": "number"
+            },
+            "weekly": {
+              "type": "number"
+            },
+            "monthly": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "daily",
+            "weekly",
+            "monthly"
+          ],
+          "additionalProperties": {}
+        },
+        "ssh": {
+          "type": "object",
+          "properties": {
+            "public_key": {
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            },
+            "user": {
+              "type": "string"
+            },
+            "port": {
+              "type": "number"
+            },
+            "known_host": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "public_key",
+            "host",
+            "user",
+            "port",
+            "known_host"
+          ],
+          "additionalProperties": {}
+        },
+        "postgres": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              },
+              "database": {
+                "type": "string"
+              },
+              "network": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "host",
+              "user",
+              "database",
+              "network"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "dir",
+        "repository",
+        "schedule",
+        "restore_test_schedule",
+        "paths"
+      ],
+      "additionalProperties": {},
+      "description": "The nightly restic backup: what, where to (SFTP), when, how long kept, the Postgres databases dumped first (each reached as host on network), and the monthly restore test."
+    },
     "monitor": {
       "type": "object",
       "properties": {

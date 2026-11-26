@@ -4,7 +4,8 @@
 #
 # Play 1: Bootstrap — base packages, deploy user, Docker installation.
 #         Run once on a fresh server (idempotent, safe to re-run).
-# Play 2: Platform — Traefik, Authelia, the registry, BuildKit, the builder and the deployer via docker compose.
+# Play 2: Platform — Traefik, Authelia, the registry, BuildKit, the builder and the deployer via docker compose,
+#         then the server's own stacks and, with restic_backup, their nightly backup.
 #         Re-run whenever platform config, or certs change.
 #
 # The platform lives in /opt/platform and knows no app by name. Apps live in
@@ -49,6 +50,10 @@
     - role: compose-stacks
       become: true
       when: compose_stacks is defined
+    # After the stacks: the databases it dumps are on their networks.
+    - role: restic-backup
+      become: true
+      when: restic_backup is defined
     - role: forgejo-config
       when: forgejo_config is defined
     - role: monitor

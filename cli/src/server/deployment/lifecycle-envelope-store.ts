@@ -1,3 +1,4 @@
+import { managedRemovalEffectsReference } from "./managed-removal-intent.ts";
 import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
 import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff, activateManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
 import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
@@ -171,6 +172,27 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const next = requestManagedRemovalEnvelope(await required(), ...args);
       if (next.changed) await persist(next.state);
       return next.removal;
+    }),
+    bindManagedRemovalEffects: (input: unknown) => serial(async () => {
+      const current = await required();
+      const reference = managedRemovalEffectsReference.parse(input);
+      const prior = current.removalEffects;
+      if (current.removal?.request !== reference.request || current.removal.action !== reference.action) throw new Error("managed removal effects lack their intent");
+      if (prior !== undefined) {
+        if (prior.inventory !== reference.inventory || prior.deadline !== reference.deadline) throw new Error("managed removal effects reference conflicts");
+        return prior;
+      }
+      if (reference.journal !== "initializing") throw new Error("managed removal effects require initialization");
+      await persist({ ...current, removalEffects: reference });
+      return reference;
+    }),
+    publishManagedRemovalEffects: (input: unknown) => serial(async () => {
+      const current = await required();
+      const reference = managedRemovalEffectsReference.parse(input);
+      if (reference.journal !== "initializing" || JSON.stringify(current.removalEffects) !== JSON.stringify(reference)) throw new Error("managed removal effects publication conflicts");
+      const next = Object.freeze({ ...reference, journal: "ready" as const });
+      await persist({ ...current, removalEffects: next });
+      return next;
     }),
     reserveManagedForward: (input: Parameters<typeof reserveManagedForwardEnvelope>[1]) => serial(async () => {
       const next = reserveManagedForwardEnvelope(await required(), input); if (next.changed) await persist(next.state); return next.reservation;

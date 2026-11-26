@@ -2704,3 +2704,10 @@ It covers candidate, prior and retired workload descriptions, their recorded
 runtime versions, migration or probe attempts, and pinned uncertain checks.
 Consumers appear before retained dependencies. The reconciler must prove
 cessation before settling accounting or publishing a removal tombstone.
+
+The removal reconciler publishes its inventory and absolute deadline before
+binding the effects journal. It fences each known job, stops and scrubs consumer
+services, checks for remaining execution containers, and then stops retained
+services. It reconciles the same journal after restart and refuses a missing
+published journal. A fresh read-only completion check repeats the native
+observations before they can support accounting or tombstone publication.

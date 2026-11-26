@@ -1,3 +1,5 @@
+import { managedRemovalEffects, managedRemovalInventoryDigest } from "./managed-removal-effects.ts";
+import type { ManagedRemovalEffectsPorts, ManagedRemovalInventory } from "./managed-removal-effects.ts";
 import { managedRemovalInventory } from "./managed-removal-inventory.ts";
 import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
 import type { ManagedRemovalIntent } from "./managed-removal-intent.ts";
@@ -200,6 +202,82 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, left);
     try { return await Promise.race([Promise.resolve().then(call).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
   };
+  const useRemovalInventory = <T>(app: string, request: string, ports: ManagedDeploymentReadPort, use: (inventory: ManagedRemovalInventory, store: EnvelopeStore) => Promise<T>) =>
+    useIndexed(app, async (store, indexed) => {
+      const envelope = await store.read();
+      const intent = envelope?.removal;
+      if (envelope === undefined || indexed.protocol !== "managed-v3" || intent?.request !== request || intent.owner.dataOwner !== indexed.dataOwner ||
+        intent.owner.incarnation !== indexed.incarnation || JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) {
+        throw new Error("managed removal inventory lacks the accepted scope");
+      }
+      const path = join(appDirectory(app), "managed");
+      await requireDirectory(path);
+      const deadline = ports.now() + 10_000;
+      const read = async (digest: string) => {
+        const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest));
+        if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed removal evidence unavailable");
+        return bytes;
+      };
+      if (indexed.managedRoot === "empty" && await stat(join(path, "state.json")) === undefined) return use(await managedRemovalInventory(intent, null, read), store);
+      const root = await journals(path, "existing");
+      try {
+        const state = parseManagedLifecycleStore(await root.read());
+        const accepted = envelope.managed?.find((item) => item.run === state.operation.run);
+        if (accepted?.source !== state.operation.source || accepted.action !== state.operation.action ||
+          accepted.completion !== null && !matchesManagedRequestCompletion(accepted.completion, state)) throw new Error("managed removal checkpoint lacks its request");
+        const bytes = await read(accepted.source);
+        const source = parseManagedLifecycleSource(JSON.parse(bytes));
+        if (bytes !== JSON.stringify(source)) throw new Error("managed removal source binding disagrees");
+        return await use(await managedRemovalInventory(intent, { state, source }, read), store);
+      } finally { await root.close(); }
+    });
+  type RemovalEffectsOwner = ReturnType<typeof managedRemovalEffects>;
+  type RemovalEffectsState = NonNullable<Awaited<ReturnType<RemovalEffectsOwner["read"]>>>;
+  const useRemovalEffects = <T>(app: string, request: string, ports: ManagedRemovalEffectsPorts, initialize: boolean, use: (owner: RemovalEffectsOwner, state: RemovalEffectsState) => Promise<T>) =>
+    useRemovalInventory(app, request, ports, async (inventory, store) => {
+      const intent = inventory.intent;
+      const identity = managedRemovalInventoryDigest(inventory);
+      const existing = (await store.read())?.removalEffects;
+      if (!initialize && existing?.journal !== "ready") throw new Error("removal effects are not published");
+      const reference = existing ?? await (async () => {
+        const createdAt = ports.now();
+        const deadline = createdAt + 90_000;
+        if (await boundedManagedRead(deadline, ports.now, () => ports.authorize(intent, null)) !== true ||
+          await boundedManagedRead(deadline, ports.now, () => ports.retain(JSON.stringify(inventory))) !== identity || ports.now() >= deadline) throw new Error("removal effects initialization is unavailable");
+        return store.bindManagedRemovalEffects({ version: 1, request, action: intent.action, inventory: identity, createdAt, deadline, journal: "initializing" });
+      })();
+      if (reference.inventory !== identity || reference.request !== request || reference.action !== intent.action) throw new Error("removal effects inventory changed");
+      const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(reference.inventory));
+      if (bytes !== JSON.stringify(inventory)) throw new Error("removal effects retained inventory unavailable");
+      const path = join(appDirectory(app), "managed", "removal");
+      const directory = join(path, request);
+      if (reference.journal === "initializing") {
+        if (ports.now() >= reference.deadline) throw new Error("removal effects initialization expired");
+        if (await stat(path) === undefined) { await mkdir(path, { mode: 0o700 }); await syncDirectory(dirname(path)); }
+        await requireDirectory(path);
+        if (await stat(directory) === undefined) { await mkdir(directory, { mode: 0o700 }); await syncDirectory(path); }
+      }
+      await requireDirectory(path);
+      await requireDirectory(directory);
+      const journal = await journals(directory, reference.journal === "initializing" ? "initialize" : "existing");
+      try {
+        const owner = managedRemovalEffects(journal, inventory, { ...ports, authorize: async (input, action) => {
+          const current = await store.read();
+          return current?.fence?.lifecycle.phase === "removal-requested" && current.removalEffects?.journal === "ready" &&
+            JSON.stringify(current.removalEffects) === JSON.stringify(reference) && JSON.stringify(current.removal) === JSON.stringify(input) &&
+            await ports.authorize(input, action);
+        } });
+        if (reference.journal === "initializing") {
+          const state = await owner.prepare(reference.createdAt);
+          if (state.createdAt !== reference.createdAt || state.deadline !== reference.deadline || state.phase !== "fencing-jobs") throw new Error("removal effects initialization disagrees");
+          await store.publishManagedRemovalEffects(reference);
+          return await use(owner, state);
+        }
+        const state = await owner.read();
+        if (state?.createdAt !== reference.createdAt || state.deadline !== reference.deadline) throw new Error("published removal journal is unavailable");
+        return await use(owner, state);
+      } finally { await journal.close(); }
+    });
   /** Published read models hold only journal ownership and read capabilities. They never initialize/resume a deployment or acquire effect authority. */
   const useManagedRead = <T>(app: string, ports: ManagedDeploymentReadPort, project: (state: ManagedLifecycleStore, source: ManagedLifecycleSource) => Promise<T>) => useIndexed(app, async (store, indexed) => {
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
@@ -757,34 +835,13 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return store.requestManagedRemoval(owner, request, operator, proposed.removal.createdAt);
       }),
     inspectManagedRemoval: (app: string, request: string, ports: ManagedDeploymentReadPort) =>
-      useIndexed(app, async (store, indexed) => {
-        const envelope = await store.read();
-        const intent = envelope?.removal;
-        if (envelope === undefined || indexed.protocol !== "managed-v3" || intent?.request !== request || intent.owner.dataOwner !== indexed.dataOwner ||
-          intent.owner.incarnation !== indexed.incarnation || JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) {
-          throw new Error("managed removal inventory lacks the accepted scope");
-        }
-        const path = join(appDirectory(app), "managed");
-        await requireDirectory(path);
-        const deadline = ports.now() + 10_000;
-        const read = async (digest: string) => {
-          const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest));
-          if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed removal evidence unavailable");
-          return bytes;
-        };
-        if (indexed.managedRoot === "empty" && await stat(join(path, "state.json")) === undefined) return managedRemovalInventory(intent, null, read);
-        const root = await journals(path, "existing");
-        try {
-          const state = parseManagedLifecycleStore(await root.read());
-          const accepted = envelope.managed?.find((item) => item.run === state.operation.run);
-          if (accepted?.source !== state.operation.source || accepted.action !== state.operation.action ||
-            accepted.completion !== null && !matchesManagedRequestCompletion(accepted.completion, state)) throw new Error("managed removal checkpoint lacks its request");
-          const bytes = await read(accepted.source);
-          const source = parseManagedLifecycleSource(JSON.parse(bytes));
-          if (bytes !== JSON.stringify(source)) throw new Error("managed removal source binding disagrees");
-          return await managedRemovalInventory(intent, { state, source }, read);
-        } finally { await root.close(); }
-      }),
+      useRemovalInventory(app, request, ports, (inventory) => Promise.resolve(inventory)),
+    prepareManagedRemovalEffects: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
+      useRemovalEffects(app, request, ports, true, (_owner, state) => Promise.resolve(state)),
+    tickManagedRemovalEffects: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
+      useRemovalEffects(app, request, ports, false, (owner) => owner.tick()),
+    observeManagedRemovalCompletion: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
+      useRemovalEffects(app, request, ports, false, (owner) => owner.observeCompletion()),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),

@@ -41,3 +41,10 @@ export const parseManagedRemovalIntent = (input: unknown) => {
   return Object.freeze({ ...rest, ...(interrupted === undefined ? {} : { interruptedForward: interrupted }), owner, registration: registration.value, operator: Object.freeze({ ...raw.operator, actor: actor.value }) });
 };
 export type ManagedRemovalIntent = ReturnType<typeof parseManagedRemovalIntent>;
+
+export const managedRemovalEffectsReference = z.object({
+  version: z.literal(1), request: z.uuid(), action: z.string().max(80),
+  inventory: z.string().regex(/^[a-f0-9]{64}$/),
+  createdAt: time, deadline: time, journal: z.enum(["initializing", "ready"]),
+}).strict().readonly().refine((value) => value.deadline === value.createdAt + 90_000);
+export type ManagedRemovalEffectsReference = z.infer<typeof managedRemovalEffectsReference>;

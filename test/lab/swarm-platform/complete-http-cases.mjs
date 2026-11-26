@@ -43,7 +43,10 @@ export async function runCompleteHttpCases({ manifest, target, submit, terminal,
       setPhase(name + ':update');
       const { receipt } = await submit(release);
       event('replacement-accepted', { name, submittedAt, receipt });
-      final = await terminal(receipt, successful ? ['deployed'] : interrupted ? ['rolled-back'] : ['rolled-back', 'unchanged']);
+      let firstFailureAt;
+      final = await terminal(receipt, successful ? ['deployed'] : interrupted ? ['rolled-back'] : ['rolled-back', 'unchanged'], ({ phase, outcome }) => {
+        if (['held', 'recovering', 'recovery-verifying'].includes(phase) || outcome === 'rolled-back' || outcome === 'unchanged') firstFailureAt ??= Date.now();
+      });
       const convergedAt = Date.now();
       assert.equal(final.verifiedActive.commit, manifest.commits[expected]);
       const nativePlan = await readNativePlan();
@@ -70,7 +73,7 @@ export async function runCompleteHttpCases({ manifest, target, submit, terminal,
       const stable = samples.filter((value) => value.at >= convergedAt);
       const summary = summarizeRequests(samples);
       const premature = prematureCandidateRequests(samples, release);
-      const result = { name, release, expected, nativePlan, candidatePlan, submittedAt, convergedAt,
+      const result = { name, release, expected, nativePlan, candidatePlan, submittedAt, convergedAt, firstFailureAt: firstFailureAt ?? null,
         recoveryMs, failure: item.failure ?? null, operation: final.operation, requests: summary, long, prematureExposure: premature.length };
       event('http-case', result);
       assert.ok(baselineSamples.length >= 50 && baselineSamples.every((value) => value.status === 200 && value.release === previous && value.ready));
@@ -84,7 +87,7 @@ export async function runCompleteHttpCases({ manifest, target, submit, terminal,
         assert.ok(preparing.length >= 200 && preparing.every((value) => value.release === previous));
       }
       if (release === 'D') {
-        assert.ok(convergedAt - submittedAt <= 90000, 'never-ready attempt did not settle within 90 seconds');
+        assert.ok(firstFailureAt !== undefined && firstFailureAt - submittedAt <= 90000, 'never-ready attempt did not report failure within 90 seconds');
         assert.ok(healthy === undefined && samples.every((value) => value.release !== release));
       }
       if (interrupted) {

@@ -40,10 +40,11 @@ const wait = async (condition, label, timeout = 180000) => {
   throw new Error('timed out: ' + label);
 };
 const currentOperation = (value) => managed ? value?.operation : value?.operation ?? value?.preparation;
-const terminal = (receipt, outcomes = ['deployed']) => wait(async () => {
+const terminal = (receipt, outcomes = ['deployed'], observe = () => {}) => wait(async () => {
   const value = await status(); const current = currentOperation(value);
   if (current == null || (managed ? current.run : current.request) !== receipt.request) return undefined;
   event('status', value);
+  observe(current);
   // The managed coordinator records a failed effect before opening automatic compensation on its next tick.
   const recovering = managed && outcomes.includes('rolled-back');
   assert.ok(!['failed', 'cancelled'].includes(current.phase) && (current.phase !== 'held' || recovering), 'fixture rollout did not converge');
@@ -61,13 +62,14 @@ const submit = async (release) => {
   assert.equal(preview.plan.policy.migrationTimeoutCeilingSeconds, manifest.migrationCeilingSeconds); return { receipt, nativePlan, preview: preview.plan };
 };
 const resumeHttp = async (after) => {
-  assert.ok(managed && ['B', 'C', 'F'].includes(after));
+  assert.ok(managed && ['B', 'C', 'D', 'E', 'F'].includes(after));
+  const previous = ['D', 'E'].includes(after) ? 'C' : after;
   const start = await status();
   assert.equal(start.operation.phase, 'complete');
-  assert.equal(start.verifiedActive.commit, manifest.commits[after]);
+  assert.equal(start.verifiedActive.commit, manifest.commits[previous]);
   const target = { host: manifest.host, ca: await readFile('/var/lib/kayra/swarm/lab-ca.pem', 'utf8') };
   const response = await request(target);
-  assert.equal(response.status, 200); assert.equal(response.release, after); assert.equal(response.ready, true);
+  assert.equal(response.status, 200); assert.equal(response.release, previous); assert.equal(response.ready, true);
   event('resumed-http-observation', { after, start });
   const replacement = await runCompleteHttpCases({ manifest, target, submit, terminal, readNativePlan, events, requests, event,
     setPhase: (value) => { phase = value; }, baseline: { nativePlan: await readNativePlan() }, after });

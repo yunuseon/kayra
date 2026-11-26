@@ -34,6 +34,10 @@ test("removal owns the lifecycle fence before a competing managed request and pr
   await refused;
   assert.equal(removal.phase, "requested");
   assert.deepEqual(await lab.index().managedPruneCandidates(), ["shop"]);
+  const pending = await lab.index().publishedDeploymentStatus("shop");
+  assert.equal(pending?.version, 1);
+  assert.equal(pending.retirement?.phase, "requested");
+  assert.equal(pending.verifiedActive, null);
   assert.equal(removal.action, lab.incarnation + ":4");
   assert.deepEqual(removal.volumes, lab.volumes);
   assert.deepEqual(await lab.index().resourceSnapshot(), before);
@@ -187,6 +191,10 @@ test("removal effects stop consumers before retained services and reopen their d
   try {
     await assert.rejects(lab.index().prepareManagedRemovalEffects("shop", request, ports), /missing|journal|exist/);
     await assert.rejects(readFile(path), /ENOENT/);
+    const blocked = await lab.index().publishedDeploymentStatus("shop");
+    assert.equal(blocked?.version, 1);
+    assert.equal(blocked.retirement?.reason, "evidence");
+    assert.equal(blocked.requiredAction, "inspect-and-resolve");
   } finally { await rename(path + ".kept", path); }
 
   await assert.rejects(finalize({ ...withdrawal, request: randomUUID() }), /withdrawal is unverified/);
@@ -211,6 +219,10 @@ test("removal effects stop consumers before retained services and reopen their d
   const archived = await lab.index().acceptedManagedRequest("shop", lab.source.run, lab.runtime); assert.ok(archived);
   assert.equal(managedReceipt(archived.source, archived.request).outcome, "removed");
   assert.equal(await lab.index().managedDeploymentStatus("shop", lab.runtime), null);
+  const published = await lab.index().publishedDeploymentStatus("shop");
+  assert.equal(published?.version, 1);
+  assert.equal(published.lifecycle, "removed");
+  assert.equal(published.retirement?.remainingVolumes, intent.volumes.length);
   assert.deepEqual(await lab.index().managedHealthContexts(lab.runtime), []);
   assert.deepEqual(await lab.index().managedPruneCandidates(), []);
   assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
@@ -276,6 +288,10 @@ test("removal of a registered app with no deployment retains its data identities
   assert.equal(done.deadline, accepted.deadline);
   await lab.reopen();
   assert.deepEqual(await tick(), done);
+  const projection = await lab.index().publishedDeploymentStatus("shop");
+  assert.equal(projection?.version, 1);
+  assert.equal(projection.lifecycle, "purged");
+  assert.equal(projection.retirement?.remainingVolumes, 0);
   assert.deepEqual((await lab.index().managedRemovalTombstone("shop"))?.volumes, lab.volumes);
   assert.equal(await lab.index().resourceSnapshot(), null);
 });

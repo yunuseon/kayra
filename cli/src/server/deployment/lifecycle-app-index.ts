@@ -1,10 +1,11 @@
+import { parseDeploymentStatus } from "../../contracts/deployment-status.ts";
 import { managedPurgeInventory } from "./managed-purge-inventory.ts";
 import { inspectManagedPurgeVolume, reconcileManagedPurge } from "./managed-purge-effects.ts";
 import type { ManagedPurgeEffectsPorts } from "./managed-purge-effects.ts";
 import type { ManagedPurge } from "./managed-purge-state.ts";
 import { parseRegistrationWithdrawal } from "../../contracts/registration-withdrawal.ts";
 import { managedRemovalAccounting } from "./managed-removal-accounting.ts";
-import { managedRemovalEffects, managedRemovalInventoryDigest } from "./managed-removal-effects.ts";
+import { managedRemovalEffects, managedRemovalInventoryDigest, readManagedRemovalProgress } from "./managed-removal-effects.ts";
 import type { ManagedRemovalEffectsPorts, ManagedRemovalInventory } from "./managed-removal-effects.ts";
 import { managedRemovalInventory } from "./managed-removal-inventory.ts";
 import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
@@ -615,6 +616,38 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   const legacyPins = async (app: string, store: EnvelopeStore, ports: Pick<BuildPorts, "read">) => {
     const envelope = await store.read(); if (envelope === undefined) throw new Error("image pins lack lifecycle ownership"); return deploymentImagePins(app, envelope, ports);
   };
+  const managedRetirementStatus = (app: string) => useIndexed(app, async (store, indexed) => {
+    const saved = await store.read();
+    if (indexed.protocol !== "managed-v3" || saved?.removal === undefined || saved.fence === null) return undefined;
+    const { removal, fence } = saved;
+    if (removal.owner.dataOwner !== indexed.dataOwner || JSON.stringify(removal.volumes) !== JSON.stringify(indexed.volumes)) {
+      throw new Error("managed retirement projection lacks indexed ownership");
+    }
+    const effects = saved.removalEffects;
+    const purge = saved.managedPurge;
+    const base = deploymentStatus(app, indexed.incarnation, "swarm", fence.lifecycle.phase);
+    const progress = await (async () => {
+      if (purge !== undefined) return Object.freeze({ request: purge.request, kind: "purge", phase: purge.phase, reason: purge.reason, deadline: purge.deadline });
+      const reference = { request: removal.request, kind: "remove", deadline: effects?.deadline ?? null };
+      if (saved.removalTombstone !== undefined) return Object.freeze({ ...reference, phase: "complete", reason: null });
+      if (effects?.journal !== "ready") return Object.freeze({ ...reference, phase: "requested", reason: null });
+      try {
+        const journal = await journals(join(appDirectory(app), "managed", "removal", removal.request), "existing");
+        try {
+          const observed = readManagedRemovalProgress(await journal.read(), effects);
+          if (observed.phase !== "complete") return Object.freeze({ ...reference, ...observed });
+          const charge = (await serialIndex(readIndex)).resources?.charges.find((item) => item.app === app);
+          const settled = saved.removalAccounting !== undefined && (charge === undefined || charge.result === "absent");
+          return Object.freeze({ ...reference, reason: null, phase: settled ? "withdrawing" : "settling" });
+        } finally { await journal.close(); }
+      } catch { return Object.freeze({ ...reference, phase: "held", reason: "evidence" }); }
+    })();
+    const answer = parseDeploymentStatus({ ...base, requiredAction: progress.phase === "held" ? "inspect-and-resolve" : "none",
+      retirement: { ...progress, protocol: "managed-v3", remainingVolumes: purge === undefined ? removal.volumes.length : purge.entries.filter((entry) => entry.phase !== "absent").length },
+    });
+    if (!answer.ok) throw new Error(answer.error);
+    return answer.value;
+  });
   const executionContext = (app: string, ports: ManagedDeploymentReadPort, run?: string, pendingOnly = true) => useIndexed(app, async (store, indexed) => {
     if (indexed.protocol !== "managed-v3" || run !== undefined && !z.uuid().safeParse(run).success) throw new Error("managed execution scope unavailable");
     const envelope = await store.read(); const request = run === undefined ? envelope?.managed?.at(-1) : envelope?.managed?.find((item) => item.run === run);
@@ -1473,6 +1506,8 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     /** Dispatch is based only on the persisted owner protocol; readers never guess a backend from observed Docker objects. */
     publishedDeploymentStatus: async (app: string, ports?: ManagedDeploymentReadPort) => {
       if (!(await managedReporting(app))) return useReady(app, (store) => legacyStatus(app, store));
+      const retirement = await managedRetirementStatus(app);
+      if (retirement !== undefined) return retirement;
       if (ports === undefined) throw new Error("managed deployment reporting is unavailable");
       return useManagedRead(app, ports, (state, source) => managedDeploymentStatus(state, source, ports));
     },

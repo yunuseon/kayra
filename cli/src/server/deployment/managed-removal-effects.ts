@@ -12,6 +12,7 @@ import { claimJournal } from "./journal-claim.ts";
 import { jobCleanup } from "./job-cleanup.ts";
 import { managedServiceBarrier, parseManagedServiceBarrier } from "./managed-service-barrier.ts";
 import type { managedRemovalInventory } from "./managed-removal-inventory.ts";
+import type { ManagedRemovalEffectsReference } from "./managed-removal-intent.ts";
 import type { OperationJournal } from "./operation.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -37,6 +38,15 @@ export type ManagedRemovalEffectsPorts = {
   readonly jobs: JobCleanupPort;
   readonly containers: CheckContainerFencePort;
   readonly authorize: (intent: ManagedRemovalInventory["intent"], action: ManagedServiceAction | null) => Promise<boolean>;
+};
+
+/** Status projection under the app owner. It neither creates a child journal nor obtains runtime capabilities. */
+export const readManagedRemovalProgress = (input: unknown, reference: ManagedRemovalEffectsReference) => {
+  const state = schema.parse(input);
+  if (state.inventory !== reference.inventory || state.createdAt !== reference.createdAt ||
+    state.deadline !== reference.deadline || (state.phase === "held") !== (state.reason !== null) ||
+    (state.phase === "complete") !== (state.finishedAt !== null)) throw new Error("managed removal progress conflicts");
+  return Object.freeze({ phase: state.phase, reason: state.reason });
 };
 
 /** Removal stops application effects and retains native name barriers. This owner cannot delete volumes or settle admission. */

@@ -5785,6 +5785,90 @@
                                 }
                               ]
                             },
+                            "retirement": {
+                              "readOnly": true,
+                              "type": "object",
+                              "properties": {
+                                "protocol": {
+                                  "type": "string",
+                                  "const": "managed-v3"
+                                },
+                                "request": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "remove",
+                                    "purge"
+                                  ]
+                                },
+                                "phase": {
+                                  "type": "string",
+                                  "enum": [
+                                    "requested",
+                                    "fencing-jobs",
+                                    "stopping",
+                                    "settling",
+                                    "withdrawing",
+                                    "preflight",
+                                    "deleting",
+                                    "held",
+                                    "complete"
+                                  ]
+                                },
+                                "deadline": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "reason": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "deadline",
+                                        "authority",
+                                        "job",
+                                        "service",
+                                        "check",
+                                        "registration",
+                                        "attachments",
+                                        "ownership",
+                                        "evidence"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "remainingVolumes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 32
+                                }
+                              },
+                              "required": [
+                                "protocol",
+                                "request",
+                                "kind",
+                                "phase",
+                                "deadline",
+                                "reason",
+                                "remainingVolumes"
+                              ],
+                              "additionalProperties": false
+                            },
                             "runtimeObservation": {
                               "type": "string",
                               "const": "not-observed"
@@ -11631,6 +11715,90 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "retirement": {
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "protocol": {
+                        "type": "string",
+                        "const": "managed-v3"
+                      },
+                      "request": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "remove",
+                          "purge"
+                        ]
+                      },
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "requested",
+                          "fencing-jobs",
+                          "stopping",
+                          "settling",
+                          "withdrawing",
+                          "preflight",
+                          "deleting",
+                          "held",
+                          "complete"
+                        ]
+                      },
+                      "deadline": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "reason": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "deadline",
+                              "authority",
+                              "job",
+                              "service",
+                              "check",
+                              "registration",
+                              "attachments",
+                              "ownership",
+                              "evidence"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "remainingVolumes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 32
+                      }
+                    },
+                    "required": [
+                      "protocol",
+                      "request",
+                      "kind",
+                      "phase",
+                      "deadline",
+                      "reason",
+                      "remainingVolumes"
+                    ],
+                    "additionalProperties": false
                   },
                   "runtimeObservation": {
                     "type": "string",

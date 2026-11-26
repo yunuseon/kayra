@@ -23,6 +23,16 @@ const preparation = z.object({ request: z.uuid(), phase: z.enum(["prepared", "ad
   resolution: z.object({ id: digest, outcome: z.enum(["applied", "not-applied"]), at: z.number().int().positive() }).strict().readonly().nullable().default(null),
   step: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/).nullable(),
 }).strict().readonly();
+const retirement = z.object({
+  protocol: z.literal("managed-v3"), request: z.uuid(), kind: z.enum(["remove", "purge"]),
+  phase: z.enum(["requested", "fencing-jobs", "stopping", "settling", "withdrawing", "preflight", "deleting", "held", "complete"]),
+  deadline: z.number().int().positive().nullable(),
+  reason: z.enum(["deadline", "authority", "job", "service", "check", "registration", "attachments", "ownership", "evidence"]).nullable(),
+  remainingVolumes: z.number().int().min(0).max(32),
+}).strict().readonly().refine((value) => (value.phase === "held") === (value.reason !== null) &&
+  (value.kind === "remove" ? !["preflight", "deleting"].includes(value.phase) :
+    !["requested", "fencing-jobs", "stopping", "settling", "withdrawing"].includes(value.phase)));
+
 const schema = z.object({
   version: z.literal(1), app: z.string().regex(names.app.pattern), incarnation: z.uuid(), runtime: z.enum(["compose", "swarm"]),
   lifecycle: z.enum(["registering", "registered", "removal-requested", "removing", "removed", "purging", "purged"]),
@@ -30,14 +40,20 @@ const schema = z.object({
   requested: target.nullable(), desired: target.nullable(), verifiedActive: verified.nullable(), lastKnownGood: verified.nullable(),
   operation: operation.nullable(), requiredAction: z.enum(["none", "inspect-and-resolve"]),
   preparation: preparation.nullable().default(null),
+  retirement: retirement.optional(),
   // A certified release is historical evidence, not a fresh runtime health observation.
   runtimeObservation: z.literal("not-observed"),
 }).strict().readonly().superRefine((value, context) => {
-  if ((value.runtime === "compose" && (value.verification !== "legacy-unverified" || value.requested !== null || value.desired !== null || value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null || value.preparation !== null)) ||
+  const life = value.retirement;
+  if ((life !== undefined && (value.runtime !== "swarm" || value.requested !== null || value.desired !== null ||
+    value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null || value.preparation !== null ||
+    (life.kind === "remove" ? value.lifecycle !== (life.phase === "complete" ? "removed" : "removal-requested") :
+      value.lifecycle !== (life.phase === "complete" ? "purged" : "purging")))) ||
+    (value.runtime === "compose" && (value.verification !== "legacy-unverified" || value.requested !== null || value.desired !== null || value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null || value.preparation !== null)) ||
     (value.runtime === "swarm" && value.verification !== (value.verifiedActive === null ? "unverified" : "verified")) ||
     (value.operation?.phase === "cancelled" && value.operation.cancelRequestedAt === null) ||
     (value.operation?.cancelRequestedAt !== undefined && value.operation.cancelRequestedAt !== null && !["recovering", "held", "cancelled"].includes(value.operation.phase)) ||
-    value.requiredAction !== (value.operation?.phase === "held" || value.preparation?.phase === "held" ? "inspect-and-resolve" : "none") ||
+    value.requiredAction !== (value.operation?.phase === "held" || value.preparation?.phase === "held" || life?.phase === "held" ? "inspect-and-resolve" : "none") ||
     value.preparation !== null && (value.operation !== null || value.requested === null ||
       value.preparation.completedAt === null && JSON.stringify(value.requested) !== JSON.stringify(value.desired) ||
       (value.preparation.phase === "cancelled" || value.preparation.phase === "failed") !== (value.preparation.completedAt !== null) ||

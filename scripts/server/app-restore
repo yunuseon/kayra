@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
-# app-restore <app> — an app that was deployed, yet runs no container now,
-# deployed again at the release that ran.
+# app-restore <app> [--changed] — an app that was deployed, yet runs no
+# container now, deployed again at the release that ran. With --changed, the
+# app's registration or .env has just changed (its hosts, after a new domain;
+# its config): it is deployed again at that release even if it runs, since a
+# running deploy keeps the routes and environment it was started with.
 #
 # A Docker update or a reboot stops every container; one deployed before the
 # platform gave each service a restart policy stays down. The deployer's ctl
 # follows the run to its end, so this exits as the run did. An app never
-# deployed (no release record) and one that runs are left alone.
+# deployed (no release record) is left alone, and so is one that runs unless
+# --changed.
 #
 # Installed by the platform role at <platform_dir>/bin; run by the app role
 # after it registers the app. Run as root. Prints what it did on its last line:
-# "never deployed", "runs", or "restored <sha>".
+# "never deployed", "runs", "restored <sha>" or "redeployed <sha>".
 # =============================================================================
 set -euo pipefail
 
-app="${1:?Usage: app-restore <app>}"
+app="${1:?Usage: app-restore <app> [--changed]}"
 valid_app_name() {
     local LC_ALL=C
     [[ "$1" =~ ^[a-z][a-z0-9-]*$ ]]
@@ -23,6 +27,12 @@ if ! valid_app_name "$app"; then
     echo 'ERROR: invalid app name' >&2
     exit 1
 fi
+changed=false
+case "${2:-}" in
+    "") ;;
+    --changed) changed=true ;;
+    *) echo "Usage: app-restore <app> [--changed]" >&2; exit 2 ;;
+esac
 platform_dir="${PLATFORM_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 releases="${platform_dir}/releases/${app}"
 
@@ -38,11 +48,11 @@ if [ -z "$live" ]; then
 fi
 
 running="$(docker ps -q --filter "label=com.docker.compose.project=${app}" --filter status=running --filter status=restarting)"
-if [ -n "$running" ]; then
+if [ -n "$running" ] && [ "$changed" = false ]; then
     echo "runs"
     exit 0
 fi
 
 cd "$platform_dir"
 docker compose exec -T deployer kayra-deployer ctl deploy "$app" "$live"
-echo "restored ${live}"
+if [ -n "$running" ]; then echo "redeployed ${live}"; else echo "restored ${live}"; fi

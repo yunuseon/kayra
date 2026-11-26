@@ -53,6 +53,11 @@ renovate_schedule: "0 4 * * 1"
 # www sends https://<domain>/x?y to https://www.<domain>/x?y. Empty, the bare
 # domain is not served.
 apex_redirect: ""
+# Other domains that only redirect here, domain => a host of this server's
+# domain: {example.de: www} sends example.de and www.example.de, path and query
+# kept, to https://www.<domain>, permanently. Their names must already point at
+# the server: certificates come by HTTP-01 like every other host's.
+redirect_domains: {}
 # Push webhooks start a deploy at once; without them, the poll below finds the push.
 webhooks: true
 deploy_poll: "17 * * * *"

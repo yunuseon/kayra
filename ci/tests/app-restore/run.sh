@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs scripts/server/app-restore against a fixture platform directory and a
 # stub docker, one case per state an app can be in after a Docker restart:
-# never deployed (no release record, or none readable), running, stopped.
+# never deployed (no release record, or none readable), running, stopped; and
+# with --changed (its registration or .env changed), running or not.
 # Needs nothing but bash; no Docker, no server.
 #   bash ci/tests/app-restore/run.sh
 set -euo pipefail
@@ -26,14 +27,14 @@ chmod +x "${tmp}/bin/docker"
 sha_old="$(printf 'a%.0s' $(seq 40))"
 sha_new="$(printf 'b%.0s' $(seq 40))"
 
-# case <name> <setup> <want last line> <want exit> <want deploy call or "none">, with RUNNING/CTL_EXIT from the environment.
+# case <name> <setup> <want last line> <want exit> <want deploy call or "none">, with RUNNING/CTL_EXIT/ARGS from the environment.
 case_() {
     local name="$1" setup="$2" want="$3" want_code="$4" want_call="$5" platform out code calls
     platform="${tmp}/${name// /-}"
     mkdir -p "$platform"
     : > "${tmp}/calls"
     (cd "$platform" && eval "$setup")
-    out="$(PATH="${tmp}/bin:${PATH}" PLATFORM_DIR="$platform" CALLS="${tmp}/calls" bash "$restore" shop 2>&1)" && code=0 || code=$?
+    out="$(PATH="${tmp}/bin:${PATH}" PLATFORM_DIR="$platform" CALLS="${tmp}/calls" bash "$restore" shop ${ARGS:-} 2>&1)" && code=0 || code=$?
     calls="$(cat "${tmp}/calls")"
     if [ "$(tail -1 <<< "$out")" = "$want" ] && [ "$code" = "$want_code" ] && [ "${calls:-none}" = "$want_call" ]; then
         echo "  ✓ ${name}"
@@ -55,5 +56,18 @@ case_ "stopped: the newest release deployed again" \
 CTL_EXIT=1 case_ "a restore whose run fails fails" \
     "mkdir -p releases/shop && touch releases/shop/20261020T100000Z-${sha_new}.env" \
     "" 1 "compose exec -T deployer kayra-deployer ctl deploy shop ${sha_new}"
+
+# --changed: a new domain or config reaches a running app only by a deploy.
+ARGS=--changed RUNNING=0123abc case_ "changed and running: the live release deployed again" \
+    "mkdir -p releases/shop && touch releases/shop/20261018T100000Z-${sha_old}.env releases/shop/20261020T100000Z-${sha_new}.env" \
+    "redeployed ${sha_new}" 0 "compose exec -T deployer kayra-deployer ctl deploy shop ${sha_new}"
+ARGS=--changed case_ "changed and stopped: restored as without it" \
+    "mkdir -p releases/shop && touch releases/shop/20261020T100000Z-${sha_new}.env" \
+    "restored ${sha_new}" 0 "compose exec -T deployer kayra-deployer ctl deploy shop ${sha_new}"
+ARGS=--changed case_ "changed, never deployed: left alone" ":" "never deployed" 0 none
+ARGS=--changed RUNNING=0123abc CTL_EXIT=1 case_ "a redeploy whose run fails fails" \
+    "mkdir -p releases/shop && touch releases/shop/20261020T100000Z-${sha_new}.env" \
+    "" 1 "compose exec -T deployer kayra-deployer ctl deploy shop ${sha_new}"
+ARGS=--force case_ "an unknown option is refused" ":" "Usage: app-restore <app> [--changed]" 2 none
 
 exit "$failed"

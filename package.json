@@ -1,6 +1,6 @@
 {
   "name": "@yunuseon/kayra",
-  "version": "0.23.0",
+  "version": "0.26.1",
   "description": "A self-hosted app platform and the CLI that runs it: Traefik, Authelia, a registry, rootless BuildKit and a small deployer per server, set up with OpenTofu and Ansible.",
   "license": "MIT",
   "author": "Yunus Öztürk",
@@ -59,7 +59,7 @@
     "eslint": "10.13.0",
     "eslint-plugin-functional": "10.0.1",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.72.0"
+    "typescript-eslint": "8.72.1"
   },
   "overrides": {
     "eslint-plugin-functional": {

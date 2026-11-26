@@ -7,7 +7,8 @@
 #   {{ apps_dir }}/<app>/.env                 operator config for compose
 #   app-apply                                  secrets → app-secrets/<app>/
 #   app-restore                                a deployed app that runs
-#                                              nothing, deployed again
+#                                              nothing, or whose registration
+#                                              or .env changed, deployed again
 #   {{ platform_dir }}/apps/<app>.json         the registration the deployer
 #                                              and the builder read
 #
@@ -140,14 +141,18 @@
 
 # A Docker update or a reboot stops every container, and one deployed before
 # the platform gave each service a restart policy stays down (bin/app-restore).
+# A changed registration or .env (a new domain moves every host; new config)
+# reaches a running app only by a deploy: until then it keeps the routes and
+# environment it started with, and a new domain's redirects send visitors to
+# hosts it does not serve. So then it is deployed again at the release it runs.
 # The retries wait out a deployer the host layer has just restarted.
-- name: Restore the app if it was deployed but runs nothing
+- name: Restore the app if it was deployed but runs nothing, or redeploy it if its registration changed
   ansible.builtin.command:
-    cmd: "{{ platform_dir }}/bin/app-restore {{ app.name }}"
+    argv: "{{ [platform_dir ~ '/bin/app-restore', app.name] + (['--changed'] if compose_registration.redeploy_required | default(false) else []) }}"
   register: app_restored
   retries: 5
   delay: 3
   until: app_restored.rc == 0
-  changed_when: "'restored ' in app_restored.stdout"
+  changed_when: "'restored ' in app_restored.stdout or 'redeployed ' in app_restored.stdout"
   when: app.runtime | default('compose') == 'compose'
   become: true

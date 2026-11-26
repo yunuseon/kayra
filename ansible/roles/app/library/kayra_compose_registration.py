@@ -53,9 +53,10 @@ def apply(module, platform, app, app_directory, registration, dotenv, lock_fd=No
     deploy = pwd.getpwnam("deploy").pw_uid
     group = grp.getgrnam("deploy").gr_gid
     env_path = app_directory / ".env"
-    if module.check_mode:
-        module.exit_json(changed=not matches(env_path, dotenv, deploy, group, 0o644)
+    redeploy_required = (not matches(env_path, dotenv, deploy, group, 0o644)
                          or not matches(target, registration, 0, 0, 0o644))
+    if module.check_mode:
+        module.exit_json(changed=redeploy_required, redeploy_required=redeploy_required)
 
     app_directory.mkdir(exist_ok=True)
     os.chown(app_directory, deploy, group)
@@ -64,7 +65,7 @@ def apply(module, platform, app, app_directory, registration, dotenv, lock_fd=No
     subprocess.run([str(platform / "bin" / "app-apply"), app, "--locked-fd", str(lock_fd)],
                    input=module.params["secrets"].encode(), capture_output=True, check=True, pass_fds=(lock_fd,))
     install(target, registration, 0, 0, 0o644)
-    module.exit_json(changed=True)
+    module.exit_json(changed=True, redeploy_required=redeploy_required)
 
 
 def main():

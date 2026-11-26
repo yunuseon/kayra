@@ -44,6 +44,7 @@ apps:
   - which repos a server's Renovate keeps up to date → `renovate_repositories` in its `vars.yml`
   - a value that never varies is not a setting: write it where it is used
 - **Monitoring:** `monitor` in a platform or edge server's `vars.yml` runs Gatus there (role `monitor`): it watches the servers in `monitor.watch` the way `kayra verify` does — logins, pages, app routes, `deploy.<domain>/health`, an edge's routes, certificates — plus `monitor.extra`, and alerts through the `notifier`. Two servers watching each other (the edge and one at home) notice each other's death.
+- **Backups:** `restic_backup` in a platform or NAS server's `vars.yml` runs role `restic-backup` there: nightly restic over SFTP (`restic_backup.ssh`), the Postgres databases in `restic_backup.postgres` dumped first (each reached by its container name on its stack's network, password in `restic_backup_postgres_passwords`), pruned on Sundays by `restic_backup.keep`, and a monthly restore test, by hand `kayra backup test <server>`. Every path is mounted read-only and must exist. On a platform server it runs after the server's own stacks, whose networks the dumps join; a stack's named volume is backed up from `/var/lib/docker/volumes/<volume>/_data`.
 - `kind` picks the playbook (`ansible/playbooks/<kind>.yml` in kayra); only `platform` servers run apps.
   `edge` (e.g. `servers/edge/`) is a WireGuard tunnel into a private network plus Caddy in front of it — roles `wireguard` + `edge-proxy`, routes and keys in its `vars.yml` — and the outside eye on that network's backups (`backup-check`: hourly, reads each repository's newest snapshot and restore-test result over read-only HTTPS, an alert to the `notifier` when either goes stale or a test fails) and, with `ntfy` set, an ntfy server for the fleet's alerts (role `ntfy`: users, access and tokens as code, everything else denied; Caddy reaches it through an `edge_routes` entry to `ntfy:80`).
   `nas` (`servers/nas/`) is a box whose OS belongs to its vendor (UGOS): the play writes nothing outside `nas_root` (`/volume2`) and asserts so before any change — no packages, users or system config, which a firmware update would reset; everything runs as containers. `/volume1` (media, homes) is never written; the backup reads from it (`restic_backup.paths`, mounted read-only, asserted to exist so Docker never creates one). Role `compose-stacks`: the services, one `servers/nas/stacks/<name>/compose.yaml` each, every image pinned, only what differs from the image's defaults plus an explicit `container_name` (the proxy's Caddyfile addresses containers by it) — the stack folder (compose file plus any config it mounts as `./…`, e.g. Homepage's dashboard, read-only) and an `.env` to `/volume2/docker/stacks/<name>/`, data mounted from where it already lives. Private images: `compose_registry_logins` in `secrets.yml` (`{registry, username, password}`), logged in with a Docker config inside the stacks' directory, never the host's. Role `restic-backup`: nightly restic over SFTP to a Hetzner Storage Box (`servers/nas/terraform/`, its own daily snapshots), Postgres dumped first, pruned on Sundays; a restore test monthly by cron (a twelfth of the data read each time) and by hand with `kayra backup test nas`, its result uploaded next to the repository.
@@ -130,3 +131,31 @@ The bare domain is served only where `apex_redirect` in the server's
 own, and the module adds the record for it (`@`, or `shop` under the zone).
 `kayra validate` checks that one of the server's apps routes that host;
 `kayra verify` and the monitors check the redirect.
+
+Other domains that should only send visitors here — the same brand under
+another TLD, an old name — go in `redirect_domains`, each to a host of the
+server's domain:
+
+```yaml
+redirect_domains:
+  example.de: www
+  example.com: www
+```
+
+`https://example.de/x?y` and `https://www.example.de/x?y` then redirect
+permanently to `https://www.example.com/x?y` (with `example.com` the server's
+domain), each name with a certificate of its own. Their DNS is the fleet's own:
+a zone per domain beside the platform-dns module, with `@` and `www` pointing
+at the server, and whatever else those domains carry (mail, a shop elsewhere).
+**Set `redirect_domains` only once both names resolve to the server:**
+certificates come by HTTP-01, and a name that still points elsewhere fails its
+challenge, which Let's Encrypt counts against the name for an hour.
+`kayra validate` checks each target like `apex_redirect`'s; `kayra verify` and
+the monitors check both names of each domain.
+
+**Changing a server's domain** (`domain` in `server.yml`) moves every host,
+the platform's and the apps'. Point the new names at the server first (the
+same HTTP-01 rule as above), then `kayra deploy`: it sets the platform up for
+the new domain and, since each app's registration and `.env` change with it,
+deploys every app again at the release it runs, so its routes move too. To
+keep the old domain working for visitors, list it in `redirect_domains`.

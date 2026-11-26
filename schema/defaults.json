@@ -97,6 +97,18 @@
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
     },
+    "redirect_domains": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+      },
+      "description": "Other domains that only send visitors here, each to a host of the server's domain: example.de: www sends https://example.de/x?y and https://www.example.de/x?y to https://www.<domain>/x?y, permanently, path and query kept. Their DNS is the fleet's: both names must point at the server before setup, or their certificates fail."
+    },
     "webhooks": {
       "type": "boolean",
       "description": "Whether a push webhook may start a deploy at once: true (default) serves deploy.<domain>/hook/<app>; false serves no such endpoint, and pushes deploy by deploy_poll."
@@ -467,6 +479,37 @@
             "known_host"
           ],
           "additionalProperties": {}
+        },
+        "postgres": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              },
+              "database": {
+                "type": "string"
+              },
+              "network": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "host",
+              "user",
+              "database",
+              "network"
+            ],
+            "additionalProperties": {}
+          }
         }
       },
       "required": [
@@ -477,7 +520,7 @@
         "paths"
       ],
       "additionalProperties": {},
-      "description": "The nightly restic backup: what, where to (SFTP), when, how long kept, and the monthly restore test."
+      "description": "The nightly restic backup: what, where to (SFTP), when, how long kept, the Postgres databases dumped first (each reached as host on network), and the monthly restore test."
     },
     "wireguard": {
       "type": "object",

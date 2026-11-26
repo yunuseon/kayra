@@ -9,7 +9,8 @@
 #     where a monitor runs) send a browser to the login, not a 403 from rules
 #     Authelia never loaded
 #   - with apex_redirect, the bare domain redirects permanently to that host,
-#     path and query kept
+#     path and query kept; with redirect_domains, each other domain and its
+#     www to theirs
 #   - every certificate is a real one (Let's Encrypt or mkcert), never
 #     Traefik's default
 #   - an unsigned webhook is refused (with webhooks: false, /hook is not
@@ -44,6 +45,8 @@ domain="$(yq -r '.domain' "${dir}/server.yml")"
 # Not yq's `//`: it takes false for missing too.
 webhooks="$( { [ -f "${dir}/vars.yml" ] && yq -r '.webhooks' "${dir}/vars.yml"; } || echo true)"
 apex="$( { [ -f "${dir}/vars.yml" ] && yq -r '.apex_redirect // ""' "${dir}/vars.yml"; } || true)"
+# "<other domain> <host>" per line, from redirect_domains.
+redirects="$( { [ -f "${dir}/vars.yml" ] && yq -r '.redirect_domains // {} | to_entries | .[] | .key + " " + .value' "${dir}/vars.yml"; } || true)"
 inventory="${dir}/inventory.ini"
 [ -f "$inventory" ] || { fail "no inventory for ${name}: provision it first"; exit 1; }
 field() { awk -v key="$1" '{for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) {print substr($i, length(key) + 2); exit}}' "$inventory"; }
@@ -84,6 +87,9 @@ to_login() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 302 ] && case "$(
 not_5xx() { real_cert "$1" && case "$(cut -d' ' -f1 <<< "$1")" in 000|5*) return 1 ;; esac; }
 refused() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 401 ]; }
 to_apex() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 301 ] && [ "$(cut -d' ' -f2 <<< "$1")" = "https://${apex}.${domain}/x?y" ]; }
+# The host a redirect_domains probe expects, set before each check.
+redirect_to=""
+to_redirect() { real_cert "$1" && [ "$(cut -d' ' -f1 <<< "$1")" = 301 ] && [ "$(cut -d' ' -f2 <<< "$1")" = "https://${redirect_to}/x?y" ]; }
 
 describe() { echo "HTTP $(cut -d' ' -f1 <<< "$1"), certificate by $(cut -d' ' -f4- <<< "$1") (verify $(cut -d' ' -f3 <<< "$1"))"; }
 
@@ -102,6 +108,13 @@ while IFS= read -r sub; do
     esac
 done < <(awk '!/^[[:space:]]*(#|$)/ {print $1}' "${KAYRA_ROOT}/hosts.conf")
 [ -z "$apex" ] || check "${domain} redirects to ${apex}.${domain}" "$domain" GET to_apex "/x?y"
+while read -r other target; do
+    [ -n "$other" ] || continue
+    redirect_to="${target}.${domain}"
+    for host in "$other" "www.${other}"; do
+        check "${host} redirects to ${redirect_to}" "$host" GET to_redirect "/x?y"
+    done
+done <<< "$redirects"
 
 first_app="$(yq -r '.apps // [] | .[] | select(.runtime != "swarm") | .name' "${dir}/server.yml" | sed -n '1p')"
 if [ -n "$first_app" ]; then

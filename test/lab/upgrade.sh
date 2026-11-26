@@ -208,7 +208,12 @@ to_sops() {
     (cd "$fleet" && sops encrypt --in-place "servers/${server}/secrets.yml")
 }
 [ "$sops_fleet" = false ] || to_sops
-sed "s/__KAYRA_LAB_VM_NAME__/${vm_name}/" > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
+# Releases before 0.26 let the fleet select the Multipass provider's major.
+# Keep the old provider for the first deployment, then switch the disposable
+# fleet to the checkout's module constraints before planning the upgrade.
+legacy_providers="${fleet}/servers/${server}/terraform/legacy-providers.tf"
+if [ "$(printf '%s\n0.26.0\n' "$from" | sort -V | head -1)" != 0.26.0 ]; then
+    cat > "$legacy_providers" <<'EOF'
 terraform {
   required_providers {
     multipass = { source = "todoroff/multipass", version = "~> 1.7" }
@@ -216,7 +221,9 @@ terraform {
     local     = { source = "hashicorp/local", version = "~> 2.5" }
   }
 }
-
+EOF
+fi
+sed "s/__KAYRA_LAB_VM_NAME__/${vm_name}/" > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
 module "instance" {
   source         = "../../../node_modules/@yunuseon/kayra/terraform/modules/multipass-instance"
   name           = "__KAYRA_LAB_VM_NAME__"
@@ -297,6 +304,11 @@ first_deploy() {
 step "2  the upgrade to this checkout ($(git -C "$KAYRA_ROOT" rev-parse --short HEAD))"
 rm -rf node_modules/@yunuseon/kayra
 ln -s "$KAYRA_ROOT" node_modules/@yunuseon/kayra
+if [ -f "$legacy_providers" ]; then
+    rm "$legacy_providers"
+    tofu -chdir="servers/${server}/terraform" init -upgrade -input=false >> "$log" 2>&1 ||
+        die "upgrading the disposable fleet's OpenTofu providers"
+fi
 upgrade() {
     local upgraded ok
     upgraded="$(kayra_cmd "$1" "$server" 2>&1)" && ok=true || ok=false
@@ -401,6 +413,21 @@ run="$(await_run "$before")"
 case "$run" in *" restore "*) ;; *) die "the app restarted for a reason other than restore: ${run}" ;; esac
 expect_serves v3
 echo "✓ stopped Compose app restored after deployer restart"
+
+step "3b  changed Compose config redeploys the live commit once"
+before="$run"
+yq -i '.MODE = "updated"' "${fleet}/servers/${server}/apps/sample.yml"
+upgrade apps
+run="$(await_run "$before")"
+[ "$(state_of "$run")" = success ] || die "the Compose configuration redeploy failed"
+[ "$(awk '{print $3}' <<< "$run")" = "$(awk '{print $3}' <<< "$before")" ] ||
+    die "the Compose configuration redeploy switched commits"
+multipass exec "$vm_name" -- sudo docker exec sample-web-1 printenv MODE | grep -qx updated ||
+    die "the live Compose container has the old configuration"
+upgrade apps
+[ "$(newest_run)" = "$run" ] || die "unchanged Compose registration redeployed the app"
+expect_serves v3
+echo "✓ changed Compose config reached the same release, and an unchanged registration left it running"
 
 # ── 4: a commit the policy refuses ──────────────────────────────────────────
 step "4  a commit the compose policy refuses"

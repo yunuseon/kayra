@@ -99,6 +99,16 @@ run_case apex-default-cert "shop.test redirects to www.shop.test: HTTP 301, cert
 healthy; answer issuer-shop.test "R13"; answer "shop.test_x?y" "302 https://www.shop.test/ 0"
 run_case apex-redirect-loses-the-path "shop.test redirects to www.shop.test: HTTP 302"
 rm -f "${fleet}/servers/shop/vars.yml"
+# Other domains (redirect_domains), bare and www, answer 301 to their host here, path and query kept.
+redirected() { healthy; echo 'redirect_domains: {shop.de: www}' > "${fleet}/servers/shop/vars.yml"
+    answer issuer-shop.de "R13"; answer "shop.de_x?y" "301 https://www.shop.test/x?y 0"
+    answer issuer-www.shop.de "R13"; answer "www.shop.de_x?y" "301 https://www.shop.test/x?y 0"; }
+redirected; run_case redirect-domains nothing
+redirected; answer issuer-www.shop.de "TRAEFIK DEFAULT CERT"; answer "www.shop.de_x?y" "301 https://www.shop.test/x?y 20"
+run_case redirect-domain-default-cert "www.shop.de redirects to www.shop.test: HTTP 301, certificate by TRAEFIK DEFAULT CERT"
+redirected; answer "shop.de_x?y" "404  0"
+run_case redirect-domain-not-served "shop.de redirects to www.shop.test: HTTP 404"
+rm -f "${fleet}/servers/shop/vars.yml"
 healthy; answer deploy.shop.test "403  0"
 run_case authelia-without-the-rule "deploy.shop.test sends a browser to the login: HTTP 403"
 healthy; answer www.shop.test "200  20"; answer issuer-www.shop.test "TRAEFIK DEFAULT CERT"

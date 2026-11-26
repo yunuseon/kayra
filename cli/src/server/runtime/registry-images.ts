@@ -96,7 +96,11 @@ export const registryImages = (origin = "http://registry:5000", architecture = p
   };
   const resolveDeclared: ImageResolutionPort["resolveDeclared"] = async (app, usages) => {
     const inspected = await inspectDeclared(app, usages);
-    return typeof inspected === "string" ? Object.freeze({ status: inspected }) : Object.freeze({ status: "accepted", images: inspected });
+    if (typeof inspected === "string") return Object.freeze({ status: inspected });
+    // Each declaration must pass its own mount policy even when several workloads use the same digest.
+    const bySource = new Map(inspected.map((image) => [image.source, image] as const));
+    if (inspected.some((image) => bySource.get(image.source)?.pull !== image.pull)) return Object.freeze({ status: unavailable });
+    return Object.freeze({ status: "accepted", images: Object.freeze([...bySource.values()]) });
   };
   return typed<ImageAdmissionPort & DeclaredImageAdmissionPort & ImageResolutionPort>(Object.freeze({ verifyDeclared, resolveDeclared,
     verify: async (app, images) => {

@@ -154,6 +154,8 @@ test("resolution enforces every usage and never returns partially verified image
   const allowed = await lab.port.resolveDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets: ["/data"] }]); assert.equal(allowed.status, "accepted");
   assert.deepEqual(await lab.port.resolveDeclared("shop", [{ image: image.ref, kind: "service", volumeTargets: ["/data"] }, { image: image.ref, kind: "one-shot", volumeTargets: [] }]), { status: "unsupported" });
   const plain = lab.image();
+  const shared = await lab.port.resolveDeclared("shop", [{ image: plain.ref, kind: "service", volumeTargets: [] }, { image: plain.ref, kind: "one-shot", volumeTargets: [] }]);
+  assert.deepEqual(shared, { status: "accepted", images: [{ source: plain.ref, pull: plain.ref, os: "linux", architecture: "arm64" }] });
   assert.deepEqual(await lab.port.resolveDeclared("shop", [{ image: plain.ref, kind: "service", volumeTargets: [] }, { image: "localhost:5000/other/web@sha256:" + "a".repeat(64), kind: "service", volumeTargets: [] }]), { status: "unsupported" });
   lab.override(() => ({ code: 302, redirect: "http://untrusted.invalid/metadata" }));
   assert.deepEqual(await lab.port.resolveDeclared("shop", [{ image: plain.ref, kind: "service", volumeTargets: [] }]), { status: "unavailable" });

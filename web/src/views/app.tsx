@@ -120,10 +120,8 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
   if (!answer.ok) return <Problem failure={answer.failure} />;
   const state = answer.value;
   if (state === null) return <><p class="tone-muted">No deployment has been requested.</p><button class="button small" onClick={refresh}>Refresh deployment</button></>;
-  const preparation = state.version === 1 ? state.preparation : null;
   const view = deploymentView(state, health?.ok === true ? health.value : undefined);
-  const cancelRequest = view.cancelRequest;
-  const resolution = preparation?.step === null || preparation?.step === undefined ? null : { run: preparation.request, step: preparation.step };
+  const { cancelRequest, migrationResolution: resolution } = view;
   return <>
     <div class="actions"><button class="button small" onClick={() => { refresh(); refreshHealth(); }}>Refresh deployment</button></div>
     <dl class="facts deployment-facts">

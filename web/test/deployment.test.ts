@@ -58,5 +58,16 @@ test("managed restoration reports the requested failure separately from the acti
   expect(deploymentView(stopping).recoveryPhase).toBe("Stopping interrupted checks"); expect(deploymentView(stopping).pendingCheckContainers).toBe(1); expect(deploymentView(stopping).recovery).toBe("None recorded");
   const blocked: DeploymentStatus = { ...stopping, operation: { ...stopping.operation, phase: "held", reason: "recovery" }, requiredAction: "inspect-and-resolve", recovery: { phase: "held", reason: "deadline", deadline: 180000, checks: { containers: 2, stopped: 1 } } };
   expect(deploymentView(blocked).action).toContain("check containers stopped"); expect(deploymentView({ ...blocked, rollback: "data-fenced" }).action).toContain("preserve retained data");
+  const updating: DeploymentStatus = { ...managed, operation: { ...managed.operation, phase: "updating", outcome: null, settled: false } };
+  expect(deploymentView(updating).cancelRequest).toBe(managed.operation.run);
+  expect(deploymentView({ ...updating, operation: { ...updating.operation, cancelRequestedAt: 1500 } }).cancelRequest).toBeNull();
+  expect(deploymentView(stopping).cancelRequest).toBeNull();
+  expect(deploymentView(blocked).migrationResolution).toBeNull();
+  const ambiguous: DeploymentStatus = { ...blocked, recovery: null, operation: { ...blocked.operation, reason: "preparation" },
+    migrations: { phase: "held", reason: "probe-unknown", step: "schema", resolutions: [] } };
+  expect(deploymentView(ambiguous).migrationResolution).toEqual({ run: managed.operation.run, step: "schema" });
+  expect(deploymentView({
+    ...ambiguous, migrations: { ...ambiguous.migrations, resolutions: [{ step: "schema", id: "a".repeat(64), outcome: "not-applied", at: 1500 }] },
+  }).migrationResolution).toBeNull();
   expect(deploymentView(managed, null).runtime).toBe("Not observed");
 });

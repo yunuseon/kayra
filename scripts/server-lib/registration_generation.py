@@ -303,6 +303,69 @@ def _pointer(parent, app):
         return None
 
 
+def _withdrawal_identity(value):
+    _require(type(value) is dict and set(value) == {"version", "request", "action", "registration"}
+             and type(value["version"]) is int and value["version"] == 1, "invalid registration withdrawal")
+    registration = _metadata(value["registration"])
+    request, action = value["request"], value["action"]
+    _require(type(request) is str and bool(_UUID.fullmatch(request)), "invalid registration withdrawal request")
+    action_meta = _metadata({**registration, "actionId": action})
+    _require(int(action_meta["actionId"].split(":")[1]) > int(registration["actionId"].split(":")[1]),
+             "registration withdrawal action did not advance")
+    return {"version": 1, "request": request, "action": action, "registration": registration}
+
+
+def _withdrawal(parent, name="withdrawal.json"):
+    try:
+        raw = _decode(_read_file(parent, name, 0o444))
+    except FileNotFoundError:
+        return None
+    return _withdrawal_identity(raw)
+
+
+def _write_withdrawal(parent, name, intent):
+    temporary = ".withdrawal-" + uuid.uuid4().hex + ".tmp"
+    _new_file(parent, temporary, _encoded(intent), 0o444)
+    os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+    os.fsync(parent)
+
+
+def withdraw_managed(root, requested, private_gid):
+    """Withdraw a managed pointer after the caller authenticates the coordinator's finalized accounting."""
+    intent = _withdrawal_identity(requested)
+    expected = intent["registration"]
+    try:
+        with _app(root, expected, private_gid) as (public, public_generations, _):
+            recorded = _withdrawal(public)
+            completed = _withdrawal(public, "withdrawn.json")
+            current = _pointer(public, expected["app"])
+            _require(completed is None or completed == recorded == intent and current is None,
+                     "registration withdrawal completion conflicts")
+            if recorded is None:
+                _require(current == expected, "registration pointer changed")
+            else:
+                _require(recorded == intent and current in (None, expected), "registration withdrawal conflicts")
+            with _dir(public_generations, expected["registrationGeneration"], 0o555) as generation:
+                _require(_metadata(_decode(_read_file(generation, "manifest.json", 0o444))) == expected,
+                         "registration manifest changed")
+                payload = _registration(_decode(_read_file(generation, "registration.json", 0o444)), expected)
+                _require(payload["runtime"] == "swarm", "withdrawal requires a managed Swarm registration")
+                _ownership(_decode(_read_file(generation, "ownership.json", 0o444)), expected)
+            if recorded is None:
+                _write_withdrawal(public, "withdrawal.json", intent)
+            # Synchronize even on replay. A previous replacement may have lost its acknowledgement.
+            os.fsync(public)
+            if current is not None:
+                os.unlink("current.json", dir_fd=public)
+            # Evidence cannot become visible to the deployer before pointer absence is durable.
+            os.fsync(public)
+            if completed is None:
+                _write_withdrawal(public, "withdrawn.json", intent)
+    except (OSError, UnicodeError):
+        raise RegistrationError("registration withdrawal uncertain; reconcile the same action") from None
+    return intent
+
+
 def publish(root, metadata, registration, configuration, secrets, private_gid, previous=None, ownership=None, infrastructure=None):
     """Publish once under an already-held durable app fence. Never retries effects.
 
@@ -328,6 +391,8 @@ def publish(root, metadata, registration, configuration, secrets, private_gid, p
     generation = expected["registrationGeneration"]
     try:
         with _app(root, expected, private_gid, create=True) as (public, public_generations, private_generations):
+            _require(_withdrawal(public) is None and _withdrawal(public, "withdrawn.json") is None,
+                     "registration has a withdrawal fence")
             _require(_pointer(public, expected["app"]) == previous, "registration pointer changed")
             if previous is not None:
                 with _dir(public_generations, previous["registrationGeneration"], 0o555) as prior:

@@ -18,6 +18,7 @@ import { oneShotCleanup, oneShotJob } from "../runtime/one-shot-job.ts";
 import { observeSwarmHost } from "../runtime/swarm-host.ts";
 import { registryImages } from "../runtime/registry-images.ts";
 import { platformManagedPlans } from "./managed-plans.ts";
+import { registrationWithdrawalObservation } from "../platform/registration-withdrawal.ts";
 import { readRegistrationOwnership } from "../platform/registration-ownership.ts";
 import { readPublicRegistration, readPublicRegistrationGeneration } from "../platform/public-registration.ts";
 import { managedRemovalRuntime } from "./managed-removal-runtime.ts";
@@ -26,7 +27,7 @@ import { managedRuntime } from "./managed-runtime.ts";
 import { typed } from "../../lib/typed.ts";
 
 type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts" |
-  "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting">>;
+  "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
 type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined; readonly actor?: MigrationResolutionActor | undefined };
 
@@ -61,6 +62,7 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
       native: { services: native.services, jobs: removalJobs, containers: native.checkFences },
     });
   };
+  const observeWithdrawal = registrationWithdrawalObservation(paths.publicRegistrations, now);
   const removal = Object.freeze({
     request: (app: string, request: string, reason: string) => {
       const actor = ports.actor;
@@ -70,6 +72,9 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
     prepare: async (app: string, request: string) => index.prepareManagedRemovalEffects(app, request, await forRemoval(app, request)),
     tick: async (app: string, request: string) => index.tickManagedRemovalEffects(app, request, await forRemoval(app, request)),
     retireAccounting: async (app: string, request: string) => index.retireManagedRemovalAccounting(app, request, await forRemoval(app, request)),
+    finalize: async (app: string, request: string) => index.completeManagedRemoval(app, request, {
+      ...await forRemoval(app, request), observeWithdrawal,
+    }),
   });
   return Object.freeze({
     prepare, removal,

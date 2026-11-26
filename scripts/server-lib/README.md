@@ -68,3 +68,11 @@ Tests: `sudo python3 -B ci/tests/registration-generation/test_generation.py` on
 Linux. They operate only under new temporary directories, including tests that
 drop privileges and kill child publishers. They do not prove power-loss
 durability or the final production container mounts.
+
+Managed withdrawal uses the same publisher lock and requires an exact
+registration and coordinator-authorized removal action. The adapter syncs a
+withdrawal intent, unlinks and syncs the current pointer, then publishes the
+completion marker. A restart can reconcile the same action. Registration
+publication refuses while either marker exists. Immutable generations and
+their files are preserved. The deployer reads the markers without acquiring
+write access to the platform registration tree.

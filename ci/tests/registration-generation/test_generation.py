@@ -453,6 +453,54 @@ class GenerationTest(unittest.TestCase):
         self.assertEqual(storage.observe(self.fd, self.meta, GID, owner)["status"], "unknown")
         self.assertEqual(self.observation()["status"], "applied")  # Old generations remain readable, without inferred ownership.
 
+    def test_withdrawal_reconciles_after_unlink_and_fences_publication(self):
+        self.swarm_registration()
+        owner = self.ownership()
+        storage.publish(self.fd, self.meta, self.fixture["registration"], self.fixture["configuration"],
+                        self.fixture["secrets"], GID, ownership=owner)
+        requested = {"version": 1, "request": "12345678-1111-4111-8111-123456789abc",
+                     "action": self.meta["incarnation"] + ":2", "registration": self.meta}
+        public = self.root / "public" / self.key
+        current = public / "current.json"
+        other = {**self.meta, "registrationGeneration": self.next_metadata()["registrationGeneration"]}
+        with self.assertRaisesRegex(storage.RegistrationError, "pointer changed"):
+            storage.withdraw_managed(self.fd, {**requested, "registration": other}, GID)
+        self.assertTrue(current.exists())
+        self.assertFalse((public / "withdrawal.json").exists())
+
+        with mock.patch.object(storage.os, "unlink", side_effect=OSError("before unlink")):
+            with self.assertRaisesRegex(storage.RegistrationError, "withdrawal uncertain"):
+                storage.withdraw_managed(self.fd, requested, GID)
+        self.assertTrue(current.exists())
+        self.assertFalse((public / "withdrawn.json").exists())
+        intent_stat = (public / "withdrawal.json").stat()
+
+        def lose_unlink_ack(path, **kwargs):
+            unlink(path, **kwargs)
+            raise OSError("after unlink")
+
+        unlink = os.unlink
+        with mock.patch.object(storage.os, "unlink", side_effect=lose_unlink_ack):
+            with self.assertRaisesRegex(storage.RegistrationError, "withdrawal uncertain"):
+                storage.withdraw_managed(self.fd, requested, GID)
+        self.assertFalse(current.exists())
+        self.assertFalse((public / "withdrawn.json").exists())
+        with self.assertRaisesRegex(storage.RegistrationError, "withdrawal fence"):
+            self.publish(self.next_metadata())
+
+        self.assertEqual(storage.withdraw_managed(self.fd, requested, GID), requested)
+        self.assertEqual((public / "withdrawal.json").stat().st_ino, intent_stat.st_ino)
+        self.assertEqual((public / "withdrawal.json").read_bytes(), (public / "withdrawn.json").read_bytes())
+        complete = (public / "withdrawn.json").stat()
+        self.assertEqual((complete.st_uid, complete.st_gid, stat.S_IMODE(complete.st_mode)), (0, 0, 0o444))
+        self.assertEqual(storage.withdraw_managed(self.fd, requested, GID), requested)
+        self.assertEqual((public / "withdrawn.json").stat().st_ino, complete.st_ino)
+        self.assertTrue((self.path(True) / "configuration.json").is_file())
+        self.assertEqual(json.loads((self.path() / "ownership.json").read_text()), owner)
+        self.assertEqual(self.observation()["status"], "not-applied")
+        with self.assertRaisesRegex(storage.RegistrationError, "conflict"):
+            storage.withdraw_managed(self.fd, {**requested, "action": self.meta["incarnation"] + ":3"}, GID)
+
     def test_invalid_ownership_is_refused_before_publication(self):
         self.swarm_registration()
         owner = self.ownership()

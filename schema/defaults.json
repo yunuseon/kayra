@@ -54,6 +54,10 @@
       "additionalProperties": false,
       "description": "Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications."
     },
+    "managed_swarm_rollouts": {
+      "type": "boolean",
+      "description": "Opt in to indexed application registration and recoverable rollouts on an explicitly provisioned experimental Swarm host. Off by default."
+    },
     "swarm_migration_timeout_seconds": {
       "type": "integer",
       "minimum": 1,

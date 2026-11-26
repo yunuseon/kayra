@@ -20,7 +20,7 @@
 
     - name: Build contract dependencies into the existing lab deployer image
       ansible.builtin.command:
-        argv: [docker, compose, build, --build-arg, KAYRA_REGISTRATION_LAB=true, deployer]
+        argv: [docker, compose, build, --build-arg, KAYRA_INDEXED_REGISTRATION=true, deployer]
         chdir: /opt/platform
       changed_when: true
 

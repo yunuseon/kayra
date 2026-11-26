@@ -2750,3 +2750,28 @@ delete has a durable intent, uses the exact birth receipt and uses Docker's
 non-forced deletion. Observed absence settles the action after a lost reply.
 The original purge deadline and the removal ownership tombstone survive
 restart.
+
+### Fleet opt-in
+
+An experimental host supplies its Swarm address, capacity and standing
+platform reservations in `experimental_swarm` in the host's `vars.yml`.
+Set `managed_swarm_rollouts: true` on that host to provision the registration
+publisher and enable the managed coordinator. The builder receives public
+registration metadata. The deployer reads the protected generation inputs and
+keeps its existing Docker transport. Where Kayra provisions a local mkcert
+certificate, setup ships the verified public CA certificate for routed
+readiness.
+
+Select `runtime: swarm` for a new app in `server.yml`. Its fleet grants must
+supply `memory_bytes`, `cpu_millicores` and `maintenance`. The app supplies its
+role, compatibility and recovery declarations in `app.yml`. After
+`kayra setup`, `kayra apps` registers the chosen backend. The first publisher
+binds immutable configuration and secret generations. Changes to an existing
+registration's runtime are refused.
+
+Retain an exact application build using `kayra app build`, then submit that
+commit and an operation UUID with `kayra app deployment prepare`. Use
+`kayra app deployment status` to distinguish acceptance from verified release
+activation. Fleet pruning includes incomplete managed removals and preserves
+their volumes. The explicit purge command requires the recorded removal and
+current ownership and attachment evidence.

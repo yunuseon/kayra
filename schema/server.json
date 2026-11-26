@@ -54,9 +54,37 @@
             "type": "string"
           },
           "runtime": {
-            "description": "The fleet-selected deployment runtime (default compose; Swarm is not available yet).",
+            "description": "The fleet-selected deployment runtime. Compose is the default. Swarm requires explicit host opt-in and applies to new registrations.",
             "type": "string",
-            "const": "compose"
+            "enum": [
+              "compose",
+              "swarm"
+            ]
+          },
+          "grants": {
+            "description": "Explicit Swarm resources and the operator grant to allow maintenance deployment.",
+            "type": "object",
+            "properties": {
+              "memory_bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "cpu_millicores": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maintenance": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "memory_bytes",
+              "cpu_millicores",
+              "maintenance"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

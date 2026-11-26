@@ -198,6 +198,11 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
+      if (route === "/deployment/list-managed") {
+        if (!managedSwarm || managed === undefined || typeof input !== "object" || input === null || Array.isArray(input) ||
+          Object.keys(input).length !== 0) return undefined;
+        return (await opening).managedPruneCandidates();
+      }
       if (route === "/deployment/remove-step" || route === "/deployment/remove-finalize" || route === "/deployment/purge-step") {
         if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
         if (typeof input !== "object" || input === null || Array.isArray(input) || !("app" in input) || typeof input.app !== "string" ||

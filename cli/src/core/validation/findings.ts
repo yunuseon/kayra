@@ -179,6 +179,11 @@ const appFindings = (facts: Facts) =>
     if (!parsed.success) return typed<readonly Finding[]>([problem(`app ${app.name}: its app.yml: ${parsed.error.issues.at(0)?.message ?? "invalid"}`)]);
     if (parsed.data.name !== app.name)
       return typed<readonly Finding[]>([problem(`app ${app.name}: its app.yml says name ${parsed.data.name}`, "server.yml and app.yml must name it alike")]);
+    const managed = app.entry["runtime"] === "swarm";
+    if (managed !== (parsed.data.rollout !== undefined)) return typed<readonly Finding[]>([
+      problem(managed ? `app ${app.name}: Swarm requires an explicit rollout in app.yml` :
+        `app ${app.name}: rollout metadata requires a Swarm registration`),
+    ]);
     const configKeys = parsed.data.config ?? [];
     const secretKeys = parsed.data.secrets ?? [];
     const config = facts.appConfig[app.name] ?? {};

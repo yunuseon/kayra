@@ -875,6 +875,16 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         }
         return store.requestManagedRemoval(owner, request, operator, proposed.removal.createdAt);
       }),
+    managedPruneCandidates: async () => {
+      if (closed) throw new Error("lifecycle app index is closed");
+      const snapshot = await serialIndex(readIndex);
+      const entries = snapshot.apps.filter((entry) => entry.phase === "ready" && entry.protocol === "managed-v3");
+      const apps = await Promise.all(entries.map((entry) => useIndexed(entry.app, async (store) => {
+        const envelope = await store.read();
+        return envelope?.registrationReceipt?.runtime === "swarm" && envelope.removalTombstone === undefined ? entry.app : null;
+      })));
+      return Object.freeze(apps.filter((app) => app !== null).toSorted());
+    },
     managedRemovalIntent: (app: string) => useIndexed(app, async (store, indexed) => {
       if (indexed.protocol !== "managed-v3") throw new Error("application does not own managed removal");
       return (await store.read())?.removal;

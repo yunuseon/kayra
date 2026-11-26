@@ -33,6 +33,7 @@ test("removal owns the lifecycle fence before a competing managed request and pr
   const removal = await started;
   await refused;
   assert.equal(removal.phase, "requested");
+  assert.deepEqual(await lab.index().managedPruneCandidates(), ["shop"]);
   assert.equal(removal.action, lab.incarnation + ":4");
   assert.deepEqual(removal.volumes, lab.volumes);
   assert.deepEqual(await lab.index().resourceSnapshot(), before);
@@ -211,6 +212,7 @@ test("removal effects stop consumers before retained services and reopen their d
   assert.equal(managedReceipt(archived.source, archived.request).outcome, "removed");
   assert.equal(await lab.index().managedDeploymentStatus("shop", lab.runtime), null);
   assert.deepEqual(await lab.index().managedHealthContexts(lab.runtime), []);
+  assert.deepEqual(await lab.index().managedPruneCandidates(), []);
   assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
   await assert.rejects(lab.index().verifiedRegistration("shop"), /registration has not been verified/);
 });

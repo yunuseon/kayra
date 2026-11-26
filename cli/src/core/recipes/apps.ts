@@ -8,6 +8,12 @@ import { typed } from "../../lib/typed.ts";
 
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server) => {
+  const managed = server.apps.find((app) => app.entry["runtime"] === "swarm");
+  if (managed !== undefined && (server.vars["managed_swarm_rollouts"] !== true ||
+    typeof server.vars["experimental_swarm"] !== "object" || server.vars["experimental_swarm"] === null ||
+    !("enabled" in server.vars["experimental_swarm"]) || server.vars["experimental_swarm"].enabled !== true)) {
+    return err(`${managed.name} requires explicitly enabled experimental Swarm and managed_swarm_rollouts`);
+  }
   const playbook = (title: string, name: string, ...extra: readonly string[]) =>
     run(title, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, {}));
   return ok<Plan>(
@@ -35,7 +41,9 @@ export const apps = (engine: Engine, server: Server) => {
               "Remove apps not in server.yml",
               "apps-prune.yml",
               "-e",
-              `{"keep": ${JSON.stringify(server.apps.map((app) => app.name))}}`,
+              server.vars["managed_swarm_rollouts"] === true
+                ? JSON.stringify({ keep: server.apps.map((app) => app.name), prune_managed: true })
+                : `{"keep": ${JSON.stringify(server.apps.map((app) => app.name))}}`,
             ),
           ]
         : []),

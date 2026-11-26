@@ -67,7 +67,7 @@
             deployer:
               build:
                 args:
-                  KAYRA_REGISTRATION_LAB: "true"
+                  KAYRA_INDEXED_REGISTRATION: "true"
               environment:
                 KAYRA_REGISTRATION_EVIDENCE_DIR: /run/kayra-registration/observations
                 KAYRA_PUBLIC_REGISTRATIONS_DIR: /run/kayra-registration/public

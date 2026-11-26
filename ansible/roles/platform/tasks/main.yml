@@ -8,6 +8,13 @@
 # command is just `docker compose ...` run in {{ platform_dir }}.
 # =============================================================================
 
+- name: Require explicit Swarm infrastructure for managed rollouts
+  ansible.builtin.assert:
+    that: experimental_swarm.enabled | default(false) | bool
+    fail_msg: managed_swarm_rollouts requires explicitly provisioned experimental_swarm
+    quiet: true
+  when: managed_swarm_rollouts | bool
+
 - name: Reconcile explicitly enabled experimental Swarm host setup
   kayra_swarm_host:
     profile: "{{ experimental_swarm }}"
@@ -141,6 +148,7 @@
     - docker-compose.ci.yml
     - docker-compose.acme-dns.yml
     - docker-compose.swarm.yml
+    - docker-compose.managed.yml
     - traefik/dynamic/
     - authelia/configuration.yml
     - buildkit/
@@ -211,6 +219,59 @@
     group: root
     mode: "0755"
   become: true
+
+- name: Provision the managed registration publisher
+  when: managed_swarm_rollouts | bool
+  become: true
+  block:
+    - name: Create root-controlled registration directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /var/lib/kayra
+        - /var/lib/kayra/registrations
+        - /var/lib/kayra/registrations/public
+        - /var/lib/kayra/registrations/observations
+        - /var/lib/kayra/registrations/trust
+        - "{{ platform_dir }}/registration-lib"
+
+    - name: Create the deployer-only registration input directory
+      ansible.builtin.file:
+        path: /var/lib/kayra/registrations/private
+        state: directory
+        owner: root
+        group: "1000"
+        mode: "0750"
+
+    - name: Copy the public local certification authority for routed readiness
+      ansible.builtin.copy:
+        src: "{{ fleet_root }}/.cache/certs/ca.pem"
+        dest: /var/lib/kayra/registrations/trust/ca.pem
+        owner: root
+        group: root
+        mode: "0444"
+      when: target != 'hetzner' and not acme_dns and not ansible_check_mode
+
+    - name: Install the platform publisher
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/scripts/server-lib/{{ item }}"
+        dest: "{{ platform_dir }}/registration-lib/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [registration_command.py, registration_generation.py]
+
+    - name: Publish the trusted registration root for lifecycle commands
+      ansible.builtin.copy:
+        content: "/var/lib/kayra/registrations\n"
+        dest: "{{ platform_dir }}/registration-lib/root"
+        owner: root
+        group: root
+        mode: "0644"
 
 - name: Render Traefik static config
   ansible.builtin.copy:
@@ -422,6 +483,17 @@
     project_src: "{{ platform_dir }}"
     build: always
     remove_orphans: true
+
+- name: Initialize the managed registration index through its owner
+  ansible.builtin.command:
+    argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, registration, initialize]
+    chdir: "{{ platform_dir }}"
+  register: managed_registration_init
+  until: managed_registration_init.rc == 0
+  retries: 6
+  delay: 2
+  changed_when: false
+  when: managed_swarm_rollouts | bool and not ansible_check_mode
 
 # Only dynamic/ is watched; the static file is read once at startup.
 - name: Restart Traefik when its static config changed

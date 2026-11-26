@@ -146,6 +146,14 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     return 0;
   },
   lifecycle: async ([operation, app, commit, request, extra]) => {
+    if (operation === "list-managed" && app === undefined) {
+      const response = await fetch("http://127.0.0.1:8091/deployment/list-managed", {
+        method: "POST", body: "{}", signal: AbortSignal.timeout(15_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed registration listing is unavailable");
+      console.log(await response.text());
+      return 0;
+    }
     if (operation === "remove-step" || operation === "remove-finalize" || operation === "purge-step") {
       const step = operation !== "remove-finalize";
       if (app === undefined || request !== undefined || (step ? commit !== undefined : commit === undefined)) {

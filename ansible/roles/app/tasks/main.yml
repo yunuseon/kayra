@@ -68,16 +68,17 @@
     that:
       - manifest.name == app.name
       - manifest.subdomains is not defined
-      - manifest.rollout is not defined
-      - app.runtime is not defined or app.runtime == 'compose'
+      - app.runtime | default('compose') in ['compose', 'swarm']
+      - (app.runtime | default('compose') == 'swarm') == (manifest.rollout is defined)
+      - app.runtime | default('compose') != 'swarm' or (managed_swarm_rollouts | bool and experimental_swarm.enabled | default(false) | bool and app.grants is mapping and manifest.rollout is mapping)
       - missing_secrets | length == 0
       - missing_config | length == 0
       - reserved_subdomains | length == 0
     fail_msg: >-
       {{ app.name }}: app.yml name={{ manifest.name }};
       {{ 'subdomains is gone: declare routes instead (the app contract);' if manifest.subdomains is defined else '' }}
-      {{ 'rollout metadata is not yet supported;' if manifest.rollout is defined else '' }}
-      {{ 'only the Compose runtime is currently supported;' if app.runtime is defined and app.runtime != 'compose' else '' }}
+      {{ 'rollout metadata is not yet supported for Compose;' if manifest.rollout is defined and app.runtime | default('compose') == 'compose' else '' }}
+      {{ 'only the Compose runtime is currently supported without an explicit managed Swarm opt-in, grants and app rollout;' if app.runtime | default('compose') != 'compose' else '' }}
       missing config {{ missing_config }} in servers/{{ server }}/apps/{{ app.name }}.yml,
       missing secrets {{ missing_secrets }} in servers/{{ server }}/secrets.yml under app_secrets.{{ app.name }};
       hosts reserved by the platform {{ reserved_subdomains }}
@@ -86,6 +87,31 @@
     missing_secrets: "{{ manifest.secrets | default([]) | difference(app_secret_values | list) }}"
     missing_config: "{{ manifest.config | default([]) | difference(app_config | default({}) | list) }}"
     reserved_subdomains: "{{ app_subdomains | intersect(lookup('file', kayra_root ~ '/hosts.conf').splitlines() | reject('match', '^\\s*(#|$)') | list) }}"
+
+- name: Register the managed Swarm app through the platform
+  ansible.builtin.command:
+    argv: [python3, -B, "{{ platform_dir }}/registration-lib/registration_command.py", register, --root,
+           /var/lib/kayra/registrations, --private-gid, "1000", --platform-dir, "{{ platform_dir }}"]
+    stdin: "{{ request | to_json }}"
+  vars:
+    config_keys: "{{ manifest.config | default([]) }}"
+    secret_keys: "{{ manifest.secrets | default([]) }}"
+    request:
+      app: "{{ app.name }}"
+      registration:
+        name: "{{ app.name }}"
+        repo: "{{ app_repo }}"
+        ref: "{{ app_ref }}"
+        path: "{{ app.path | default('.') }}"
+        runtime: swarm
+        grants: "{{ app.grants }}"
+        hosts: "{{ app_subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
+        secrets: "{{ secret_keys }}"
+      configuration: "{{ dict(config_keys | zip(config_keys | map('extract', app_config | default({})))) }}"
+      secrets: "{{ dict(secret_keys | zip(secret_keys | map('extract', app_secret_values))) }}"
+  no_log: true
+  become: true
+  when: app.runtime | default('compose') == 'swarm' and not ansible_check_mode
 
 - name: Apply Compose app registration
   kayra_compose_registration:
@@ -108,6 +134,7 @@
   retries: 5
   delay: 3
   until: compose_registration is succeeded or not (compose_registration.retryable | default(false))
+  when: app.runtime | default('compose') == 'compose'
   become: true
 
 # A Docker update or a reboot stops every container, and one deployed before
@@ -121,4 +148,5 @@
   delay: 3
   until: app_restored.rc == 0
   changed_when: "'restored ' in app_restored.stdout"
+  when: app.runtime | default('compose') == 'compose'
   become: true

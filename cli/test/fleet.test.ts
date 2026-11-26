@@ -18,10 +18,15 @@ test("a server's kind defaults to platform", () => {
   strictEqual(server("shop", "target: multipass\ndomain: shop.test\n").kind, "platform");
 });
 
-test("the fleet can select Compose and rejects unsupported runtimes", () => {
-  const app = (runtime: string) => `target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, runtime: ${runtime}}]`;
+test("the fleet selects Compose or explicitly granted Swarm for an app", () => {
+  const app = (runtime: string, grants = "") => `target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, runtime: ${runtime}${grants}}]`;
   strictEqual(server("a", app("compose")).apps[0]?.entry["runtime"], "compose");
   strictEqual(refused(app("swarm")) === "accepted", false);
+  const grants = { memory_bytes: 268435456, cpu_millicores: 500, maintenance: false };
+  const managed = server("a", app("swarm", ", grants: " + JSON.stringify(grants)));
+  strictEqual(managed.apps[0]?.entry["runtime"], "swarm");
+  deepStrictEqual(managed.apps[0].entry["grants"], grants);
+  strictEqual(refused(app("compose", ", grants: " + JSON.stringify(grants))) === "accepted", false);
   strictEqual(refused(app("unknown")) === "accepted", false);
 });
 

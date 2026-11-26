@@ -104,8 +104,9 @@ export const monitorEndpoints = (engine: Engine, server: Server) => typed<Substi
   env: fleetEnv(engine),
 });
 
-export const certs = (engine: Engine, domain: string, subdomains: readonly Arg[]) =>
-  run("mkcert certificates", ["bash", script(engine, "certs.sh"), domain, within(engine.fleet, ".cache", "certs"), ...subdomains]);
+export const certs = (engine: Engine, domain: string, subdomains: readonly Arg[], exportTrust = false) =>
+  run("mkcert certificates", ["bash", script(engine, "certs.sh"), domain, within(engine.fleet, ".cache", "certs"), ...subdomains],
+    exportTrust ? { KAYRA_EXPORT_MKCERT_CA: "true" } : undefined);
 
 export const sequence = (plans: readonly Result<Plan, string>[]) =>
   map(all(plans), (each) => Object.freeze(each.flat()));

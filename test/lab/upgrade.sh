@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--egress-mtu <1280-1500>] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet] [--egress-mtu <1280-1500>] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -36,6 +36,7 @@ keep=false
 indexed_registration=false
 swarm_host=false
 managed_rollouts=false
+managed_fleet=false
 egress_mtu=""
 vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
@@ -45,11 +46,16 @@ while [ $# -gt 0 ]; do
         --indexed-registration) indexed_registration=true; shift ;;
         --swarm-host) swarm_host=true; shift ;;
         --managed-rollouts) managed_rollouts=true; indexed_registration=true; swarm_host=true; shift ;;
+        --managed-fleet) managed_fleet=true; shift ;;
         --egress-mtu) [ $# -ge 2 ] || { echo "--egress-mtu requires a value" >&2; exit 2; }; egress_mtu="$2"; shift 2 ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--egress-mtu <1280-1500>] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet] [--egress-mtu <1280-1500>] [--keep]" >&2; exit 2 ;;
     esac
 done
+if [ "$managed_fleet" = true ] && { [ "$indexed_registration" = true ] || [ "$swarm_host" = true ]; }; then
+    echo "--managed-fleet uses the production provisioning path in its own VM" >&2
+    exit 2
+fi
 if [ -n "$egress_mtu" ] && { ! [[ "$egress_mtu" =~ ^[0-9]{4}$ ]] || [ "$egress_mtu" -lt 1280 ] || [ "$egress_mtu" -gt 1500 ]; }; then
     echo "invalid lab egress MTU: $egress_mtu" >&2
     exit 2
@@ -446,16 +452,99 @@ grep -q " poll " <<< "$run" || die "v4 deployed, but not by the poll: ${run}"
 expect_serves v4
 echo "✓ a push with no webhook deployed by deploy_poll"
 
-if [ "$swarm_host" = true ]; then
+if [ "$swarm_host" = true ] || [ "$managed_fleet" = true ]; then
     step "6a  explicit Swarm host setup alongside Compose"
     KAYRA_LAB_ADVERTISE_ADDRESS="$address" yq -i '.experimental_swarm = {
         "enabled": true, "advertise_address": strenv(KAYRA_LAB_ADVERTISE_ADDRESS),
         "memory_bytes": 3221225472, "cpu_millicores": 2000,
         "platform_memory_bytes": 1073741824, "platform_cpu_millicores": 500
     }' "${fleet}/servers/${server}/vars.yml"
+    if [ "$managed_fleet" = true ]; then
+        yq -i '.managed_swarm_rollouts = true' "${fleet}/servers/${server}/vars.yml"
+    fi
     kayra_cmd plan "$server" >> "$log" 2>&1 || die "previewing explicit Swarm setup"
     [ "$(multipass exec "$vm_name" -- sudo docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ] || die "Swarm preview changed membership"
     kayra_cmd setup "$server" >> "$log" 2>&1 || die "explicit Swarm host setup"
+fi
+
+if [ "$managed_fleet" = true ]; then
+    step "6b  production-style opt-in registration and HTTPS rollout"
+    fleet_repo="${work}/managed-fleet"
+    cp -R "${KAYRA_ROOT}/test/lab/app" "$fleet_repo"
+    yq -i '.name = "managed-fleet" | .routes[0].host = "managed-fleet" | .routes[0].check = "/" |
+        del(.secrets) | .rollout = {"strategy": "rolling", "mixed_version_compatible": true, "rollback_compatible": true,
+        "services": {"web": {"role": "http", "overlap": "allowed"}}}' "$fleet_repo/app.yml"
+    yq -i 'del(.services.web.mem_limit, .services.web.environment.GREETING) |
+        .services.web.deploy.resources = {"limits": {"memory": "64m", "cpus": "0.1"}, "reservations": {"memory": "32m", "cpus": "0.05"}} |
+        .services.web.healthcheck = {"test": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"], "interval": "1s", "timeout": "1s", "start_period": "1s", "retries": 3} |
+        .services.web.stop_grace_period = "30s"' "$fleet_repo/deploy/compose.yml"
+    jq '.image = "managed-fleet/web"' "$fleet_repo/web/docker/image.json" > "${work}/managed-fleet-image.json"
+    mv "${work}/managed-fleet-image.json" "$fleet_repo/web/docker/image.json"
+    printf 'fleet-managed\n' > "$fleet_repo/web/index.html"
+    git -C "$fleet_repo" init -q -b main
+    git -C "$fleet_repo" add -A
+    git -C "$fleet_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "managed fleet registration fixture"
+    git clone -q --bare "$fleet_repo" "${served}/lab/managed-fleet.git"
+    fleet_commit="$(git -C "$fleet_repo" rev-parse HEAD)"
+    FLEET_REPO="http://${host_ip}:${port}/lab/managed-fleet.git" yq -i '.apps += [{"name": "managed-fleet", "ref": "main", "path": ".", "repo": strenv(FLEET_REPO),
+        "runtime": "swarm", "grants": {"memory_bytes": 268435456, "cpu_millicores": 500, "maintenance": false}}]' "${fleet}/servers/${server}/server.yml"
+    # The managed app must have its own operator config; it cannot inherit MODE from sample.
+    kayra_cmd apps "$server" >> "$log" 2>&1 && die "managed fixture registered without its own configuration"
+    printf 'MODE: managed\n' > "${fleet}/servers/${server}/apps/managed-fleet.yml"
+    kayra_cmd apps "$server" >> "$log" 2>&1 || die "registering the managed fixture through fleet configuration"
+    ctl registration policy managed-fleet | jq -e '.runtime == "swarm"' >/dev/null || die "fleet registration did not select Swarm"
+    ctl build managed-fleet "$fleet_commit" | jq -e --arg commit "$fleet_commit" '.commit == $commit' >/dev/null || die "managed fleet build receipt"
+    fleet_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    ctl lifecycle prepare managed-fleet "$fleet_commit" "$fleet_request" | jq -e --arg run "$fleet_request" '.version == 3 and .request == $run' >/dev/null || die "managed fleet deployment acceptance"
+    await_fleet_release() {
+        local request="$1" commit="$2" report="$3"
+        for _ in $(seq 1 80); do
+            ctl lifecycle status managed-fleet > "$report"
+            if jq -e --arg run "$request" --arg sha "$commit" '.operation.run == $run and .operation.outcome == "deployed" and .verifiedActive.commit == $sha' "$report" >/dev/null; then return 0; fi
+            jq -e '.operation.phase == "held"' "$report" >/dev/null && die "managed fleet deployment held"
+            sleep 2
+        done
+        die "managed fleet release did not converge"
+    }
+    await_fleet_release "$fleet_request" "$fleet_commit" "${work}/fleet-status.json"
+    routed="$(curl -sf -m 10 --resolve "managed-fleet.${domain}:443:${address}" "https://managed-fleet.${domain}/" | tr -d '\n')"
+    [ "$routed" = fleet-managed ] || die "the managed fleet release was not routed"
+    ctl runs managed-fleet --json | jq -e --arg run "$fleet_request" '.protocol == "managed-v3" and (.runs[0] | .id == $run and .managed.outcome == "deployed")' >/dev/null || die "fleet rollout did not reach run reporting"
+
+    printf 'fleet-successor\n' > "$fleet_repo/web/index.html"
+    git -C "$fleet_repo" add -A
+    git -C "$fleet_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "managed fleet successor"
+    git -C "$fleet_repo" push -q "${served}/lab/managed-fleet.git" HEAD:refs/heads/main
+    fleet_successor="$(git -C "$fleet_repo" rev-parse HEAD)"
+    ctl build managed-fleet "$fleet_successor" | jq -e --arg commit "$fleet_successor" '.commit == $commit' >/dev/null || die "managed successor build"
+    successor_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    ctl lifecycle prepare managed-fleet "$fleet_successor" "$successor_request" >/dev/null || die "managed successor acceptance"
+    await_fleet_release "$successor_request" "$fleet_successor" "${work}/fleet-successor.json"
+    restore_record="$(jq -er --arg sha "$fleet_commit" '.previousRelease | select(.commit == $sha) | .record' "${work}/fleet-successor.json")"
+    restore_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    ctl lifecycle restore managed-fleet "$restore_record" "$restore_request" >/dev/null || die "managed restore acceptance"
+    await_fleet_release "$restore_request" "$fleet_commit" "${work}/fleet-restored.json"
+    restored="$(curl -sf -m 10 --resolve "managed-fleet.${domain}:443:${address}" "https://managed-fleet.${domain}/" | tr -d '\n')"
+    [ "$restored" = fleet-managed ] || die "the restored managed release was not routed"
+    ctl runs managed-fleet --json | jq -e --arg run "$restore_request" '.runs[0] | .id == $run and .why == "restore" and .managed.outcome == "deployed"' >/dev/null || die "managed restore history"
+    expect_serves v4
+    kayra_cmd verify "$server" >> "$log" 2>&1 || die "mixed-runtime fleet verification"
+    yq -i '.apps |= map(select(.name != "managed-fleet"))' "${fleet}/servers/${server}/server.yml"
+    kayra_cmd apps "$server" >> "$log" 2>&1 || die "retiring the managed fleet app"
+    ctl lifecycle status managed-fleet > "${work}/fleet-removed.json"
+    jq -e '.lifecycle == "removed" and .verifiedActive == null' "${work}/fleet-removed.json" >/dev/null || die "managed fleet removal status"
+    multipass exec "$vm_name" -- sudo /opt/platform/bin/app-purge managed-fleet >> "$log" 2>&1 || die "purging the disposable managed fleet app"
+    ctl lifecycle status managed-fleet > "${work}/fleet-purged.json"
+    jq -e '.lifecycle == "purged" and .retirement.remainingVolumes == 0' "${work}/fleet-purged.json" >/dev/null || die "managed fleet purge status"
+    expect_serves v4
+    kayra_cmd verify "$server" >> "$log" 2>&1 || die "Compose verification after managed fleet retirement"
+    for stage in status successor restored removed purged; do
+        install -m 600 "${work}/fleet-${stage}.json" "/tmp/kayra-swarm-platform-${vm_name}.fleet-${stage}.json"
+    done
+    echo "✓ an explicitly enabled fleet registered, deployed, restored and removed Swarm alongside its Compose app"
+fi
+
+if [ "$swarm_host" = true ]; then
     ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" \
         ANSIBLE_LIBRARY="${KAYRA_ROOT}/ansible/roles/platform/library" ansible-playbook \
         -i "servers/${server}/inventory.ini" \

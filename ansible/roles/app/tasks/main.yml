@@ -45,12 +45,13 @@
     file: "{{ app_root }}/app.yml"
     name: manifest
 
-# Either may be missing: an app without config or without secrets.
+# Load an empty mapping for an app without a config file. Each role iteration
+# replaces the previous app's values.
 - name: Read the operator's config for this app
-  ansible.builtin.include_vars:
-    file: "{{ server_dir }}/apps/{{ app.name }}.yml"
-    name: app_config
-  when: (server_dir ~ '/apps/' ~ app.name ~ '.yml') is file
+  ansible.builtin.set_fact:
+    app_config: "{{ (lookup('ansible.builtin.file', config_path) | from_yaml | default({}, true)) if config_path is file else {} }}"
+  vars:
+    config_path: "{{ server_dir }}/apps/{{ app.name }}.yml"
 
 - name: Take this app's secrets from secrets.yml
   ansible.builtin.set_fact:

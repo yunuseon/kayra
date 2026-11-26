@@ -2368,3 +2368,10 @@ a 20-second request accepted by the previous release. Each case records at
 least 30 seconds of traffic after convergence. The post-readiness failure
 records failed requests, sampled disruption intervals, and elapsed time from
 the native crash to verified recovery separately from the continuity cases.
+
+Use `test/lab/upgrade.sh --from 0.23.0 --managed-fleet --vm-name <unique-lab-name>`
+to exercise the regular fleet configuration and Ansible app role in a fresh
+upgrade VM. This mode registers a Compose app and an opted-in Swarm app using
+their own configuration files, deploys the Swarm app through real HTTPS routing,
+and checks its managed run report. It takes the ordinary platform setup path
+with no registration lab Compose override.

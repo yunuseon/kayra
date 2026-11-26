@@ -70,7 +70,10 @@ RUN pip install --no-cache-dir \
       "yamllint==${YAMLLINT_VERSION}"
 
 COPY ansible/requirements.yml /tmp/requirements.yml
-RUN ansible-galaxy collection install -r /tmp/requirements.yml
+# --no-cache: a build starts with no cache to gain from, and a reply Galaxy
+# garbles once lands in it and fails the install ("Missing expected 'results'
+# in ansible-galaxy cache", ippo-infra's checks on 23 Nov).
+RUN ansible-galaxy collection install --no-cache -r /tmp/requirements.yml
 
 COPY --from=cli /usr/local/bin/node /usr/local/bin/node
 

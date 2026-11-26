@@ -598,6 +598,35 @@ if [ "$swarm_host" = true ]; then
 fi
 
 if [ "$indexed_registration" = true ]; then
+    prepare_admission_inputs() {
+        local prefix="$1" inputs="$2" memory="$3" bytes="$4" managed=false
+        local admission_app admission_repo admission_commit admission_request
+        [ -z "$prefix" ] || managed=true
+        jq -n --argjson managed "$managed" --argjson memory "$bytes" '
+            {admission_applications: [], admission_managed: $managed, admission_memory: $memory}
+        ' > "$inputs"
+        for admission_app in "${prefix}admission-left" "${prefix}admission-right"; do
+            admission_repo="${work}/${admission_app}"
+            cp -R "${KAYRA_ROOT}/test/lab/swarm-platform/complete-fixture" "$admission_repo"
+            APP_NAME="$admission_app" yq -i '.name = strenv(APP_NAME) |
+                .routes[0].host = strenv(APP_NAME) | .rollout.migrations = []' "${admission_repo}/app.yml"
+            ADMISSION_MEMORY="$memory" yq -i '.services.web.deploy.resources.limits.memory = strenv(ADMISSION_MEMORY)' "${admission_repo}/deploy/compose.yml"
+            jq --arg image "${admission_app}/web" '.image = $image' "${admission_repo}/web/docker/image.json" > "${work}/admission-image.json"
+            mv "${work}/admission-image.json" "${admission_repo}/web/docker/image.json"
+            git -C "$admission_repo" init -q -b main
+            git -C "$admission_repo" add -A
+            git -C "$admission_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "declared admission contender"
+            admission_commit="$(git -C "$admission_repo" rev-parse HEAD)"
+            git clone -q --bare "$admission_repo" "${served}/lab/${admission_app}.git"
+            git -C "$admission_repo" bundle create "/tmp/kayra-swarm-platform-${vm_name}.${admission_app}.bundle" --all
+            admission_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+            jq --arg app "$admission_app" --arg commit "$admission_commit" --arg request "$admission_request" \
+                --arg repo "http://${host_ip}:${port}/lab/${admission_app}.git" \
+                '.admission_applications += [{app:$app,commit:$commit,request:$request,repo:$repo}]' \
+                "$inputs" > "$inputs.next"
+            mv "$inputs.next" "$inputs"
+        done
+    }
     step "7  indexed registration through Ansible and the running deployer"
     ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook         -i "servers/${server}/inventory.ini"         "${KAYRA_ROOT}/test/lab/registration-generation/live.yml"         -e "kayra_root=${KAYRA_ROOT}" -e "kayra_lab_swarm=${swarm_host}" >> "$log" 2>&1 || die "indexed registration through Ansible"
     echo "✓ indexed registration survived a deployer restart and protected its app name"
@@ -725,28 +754,7 @@ if [ "$indexed_registration" = true ]; then
         cp "${work}/candidate-oom.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.clock.json"
         echo "✓ container OOM recovered the previous release without promoting the failed candidate"
 
-        printf '{"admission_applications":[]}\n' > "${work}/admission-inputs.json"
-        for admission_app in admission-left admission-right; do
-            admission_repo="${work}/${admission_app}"
-            cp -R "${KAYRA_ROOT}/test/lab/swarm-platform/complete-fixture" "$admission_repo"
-            APP_NAME="$admission_app" yq -i '.name = strenv(APP_NAME) |
-                .routes[0].host = strenv(APP_NAME) | .rollout.migrations = []' "${admission_repo}/app.yml"
-            yq -i '.services.web.deploy.resources.limits.memory = "1024m"' "${admission_repo}/deploy/compose.yml"
-            jq --arg image "${admission_app}/web" '.image = $image' "${admission_repo}/web/docker/image.json" > "${work}/admission-image.json"
-            mv "${work}/admission-image.json" "${admission_repo}/web/docker/image.json"
-            git -C "$admission_repo" init -q -b main
-            git -C "$admission_repo" add -A
-            git -C "$admission_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "declared admission contender"
-            admission_commit="$(git -C "$admission_repo" rev-parse HEAD)"
-            git clone -q --bare "$admission_repo" "${served}/lab/${admission_app}.git"
-            git -C "$admission_repo" bundle create "/tmp/kayra-swarm-platform-${vm_name}.${admission_app}.bundle" --all
-            admission_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
-            jq --arg app "$admission_app" --arg commit "$admission_commit" --arg request "$admission_request" \
-                --arg repo "http://${host_ip}:${port}/lab/${admission_app}.git" \
-                '.admission_applications += [{app:$app,commit:$commit,request:$request,repo:$repo}]' \
-                "${work}/admission-inputs.json" > "${work}/admission-inputs.next.json"
-            mv "${work}/admission-inputs.next.json" "${work}/admission-inputs.json"
-        done
+        prepare_admission_inputs "" "${work}/admission-inputs.json" 1024m 1073741824
         ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
             -i "servers/${server}/inventory.ini" \
             "${KAYRA_ROOT}/test/lab/swarm-platform/admission-race.yml" \
@@ -848,6 +856,18 @@ if [ "$indexed_registration" = true ]; then
             -e "report_path=${work}/managed-enospc.json" >> "$log" 2>&1 || die "managed bounded metadata exhaustion"
         for evidence in "" .tar .source.json .clock.json; do
             install -m 600 "${work}/managed-enospc.json${evidence}" "/tmp/kayra-swarm-platform-${vm_name}.managed-enospc.json${evidence}"
+        done
+        step "8b  competing managed resource reservations across restart"
+        # Stage 7 left one 1 GiB contender and two smaller apps certified.
+        # With the managed baseline settled, exactly one 600 MiB contender fits.
+        prepare_admission_inputs managed- "${work}/managed-admission-inputs.json" 600m 629145600
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/admission-race.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e "@${work}/managed-admission-inputs.json" \
+            -e "report_path=${work}/managed-admission.json" >> "$log" 2>&1 || die "managed concurrent admission and restart"
+        for evidence in "" .tar .source.json .clock.json; do
+            install -m 600 "${work}/managed-admission.json${evidence}" "/tmp/kayra-swarm-platform-${vm_name}.managed-admission.json${evidence}"
         done
     fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"

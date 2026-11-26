@@ -53,7 +53,7 @@ export const managedRuntime = (input: ManagedExecutionContext, ports: Ports) => 
   const matches = (source: ManagedLifecycleSource) => {
     const description = managedLifecycleDescription(source);
     return managedLifecycleSourceDigest(source) === context.source && source.run === context.run && source.action === context.action && source.createdAt === context.createdAt && description.admissionDeadline === context.admissionDeadline && description.deadline === context.deadline &&
-      (source.version === 2) === context.allocationRequired && managedApplicationDigest(source.candidate) === managedApplicationDigest(context.application) && (source.previous === null ? context.previous === null : context.previous !== null && managedApplicationDigest(source.previous.source.application) === managedApplicationDigest(context.previous));
+      (source.version !== 1) === context.allocationRequired && managedApplicationDigest(source.candidate) === managedApplicationDigest(context.application) && (source.previous === null ? context.previous === null : context.previous !== null && managedApplicationDigest(source.previous.source.application) === managedApplicationDigest(context.previous));
   };
   const permission = (effect: ManagedLifecycleEffect) => {
     if (effect.kind === "accepted-recovery") return typed<ManagedRuntimePermission>({ kind: "accepted-recovery" });

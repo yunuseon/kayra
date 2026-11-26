@@ -157,6 +157,10 @@ export const parseLifecycleEnvelope = (input: unknown) => {
       return item.completion === null ? !bound.ok || bound.value.status !== "accepted" || !operations.some((operation) => operation.ticket === item.ticket && operation.action === item.action && operation.descriptor.kind === "deploy" && operation.descriptor.planDigest === item.plan) :
         lookup.value.status !== "expired" && (!bound.ok || bound.value.status !== "terminal" || bound.value.outcome !== item.completion.disposition);
     }) || operations.some((operation) => operation.descriptor.kind === "deploy" && !managed.some((item) => item.completion === null && item.action === operation.action && item.ticket === operation.ticket)))) return err("invalid managed lifecycle envelope");
+  if (managed?.some((item, index) => {
+    if (item.completion?.outcome !== "superseded") return false;
+    return managed[index + 1]?.run !== item.completion.successor;
+  })) return err("managed supersession lacks its accepted successor");
   const forward = (() => { try { return parsed.data.forward === undefined ? undefined : managedForwardReservation(parsed.data.forward); } catch { return null; } })();
   if (forward === null) return err("invalid managed forward reservation");
   if (forward !== undefined) {

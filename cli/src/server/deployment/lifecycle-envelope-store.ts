@@ -1,4 +1,4 @@
-import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff } from "./managed-forward-reservation-transition.ts";
+import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff, activateManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
 import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
 import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
 import { settledMigrationPrefix } from "./migration-prefix.ts";
@@ -179,6 +179,11 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
       const next = publishManagedForwardHandoff(await required(), expected, source);
       await persist(next.state);
       return next.reservation;
+    }),
+    activateManagedForward: (source: ManagedLifecycleSource, root: unknown) => serial(async () => {
+      const next = activateManagedForwardEnvelope(await required(), source, root);
+      await persist(next.state);
+      return next.request;
     }),
     completeManaged: (input: unknown, record: string) => serial(async () => {
       const next = completeManagedEnvelope(await required(), input, record); if (next.changed) await persist(next.state); return next.request;

@@ -1,3 +1,6 @@
+import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
+import { admitTicket, completeTicket, reserveTicket } from "./lifecycle-tickets.ts";
+import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
 import { managedForwardEffectSource, managedForwardEffectSourceDigest } from "./managed-forward-effect-source.ts";
 import { createHash } from "node:crypto";
 import { parseManagedApplicationPlan, managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
@@ -78,4 +81,52 @@ export const publishManagedForwardHandoff = (before: unknown, expected: ManagedF
   } });
   if (!next.ok || next.value.forward?.phase !== "transferring") throw new Error("invalid managed admission handoff");
   return Object.freeze({ state: next.value, reservation: next.value.forward });
+};
+
+/** Switch the shared fence only after the index has authenticated the transferred lease and installed root. */
+export const activateManagedForwardEnvelope = (before: unknown, input: ManagedLifecycleSource, rootInput: unknown) => {
+  const parsed = parseLifecycleEnvelope(before);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const current = parsed.value;
+  const reservation = current.forward;
+  const source = parseManagedLifecycleSource(input);
+  const certificate = source.forward;
+  const root = parseManagedLifecycleStore(rootInput);
+  const description = managedLifecycleDescription(source);
+  const digest = managedLifecycleSourceDigest(source);
+  const fence = current.fence;
+  const old = current.managed?.find((item) => item.run === reservation?.blocked.run);
+  if (reservation?.phase !== "transferring" || certificate === undefined || reservation.handoff.source !== digest ||
+    reservation.run !== root.operation.run || reservation.action !== root.operation.action || reservation.run !== source.run ||
+    reservation.action !== source.action || root.operation.source !== digest || root.operation.plan !== description.admission.planDigest ||
+    root.operation.createdAt !== source.createdAt || root.operation.admissionDeadline !== description.admissionDeadline || root.operation.deadline !== description.deadline ||
+    !["allocating", "held"].includes(root.operation.phase) || !root.operation.admitted || root.operation.settled || root.active !== null || root.compatibilityEpoch !== reservation.blocked.compatibilityEpoch ||
+    !same(root.owner, reservation.owner) || old?.completion !== null || old.source !== certificate.blocked.source ||
+    old.run !== certificate.blocked.run || certificate.blocked.checkpoint !== reservation.blocked.checkpoint || fence === null) {
+    throw new Error("forward activation requires the installed successor and held request");
+  }
+  const closed = completeTicket(current.tickets, old.ticket, "failure");
+  if (!closed.ok) throw new Error(closed.error);
+  const reserved = reserveTicket(closed.value);
+  if (!reserved.ok) throw new Error(reserved.error);
+  const descriptor = Object.freeze({ kind: "deploy" as const, planDigest: description.admission.planDigest });
+  const accepted = admitTicket(reserved.value.state, reserved.value.ticket, descriptor);
+  if (!accepted.ok || accepted.value.status !== "new") throw new Error("forward successor ticket admission failed");
+  const successor = parseManagedLifecycleRequest({
+    version: 1, protocol: "managed-v3", owner: root.owner, run: source.run, ticket: reserved.value.ticket,
+    action: source.action, source: digest, plan: descriptor.planDigest, createdAt: source.createdAt,
+    admissionDeadline: description.admissionDeadline, deadline: description.deadline, completion: null,
+  });
+  const completed = parseManagedLifecycleRequest({
+    ...old, completion: { rootSnapshot: certificate.blocked.checkpoint, outcome: "superseded", disposition: "failure", successor: successor.run },
+  });
+  const next = parseLifecycleEnvelope({
+    ...current, forward: undefined,
+    fence: { ...fence, lifecycle: { phase: "registered", active: { kind: "deploy", sequence: root.sequence } } },
+    tickets: accepted.value.state,
+    operations: [...current.operations.filter((item) => item.ticket !== old.ticket), { ticket: successor.ticket, action: successor.action, descriptor }],
+    managed: [...(current.managed ?? []).map((item) => item.run === old.run ? completed : item), successor],
+  });
+  if (!next.ok) throw new Error(next.error);
+  return Object.freeze({ state: next.value, request: successor });
 };

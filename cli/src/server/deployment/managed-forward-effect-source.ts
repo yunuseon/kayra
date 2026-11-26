@@ -26,7 +26,7 @@ export const managedForwardEffectSource = (input: unknown) => {
   if (operation.source !== managedLifecycleSourceDigest(source) || operation.run !== source.run || operation.action !== source.action || operation.createdAt !== source.createdAt ||
     operation.plan !== description.admission.planDigest || operation.previous !== description.previous || operation.previousPlan !== (description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous)) ||
     operation.admissionDeadline !== description.admissionDeadline || operation.deadline !== description.deadline || !same(state.owner, source.candidate.infrastructure.ownership) ||
-    source.candidate.rollout.rollback_compatible || raw.request.createdAt < operation.enteredAt || raw.deadline !== raw.request.createdAt + 90_000) throw new Error("forward effect baseline binding disagrees");
+    source.version !== 3 && source.candidate.rollout.rollback_compatible || raw.request.createdAt < operation.enteredAt || raw.deadline !== raw.request.createdAt + 90_000) throw new Error("forward effect baseline binding disagrees");
   const policy = managedForwardRecoveryBaseline(state, source, candidate.value, raw.request);
   if (policy.retained.some((service) => { const target = candidate.value.services[service.service]; return target === undefined || managedServiceDigest(target) !== managedServiceDigest(service); })) throw new Error("forward effects require normalized unchanged retained dependencies");
   if (source.previous !== null && operation.quiescence?.phase !== "complete") throw new Error("forward effects require completed prior maintenance quiescence");

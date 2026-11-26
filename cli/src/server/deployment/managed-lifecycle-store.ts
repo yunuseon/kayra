@@ -21,6 +21,7 @@ import { parseManagedGroupCompensation } from "./managed-group-compensation.ts";
 import { managedUnstartedSource } from "./managed-unstarted-source.ts";
 import { managedRecoverySource, managedRecoveryCheckTargets } from "./managed-recovery-safety.ts";
 import { managedRecoverySnapshot } from "./managed-recovery-description.ts";
+import type { ManagedAdmissionPort } from "../../contracts/managed-admission.ts";
 import type { OperationJournal } from "./operation.ts";
 
 import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
@@ -53,7 +54,9 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   const artifact = async (digest: string) => { const bytes = await metadata(() => ports.read(digest)); if (hash(bytes) !== digest) throw new Error("managed lifecycle artifact integrity failed"); return bytes; };
   const source = async (state: ManagedLifecycleStore) => {
     const bytes = await artifact(state.operation.source); const raw: unknown = JSON.parse(bytes); const value = parseManagedLifecycleSource(raw); const description = managedLifecycleDescription(value);
-    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || state.operation.previousPlan !== (description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous)) || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible || value.version === 1 && state.operation.allocation !== undefined || value.version === 2 && state.operation.admitted && state.operation.allocation === undefined) throw new Error("managed lifecycle source disagrees");
+    if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || state.operation.previousPlan !== (description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous)) || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible || value.version === 1 && state.operation.allocation !== undefined || value.version === 2 && state.operation.admitted && state.operation.allocation === undefined ||
+      value.version === 3 && (!state.operation.admitted || state.compatibilityEpoch < (value.forward?.blocked.epoch ?? Infinity) ||
+        state.operation.phase !== "held" && state.operation.allocation === undefined)) throw new Error("managed lifecycle source disagrees");
     if (state.operation.recoverySource !== null) { const raw: unknown = JSON.parse(await artifact(state.operation.recoverySource)); const recovery = managedRecoverySnapshot(raw);
       if (!same(recovery.source.candidate, value.candidate) || !same(recovery.source.checks, managedRecoveryCheckTargets(state, value))) throw new Error("managed recovery check source disagrees"); }
     return value;
@@ -165,12 +168,65 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
         // eslint-disable-next-line functional/immutable-data -- obsolete views retain their bound run and can never write the next operation
         views.clear(); return state;
     }),
+    /** The app index still owns the envelope fence. Only a durable pending successor charge permits root installation. */
+    installForward: (input: ManagedLifecycleSource, observe: ManagedAdmissionPort["observe"]) => serial(async () => {
+      const value = parseManagedLifecycleSource(input);
+      const certificate = value.forward;
+      if (value.version !== 3 || certificate === undefined || !same(value.candidate.infrastructure.ownership, owner)) throw new Error("managed forward root source disagrees");
+      const description = managedLifecycleDescription(value);
+      const identity = managedLifecycleSourceDigest(value);
+      const lease = Object.freeze({ owner, run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, deadline: description.admissionDeadline });
+      const current = await required();
+      if (current.operation.run === value.run) {
+        if (current.operation.source !== identity) throw new Error("managed forward root installation conflicts");
+        await source(current);
+        return current;
+      }
+
+      if (current.operation.phase !== "held" || !current.operation.admitted || current.operation.settled ||
+        current.operation.run !== certificate.blocked.run || current.operation.action !== certificate.blocked.action ||
+        current.operation.source !== certificate.blocked.source || current.compatibilityEpoch !== certificate.blocked.epoch ||
+        hash(JSON.stringify(current)) !== certificate.blocked.checkpoint) throw new Error("managed forward root requires the exact held checkpoint");
+      const before = await source(current);
+      if (before.candidate.rollout.strategy !== "maintenance" || current.operation.recoverySource !== null ||
+        current.operation.compatibilityFencedAt === null && before.version !== 3) throw new Error("managed forward root lacks an inherited data fence");
+
+      if (await metadata(() => observe(lease, description.admission)) !== "reserved") throw new Error("managed forward root requires the transferred charge");
+      const bytes = JSON.stringify(value);
+      if (await artifact(identity) !== bytes || await artifact(certificate.blocked.checkpoint) !== JSON.stringify(current)) {
+        throw new Error("managed forward root retained source or checkpoint disagrees");
+      }
+      const historyBytes = JSON.stringify({ previous: current.history, state: current });
+      const history = await retain(historyBytes);
+      if (history !== hash(historyBytes)) throw new Error("managed forward root history retention failed");
+
+      const at = time(value.createdAt);
+      const late = at >= description.admissionDeadline;
+      const compatibilityEpoch = current.compatibilityEpoch;
+      const state = await write({
+        version: 3, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]),
+        compatibilityEpoch, active: null, lastGood: current.lastGood, history,
+        operation: {
+          run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: null, previousPlan: null,
+          createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline,
+          phase: late ? "held" : "allocating", enteredAt: at, reason: late ? "deadline" : null,
+          ...(late ? {} : { allocation: { createdAt: at, deadline: at + 90_000, readyAt: null } }),
+          outcome: null, settlement: null, unstartedAt: null, failure: null, recoverySource: null,
+          recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: true,
+          settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null,
+          resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null,
+        },
+      });
+      // eslint-disable-next-line functional/immutable-data -- obsolete views cannot write the successor's children
+      views.clear();
+      return state;
+    }),
     admit: () => serial(async () => { const state = await required(); const at = time(state.operation.createdAt); if (state.operation.phase !== "admitting") return state; if (at >= state.operation.admissionDeadline) return write({ ...state, operation: { ...state.operation, phase: "held", reason: "deadline" } }); const run = await source(state); return write({ ...state, operation: { ...state.operation, admitted: true, phase: run.version === 2 ? "allocating" : run.candidate.rollout.strategy === "maintenance" ? "quiescing" : "preparing", ...(run.version === 2 ? { allocation: { createdAt: at, deadline: at + 90_000, readyAt: null } } : {}), enteredAt: at } }); }),
     allocated: () => serial(async () => {
       const state = await required(); const operation = state.operation; if (operation.phase !== "allocating") return state;
       const intent = operation.allocation; const at = time(operation.createdAt);
       if (intent === undefined || operation.cancelRequestedAt !== null || at >= intent.deadline) return write({ ...state, operation: { ...operation, phase: "held", reason: operation.cancelRequestedAt === null ? "deadline" : "cancellation" } });
-      const input = await source(state); if (input.version !== 2) throw new Error("managed allocation source disagrees");
+      const input = await source(state); if (input.version === 1) throw new Error("managed allocation source disagrees");
       return write({ ...state, operation: { ...operation, allocation: { ...intent, readyAt: at }, phase: input.candidate.rollout.strategy === "maintenance" ? "quiescing" : "preparing", enteredAt: at } });
     }),
     enter: (expected: "quiescing" | "preparing" | "updating", next: "preparing" | "updating" | "verifying", at: number) => serial(async () => { const state = await required(); if (state.operation.phase !== expected) return state;

@@ -1,3 +1,4 @@
+import { matchesManagedRequestCompletion } from "./managed-lifecycle-request.ts";
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { indexedManagedForward } from "./indexed-managed-forward.ts";
 import type { ManagedForwardCleanupContext, ManagedForwardCleanupRuntimePort } from "../../contracts/managed-forward-cleanup-context.ts";
@@ -22,6 +23,7 @@ import type { ManagedDeploymentReadPort, ManagedHealthReadPort } from "../../con
 import { managedDeploymentStatus } from "./managed-deployment-status.ts";
 import { managedDeploymentHealth } from "./managed-deployment-health.ts";
 import { managedImagePins } from "./managed-image-pins.ts";
+import { managedLifecycleStore } from "./managed-lifecycle-store.ts";
 import { parseManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 import type { ManagedLifecycleStore } from "./managed-lifecycle-state.ts";
 import { parseManagedLifecycleSource, managedLifecycleDescription, managedLifecycleSourceDigest } from "./managed-lifecycle-source.ts";
@@ -77,7 +79,13 @@ import { openJournal } from "./journal.ts";
 import { openLifecycleEnvelopeStore, type RegistrationObserver } from "./lifecycle-envelope-store.ts";
 
 const appName = z.string().regex(names.app.pattern);
-type ForwardSelectionUse<T> = (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown, view: { readonly root: () => Promise<ManagedLifecycleStore>; readonly envelope: EnvelopeStore; readonly directory: string }) => Promise<T>;
+type ForwardSelectionView = {
+  readonly root: () => Promise<ManagedLifecycleStore>;
+  readonly envelope: EnvelopeStore;
+  readonly directory: string;
+  readonly installForward: ReturnType<typeof managedLifecycleStore>["installForward"];
+};
+type ForwardSelectionUse<T> = (selection: ReturnType<typeof managedForwardSelection>, catalog: z.infer<typeof lifecycleIndexForwardSelection>, input: unknown, view: ForwardSelectionView) => Promise<T>;
 type ForwardBuildPorts = BuildPorts & { readonly authorizeSelection: ForwardSelectionPorts["authorize"] };
 type ForwardBuildContext = { readonly request: ManagedForwardSelectionRequest; readonly ports: ForwardSelectionPorts };
 type ForwardCleanupRuntime = (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort;
@@ -354,13 +362,20 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const input = prepared.input ?? (recorded === undefined ? await (async () => { const state = await rootState(); if (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== catalog.checkpoint || actor === undefined) throw new Error("managed forward selection initialization lost its baseline"); const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(catalog.blockedSource)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== catalog.blockedSource) throw new Error("managed forward selection source unavailable"); return { state, source: parseManagedLifecycleSource(JSON.parse(bytes)), registration: catalog.registration, request: statement, actor }; })() : { state: undefined, source: undefined, registration: undefined, request: statement, actor: actor ?? recorded.audit.actor });
         // Acquire owned journal handles before a timed permission callback can be abandoned.
         if (observeRoot) { try { await rootState(); } catch { unavailable = true; } }
-        return await use(selection, catalog, { ...input, createdAt: catalog.createdAt }, { root: rootState, envelope: store, directory: path });
+        return await use(selection, catalog, { ...input, createdAt: catalog.createdAt }, {
+          root: rootState, envelope: store, directory: path,
+          installForward: async (source, observe) => {
+            await rootState();
+            if (root === undefined) throw new Error("managed forward root journal unavailable");
+            return managedLifecycleStore(root, ownership.value, ports).installForward(source, observe);
+          },
+        });
       } finally { await child.close(); }
     } finally { if (root !== undefined) await root.close(); }
   };
   const withForwardSelection = <T>(app: string, request: ManagedForwardSelectionRequest, actor: MigrationResolutionActor | undefined, ports: ForwardSelectionPorts, use: ForwardSelectionUse<T>, observeRoot = actor === undefined) =>
     useIndexed(app, (store, indexed) => forwardSelectionHeld(store, indexed, app, request, actor, ports, use, observeRoot));
-  const useForwardCleanup = <T>(app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, use: (owner: ReturnType<typeof indexedManagedForward>, envelope: EnvelopeStore, root: () => Promise<ManagedLifecycleStore>) => Promise<T>) => withForwardSelection(app, request, undefined, ports, async (selection, catalog, _input, view) => {
+  const useForwardCleanup = <T>(app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, use: (owner: ReturnType<typeof indexedManagedForward>, view: ForwardSelectionView) => Promise<T>) => withForwardSelection(app, request, undefined, ports, async (selection, catalog, _input, view) => {
     const audit = await selection.audit(); if (audit === undefined || catalog.source === null || catalog.decision !== audit.id || catalog.preparedBuild === undefined) throw new Error("forward cleanup lacks its audited prepared selection");
     const chosen = Object.freeze({ request: request.request, source: catalog.source, decision: audit.id });
     const owner = indexedManagedForward({ envelope: view.envelope, root: view.root, selection: chosen,
@@ -377,7 +392,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         return observed.ok && observed.value === "reserved";
       }),
     }, ports);
-    return use(owner, view.envelope, view.root);
+    return use(owner, view);
   });
   const forwardGrantHeld = (store: EnvelopeStore, indexed: IndexEntry, app: string, forward: ForwardBuildContext) => forwardSelectionHeld(store, indexed, app, forward.request, undefined, forward.ports, async (selection, catalog) => {
     if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
@@ -567,7 +582,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     prepareManagedForwardHandoff: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: (context: ManagedForwardCleanupContext) => ManagedForwardCleanupRuntimePort, retained: ManagedWorkloadPort["observeDesired"]) =>
       useForwardCleanup(app, request, ports, (owner) => owner.prepareHandoff(runtime, retained)),
     transferManagedForwardAdmission: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardTransferPorts, runtime: ForwardCleanupRuntime, retained: ManagedWorkloadPort["observeDesired"]) =>
-      useForwardCleanup(app, request, ports, async (owner, envelope, root) => {
+      useForwardCleanup(app, request, ports, async (owner, { envelope, root }) => {
         const recorded = (await envelope.read())?.forward;
         if (recorded?.phase !== "transferring") throw new Error("forward admission transfer requires its published intent");
         const prepared = await owner.prepareHandoff(runtime, retained);
@@ -618,6 +633,49 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           await journal.write({ ...snapshot, resources: next.value.resources, managedBindings: next.value.bindings });
           return targetIdentity;
         });
+      }),
+    installManagedForwardRoot: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: ForwardCleanupRuntime, retained: ManagedWorkloadPort["observeDesired"]) =>
+      useForwardCleanup(app, request, ports, async (owner, view) => {
+        const reservation = (await view.envelope.read())?.forward;
+        if (reservation?.phase !== "transferring") throw new Error("forward root installation requires its published intent");
+        const prepared = await owner.prepareHandoff(runtime, retained);
+        return view.installForward(prepared.source, (identity, claim) => serialIndex(async () => {
+          const snapshot = await readIndex();
+          const envelope = await view.envelope.read();
+          const entry = snapshot.apps.find((item) => item.app === app);
+          if (identity.source !== reservation.handoff.source || JSON.stringify(envelope?.forward) !== JSON.stringify(reservation) ||
+            !managedIndexScope({ owner: entry, envelope, source: prepared.source }).ok) return "unavailable" as const;
+          const observed = observeManagedAdmission({ resources: snapshot.resources, bindings: snapshot.managedBindings ?? [] }, identity, claim);
+          return observed.ok ? observed.value : "unavailable" as const;
+        }));
+      }),
+    activateManagedForward: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts & RetainedInputsPort, runtime: ForwardCleanupRuntime, retained: ManagedWorkloadPort["observeDesired"]) =>
+      useForwardCleanup(app, request, ports, async (owner, view) => {
+        const envelope = await view.envelope.read();
+        const reservation = envelope?.forward;
+        if (reservation === undefined) {
+          const old = envelope?.managed?.find((item) => item.run === request.blockedRun);
+          const installed = envelope?.managed?.find((item) => item.run === request.request);
+          if (old?.completion?.outcome !== "superseded" || old.completion.successor !== installed?.run || installed === undefined) throw new Error("forward activation intent unavailable");
+          return installed;
+        }
+        if (reservation.phase !== "transferring") throw new Error("forward activation requires its published intent");
+        const prepared = await owner.prepareHandoff(runtime, retained);
+        const state = await view.root();
+        const description = managedLifecycleDescription(prepared.source);
+        const identity = Object.freeze({
+          owner: state.owner, run: prepared.source.run, action: prepared.source.action, source: reservation.handoff.source,
+          plan: description.admission.planDigest, deadline: description.admissionDeadline,
+        });
+        const charged = await serialIndex(async () => {
+          const snapshot = await readIndex();
+          const entry = snapshot.apps.find((item) => item.app === app);
+          if (!managedIndexScope({ owner: entry, envelope, source: prepared.source }).ok) return false;
+          const observed = observeManagedAdmission({ resources: snapshot.resources, bindings: snapshot.managedBindings ?? [] }, identity, description.admission);
+          return observed.ok && observed.value === "reserved";
+        });
+        if (!charged) throw new Error("forward activation requires the transferred charge");
+        return view.envelope.activateManagedForward(prepared.source, state);
       }),
     managedForwardBuildGrant: (app: string, request: ManagedForwardSelectionRequest, ports: ForwardSelectionPorts) => withForwardSelection(app, request, undefined, ports, async (selection, catalog) => {
       if (catalog.phase !== "ready") throw new Error("managed forward selection is not durably published"); return selection.buildGrant();
@@ -699,7 +757,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed migration audit source binding disagrees");
       const project = async (input: unknown) => {
         const state = parseManagedLifecycleStore(input);
-        if (request.completion !== null && (createHash("sha256").update(JSON.stringify(state)).digest("hex") !== request.completion.rootSnapshot || state.operation.phase !== "complete" || state.operation.outcome !== request.completion.outcome)) throw new Error("managed migration audit completion disagrees");
+        if (request.completion !== null && !matchesManagedRequestCompletion(request.completion, state)) throw new Error("managed migration audit completion disagrees");
         return managedMigrationAudit(state, source, query.value, { read });
       };
       if (request.completion !== null) return project(JSON.parse(await read(request.completion.rootSnapshot)));

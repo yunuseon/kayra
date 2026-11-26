@@ -165,7 +165,7 @@ export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwne
     const result = await child.verification.tick(); return result.phase === "held" ? store.hold("verification") : store.read();
   };
   const capabilities = (source: ManagedLifecycleSource) => {
-    if (source.version === 2 && ports.allocations === undefined) throw new Error("managed allocation capability unavailable");
+    if (source.version !== 1 && ports.allocations === undefined) throw new Error("managed allocation capability unavailable");
     if (source.previous !== null && source.candidate.rollout.rollback_compatible && ports.services.fence === undefined) throw new Error("managed recovery fencing capability unavailable");
     if (source.retained.some((value) => value.kind === "barrier") && ports.services.reactivate === undefined || ports.checks === undefined && [source.candidate, ...(source.previous === null ? [] : [source.previous.source.application])].some((plan) => plan.rollout.checks.length > 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed lifecycle capabilities unavailable");
   };

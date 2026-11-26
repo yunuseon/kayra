@@ -2679,3 +2679,12 @@ intent. It rechecks the old lease, current host, successor authority, consumer
 cessation and retained readiness before replacing the charge and its binding in
 one write. A lost acknowledgement recovers the exact pending successor lease.
 The envelope and held root still fence execution during this stage.
+
+Once the transferred charge is durable, the index installs the successor root
+and archives the held root with its history. The successor inherits the data
+epoch and historical last known good release. If installation resumes after
+the admission deadline, the successor is held with its pending lease. The
+envelope then atomically marks the old run superseded and makes the successor
+the accepted lifecycle action. Reopening after either write reconciles the
+same records. A held successor with inherited data can be selected for another
+audited forward attempt.

@@ -1,3 +1,4 @@
+import { matchesManagedRequestCompletion } from "./managed-lifecycle-request.ts";
 import type { OwnedVolumePort } from "../../contracts/owned-volume.ts";
 import type { RecordedVolumeReceiptsPort } from "../../contracts/recorded-volume-receipts.ts";
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
@@ -48,6 +49,7 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
     return effect.kind === "accepted-recovery" ? JSON.stringify(effect.request) === JSON.stringify(gate.value.request) : gate.value.activeGate && await ports.authorize(source, effect);
   } });
   const synchronize = async () => {
+    if ((await context.envelope.read())?.forward !== undefined) return;
     const root = await owner.read(); if (root === undefined) return;
     const source = await owner.source(); const gate = managedIndexGate(await scope(source));
     if (!gate.ok || gate.value.request.source !== root.operation.source || gate.value.request.completion !== null && gate.value.request.completion.rootSnapshot !== createHash("sha256").update(JSON.stringify(root)).digest("hex")) throw new Error("indexed managed root lacks its shared request");
@@ -100,7 +102,7 @@ export const indexedManagedLifecycle = (context: IndexedManagedContext, ports: I
       if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== completion.rootSnapshot) throw new Error("completed managed audit snapshot is unavailable");
       const raw: unknown = JSON.parse(bytes); const root = parseManagedLifecycleStore(raw); const operation = root.operation;
       const audit = operation.preparation?.sequence?.steps.find((step) => step.id === statement.value.step)?.resolution; const receipt = operation.resolutionReceipts.find((item) => item.step === statement.value.step);
-      if (bytes !== JSON.stringify(root) || root.owner.app !== statement.value.app || JSON.stringify(root.owner) !== JSON.stringify(value.owner) || operation.run !== value.run || operation.source !== value.source || operation.action !== value.action || operation.plan !== value.plan || operation.phase !== "complete" || !operation.settled || operation.outcome !== completion.outcome || audit === undefined || receipt === undefined || audit.outcome !== statement.value.outcome || audit.reason !== statement.value.reason || JSON.stringify(audit.actor) !== JSON.stringify(identity.value) ||
+      if (bytes !== JSON.stringify(root) || root.owner.app !== statement.value.app || JSON.stringify(root.owner) !== JSON.stringify(value.owner) || operation.run !== value.run || operation.source !== value.source || operation.action !== value.action || operation.plan !== value.plan || !matchesManagedRequestCompletion(completion, root) || audit === undefined || receipt === undefined || audit.outcome !== statement.value.outcome || audit.reason !== statement.value.reason || JSON.stringify(audit.actor) !== JSON.stringify(identity.value) ||
         await bounded(ports.now() + 10_000, () => ports.authorize(source, { kind: "migration-resolution", request: statement.value, actor: identity.value })) !== true) throw new Error("completed managed migration assertion conflicts or is not authorized");
       return Object.freeze({ state: root, receipt });
     },

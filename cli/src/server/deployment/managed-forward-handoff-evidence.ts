@@ -61,7 +61,7 @@ export const observeManagedForwardHandoff = async (source: ManagedForwardEffectS
   const retained = Object.values(blocked.source.candidate.services).filter((service) => service.role === "retained-dependency");
   const dependencies = await Promise.all(retained.map(async (service) => {
     const prepared = preparation?.nodes.find((node) => node.name === service.service)?.ready;
-    const previous = blocked.source.retained.find((item) => item.name === service.service && item.kind === "active");
+    const previous = blocked.source.retained.find((item) => item.name === service.service && item.kind !== "barrier");
     const reference = prepared ?? previous;
     if (reference?.action.plan !== managedServiceDigest(service)) throw new Error("forward handoff retained readiness identity unavailable");
     const observed = await bounded(() => ports.retained(reference.action, service, blocked.source.candidate));

@@ -1,4 +1,5 @@
 /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- observes native effects and injects interruption or ownership loss */
+import { randomUUID } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { managedLifecycleSourceDigest, parseManagedLifecycleSource } from "../../src/server/deployment/managed-lifecycle-source.ts";
 import { readFile, rename } from "node:fs/promises";
@@ -98,6 +99,8 @@ test("the global admission writer transfers capacity exactly once after fresh ha
   await assert.rejects(transfer(), /requires its published intent/);
   const prepared = await lab.index().prepareManagedForwardHandoff("shop", lab.request, lab.ports, lab.factory, retained);
   assert.equal(prepared.reservation.phase, "transferring");
+  const install = () => lab.index().installManagedForwardRoot("shop", lab.request, lab.ports, lab.factory, retained);
+  await assert.rejects(install(), /requires the transferred charge/);
   await assert.rejects(transfer(false), /authority unavailable/);
   lab.cut("transfer-write-before");
   await assert.rejects(transfer(), /injected before/);
@@ -112,10 +115,53 @@ test("the global admission writer transfers capacity exactly once after fresh ha
   assert.equal(moved.source, prepared.reservation.handoff.source);
   assert.equal(moved.deadline, prepared.reservation.handoff.deadline);
   const resources = await lab.index().resourceSnapshot();
-  assert.equal(resources?.charges.length, 1);
-  assert.equal(resources.charges[0]?.sequence, 4);
-  assert.equal(resources.charges[0]?.result, "pending");
+  assert.ok(resources);
+  assert.equal(resources.charges.length, 1);
+  const charge = resources.charges[0]; assert.ok(charge);
+  assert.equal(charge.sequence, 4);
+  assert.equal(charge.result, "pending");
   assert.deepEqual(await lab.index().managedState("shop", lab.runtime), lab.held);
   assert.equal((await lab.readEnvelope()).fence?.lifecycle.phase, "registered");
+  lab.cut("root-install-after");
+  await assert.rejects(install(), /synchronization uncertain/);
+  await lab.reopen();
+  const installed = await install();
+  assert.equal(installed.operation.phase, "held");
+  assert.equal(installed.operation.reason, "deadline");
+  assert.equal(installed.operation.admitted, true);
+  assert.equal(installed.operation.admissionDeadline, moved.deadline);
+  assert.equal(installed.compatibilityEpoch, lab.held.compatibilityEpoch);
+  assert.equal(installed.active, null);
+  assert.deepEqual(installed.lastGood, lab.held.lastGood);
+  assert.ok(installed.history);
+  const archived: unknown = JSON.parse(await lab.artifacts.read(installed.history));
+  assert.deepEqual(archived, { previous: lab.held.history, state: lab.held });
+  await lab.reopen();
+  assert.deepEqual(await install(), installed);
+  await assert.rejects(lab.index().tickManagedDeployment("shop", lab.source.run, lab.runtime), /forward continuation owns lifecycle/);
+  assert.deepEqual(await lab.index().resourceSnapshot(), resources);
+  const activate = () => lab.index().activateManagedForward("shop", lab.request, lab.ports, lab.factory, retained);
+  lab.cut("activation-after");
+  await assert.rejects(activate(), /injected after/);
+  await lab.reopen();
+  const accepted = await activate();
+  assert.equal(accepted.run, moved.run);
+  assert.equal(accepted.source, moved.source);
+  const activated = await lab.readEnvelope();
+  assert.equal(activated.forward, undefined);
+  assert.deepEqual(activated.managed?.find((entry) => entry.run === lab.source.run)?.completion,
+    { rootSnapshot: lab.reservation.blocked.checkpoint, outcome: "superseded", disposition: "failure", successor: moved.run });
+  await lab.reopen();
+  assert.deepEqual(await activate(), accepted);
+  assert.deepEqual(await lab.index().tickManagedDeployment("shop", moved.run, lab.runtime), installed);
+  assert.deepEqual(await lab.index().resourceSnapshot(), resources);
+  assert.deepEqual((await lab.index().pendingManagedDeployments()).map((item) => item.run), [moved.run]);
+  const nextSelection = await lab.index().selectManagedForward("shop", {
+    ...lab.request, request: randomUUID(), blockedRun: moved.run, commit: "9".repeat(40),
+  }, lab.actor, lab.ports);
+  assert.equal(nextSelection.audit.blocked.compatibilityEpoch, lab.held.compatibilityEpoch);
+  const status = await lab.index().managedDeploymentStatus("shop", lab.runtime);
+  assert.equal(status?.rollback, "data-fenced");
+  assert.equal(status?.verifiedActive, null);
   assert.equal(lab.effects.length, 4);
 });

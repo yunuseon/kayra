@@ -10,10 +10,12 @@ import { parseManagedRelease, managedReleaseBaselines } from "../../src/server/d
 import { parseManagedApplicationPlan } from "../../src/contracts/managed-application-plan.ts";
 import { parseManagedLifecycleSource } from "../../src/server/deployment/managed-lifecycle-source.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
+import { parseLifecycleEnvelope } from "../../src/server/deployment/lifecycle-envelope.ts";
+import { parseManagedLifecycleStore } from "../../src/server/deployment/managed-lifecycle-state.ts";
 import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
 
 export const indexedForwardFixture = async (t: TestContext) => {
-  let cut: "catalog-before" | "catalog-after" | "decision-after" | "publication-before" | "publication-after" | "build-publication-before" | "build-publication-after" | "reservation-before" | "reservation-after" | "cleanup-child-before" | "cleanup-child-after" | "cleanup-publication-before" | "cleanup-publication-after" | "handoff-publication-after" | "transfer-write-before" | "transfer-write-after" | undefined; let decisions = 0;
+  let cut: "catalog-before" | "catalog-after" | "decision-after" | "publication-before" | "publication-after" | "build-publication-before" | "build-publication-after" | "reservation-before" | "reservation-after" | "cleanup-child-before" | "cleanup-child-after" | "cleanup-publication-before" | "cleanup-publication-after" | "handoff-publication-after" | "transfer-write-before" | "transfer-write-after" | "activation-after" | "root-install-after" | undefined; let decisions = 0;
   let rootGate: { readonly entered: ReturnType<typeof Promise.withResolvers<undefined>>; readonly release: ReturnType<typeof Promise.withResolvers<undefined>> } | undefined;
   const journals = async (...args: Parameters<typeof openJournal>) => {
     if (args[0].endsWith("/managed") && rootGate !== undefined) { const gate = rootGate; rootGate = undefined; gate.entered.resolve(undefined); await gate.release.promise; }
@@ -23,7 +25,10 @@ export const indexedForwardFixture = async (t: TestContext) => {
       const transferring = index?.managedBindings?.some((binding) => binding.run === selected?.request) === true;
       const forward = typeof value === "object" && value !== null && "forward" in value ? value["forward"] : undefined;
       const phase = typeof forward === "object" && forward !== null && "phase" in forward ? forward["phase"] : undefined;
-      const point = transferring ? "transfer-write" : args[0].endsWith("/effects") ? "cleanup-child" : phase === "transferring" ? "handoff-publication" :
+      const activated = typeof value === "object" && value !== null && "managed" in value && forward === undefined &&
+        (() => { const checked = parseLifecycleEnvelope(value); return checked.ok && checked.value.managed?.some((item) => item.completion?.outcome === "superseded") === true; })();
+      const installed = args[0].endsWith("/managed") && parseManagedLifecycleStore(value).sequence === 4;
+      const point = activated ? "activation" : installed ? "root-install" : transferring ? "transfer-write" : args[0].endsWith("/effects") ? "cleanup-child" : phase === "transferring" ? "handoff-publication" :
         phase === "fencing" ? "cleanup-publication" : forward !== undefined ? "reservation" : selected?.preparedBuild !== undefined ?
         "build-publication" : selected?.phase === "initializing" ? "catalog" : selected?.phase === "ready" ? "publication" :
         args[0].includes("/managed/forward/") ? "decision" : undefined;

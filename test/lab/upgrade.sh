@@ -732,7 +732,7 @@ if [ "$indexed_registration" = true ]; then
         jq -n --arg repo "http://${host_ip}:${port}/lab/managed.git" --arg a "$managed_a" --arg b "$managed_b" \
             --arg c "$managed_c" --arg d "$managed_d" --arg e "$managed_e" --arg f "$managed_f" --argjson requests "$managed_requests" '{
             fixture_app: "managed-complete", fixture_runtime: "swarm", fixture_hosts: ["managed-complete.lab.test"],
-            fixture_grants: {memory_bytes: 268435456, cpu_millicores: 500, maintenance: false},
+            fixture_grants: {memory_bytes: 536870912, cpu_millicores: 1000, maintenance: false},
             fixture_configuration: {MODE: "lab", DB_HOST: "kayra-managed-ledger"}, fixture_ledger: "kayra-managed-ledger",
             fixture_repo: $repo, fixture_commit: $a, fixture_commits: {A: $a, B: $b, C: $c, D: $d, E: $e, F: $f}, fixture_requests: $requests,
             kayra_lab_swarm: true, kayra_lab_managed_rollouts: true

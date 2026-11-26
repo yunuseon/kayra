@@ -1,3 +1,4 @@
+import { managedRemovalInventory } from "./managed-removal-inventory.ts";
 import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
 import type { ManagedRemovalIntent } from "./managed-removal-intent.ts";
 import { matchesManagedRequestCompletion } from "./managed-lifecycle-request.ts";
@@ -754,6 +755,35 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           throw new Error("managed removal authority unavailable");
         }
         return store.requestManagedRemoval(owner, request, operator, proposed.removal.createdAt);
+      }),
+    inspectManagedRemoval: (app: string, request: string, ports: ManagedDeploymentReadPort) =>
+      useIndexed(app, async (store, indexed) => {
+        const envelope = await store.read();
+        const intent = envelope?.removal;
+        if (envelope === undefined || indexed.protocol !== "managed-v3" || intent?.request !== request || intent.owner.dataOwner !== indexed.dataOwner ||
+          intent.owner.incarnation !== indexed.incarnation || JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) {
+          throw new Error("managed removal inventory lacks the accepted scope");
+        }
+        const path = join(appDirectory(app), "managed");
+        await requireDirectory(path);
+        const deadline = ports.now() + 10_000;
+        const read = async (digest: string) => {
+          const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest));
+          if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed removal evidence unavailable");
+          return bytes;
+        };
+        if (indexed.managedRoot === "empty" && await stat(join(path, "state.json")) === undefined) return managedRemovalInventory(intent, null, read);
+        const root = await journals(path, "existing");
+        try {
+          const state = parseManagedLifecycleStore(await root.read());
+          const accepted = envelope.managed?.find((item) => item.run === state.operation.run);
+          if (accepted?.source !== state.operation.source || accepted.action !== state.operation.action ||
+            accepted.completion !== null && !matchesManagedRequestCompletion(accepted.completion, state)) throw new Error("managed removal checkpoint lacks its request");
+          const bytes = await read(accepted.source);
+          const source = parseManagedLifecycleSource(JSON.parse(bytes));
+          if (bytes !== JSON.stringify(source)) throw new Error("managed removal source binding disagrees");
+          return await managedRemovalInventory(intent, { state, source }, read);
+        } finally { await root.close(); }
       }),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),

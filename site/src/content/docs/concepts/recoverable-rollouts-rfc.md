@@ -2698,3 +2698,9 @@ deployment and a displaced forward cleanup description for the removal
 reconciler. An admission handoff in progress must finish its reconciliation
 before removal can take that fence. Acceptance records intent while the
 workloads, data and accounting remain available for reconciliation.
+
+Removal inventory is derived from the owned checkpoint and accepted request.
+It covers candidate, prior and retired workload descriptions, their recorded
+runtime versions, migration or probe attempts, and pinned uncertain checks.
+Consumers appear before retained dependencies. The reconciler must prove
+cessation before settling accounting or publishing a removal tombstone.

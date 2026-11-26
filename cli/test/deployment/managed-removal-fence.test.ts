@@ -30,9 +30,16 @@ test("removal owns the lifecycle fence before a competing managed request and pr
   await assert.rejects(lab.index().cancelManagedDeployment("shop", lab.source.run, lab.runtime), /removal owns lifecycle/);
   await assert.rejects(lab.index().reserveDataVolumeIdentities("shop", ["new"]), /registration has not been verified/);
 
+  const inventory = await lab.index().inspectManagedRemoval("shop", request, lab.ports);
+  assert.deepEqual(inventory.services.map((service) => service.name), ["web", "worker", "db"]);
+  assert.equal(inventory.services.at(-1)?.plan.role, "retained-dependency");
+  assert.deepEqual(inventory.blocked?.state, lab.held);
+  assert.deepEqual(inventory.intent.volumes, lab.volumes);
+  assert.deepEqual(await lab.index().resourceSnapshot(), before);
   await lab.reopen(); lab.clock(3000);
   const ports = { now: lab.runtime.now, authorize: () => Promise.resolve(false) };
   assert.deepEqual(await lab.index().requestManagedRemoval("shop", request, operator, ports), removal);
+  assert.deepEqual(await lab.index().inspectManagedRemoval("shop", request, lab.ports), inventory);
   await assert.rejects(lab.index().requestManagedRemoval("shop", request, { ...operator, reason: "Change the existing accepted removal reason" }, ports), /intent conflicts/);
 });
 

@@ -8,6 +8,7 @@ import { test, type TestContext } from "node:test";
 import { ownedVolume } from "../../src/contracts/owned-volume.ts";
 import type { VolumeObservation, VolumeAction } from "../../src/contracts/owned-volume.ts";
 import { volumeCreationCatalog } from "../../src/server/deployment/volume-creation-catalog.ts";
+import { managedPurgeInventory } from "../../src/server/deployment/managed-purge-inventory.ts";
 import { parseVolumeCreationCatalog } from "../../src/server/deployment/volume-creation-catalog-state.ts";
 import { openJournal } from "../../src/server/deployment/journal.ts";
 import type { OperationJournal } from "../../src/server/deployment/operation.ts";
@@ -32,6 +33,29 @@ test("catalog retains one birth across operations and never recreates a recorded
   assert.deepEqual(await lab.catalog().receipts.read([lab.volume]), [receipt]); await lab.reopen(); lab.clock(2000); assert.equal((await lab.catalog().prepare(lab.proposal())).status, "recorded"); assert.equal((await lab.catalog().read())?.allocations[0]?.creations.length, 1);
   lab.observe({ status: "absent" }); assert.equal((await lab.catalog().prepare(lab.proposal())).status, "recorded"); assert.deepEqual(await lab.catalog().receipts.read([lab.volume]), [receipt]); assert.equal(lab.creates.length, 1);
   await assert.rejects(lab.catalog().tick(lab.volume, randomUUID()), /unknown/); assert.deepEqual(Object.keys(lab.catalog().receipts), ["read"]);
+});
+
+test("a successor preserves the inherited birth and never starts a replacement creator", async (t) => {
+  const lab = await fixture(t);
+  const closedOwner = { ...lab.owner, incarnation: randomUUID() };
+  const receipt = { volume: lab.volume, createdAt: new Date(1000).toISOString() };
+  const inherited = { from: closedOwner, removal: randomUUID(), receipt };
+  const allocations = [{ volume: lab.volume, creations: [], inherited }];
+  const snapshot = { version: 1, owner: lab.owner, sequence: 1, allocations };
+  const directory = await mkdtemp(join(tmpdir(), "kayra-retained-volume-catalog-"));
+  const journal = await openJournal(directory, "initialize");
+  await journal.write(snapshot);
+  t.after(async () => { await journal.close(); await rm(directory, { recursive: true, force: true }); });
+  const catalog = volumeCreationCatalog(journal, lab.owner, lab.ports);
+
+  assert.deepEqual(await catalog.prepare(lab.proposal()), { status: "recorded", receipt });
+  assert.deepEqual(await catalog.receipts.read([lab.volume]), [receipt]);
+  assert.deepEqual(managedPurgeInventory(snapshot, lab.owner, [lab.volume]), [{ volume: lab.volume, birth: receipt }]);
+  assert.equal(lab.creates.length, 0);
+  const foreign = { ...inherited, from: { ...closedOwner, dataOwner: randomUUID() } };
+  assert.throws(() => parseVolumeCreationCatalog({
+    ...snapshot, allocations: [{ ...allocations[0], inherited: foreign }],
+  }), /inherited volume birth disagrees/);
 });
 
 test("same-operation replay preserves deadlines while an explicit later operation can retry an uncreated allocation", async (t) => {

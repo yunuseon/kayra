@@ -4,7 +4,7 @@ import { ownedVolumeSchema, parseDataOwnership } from "../../contracts/owned-vol
 import type { RecordedVolumeReceiptsPort } from "../../contracts/recorded-volume-receipts.ts";
 import { dataVolumeCreation, parseDataVolumeCreation } from "./data-volume-creation.ts";
 import type { DataVolumeCreation } from "./data-volume-creation.ts";
-import { parseVolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
+import { parseVolumeCreationCatalog, recordedCatalogBirth } from "./volume-creation-catalog-state.ts";
 import type { VolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
 import type { OperationJournal } from "./operation.ts";
 import { volumeCatalogReceipts } from "./volume-catalog-receipts.ts";
@@ -20,7 +20,6 @@ type Ports = Omit<Parameters<typeof dataVolumeCreation>[1], "authorizeReceipt"> 
 type Outcome = { readonly status: "recorded"; readonly receipt: VolumeReceipt } | { readonly status: "pending"; readonly operation: string; readonly deadline: number } |
   { readonly status: "waiting"; readonly until: number } | { readonly status: "held"; readonly reason: Exclude<DataVolumeCreation["reason"], null> | "authorization" | "runtime" | "history" };
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
-const birth = (state: DataVolumeCreation) => state.receipt ?? state.recoveredReceipt?.createdAt;
 
 /** Owns allocation history, not rollout policy. The caller supplies current admission/effect authority; this component never removes a volume or renews an existing operation. */
 export const volumeCreationCatalog = (journal: OperationJournal, input: DataOwnership, ports: Ports) => {
@@ -32,7 +31,6 @@ export const volumeCreationCatalog = (journal: OperationJournal, input: DataOwne
   const write = async (input: VolumeCreationCatalog) => { const value = parseVolumeCreationCatalog(input); try { await journal.write(value); } catch { poisoned = true; throw new Error("volume catalog synchronization uncertain; reopen"); } return value; };
   const next = (state: VolumeCreationCatalog) => { const sequence = state.sequence + 1; if (!Number.isSafeInteger(sequence)) throw new Error("volume catalog sequence exhausted"); return sequence; };
   const entry = (state: VolumeCreationCatalog, volume: OwnedVolume) => { const value = state.allocations.find((value) => same(value.volume, volume)); if (value === undefined) throw new Error("volume is outside registered catalog scope"); return value; };
-  const recorded = (slot: VolumeCreationCatalog["allocations"][number]) => { const value = slot.creations.find((value) => birth(value) !== undefined); const createdAt = value === undefined ? undefined : birth(value); return createdAt === undefined ? undefined : Object.freeze({ volume: slot.volume, createdAt }); };
   const bounded = async <T>(deadline: number, call: () => Promise<T>) => { const left = Math.min(10000, deadline - ports.now()); if (!Number.isFinite(left) || left <= 0) return undefined; const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, left);
     try { return await Promise.race([Promise.resolve().then(call).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
   };
@@ -63,7 +61,7 @@ export const volumeCreationCatalog = (journal: OperationJournal, input: DataOwne
       const proposal = parseDataVolumeCreation({ version: 1, ...input, owner, phase: "prepared", reason: null, attempts: 0, receipt: null }); const state = await required(); const slot = entry(state, proposal.action.volume);
       const previous = slot.creations.find((value) => value.action.operation === proposal.action.operation);
       if (previous !== undefined && (!same(previous.action, proposal.action) || previous.deployment !== proposal.deployment || previous.createdAt !== proposal.createdAt)) throw new Error("volume creation operation conflicts");
-      const known = recorded(slot); if (known !== undefined) return typed<Outcome>({ status: "recorded", receipt: known });
+      const known = recordedCatalogBirth(slot); if (known !== undefined) return typed<Outcome>({ status: "recorded", receipt: known });
       if (previous !== undefined) return typed<Outcome>({ status: "pending", operation: previous.action.operation, deadline: previous.action.deadline });
       if (ports.now() < proposal.createdAt || ports.now() >= proposal.action.deadline) return typed<Outcome>({ status: "held", reason: "deadline" });
       if (slot.creations.length >= 64) return typed<Outcome>({ status: "held", reason: "history" });
@@ -82,14 +80,14 @@ export const volumeCreationCatalog = (journal: OperationJournal, input: DataOwne
         if (observed.status !== "absent") return typed<Outcome>({ status: "held", reason: observed.status === "foreign" ? "conflict" : "runtime" });
       }
       if (ports.now() >= proposal.action.deadline || await bounded(proposal.action.deadline, () => ports.authorize(proposal)) !== true) return typed<Outcome>({ status: "held", reason: "authorization" });
-      const current = await required(); const target = entry(current, proposal.action.volume); if (recorded(target) !== undefined || target.creations.length !== slot.creations.length) throw new Error("volume creation history changed");
+      const current = await required(); const target = entry(current, proposal.action.volume); if (recordedCatalogBirth(target) !== undefined || target.creations.length !== slot.creations.length) throw new Error("volume creation history changed");
       await write({ ...current, sequence: next(current), allocations: current.allocations.map((item) => item === target ? Object.freeze({ ...item, creations: Object.freeze([...item.creations, proposal]) }) : item) });
       return typed<Outcome>({ status: "pending", operation: proposal.action.operation, deadline: proposal.action.deadline });
     }),
     tick: (volume: OwnedVolume, operation: string) => serial(async () => {
       const slot = entry(await required(), volume); if (!slot.creations.some((value) => value.action.operation === operation)) throw new Error("unknown volume creation operation");
-      const known = recorded(slot); if (known !== undefined) return typed<Outcome>({ status: "recorded", receipt: known });
-      const observed = await child(volume, operation).tick(); const birth = recorded(entry(await required(), volume));
+      const known = recordedCatalogBirth(slot); if (known !== undefined) return typed<Outcome>({ status: "recorded", receipt: known });
+      const observed = await child(volume, operation).tick(); const birth = recordedCatalogBirth(entry(await required(), volume));
       return typed<Outcome>(birth !== undefined ? { status: "recorded", receipt: birth } : observed.state.phase === "held" ? { status: "held", reason: observed.state.reason ?? "runtime" } : { status: "pending", operation, deadline: observed.state.action.deadline });
     }),
     recover: (volume: OwnedVolume, operation: string, deadline: number) => serial(async () => { const slot = entry(await required(), volume); if (!slot.creations.some((value) => value.action.operation === operation)) throw new Error("unknown volume creation operation"); return child(volume, operation).recoverReceipt(deadline); }),

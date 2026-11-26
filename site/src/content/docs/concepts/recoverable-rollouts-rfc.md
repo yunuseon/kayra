@@ -2801,3 +2801,20 @@ capacity charge and activates the successor once the new root is durable.
 Forward cleanup and ordinary rollouts use independent observer loops in that
 process. Restart and replay use the same request and original deadlines. The
 successor becomes active only after workload convergence and required checks.
+
+### Recreation custody
+
+The deployment index can reserve recreation for a fully removed application
+with a verified release in its last data epoch. It checks the completed
+withdrawal, retired admission charge, exact native volume births, and absence
+of current attachments before fencing purge. The audited reservation binds
+the predecessor, selected release, allocations, target registration
+generation, and a fixed preparation deadline.
+
+The index can stage the new incarnation's empty lifecycle and inherited
+volume catalog under that reservation. The retired app remains the current
+tombstone during staging. The successor uses the same data owner and allocation
+identities, and every inherited birth carries the predecessor's retirement
+identity. A lost acknowledgement reopens the reserved workspace and its
+original deadline. Switching the current ownership, publishing a new
+registration, and activating the release are separate transitions.

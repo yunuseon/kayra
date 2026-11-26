@@ -1,6 +1,5 @@
-import { volumeReceiptSchema } from "../../contracts/owned-volume.ts";
 import type { DataOwnership, OwnedVolume } from "../../contracts/owned-volume.ts";
-import { parseVolumeCreationCatalog } from "./volume-creation-catalog-state.ts";
+import { parseVolumeCreationCatalog, recordedCatalogBirth } from "./volume-creation-catalog-state.ts";
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 
@@ -16,10 +15,8 @@ export const managedPurgeInventory = (input: unknown, owner: DataOwnership, volu
     throw new Error("managed purge requires resolution of uncertain volume creation");
   }
   return Object.freeze(volumes.map((volume) => {
-    const history = catalog.allocations.find((entry) => same(entry.volume, volume))?.creations ?? [];
-    const birth = history.find((creation) => creation.receipt !== null || creation.recoveredReceipt !== undefined);
-    const createdAt = birth?.receipt ?? birth?.recoveredReceipt?.createdAt;
-    return Object.freeze({ volume, birth: createdAt === undefined ? null : volumeReceiptSchema.parse({ volume, createdAt }) });
+    const slot = catalog.allocations.find((entry) => same(entry.volume, volume));
+    return Object.freeze({ volume, birth: slot === undefined ? null : recordedCatalogBirth(slot) ?? null });
   }));
 };
 export type ManagedPurgeInventory = ReturnType<typeof managedPurgeInventory>;

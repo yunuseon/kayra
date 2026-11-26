@@ -3,6 +3,9 @@ import { managedPurgeInventory } from "./managed-purge-inventory.ts";
 import { inspectManagedPurgeVolume, reconcileManagedPurge } from "./managed-purge-effects.ts";
 import type { ManagedPurgeEffectsPorts } from "./managed-purge-effects.ts";
 import type { ManagedPurge } from "./managed-purge-state.ts";
+import { managedRecreationBaseline } from "./managed-recreation-baseline.ts";
+import { managedRecreationIntentSchema, managedRecreationRequestSchema, managedRecreationVolumeCatalog } from "./managed-recreation-intent.ts";
+import type { ManagedRecreationIntent } from "./managed-recreation-intent.ts";
 import { parseRegistrationWithdrawal } from "../../contracts/registration-withdrawal.ts";
 import { managedRemovalAccounting } from "./managed-removal-accounting.ts";
 import { managedRemovalEffects, managedRemovalInventoryDigest, readManagedRemovalProgress } from "./managed-removal-effects.ts";
@@ -114,6 +117,11 @@ type ManagedPurgePorts = Pick<ManagedPurgeEffectsPorts, "now" | "native"> & {
   readonly observeWithdrawal: (intent: ManagedRemovalIntent) => Promise<unknown>;
   readonly authorize: (intent: ManagedRemovalIntent, operator: ManagedPurge["operator"]) => Promise<boolean>;
 };
+type ManagedRecreationPorts = ManagedDeploymentReadPort & Pick<BuildPorts, "retain"> & {
+  readonly native: Readonly<Pick<ManagedPurgePorts["native"], "observe" | "attachments">>;
+  readonly observeWithdrawal: ManagedPurgePorts["observeWithdrawal"];
+  readonly authorize: (intent: ManagedRemovalIntent, operator: ManagedRecreationIntent["operator"]) => Promise<boolean>;
+};
 type EnvelopeStore = ReturnType<typeof openLifecycleEnvelopeStore>;
 
 const missing = (error: unknown) => error && typeof error === "object" && "code" in error && error.code === "ENOENT";
@@ -182,6 +190,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return result;
   };
   const appDirectory = (app: string) => join(directory, createHash("sha256").update(app, "utf8").digest("hex"));
+  const recreationDirectory = (incarnation: string) => join(directory, "recreation-" + incarnation);
   const withEnvelope = async <T>(path: string, ownership: IndexEntry, use: (store: EnvelopeStore) => T | Promise<T>) => {
     await requireDirectory(path);
     const appJournal = await journals(path, ownership.phase === "ready" ? "existing" : "initialize");
@@ -218,35 +227,36 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, left);
     try { return await Promise.race([Promise.resolve().then(call).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
   };
+  const readRemovalInventory = async (app: string, request: string, ports: ManagedDeploymentReadPort, store: EnvelopeStore, indexed: IndexEntry) => {
+    const envelope = await store.read();
+    const intent = envelope?.removal;
+    if (envelope === undefined || indexed.protocol !== "managed-v3" || intent?.request !== request || intent.owner.dataOwner !== indexed.dataOwner ||
+      intent.owner.incarnation !== indexed.incarnation || JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) {
+      throw new Error("managed removal inventory lacks the accepted scope");
+    }
+    const path = join(appDirectory(app), "managed");
+    await requireDirectory(path);
+    const deadline = ports.now() + 10_000;
+    const read = async (digest: string) => {
+      const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest));
+      if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed removal evidence unavailable");
+      return bytes;
+    };
+    if (indexed.managedRoot === "empty" && await stat(join(path, "state.json")) === undefined) return managedRemovalInventory(intent, null, read);
+    const root = await journals(path, "existing");
+    try {
+      const state = parseManagedLifecycleStore(await root.read());
+      const accepted = envelope.managed?.find((item) => item.run === state.operation.run);
+      if (accepted?.source !== state.operation.source || accepted.action !== state.operation.action ||
+        accepted.completion !== null && !matchesManagedRequestCompletion(accepted.completion, state)) throw new Error("managed removal checkpoint lacks its request");
+      const bytes = await read(accepted.source);
+      const source = parseManagedLifecycleSource(JSON.parse(bytes));
+      if (bytes !== JSON.stringify(source)) throw new Error("managed removal source binding disagrees");
+      return await managedRemovalInventory(intent, { state, source }, read);
+    } finally { await root.close(); }
+  };
   const useRemovalInventory = <T>(app: string, request: string, ports: ManagedDeploymentReadPort, use: (inventory: ManagedRemovalInventory, store: EnvelopeStore) => Promise<T>) =>
-    useIndexed(app, async (store, indexed) => {
-      const envelope = await store.read();
-      const intent = envelope?.removal;
-      if (envelope === undefined || indexed.protocol !== "managed-v3" || intent?.request !== request || intent.owner.dataOwner !== indexed.dataOwner ||
-        intent.owner.incarnation !== indexed.incarnation || JSON.stringify(intent.volumes) !== JSON.stringify(indexed.volumes)) {
-        throw new Error("managed removal inventory lacks the accepted scope");
-      }
-      const path = join(appDirectory(app), "managed");
-      await requireDirectory(path);
-      const deadline = ports.now() + 10_000;
-      const read = async (digest: string) => {
-        const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest));
-        if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed removal evidence unavailable");
-        return bytes;
-      };
-      if (indexed.managedRoot === "empty" && await stat(join(path, "state.json")) === undefined) return use(await managedRemovalInventory(intent, null, read), store);
-      const root = await journals(path, "existing");
-      try {
-        const state = parseManagedLifecycleStore(await root.read());
-        const accepted = envelope.managed?.find((item) => item.run === state.operation.run);
-        if (accepted?.source !== state.operation.source || accepted.action !== state.operation.action ||
-          accepted.completion !== null && !matchesManagedRequestCompletion(accepted.completion, state)) throw new Error("managed removal checkpoint lacks its request");
-        const bytes = await read(accepted.source);
-        const source = parseManagedLifecycleSource(JSON.parse(bytes));
-        if (bytes !== JSON.stringify(source)) throw new Error("managed removal source binding disagrees");
-        return await use(await managedRemovalInventory(intent, { state, source }, read), store);
-      } finally { await root.close(); }
-    });
+    useIndexed(app, async (store, indexed) => use(await readRemovalInventory(app, request, ports, store, indexed), store));
   type RemovalEffectsOwner = ReturnType<typeof managedRemovalEffects>;
   type RemovalEffectsState = NonNullable<Awaited<ReturnType<RemovalEffectsOwner["read"]>>>;
   const useRemovalEffects = <T>(app: string, request: string, ports: ManagedRemovalEffectsPorts, initialize: boolean, use: (owner: RemovalEffectsOwner, state: RemovalEffectsState, inventory: ManagedRemovalInventory, store: EnvelopeStore) => Promise<T>) =>
@@ -301,6 +311,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       readonly inventory: () => Promise<ReturnType<typeof managedPurgeInventory>>;
       readonly allowed: (operator: ManagedPurge["operator"]) => Promise<boolean>;
     }) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+    if (indexed.recreation !== undefined) throw new Error("managed recreation owns the retained data; purge is fenced");
     const envelope = await store.read();
     const intent = envelope?.removal;
     const tombstone = envelope?.removalTombstone;
@@ -688,6 +699,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const index = await readIndex();
       const path = appDirectory(app);
       const existing = index.apps.find((item) => item.app === app);
+      if (existing?.recreation !== undefined) throw new Error("managed recreation owns the next registration");
       if (protocol === "managed-v3" && existing !== undefined && existing.protocol !== "managed-v3") throw new Error("existing application protocol conversion is unsupported");
       if (existing?.phase === "ready") {
         await withEnvelope(path, existing, () => undefined);
@@ -1030,6 +1042,135 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         JSON.stringify(indexed.volumes) !== JSON.stringify(volumes)) throw new Error("managed removal tombstone lacks indexed ownership");
       return Object.freeze({ owner, volumes, ...envelope.removalTombstone });
     }),
+    reserveManagedRecreation: (app: string, input: unknown, actorInput: unknown, ports: ManagedRecreationPorts) =>
+      useIndexed(app, async (store, indexed) => {
+        const request = managedRecreationRequestSchema.parse(input);
+        const actor = parseMigrationResolutionActor(actorInput);
+        if (!actor.ok) throw new Error("invalid managed recreation operator");
+        const operator = Object.freeze({ actor: actor.value, reason: request.reason });
+        const prior = indexed.recreation;
+        if (prior !== undefined) {
+          if (prior.request !== request.request || prior.removal !== request.removal || prior.targetGeneration !== request.generation ||
+            JSON.stringify(prior.operator) !== JSON.stringify(operator)) throw new Error("managed recreation request conflicts");
+          return prior;
+        }
+
+        const envelope = await store.read();
+        const tombstone = envelope?.removalTombstone;
+        const accounting = envelope?.removalAccounting;
+        if (envelope?.fence?.lifecycle.phase !== "removed" || tombstone?.request !== request.removal || accounting === undefined ||
+          envelope.managedPurge !== undefined || indexed.managedVolumes !== 1) throw new Error("managed recreation requires completed removal before purge");
+
+        const createdAt = ports.now();
+        const deadline = createdAt + 90_000;
+        const bounded = <T>(call: () => Promise<T>) => boundedManagedRead(deadline, ports.now, call);
+        const inventory = await readRemovalInventory(app, request.removal, ports, store, indexed);
+        const withdrawalsMatch = async () => {
+          if (await bounded(() => ports.authorize(inventory.intent, operator)) !== true) return false;
+          const result = parseRegistrationWithdrawal(await bounded(() => ports.observeWithdrawal(inventory.intent)));
+          const now = ports.now();
+          return result.ok && result.value.request === tombstone.request && result.value.action === tombstone.action &&
+            JSON.stringify(result.value.registration) === JSON.stringify(inventory.intent.registration) &&
+            result.value.observedAt >= tombstone.withdrawnAt && now >= result.value.observedAt &&
+            now - result.value.observedAt <= 2000 && now < deadline;
+        };
+        if (!await withdrawalsMatch()) throw new Error("managed recreation lacks current withdrawal authority");
+
+        const path = join(appDirectory(app), "managed", "volumes");
+        await requireDirectory(path);
+        const catalog = await journals(path, "existing");
+        const volumes = await (async () => {
+          try { return managedPurgeInventory(await catalog.read(), inventory.intent.owner, indexed.volumes); }
+          finally { await catalog.close(); }
+        })();
+        const baseline = await managedRecreationBaseline(inventory, tombstone, volumes, { read: async (digest) => {
+          const bytes = await bounded(() => ports.read(digest));
+          if (bytes === undefined) throw new Error("managed recreation release evidence is unavailable");
+          return bytes;
+        } });
+        const observations = await bounded(() => Promise.all(volumes.map((item) => inspectManagedPurgeVolume(item, ports.native))));
+        if (observations === undefined || volumes.some(({ birth }, position) => observations[position] !== (birth === null ? "absent" : "owned"))) {
+          throw new Error("managed recreation requires detached, recorded data");
+        }
+        const volumeBytes = JSON.stringify(volumes);
+        const volumeDigest = createHash("sha256").update(volumeBytes).digest("hex");
+        if (await bounded(() => ports.retain(volumeBytes)) !== volumeDigest || !await withdrawalsMatch()) {
+          throw new Error("managed recreation metadata expired or is unavailable");
+        }
+
+        return serialIndex(async () => {
+          const snapshot = await readIndex();
+          const current = snapshot.apps.find((item) => item.app === app);
+          const retired = managedRemovalAccounting({ resources: snapshot.resources, bindings: snapshot.managedBindings ?? [] },
+            inventory, envelope.managed ?? [], accounting.after);
+          if (JSON.stringify(current) !== JSON.stringify(indexed) || retired.before !== accounting.after || retired.after !== accounting.after ||
+            ports.now() >= deadline) throw new Error("managed recreation retirement evidence disagrees");
+          const reservation = managedRecreationIntentSchema.parse({
+            version: 1, request: request.request, removal: request.removal, predecessor: baseline.owner,
+            checkpoint: baseline.checkpoint, accounting: accounting.after, release: baseline.active.pointer.record,
+            volumes: volumeDigest, epoch: baseline.epoch, operator, createdAt, deadline, workspace: "initializing",
+            targetIncarnation: randomUUID(), targetGeneration: request.generation,
+          });
+          const next = parseLifecycleAppIndex({
+            ...snapshot, apps: snapshot.apps.map((item) => item.app === app ? { ...item, recreation: reservation } : item),
+          });
+          await journal.write(next);
+          return reservation;
+        });
+      }),
+    prepareManagedRecreationWorkspace: (app: string, request: string, ports: ManagedDeploymentReadPort & Pick<ManagedRecreationPorts, "authorize">) =>
+      useIndexed(app, async (store, indexed) => {
+        const accepted = indexed.recreation;
+        const envelope = await store.read();
+        const removal = envelope?.removal;
+        if (accepted?.request !== request || removal?.request !== accepted.removal || envelope?.removalTombstone?.checkpoint !== accepted.checkpoint ||
+          envelope.removalAccounting?.after !== accepted.accounting || envelope.managedPurge !== undefined) {
+          throw new Error("managed recreation workspace lacks its retired owner");
+        }
+        const allowed = async () => await boundedManagedRead(accepted.deadline, ports.now, () => ports.authorize(removal, accepted.operator)) === true &&
+          ports.now() < accepted.deadline;
+        const ready = accepted.workspace === "ready";
+        if (!ready && !await allowed()) throw new Error("managed recreation workspace authorization or deadline expired");
+        const bytes = await boundedManagedRead((ready ? ports.now() + 10_000 : accepted.deadline), ports.now, () => ports.read(accepted.volumes));
+        if (bytes === undefined) throw new Error("managed recreation workspace volume evidence unavailable");
+        const catalogState = managedRecreationVolumeCatalog(bytes, accepted, indexed.volumes);
+        const successor = lifecycleIndexEntry.parse({
+          app, incarnation: accepted.targetIncarnation, dataOwner: indexed.dataOwner,
+          volumes: indexed.volumes, protocol: "managed-v3", managedRoot: "empty", managedVolumes: 1,
+          phase: ready ? "ready" : "initializing",
+        });
+        const path = recreationDirectory(accepted.targetIncarnation);
+        const managed = join(path, "managed");
+        const catalogPath = join(managed, "volumes");
+        for (const folder of [path, managed, catalogPath]) {
+          if (!ready && await stat(folder) === undefined) { await mkdir(folder, { mode: 0o700 }); await syncDirectory(dirname(folder)); }
+          await requireDirectory(folder);
+        }
+        await withEnvelope(path, successor, async (workspace) => {
+          const initial = await workspace.read();
+          if (initial === undefined || initial.created || initial.tickets.nextTicket !== 1 || await stat(join(managed, "state.json")) !== undefined) {
+            throw new Error("managed recreation workspace has unexpected lifecycle state");
+          }
+        });
+        const catalog = await journals(catalogPath, ready ? "existing" : "initialize");
+        try {
+          const existing = await catalog.read();
+          if (existing === undefined && !ready) await catalog.write(catalogState);
+          else if (JSON.stringify(parseVolumeCreationCatalog(existing)) !== JSON.stringify(catalogState)) {
+            throw new Error("managed recreation workspace catalog disagrees");
+          }
+        } finally { await catalog.close(); }
+        if (ready) return accepted;
+        if (!await allowed()) throw new Error("managed recreation workspace authorization or deadline expired");
+        return serialIndex(async () => {
+          const snapshot = await readIndex();
+          const current = snapshot.apps.find((item) => item.app === app);
+          if (JSON.stringify(current) !== JSON.stringify(indexed) || ports.now() >= accepted.deadline) throw new Error("managed recreation workspace scope changed");
+          const published = Object.freeze({ ...accepted, workspace: "ready" as const });
+          await journal.write({ ...snapshot, apps: snapshot.apps.map((item) => item.app === app ? { ...item, recreation: published } : item) });
+          return published;
+        });
+      }),
     managedPurgeIntent: (app: string, removal: string, ports: ManagedPurgePorts) =>
       usePurgeScope(app, removal, ports, ({ envelope }) => Promise.resolve(envelope.managedPurge)),
     requestManagedPurge: (app: string, removal: string, request: string, operator: ManagedPurge["operator"], ports: ManagedPurgePorts) =>

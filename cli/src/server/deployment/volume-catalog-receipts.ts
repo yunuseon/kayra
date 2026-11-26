@@ -6,5 +6,8 @@ import { recordedVolumeReceipts } from "./recorded-volume-receipts.ts";
 export const volumeCatalogReceipts = (input: unknown, owner: DataOwnership, registered: readonly OwnedVolume[]) => {
   const state = parseVolumeCreationCatalog(input);
   if (JSON.stringify(state.owner) !== JSON.stringify(owner) || state.allocations.some((slot) => !registered.some((volume) => JSON.stringify(volume) === JSON.stringify(slot.volume)))) throw new Error("volume catalog lacks indexed ownership");
-  return recordedVolumeReceipts(owner, registered, (allocation) => Promise.resolve(state.allocations.find((slot) => slot.volume.allocation === allocation)?.creations.find((value) => value.receipt !== null || value.recoveredReceipt !== undefined)));
+  const inherited = Object.freeze(state.allocations.map((slot) => slot.inherited?.receipt).filter((receipt) => receipt !== undefined));
+  const readCreation = (allocation: string) => Promise.resolve(state.allocations.find((slot) =>
+    slot.volume.allocation === allocation)?.creations.find((value) => value.receipt !== null || value.recoveredReceipt !== undefined));
+  return recordedVolumeReceipts(owner, registered, readCreation, inherited);
 };

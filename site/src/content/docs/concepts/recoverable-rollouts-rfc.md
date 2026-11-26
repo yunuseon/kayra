@@ -2688,3 +2688,13 @@ envelope then atomically marks the old run superseded and makes the successor
 the accepted lifecycle action. Reopening after either write reconciles the
 same records. A held successor with inherited data can be selected for another
 audited forward attempt.
+
+### Removal intent
+
+Managed removal now reserves an audited action and an owned volume inventory
+under the app writer. Its envelope immediately fences new builds, ordinary
+deployment reconciliation and resource settlement. It preserves any pending
+deployment and a displaced forward cleanup description for the removal
+reconciler. An admission handoff in progress must finish its reconciliation
+before removal can take that fence. Acceptance records intent while the
+workloads, data and accounting remain available for reconciliation.

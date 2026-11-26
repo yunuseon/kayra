@@ -1,3 +1,4 @@
+import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
 import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff, activateManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
 import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
 import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
@@ -165,6 +166,11 @@ export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeReg
     /** The index authenticates ownership/registration and retains artifacts before these synchronized reference-only transitions. */
     prepareManaged: (input: ManagedLifecycleSource, now: number) => serial(async () => {
       const next = prepareManagedEnvelope(await required(), input, now); if (next.changed) await persist(next.state); return next.request;
+    }),
+    requestManagedRemoval: (...args: readonly [Parameters<typeof requestManagedRemovalEnvelope>[1], string, Parameters<typeof requestManagedRemovalEnvelope>[3], number]) => serial(async () => {
+      const next = requestManagedRemovalEnvelope(await required(), ...args);
+      if (next.changed) await persist(next.state);
+      return next.removal;
     }),
     reserveManagedForward: (input: Parameters<typeof reserveManagedForwardEnvelope>[1]) => serial(async () => {
       const next = reserveManagedForwardEnvelope(await required(), input); if (next.changed) await persist(next.state); return next.reservation;

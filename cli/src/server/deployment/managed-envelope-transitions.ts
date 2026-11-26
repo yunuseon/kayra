@@ -29,6 +29,7 @@ export const prepareManagedEnvelope = (before: unknown, input: ManagedLifecycleS
 export const completeManagedEnvelope = (before: unknown, input: unknown, record: string) => {
   const current = envelope(before);
   if (current.forward !== undefined) throw new Error("managed forward continuation owns lifecycle");
+  if (current.fence?.lifecycle.phase !== "registered") throw new Error("managed removal owns lifecycle");
   const state = parseManagedLifecycleStore(input); const operation = state.operation; const request = current.managed?.find((item) => item.run === operation.run);
   if (request === undefined || JSON.stringify(state.owner) !== JSON.stringify(request.owner) || state.owner.app !== current.tickets.app || state.owner.incarnation !== current.tickets.incarnation || request.source !== operation.source || request.action !== operation.action || request.plan !== operation.plan || request.createdAt !== operation.createdAt || request.admissionDeadline !== operation.admissionDeadline || request.deadline !== operation.deadline || operation.phase !== "complete" || !operation.settled || operation.outcome === null || createHash("sha256").update(JSON.stringify(state)).digest("hex") !== record) throw new Error("managed completion requires its synchronized terminal root");
   const disposition = operation.cancelRequestedAt !== null ? "cancelled" as const : operation.outcome === "deployed" ? "success" as const : "failure" as const;

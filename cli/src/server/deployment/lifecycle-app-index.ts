@@ -1,3 +1,5 @@
+import { requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
+import type { ManagedRemovalIntent } from "./managed-removal-intent.ts";
 import { matchesManagedRequestCompletion } from "./managed-lifecycle-request.ts";
 import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { indexedManagedForward } from "./indexed-managed-forward.ts";
@@ -744,6 +746,15 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const contexts = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => executionContext(app.app, ports, undefined, false)));
       return Object.freeze(contexts.filter((context) => context !== undefined));
     },
+    requestManagedRemoval: (app: string, request: string, operator: ManagedRemovalIntent["operator"], ports: { readonly now: () => number; readonly authorize: (intent: ManagedRemovalIntent) => Promise<boolean> }) =>
+      useIndexed(app, async (store, owner) => {
+        const proposed = requestManagedRemovalEnvelope(await store.read(), owner, request, operator, ports.now());
+        if (!proposed.changed) return proposed.removal;
+        if (await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.authorize(proposed.removal)) !== true) {
+          throw new Error("managed removal authority unavailable");
+        }
+        return store.requestManagedRemoval(owner, request, operator, proposed.removal.createdAt);
+      }),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
     tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),
@@ -771,7 +782,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     managedState: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.read()),
     pendingManagedDeployments: async () => {
       if (closed) throw new Error("lifecycle app index is closed"); const snapshot = await serialIndex(readIndex);
-      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useIndexed(app.app, async (store) => Object.freeze(((await store.read())?.managed ?? []).filter((item) => item.completion === null).map((item) => Object.freeze({ app: app.app, run: item.run }))))));
+      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useIndexed(app.app, async (store) => {
+        const envelope = await store.read();
+        const fenced = envelope?.fence?.lifecycle.phase !== "registered" || envelope.forward !== undefined;
+        return Object.freeze(fenced ? [] : (envelope.managed ?? []).filter((item) => item.completion === null).map((item) => Object.freeze({ app: app.app, run: item.run })));
+      })));
       return Object.freeze(work.flat());
     },
     recordedManagedVolumes: async (app: string, volumes: readonly OwnedVolume[]) => {

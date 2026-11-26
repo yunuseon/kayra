@@ -8,6 +8,7 @@ import { parseRegistrationGeneration } from "../../contracts/registration-genera
 import { httpReleasePlan, parseHttpState, terminalHttp } from "./http-state.ts";
 import { lifecycleActionId, parseLifecycleFence } from "./lifecycle-fence.ts";
 import { admitTicket, lookupTicket, parseTicketState } from "./lifecycle-tickets.ts";
+import { parseManagedRemovalIntent } from "./managed-removal-intent.ts";
 import { managedForwardReservation } from "./managed-forward-reservation.ts";
 import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
 import { parseRolloutRequest } from "./rollout-request.ts";
@@ -37,6 +38,7 @@ const shape = z.object({
   registrationReceipt: z.object({ ticket: z.string().max(80), runtime: z.enum(["compose", "swarm"]), metadata: z.unknown() }).strict().optional(),
   managed: z.array(z.unknown()).max(1024).optional(),
   forward: z.unknown().optional(),
+  removal: z.unknown().optional(),
   http: z.unknown().optional(),
   rollout: z.unknown().optional(),
   rollouts: z.array(z.unknown()).max(1024).optional(),
@@ -169,11 +171,27 @@ export const parseLifecycleEnvelope = (input: unknown) => {
       lifecycle?.phase !== "registered" || lifecycle.active === null || fence.value === null || lifecycleActionId(fence.value, lifecycle.active.sequence) !== blocked.action ||
       Number(forward.action.split(":")[1]) !== fence.value.nextAction - 1 || Number(forward.action.split(":")[1]) <= lifecycle.active.sequence || JSON.stringify(receipt.metadata) !== JSON.stringify(forward.build.registration)) return err("managed forward reservation lacks its exclusive lifecycle");
   }
+  const removal = (() => {
+    try { return parsed.data.removal === undefined ? undefined : parseManagedRemovalIntent(parsed.data.removal); }
+    catch { return null; }
+  })();
+  if (removal === null) return err("invalid managed removal intent");
+  if (removal !== undefined) {
+    const fenceState = fence.value;
+    const lifecycle = fenceState?.lifecycle;
+    if (fenceState === null || lifecycle?.phase !== "removal-requested" || forward !== undefined || receipt?.runtime !== "swarm" ||
+      http !== undefined || history.length !== 0 || removal.owner.app !== fenceState.app || removal.owner.incarnation !== fenceState.generation ||
+      removal.action !== lifecycleActionId(fenceState, lifecycle.removal) || JSON.stringify(removal.registration) !== JSON.stringify(receipt.metadata) ||
+      managed?.some((item) => item.owner.dataOwner !== removal.owner.dataOwner) ||
+      !operations.some((item) => item.ticket === removal.ticket && item.action === removal.action && item.descriptor.kind === "remove" &&
+        item.descriptor.ownershipGeneration === removal.owner.dataOwner)) return err("managed removal lacks its lifecycle fence");
+  }
   return ok(Object.freeze({ version: 1 as const, created: parsed.data.created, fence: fence.value, tickets: tickets.value, operations: Object.freeze(operations),
     ...(allocation === undefined ? {} : { registrationAllocation: Object.freeze(allocation) }),
     ...(receipt === undefined ? {} : { registrationReceipt: receipt }),
     ...(managed === undefined ? {} : { managed: Object.freeze(managed) }),
     ...(forward === undefined ? {} : { forward }),
+    ...(removal === undefined ? {} : { removal }),
     ...(http?.ok ? { http: http.value } : {}),
     ...(rollout === undefined ? {} : { rollout }),
     ...(rollouts === undefined ? {} : { rollouts: Object.freeze(rollouts) }) }));

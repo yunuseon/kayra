@@ -104,7 +104,7 @@ export const settings: readonly Setting[] = [
   setting("nas_root", nas, text, "The only directory the NAS play writes in, asserted before any change (e.g. /volume2)."),
   setting(
     "restic_backup",
-    nas,
+    ["platform", "nas"],
     record({
       dir: text,
       repository: text,
@@ -115,8 +115,9 @@ export const settings: readonly Setting[] = [
       exclude: texts.optional(),
       keep: record({ daily: z.number(), weekly: z.number(), monthly: z.number() }).optional(),
       ssh: record({ public_key: text, host: text, user: text, port: z.number(), known_host: text }).optional(),
+      postgres: z.array(record({ name: text, host: text, user: text, database: text, network: text })).optional(),
     }),
-    "The nightly restic backup: what, where to (SFTP), when, how long kept, and the monthly restore test.",
+    "The nightly restic backup: what, where to (SFTP), when, how long kept, the Postgres databases dumped first (each reached as host on network), and the monthly restore test.",
   ),
 
   // edge
@@ -185,9 +186,9 @@ export const settings: readonly Setting[] = [
   secret("forgejo_push_mirror_credentials", platform, record({ username: text, password: text }), "The account push mirrors push with."),
   secret("compose_stack_secrets", ["platform", "nas"], z.record(z.string(), z.record(z.string(), z.unknown())), "Per stack: the variables of its .env."),
   secret("compose_registry_logins", ["platform", "nas"], z.array(record({ registry: text, username: text, password: text })), "Private registries the stacks pull from."),
-  secret("restic_backup_password", nas, text, "The restic repository's password."),
-  secret("restic_backup_ssh_key", nas, text, "The SSH key the backup reaches the Storage Box with."),
-  secret("restic_backup_postgres_passwords", nas, z.record(z.string(), text), "Per database container: the password its dump connects with."),
+  secret("restic_backup_password", ["platform", "nas"], text, "The restic repository's password."),
+  secret("restic_backup_ssh_key", ["platform", "nas"], text, "The SSH key the backup reaches the Storage Box with."),
+  secret("restic_backup_postgres_passwords", ["platform", "nas"], z.record(z.string(), text), "Per database container: the password its dump connects with."),
   secret("ntfy_password_hashes", edge, z.record(z.string(), text), "Per ntfy user: the bcrypt hash of its password (ntfy user hash)."),
   secret("ntfy_tokens", edge, z.record(z.string(), text), "Per ntfy user: an access token (ntfy token generate), e.g. the one monitors publish with."),
   secret("monitor_health_tokens", ["platform", "edge"], z.record(z.string(), text), "Per watched platform server: its health_token, which the monitor reads deploy.<domain>/health with."),

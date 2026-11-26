@@ -41,7 +41,7 @@ the first line of a platform server's `vars.yml`:
 | `forgejo_config` | platform | What this server's own Forgejo holds, as code: users, SSH keys, organizations, runners, repos (settings, collaborators, webhooks, mirrors) and the tokens it mints for the platform. |
 | `compose_stacks` | platform, nas | The server's own compose stacks: their directory on the server and the names under stacks/ to run. |
 | `nas_root` | nas | The only directory the NAS play writes in, asserted before any change (e.g. /volume2). |
-| `restic_backup` | nas | The nightly restic backup: what, where to (SFTP), when, how long kept, and the monthly restore test. |
+| `restic_backup` | platform, nas | The nightly restic backup: what, where to (SFTP), when, how long kept, the Postgres databases dumped first (each reached as host on network), and the monthly restore test. |
 | `wireguard` | edge | The tunnel into the private network: the edge's address, port, and the one peer (its key, what it may reach). |
 | `edge_routes` | edge | Public names the edge serves: subdomains of the domain and the upstream inside the tunnel they go to. |
 | `ntfy` | edge | An ntfy server for alerts, behind Caddy (an edge_routes entry to ntfy:80): its public base_url, who may read or publish which topic (everything else denied), and upstream_base_url (https://ntfy.sh) for iPhones, whose instant push only ntfy.sh can wake. |
@@ -70,9 +70,9 @@ the first line of a platform server's `vars.yml`:
 | `forgejo_push_mirror_credentials` | platform | The account push mirrors push with. |
 | `compose_stack_secrets` | platform, nas | Per stack: the variables of its .env. |
 | `compose_registry_logins` | platform, nas | Private registries the stacks pull from. |
-| `restic_backup_password` | nas | The restic repository's password. |
-| `restic_backup_ssh_key` | nas | The SSH key the backup reaches the Storage Box with. |
-| `restic_backup_postgres_passwords` | nas | Per database container: the password its dump connects with. |
+| `restic_backup_password` | platform, nas | The restic repository's password. |
+| `restic_backup_ssh_key` | platform, nas | The SSH key the backup reaches the Storage Box with. |
+| `restic_backup_postgres_passwords` | platform, nas | Per database container: the password its dump connects with. |
 | `ntfy_password_hashes` | edge | Per ntfy user: the bcrypt hash of its password (ntfy user hash). |
 | `ntfy_tokens` | edge | Per ntfy user: an access token (ntfy token generate), e.g. the one monitors publish with. |
 | `monitor_health_tokens` | platform, edge | Per watched platform server: its health_token, which the monitor reads deploy.&lt;domain>/health with. |

@@ -25,9 +25,16 @@ import { readPublicRegistration, readPublicRegistrationGeneration } from "../pla
 import { managedRemovalRuntime } from "./managed-removal-runtime.ts";
 import type { ManagedRemovalIntent } from "../deployment/managed-removal-intent.ts";
 import { managedRuntime } from "./managed-runtime.ts";
+import { managedForwardCleanupRuntime } from "./managed-forward-cleanup-runtime.ts";
+import { managedForwardOperation } from "../deployment/managed-forward-operation.ts";
+import { reconcileManagedForwardWork } from "../deployment/managed-forward-work.ts";
+import { managedSourceContext } from "../deployment/managed-source-context.ts";
+import type { ManagedForwardCleanupContext } from "../../contracts/managed-forward-cleanup-context.ts";
+import type { RegistrationGeneration } from "../../contracts/registration-generation.ts";
+import type { DataOwnership } from "../../contracts/owned-volume.ts";
 import { typed } from "../../lib/typed.ts";
 
-type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts" |
+type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Parameters<typeof managedForwardOperation>[0] & Parameters<typeof reconcileManagedForwardWork>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts" |
   "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval" |
   "managedRemovalIntent" | "managedRemovalTombstone" | "managedPurgeIntent" | "requestManagedPurge" | "tickManagedPurge">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
@@ -38,23 +45,41 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
   const { read, retain, now } = ports.builds; const environment = platformServiceInputs(paths.publicRegistrations, paths.privateRegistrations, 1000);
   const authority = platformManagedRuntimeAuthority({ ...paths, canAccess: ports.canAccess }); const volumes = ownedVolumes(ports.api, now);
   const native = { services: managedSwarmService(ports.api, volumes), volumes, jobs: oneShotJob(ports.api, now), checks: containerChecks(ports.api, now), checkFences: checkContainerFences(ports.api, now), readiness: managedRoutedReadiness({ now }) };
-  const forRun = (context: ManagedExecutionContext) => Promise.resolve(managedRuntime(context, { read, retain, now, environment, authority,
-    receipts: { read: (references) => index.recordedManagedVolumes(context.owner.app, references) }, native, observeHost: (host) => observeSwarmHost(host, ports.api) }));
+  const makeRuntime = (context: ManagedExecutionContext) => managedRuntime(context, { read, retain, now, environment, authority,
+    receipts: { read: (references) => index.recordedManagedVolumes(context.owner.app, references) }, native, observeHost: (host) => observeSwarmHost(host, ports.api) });
+  const forRun = (context: ManagedExecutionContext) => Promise.resolve(makeRuntime(context));
   const plans = platformManagedPlans(paths, { read, images: ports.images ?? registryImages() });
   const preparation = managedPreparation(index, { builds: ports.builds, plans, inputs: environment, runtime: forRun });
   const prepare = async (app: string, run: string, commit: string) => { if (!await ports.canAccess(app)) throw new Error("app is outside managed deployment scope"); return preparation.prepare(app, run, commit); };
   const health = async (context: ManagedExecutionContext) => { const runtime = await forRun(context); return typed<ManagedHealthReadPort>({ read, now, services: { observe: runtime.services.observe, observeDesired: runtime.services.observeDesired } }); };
-  const authorizeRemoval = async (intent: ManagedRemovalIntent) => {
-    if (!await ports.canAccess(intent.owner.app)) return false;
-    const published = await readPublicRegistrationGeneration(paths.publicRegistrations, intent.registration);
-    if (!published.ok || published.value.app.runtime !== "swarm") return false;
+  const currentRegistration = async (registration: RegistrationGeneration, scoped: DataOwnership) => {
+    if (!await ports.canAccess(scoped.app)) return undefined;
+    const published = await readPublicRegistrationGeneration(paths.publicRegistrations, registration);
+    if (!published.ok || published.value.app.runtime !== "swarm") return undefined;
     const [ownership, current] = await Promise.all([
-      readRegistrationOwnership(paths.publicRegistrations, intent.registration),
+      readRegistrationOwnership(paths.publicRegistrations, registration),
       readPublicRegistration(paths.publicRegistrations, published.value.app.name),
     ]);
-    return ownership.ok && current.ok && JSON.stringify(ownership.value.ownership) === JSON.stringify(intent.owner) &&
-      JSON.stringify(current.value.metadata) === JSON.stringify(intent.registration);
+    return ownership.ok && current.ok && JSON.stringify(ownership.value.ownership) === JSON.stringify(scoped) &&
+      JSON.stringify(current.value.metadata) === JSON.stringify(registration) ? published.value.app : undefined;
   };
+  const authorizeRemoval = async (intent: ManagedRemovalIntent) => await currentRegistration(intent.registration, intent.owner) !== undefined;
+  const forwardPorts = typed<Parameters<typeof managedForwardOperation>[1]>({
+    read, retain, now, images: ports.builds.images, compare: environment.compare, plans, builds: ports.builds, canAccess: ports.canAccess, actor: ports.actor,
+    authorize: async (audit) => (await currentRegistration(audit.registration, audit.owner))?.grants.maintenance === true,
+    authorizeReservation: async (decision, _candidate, operator) =>
+      JSON.stringify(operator.actor) === JSON.stringify(ports.actor) &&
+      (await currentRegistration(decision.audit.registration, decision.audit.owner))?.grants.maintenance === true,
+  });
+  const forward = managedForwardOperation(index, forwardPorts);
+  const forwardRuntime = (context: ManagedForwardCleanupContext) => managedForwardCleanupRuntime(context, { now, authority,
+    native: { services: native.services, jobs: native.jobs, containers: native.checkFences },
+  });
+  const reconcileForward = () => reconcileManagedForwardWork(index, { ...forwardPorts, runtime: forwardRuntime,
+    retained: (context) => makeRuntime(context.blocked).services.observeDesired,
+    authorizeTransfer: (source) => authority.allowed(managedSourceContext(source), { kind: "admission" }),
+    observeHost: (host) => observeSwarmHost(host, ports.api),
+  });
   const removalJobs = oneShotCleanup(ports.api, now);
   const forRemoval = async (app: string, request: string) => {
     if (!await ports.canAccess(app)) throw new Error("app is outside managed removal scope");
@@ -108,9 +133,9 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
     return Object.freeze({ status: "purging" as const, request: state.request, deadline: state.deadline });
   };
   return Object.freeze({
-    prepare, preview: preparation.preview, removal, purge,
+    prepare, preview: preparation.preview, forward, removal, purge,
     commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, restore: preparation.restore, forRun, actor: ports.actor }),
-    work: Object.freeze({ read, now, forRun }),
+    work: Object.freeze({ read, now, forRun, reconcileForward }),
     health,
     healthSnapshot: async () => {
       const contexts = await index.managedHealthContexts({ read, now }); const readers = new Map(await Promise.all(contexts.map(async (context) => [context.owner.app, await health(context)] as const)));

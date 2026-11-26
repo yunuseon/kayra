@@ -184,6 +184,20 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     return 0;
   },
   lifecycle: async ([operation, app, commit, request, extra]) => {
+    if (operation === "forward") {
+      if (app === undefined || commit !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(app)) return fail("usage: ctl lifecycle forward <base64url-request>");
+      const parsed = await import("../../contracts/managed-forward-selection.ts").then(({ parseManagedForwardSelectionRequest }) => {
+        const input: unknown = JSON.parse(Buffer.from(app, "base64url").toString("utf8"));
+        return parseManagedForwardSelectionRequest(input);
+      }).catch(() => undefined);
+      if (parsed?.ok !== true) return fail("managed forward request is invalid or unavailable");
+      const response = await fetch("http://127.0.0.1:8091/deployment/forward", {
+        method: "POST", body: JSON.stringify(parsed.value), signal: AbortSignal.timeout(47 * 60_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed forward control unavailable; inspect status and retry the same request identity");
+      console.log(await response.text());
+      return 0;
+    }
     if (operation === "list-managed" && app === undefined) {
       const response = await fetch("http://127.0.0.1:8091/deployment/list-managed", {
         method: "POST", body: "{}", signal: AbortSignal.timeout(15_000),

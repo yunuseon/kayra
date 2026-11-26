@@ -4893,6 +4893,246 @@
         }
       }
     },
+    "/operations/app.deployment.forward": {
+      "post": {
+        "summary": "Build and reconcile an exact forward recovery for a blocked managed maintenance deployment.",
+        "operationId": "app.deployment.forward",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "app": {
+                        "type": "string",
+                        "maxLength": 48,
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                      },
+                      "blockedRun": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "request": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "commit": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{40}$"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 512
+                      },
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      }
+                    },
+                    "required": [
+                      "app",
+                      "blockedRun",
+                      "request",
+                      "commit",
+                      "reason",
+                      "server"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Real server not confirmed"
+          },
+          "409": {
+            "description": "Server busy"
+          }
+        }
+      }
+    },
+    "/operations/app.deployment.forward/preview": {
+      "post": {
+        "summary": "Preview: Build and reconcile an exact forward recovery for a blocked managed maintenance deployment.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "app": {
+                        "type": "string",
+                        "maxLength": 48,
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                      },
+                      "blockedRun": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "request": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "commit": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{40}$"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 512
+                      },
+                      "server": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A server of the fleet (servers/<name>/)"
+                      }
+                    },
+                    "required": [
+                      "app",
+                      "blockedRun",
+                      "request",
+                      "commit",
+                      "reason",
+                      "server"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "options": {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "type": "object",
+                    "properties": {
+                      "verbose": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "columns": {
+                        "default": 120,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "rows": {
+                        "default": 32,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The real server's name, required before a change"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/operations/app.deployment.health": {
       "post": {
         "summary": "Observe current runtime service health separately from release certification and historical task failures.",
@@ -6295,6 +6535,37 @@
                                 "commit",
                                 "run",
                                 "verifiedAt"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "forwardRecovery": {
+                              "readOnly": true,
+                              "type": "object",
+                              "properties": {
+                                "request": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "phase": {
+                                  "type": "string",
+                                  "enum": [
+                                    "initializing",
+                                    "fencing",
+                                    "transferring",
+                                    "held"
+                                  ]
+                                },
+                                "deadline": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "request",
+                                "phase",
+                                "deadline"
                               ],
                               "additionalProperties": false
                             },
@@ -12335,6 +12606,37 @@
                     ],
                     "additionalProperties": false
                   },
+                  "forwardRecovery": {
+                    "readOnly": true,
+                    "type": "object",
+                    "properties": {
+                      "request": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "initializing",
+                          "fencing",
+                          "transferring",
+                          "held"
+                        ]
+                      },
+                      "deadline": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "request",
+                      "phase",
+                      "deadline"
+                    ],
+                    "additionalProperties": false
+                  },
                   "compatibilityEpoch": {
                     "type": "integer",
                     "minimum": 0,
@@ -13322,6 +13624,7 @@
               "app.build",
               "app.deployment.prepare",
               "app.deployment.restore",
+              "app.deployment.forward",
               "app.deployment.health",
               "app.deployment.pins",
               "app.deployment.status",

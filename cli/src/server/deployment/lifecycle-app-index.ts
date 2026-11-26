@@ -15,6 +15,7 @@ import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
 import { indexedManagedForward } from "./indexed-managed-forward.ts";
 import type { ManagedForwardCleanupContext, ManagedForwardCleanupRuntimePort } from "../../contracts/managed-forward-cleanup-context.ts";
 import { managedForwardOperator } from "./managed-forward-reservation.ts";
+import type { ManagedForwardReservation } from "./managed-forward-reservation.ts";
 import { managedForwardRecoveryProposal } from "./managed-forward-recovery-proposal.ts";
 import { managedDeploymentEvidence } from "./managed-deployment-evidence.ts";
 import { preparedManagedForwardBuild } from "./managed-forward-build-state.ts";
@@ -323,7 +324,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     return use(Object.freeze({ envelope, store, inventory, allowed }));
   });
   /** Published read models hold only journal ownership and read capabilities. They never initialize/resume a deployment or acquire effect authority. */
-  const useManagedRead = <T>(app: string, ports: ManagedDeploymentReadPort, project: (state: ManagedLifecycleStore, source: ManagedLifecycleSource) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+  const useManagedRead = <T>(app: string, ports: ManagedDeploymentReadPort, project: (state: ManagedLifecycleStore, source: ManagedLifecycleSource, forward?: ManagedForwardReservation) => Promise<T>) => useIndexed(app, async (store, indexed) => {
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
     const path = join(appDirectory(app), "managed"); await requireDirectory(path); const envelope = await store.read(); const request = envelope?.managed?.at(-1);
@@ -340,7 +341,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const bytes = await ports.read(state.operation.source); const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source });
         if (createHash("sha256").update(bytes).digest("hex") !== state.operation.source || bytes !== JSON.stringify(source) || !gate.ok || JSON.stringify(gate.value.request) !== JSON.stringify(request) ||
           request.completion !== null && (state.operation.phase !== "complete" || request.completion.outcome !== state.operation.outcome || request.completion.rootSnapshot !== createHash("sha256").update(JSON.stringify(state)).digest("hex"))) throw new Error("managed reporting lacks its shared request binding");
-        return project(state, source);
+        return project(state, source, envelope?.forward);
       });
       if (value === undefined) throw new Error("managed reporting evidence is unavailable"); return value;
     } finally { await rootJournal.close(); }
@@ -1068,8 +1069,38 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     }),
     managedDeploymentImagePins: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedImagePins(state, source, ports)),
     managedDeploymentHealth: (app: string, ports: ManagedHealthReadPort) => useManagedRead(app, ports, (state, source) => managedDeploymentHealth(state, source, ports)),
-    managedDeploymentStatus: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source) => managedDeploymentStatus(state, source, ports)),
+    managedDeploymentStatus: (app: string, ports: ManagedDeploymentReadPort) => useManagedRead(app, ports, (state, source, forward) => managedDeploymentStatus(state, source, ports, forward)),
     managedState: (app: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.read()),
+    pendingManagedForwardRequests: async (ports: ManagedDeploymentReadPort) => {
+      if (closed) throw new Error("lifecycle app index is closed");
+      const snapshot = await serialIndex(readIndex);
+      const entries = snapshot.apps.filter((entry) => entry.phase === "ready" && entry.protocol === "managed-v3");
+      const pending = await Promise.all(entries.map((entry) => useIndexed(entry.app, async (store, current) => {
+        const envelope = await store.read();
+        const reservation = envelope?.forward;
+        if (envelope?.fence?.lifecycle.phase !== "registered" || reservation === undefined || reservation.phase === "held") return undefined;
+        const catalog = current.forwardSelections?.find((item) => item.request === reservation.run);
+        if (catalog?.phase !== "ready" || catalog.source !== reservation.selection.source || catalog.decision !== reservation.selection.decision || catalog.checkpoint !== reservation.blocked.checkpoint) {
+          throw new Error("pending forward work lacks its published selection");
+        }
+        const path = join(appDirectory(entry.app), "managed", "forward", reservation.run);
+        await requireDirectory(path);
+        const journal = await journals(path, "existing");
+        try {
+          const selected = await managedForwardSelection(journal, { ...ports,
+            retain: () => Promise.reject(new Error("forward reporting cannot retain artifacts")),
+            current: () => Promise.resolve(undefined), authorize: () => Promise.resolve(false),
+          }).audit();
+          if (selected?.source !== catalog.source || selected.id !== catalog.decision || selected.audit.request.app !== entry.app ||
+            selected.audit.request.request !== reservation.run || selected.audit.request.blockedRun !== reservation.blocked.run ||
+            selected.audit.request.commit !== reservation.build.commit || JSON.stringify(selected.audit.owner) !== JSON.stringify(reservation.owner)) {
+            throw new Error("pending forward selection disagrees with its reservation");
+          }
+          return selected.audit.request;
+        } finally { await journal.close(); }
+      })));
+      return Object.freeze(pending.filter((item) => item !== undefined));
+    },
     pendingManagedDeployments: async () => {
       if (closed) throw new Error("lifecycle app index is closed"); const snapshot = await serialIndex(readIndex);
       const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useIndexed(app.app, async (store) => {
@@ -1532,7 +1563,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       const retirement = await managedRetirementStatus(app);
       if (retirement !== undefined) return retirement;
       if (ports === undefined) throw new Error("managed deployment reporting is unavailable");
-      return useManagedRead(app, ports, (state, source) => managedDeploymentStatus(state, source, ports));
+      return useManagedRead(app, ports, (state, source, forward) => managedDeploymentStatus(state, source, ports, forward));
     },
     publishedDeploymentRuns: async (app: string, run: string | undefined, ports: ManagedDeploymentReadPort) => {
       if (!(await managedReporting(app))) return null;

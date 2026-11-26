@@ -139,6 +139,7 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
       <div class="fact"><dt>Desired release</dt><dd><Release commit={view.desired} /></dd></div>
       {state.version === 3 ? <><div class="fact"><dt>Rollback eligibility</dt><dd>{view.rollback}</dd></div><div class="fact"><dt>Migration step</dt><dd>{state.migrations.step ?? "None pending"}{state.migrations.reason === null ? null : <> · {state.migrations.reason}</>}</dd></div></> : null}
       {view.recoveryPhase === null ? null : <div class="fact"><dt>Recovery phase</dt><dd>{view.recoveryPhase}{view.pendingCheckContainers === 0 ? null : <> · {view.pendingCheckContainers} check containers awaiting stop proof</>}</dd></div>}
+      {state.version !== 3 || state.forwardRecovery === undefined ? null : <div class="fact"><dt>Forward recovery</dt><dd>{state.forwardRecovery.phase}</dd></div>}
       <div class="fact"><dt>Recovery outcome</dt><dd>{view.recovery}</dd></div>
       <div class="fact"><dt>Required action</dt><dd class={state.requiredAction === "none" ? "" : "tone-bad"}>{view.action}</dd></div>
       <div class="fact"><dt>Current service health</dt><dd><Pill tone={view.runtimeTone}>{view.runtime}</Pill></dd></div>
@@ -155,6 +156,10 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
       show({ name: "app.deployment.restore", server, app, record: previousRelease.record, request: crypto.randomUUID() });
     }}>Restore verified release {previousRelease.commit.slice(0, 12)}</button>}
     {resolution === null || state.requiredAction !== "inspect-and-resolve" ? null : <button class="button" onClick={() => { openOperation("app.migration.resolve", { server, app, run: resolution.run, step: resolution.step }); }}>Record migration recovery decision</button>}
+    {state.version !== 3 || state.forwardRecovery !== undefined || state.operation.phase !== "held" || state.operation.strategy !== "maintenance" || state.rollback !== "data-fenced" || state.migrations.phase === "held" ? null :
+      <button class="button" onClick={() => { openOperation("app.deployment.forward", { server, app, blockedRun: state.operation.run, request: crypto.randomUUID() }); }}>
+        Request forward recovery
+      </button>}
   </>;
 };
 

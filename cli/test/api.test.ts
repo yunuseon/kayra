@@ -160,6 +160,7 @@ const samples = {
   "app.build": { server: "lab", app: "shop", commit: "a".repeat(40) },
   "app.deployment.prepare": { server: "lab", app: "shop", commit: "a".repeat(40), request: "12345678-1234-4234-8234-123456789abc" },
   "app.deployment.restore": { server: "lab", app: "shop", record: "a".repeat(64), request: "12345678-1234-4234-8234-123456789abc" },
+  "app.deployment.forward": { server: "lab", app: "shop", blockedRun: "12345678-1234-4234-8234-123456789abc", commit: "a".repeat(40), request: "23456789-1234-4234-8234-123456789abc", reason: "Deploy the reviewed forward fix" },
   "app.deployment.health": { server: "lab", app: "shop" },
   "app.deployment.pins": { server: "lab", app: "shop" },
   "app.deployment.status": { server: "lab", app: "shop" },

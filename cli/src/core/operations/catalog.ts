@@ -2,6 +2,7 @@ import { z } from "zod";
 import { deploymentCancellationSchema, deploymentRequestSchema, deploymentRestoreSchema } from "../../contracts/deployment-request.ts";
 import { migrationCleanupRequestSchema } from "../../contracts/migration-cleanup.ts";
 import { migrationResolutionRequestSchema } from "../../contracts/migration-resolution.ts";
+import { managedForwardSelectionRequestSchema } from "../../contracts/managed-forward-selection.ts";
 import { valueKeySchema } from "../app-values/model.ts";
 
 /**
@@ -169,6 +170,11 @@ export const operations = {
     summary: "Restore a verified managed release from the current data compatibility epoch under a stable request identity.",
     scope: "app", effect: "changes", kind: "plan", bare: true,
     input: deploymentRestoreSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.deployment.forward": {
+    summary: "Build and reconcile an exact forward recovery for a blocked managed maintenance deployment.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: managedForwardSelectionRequestSchema.unwrap().extend({ server }).strict().readonly().refine((value) => value.blockedRun !== value.request),
   },
   "app.deployment.health": {
     summary: "Observe current runtime service health separately from release certification and historical task failures.",

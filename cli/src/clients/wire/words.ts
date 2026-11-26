@@ -9,6 +9,8 @@ const extra = (call: Invocation) => {
       return [call.input.commit, call.input.request];
     case "app.deployment.restore":
       return [call.input.record, call.input.request];
+    case "app.deployment.forward":
+      return [call.input.blockedRun, call.input.commit, call.input.request, "--reason", JSON.stringify(call.input.reason)];
     case "app.deployment.cancel":
       return [call.input.request];
     case "app.migration.cleanup":

@@ -677,6 +677,31 @@ Preview: `POST /api/operations/app.deployment.restore/preview`. Returns a JSON p
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.deployment.forward`
+
+Build and reconcile an exact forward recovery for a blocked managed maintenance deployment.
+
+`POST /api/operations/app.deployment.forward`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`. |
+| `blockedRun` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `commit` | `string` | yes | — | Pattern: `^[a-f0-9]{40}$`. |
+| `reason` | `string` | yes | — | Minimum length: 8. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.forward/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.deployment.health`
 
 Observe current runtime service health separately from release certification and historical task failures.

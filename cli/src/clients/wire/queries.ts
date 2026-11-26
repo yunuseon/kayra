@@ -24,7 +24,14 @@ const queries: Queries = {
   "app.values": (context, input) => query(context, "app.values", input),
   validate: async (context, input) => map(await query(context, "validate", input), validateJson),
   version: (context, input) => query(context, "version", input),
-  "app.deployment.status": async (context, input) => scopedData(schemas.DeploymentStatus, await query(context, "app.deployment.status", input), input.app),
+  "app.deployment.status": async (context, input) => map(
+    scopedData(schemas.DeploymentStatus, await query(context, "app.deployment.status", input), input.app),
+    (status): wire.DeploymentStatus => {
+      if (status?.version !== 1) return status;
+      const { retirement, ...rest } = status;
+      return Object.freeze({ ...rest, ...(retirement === undefined ? {} : { retirement }) });
+    },
+  ),
   "app.deployment.health": async (context, input) => scopedData(schemas.DeploymentHealth, await query(context, "app.deployment.health", input), input.app),
   "app.deployment.pins": async (context, input) => scopedData(schemas.DeploymentImagePins, await query(context, "app.deployment.pins", input), input.app),
   "app.runs": async (context, input) => data(runsSchema, await query(context, "app.runs", input)),

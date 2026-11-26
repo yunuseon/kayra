@@ -69,12 +69,14 @@ const schema = z.object({
       value.preparation.admissionDeadline > value.preparation.migrationDeadline || value.preparation.migrationDeadline !== value.preparation.deadline - 180_000 ||
       value.preparation.httpDeadline !== null && value.preparation.httpDeadline > value.preparation.deadline - 90_000)) context.addIssue({ code: "custom", message: "inconsistent deployment projection" });
 });
-export type DeploymentStatus = z.infer<typeof schema>;
+export type DeploymentStatus = Readonly<Omit<z.infer<typeof schema>, "retirement"> & { readonly retirement?: z.infer<typeof retirement> }>;
 
 /** Read-only reporting format; parsing this data never grants workload authority. */
 export const parseDeploymentStatus = (input: unknown) => {
   const parsed = schema.safeParse(input);
-  return parsed.success ? ok<DeploymentStatus>(parsed.data) : err("invalid deployment status");
+  if (!parsed.success) return err("invalid deployment status");
+  const { retirement, ...status } = parsed.data;
+  return ok<DeploymentStatus>(Object.freeze({ ...status, ...(retirement === undefined ? {} : { retirement }) }));
 };
 
 export const deploymentStatusSchema = schema;

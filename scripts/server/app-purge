@@ -36,7 +36,10 @@ if [ -e "${platform_dir}/managed-apps/${app}.json" ]; then
     # The platform command takes this same lock and verifies the managed claim.
     flock -u 9
     exec 9>&-
-    printf '{"app":"%s"}\n' "$app" | python3 -B "$adapter" purge --root "$registration_root" --private-gid 1000 --platform-dir "$platform_dir"
+    if ! printf '{"app":"%s"}\n' "$app" | python3 -B "$adapter" purge --root "$registration_root" --private-gid 1000 --platform-dir "$platform_dir"; then
+        echo "ERROR: the deployment coordinator owns ${app} and did not confirm purge." >&2
+        exit 1
+    fi
     exit
 fi
 pending="${platform_dir}/removing/${app}.json"

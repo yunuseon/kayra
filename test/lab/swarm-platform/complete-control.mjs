@@ -43,7 +43,10 @@ const currentOperation = (value) => managed ? value?.operation : value?.operatio
 const terminal = (receipt, outcomes = ['deployed']) => wait(async () => {
   const value = await status(); const current = currentOperation(value);
   if (current == null || (managed ? current.run : current.request) !== receipt.request) return undefined;
-  event('status', value); assert.ok(!['held', 'failed', 'cancelled'].includes(current.phase), 'fixture rollout did not converge');
+  event('status', value);
+  // The managed coordinator records a failed effect before opening automatic compensation on its next tick.
+  const recovering = managed && outcomes.includes('rolled-back');
+  assert.ok(!['failed', 'cancelled'].includes(current.phase) && (current.phase !== 'held' || recovering), 'fixture rollout did not converge');
   if (!managed) return current.phase === 'succeeded' ? value : undefined;
   if (current.phase !== 'complete') return undefined;
   assert.ok(outcomes.includes(current.outcome), 'unexpected terminal outcome: ' + current.outcome);
@@ -56,6 +59,24 @@ const submit = async (release) => {
   if (managed) { assert.equal(receipt.phase, 'accepted'); return { receipt }; }
   const preview = await ctl('preview', manifest.app, manifest.commits[release]); const nativePlan = nativeHttpIntent(receipt, preview);
   assert.equal(preview.plan.policy.migrationTimeoutCeilingSeconds, manifest.migrationCeilingSeconds); return { receipt, nativePlan, preview: preview.plan };
+};
+const resumeHttp = async (after) => {
+  assert.ok(managed && ['B', 'C', 'F'].includes(after));
+  const start = await status();
+  assert.equal(start.operation.phase, 'complete');
+  assert.equal(start.verifiedActive.commit, manifest.commits[after]);
+  const target = { host: manifest.host, ca: await readFile('/var/lib/kayra/swarm/lab-ca.pem', 'utf8') };
+  const response = await request(target);
+  assert.equal(response.status, 200); assert.equal(response.release, after); assert.equal(response.ready, true);
+  event('resumed-http-observation', { after, start });
+  const replacement = await runCompleteHttpCases({ manifest, target, submit, terminal, readNativePlan, events, requests, event,
+    setPhase: (value) => { phase = value; }, baseline: { nativePlan: await readNativePlan() }, after });
+  assert.ok(replacement.results.length > 0 && eventError === undefined);
+  const result = { passed: true, protocol: 'managed-v3', scope: 'remaining HTTP cases from a verified release on the isolated platform',
+    after, start, final: replacement.final, replacementCases: replacement.results, requests: requests.filter(({ kind }) => kind === 'short').length,
+    versions: JSON.parse(await docker('version', '--format', '{{json .}}')), compose: await docker('compose', 'version', '--short'), node: process.version,
+    os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
+  await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); event('passed', result);
 };
 try {
   stream = spawn('docker', ['events', '--filter', 'label=com.kayra.app=' + manifest.app, '--format', '{{json .}}'], { stdio: ['ignore', 'pipe', 'pipe'] }); streamExit = once(stream, 'exit');
@@ -76,70 +97,74 @@ try {
       metrics.push({ at: Date.now(), phase, memory, cpuBusyFraction });
     } catch { eventError = 'resource observer failed'; }
   }, 1000);
-  await pause(500); const a = await submit('A'); const activeA = await terminal(a.receipt); assert.equal(activeA.verifiedActive.plan, a.receipt.plan);
-  const target = { host: manifest.host, ca: await readFile('/var/lib/kayra/swarm/lab-ca.pem', 'utf8') };
-  const response = await request(target); assert.equal(response.status, 200); assert.equal(response.release, 'A');
-  const initialLedger = await ledger(); assert.equal(initialLedger.calls[a.receipt.request + ':schema'], 1); assert.equal(initialLedger.effects[a.receipt.request + ':schema'], 1);
-  phase = 'baseline'; stop = traffic(target, (value) => requests.push({ ...value, phase })); await pause(30000);
-  assert.ok(requests.filter((value) => value.phase === 'baseline').length >= 570);
-  phase = 'migration'; const b = await submit('B');
-  await wait(async () => (await ledger()).effects[b.receipt.request + ':schema'] === 1, 'app-owned migration effect');
-  const incarnation = activeA.incarnation; const migration = jobName({ app: manifest.app, incarnation, run: b.receipt.request, step: 'schema', purpose: 'migration', attempt: 1 });
-  const originalJob = JSON.parse(await docker('inspect', migration))[0]; assert.equal(originalJob.State.Running, true);
-  const deployers = (await docker('ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=deployer', '--filter', 'label=com.docker.compose.oneoff=False')).split('\n'); assert.equal(deployers.length, 1);
-  const deployer = deployers[0]; const originalStart = await docker('inspect', deployer, '--format', '{{.State.StartedAt}}'); const interrupted = await status();
-  const pending = managed ? interrupted.operation : interrupted.preparation;
-  assert.equal(managed ? pending.run : pending.request, b.receipt.request);
-  assert.equal(pending.deadline, b.receipt.deadline);
-  if (managed) assert.equal(pending.admissionDeadline, b.receipt.admissionDeadline);
-  phase = 'interruption'; event('before-coordinator-kill', { status: interrupted, job: { id: originalJob.Id, running: originalJob.State.Running } });
-  await docker('kill', '--signal', 'KILL', deployer); await pause(3000);
-  const independent = JSON.parse(await docker('inspect', originalJob.Id))[0]; assert.equal(independent.State.Running, true); event('migration-continued-without-coordinator', { id: independent.Id, running: true });
-  await docker('start', deployer); await wait(async () => { try { return await status(); } catch { return undefined; } }, 'coordinator restart', 30000);
-  assert.notEqual(await docker('inspect', deployer, '--format', '{{.State.StartedAt}}'), originalStart);
-  phase = 'recovery'; const activeB = await terminal(b.receipt); assert.equal(activeB.verifiedActive.plan, b.receipt.plan); assert.equal(activeB.verifiedActive.commit, manifest.commits.B);
-  const replay = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits.B, b.receipt.request); assert.equal(replay.deadline, b.receipt.deadline); assert.equal(replay.plan, b.receipt.plan); assert.equal(replay.phase, managed ? 'complete' : 'succeeded');
-  if (managed) {
-    assert.equal(replay.outcome, 'deployed');
-    assert.equal(replay.admissionDeadline, b.receipt.admissionDeadline);
-    b.nativePlan = await readNativePlan();
+  if (manifest.resumeAfter !== undefined) {
+    await resumeHttp(manifest.resumeAfter);
+  } else {
+    await pause(500); const a = await submit('A'); const activeA = await terminal(a.receipt); assert.equal(activeA.verifiedActive.plan, a.receipt.plan);
+    const target = { host: manifest.host, ca: await readFile('/var/lib/kayra/swarm/lab-ca.pem', 'utf8') };
+    const response = await request(target); assert.equal(response.status, 200); assert.equal(response.release, 'A');
+    const initialLedger = await ledger(); assert.equal(initialLedger.calls[a.receipt.request + ':schema'], 1); assert.equal(initialLedger.effects[a.receipt.request + ':schema'], 1);
+    phase = 'baseline'; stop = traffic(target, (value) => requests.push({ ...value, phase })); await pause(30000);
+    assert.ok(requests.filter((value) => value.phase === 'baseline').length >= 570);
+    phase = 'migration'; const b = await submit('B');
+    await wait(async () => (await ledger()).effects[b.receipt.request + ':schema'] === 1, 'app-owned migration effect');
+    const incarnation = activeA.incarnation; const migration = jobName({ app: manifest.app, incarnation, run: b.receipt.request, step: 'schema', purpose: 'migration', attempt: 1 });
+    const originalJob = JSON.parse(await docker('inspect', migration))[0]; assert.equal(originalJob.State.Running, true);
+    const deployers = (await docker('ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=deployer', '--filter', 'label=com.docker.compose.oneoff=False')).split('\n'); assert.equal(deployers.length, 1);
+    const deployer = deployers[0]; const originalStart = await docker('inspect', deployer, '--format', '{{.State.StartedAt}}'); const interrupted = await status();
+    const pending = managed ? interrupted.operation : interrupted.preparation;
+    assert.equal(managed ? pending.run : pending.request, b.receipt.request);
+    assert.equal(pending.deadline, b.receipt.deadline);
+    if (managed) assert.equal(pending.admissionDeadline, b.receipt.admissionDeadline);
+    phase = 'interruption'; event('before-coordinator-kill', { status: interrupted, job: { id: originalJob.Id, running: originalJob.State.Running } });
+    await docker('kill', '--signal', 'KILL', deployer); await pause(3000);
+    const independent = JSON.parse(await docker('inspect', originalJob.Id))[0]; assert.equal(independent.State.Running, true); event('migration-continued-without-coordinator', { id: independent.Id, running: true });
+    await docker('start', deployer); await wait(async () => { try { return await status(); } catch { return undefined; } }, 'coordinator restart', 30000);
+    assert.notEqual(await docker('inspect', deployer, '--format', '{{.State.StartedAt}}'), originalStart);
+    phase = 'recovery'; const activeB = await terminal(b.receipt); assert.equal(activeB.verifiedActive.plan, b.receipt.plan); assert.equal(activeB.verifiedActive.commit, manifest.commits.B);
+    const replay = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits.B, b.receipt.request); assert.equal(replay.deadline, b.receipt.deadline); assert.equal(replay.plan, b.receipt.plan); assert.equal(replay.phase, managed ? 'complete' : 'succeeded');
+    if (managed) {
+      assert.equal(replay.outcome, 'deployed');
+      assert.equal(replay.admissionDeadline, b.receipt.admissionDeadline);
+      b.nativePlan = await readNativePlan();
+    }
+    phase = 'stable'; await pause(30000); await stop(); stop = undefined;
+    const snapshot = await ledger(); for (const identity of [a.receipt.request, b.receipt.request]) { assert.equal(snapshot.calls[identity + ':schema'], 1); assert.equal(snapshot.effects[identity + ':schema'], 1); }
+    const starts = events.filter((value) => value.Action === 'start' && value.Actor?.Attributes?.['com.kayra.job']);
+    const probeName = jobName({ app: manifest.app, incarnation, run: b.receipt.request, step: 'schema', purpose: 'probe', attempt: 1 });
+    const expectedJobs = [jobName({ app: manifest.app, incarnation, run: a.receipt.request, step: 'schema', purpose: 'migration', attempt: 1 }), migration, probeName];
+    assert.deepEqual(starts.map((value) => value.Actor.Attributes['com.kayra.job']).sort(), expectedJobs.sort()); assert.ok(starts.every((value) => value.Actor.Attributes['com.kayra.barrier'] === 'false'));
+    const failures = requests.filter((value) => value.error !== undefined || value.status !== 200); const premature = prematureCandidateRequests(requests, 'B'); assert.equal(failures.length, 0); assert.equal(premature.length, 0);
+    assert.ok(requests.some((value) => value.release === 'A') && requests.filter((value) => value.phase === 'stable').every((value) => value.release === 'B'));
+    assert.ok(requests.filter((value) => value.phase === 'stable').length >= 570); assert.ok(requests.some((value) => value.connection === 'fresh') && requests.some((value) => value.connection === 'persistent'));
+    assert.equal(eventError, undefined);
+    const rate = (requests.length - 1) / ((requests.at(-1).at - requests[0].at) / 1000); const maxGapMs = Math.max(...requests.map((value) => value.gapMs ?? 0));
+    assert.ok(rate >= 19, 'traffic observer missed its request rate'); assert.ok(maxGapMs <= 250, 'traffic observer was suspended or starved');
+    const failedMigration = events.find((value) => value.Action === 'die' && value.Actor?.ID === originalJob.Id && value.Actor.Attributes.exitCode === '1');
+    const probeStart = starts.find((value) => value.Actor.Attributes['com.kayra.job'] === probeName);
+    const probeFinished = events.find((value) => value.Action === 'die' && value.Actor?.ID === probeStart?.Actor.ID && value.Actor.Attributes.exitCode === '0');
+    const candidateStarted = events.find((value) => value.Action === 'start' && !value.Actor?.Attributes?.['com.kayra.job'] && value.Actor?.Attributes?.['com.kayra.plan'] === b.nativePlan);
+    assert.ok(failedMigration && probeFinished && candidateStarted); assert.ok(failedMigration.timeNano < probeStart.timeNano && probeFinished.timeNano < candidateStarted.timeNano);
+    const replacement = managed && manifest.commits.C !== undefined
+      ? await runCompleteHttpCases({ manifest, target, submit, terminal, readNativePlan, events, requests, event,
+        setPhase: (value) => { phase = value; }, baseline: b })
+      : null;
+    phase = 'complete'; stream.kill('SIGTERM'); await streamExit; clearInterval(sampler); sampler = undefined;
+    const versions = JSON.parse(await docker('version', '--format', '{{json .}}'));
+    const sharedImages = {};
+    for (const service of ['traefik', 'socket-proxy']) {
+      const ids = (await docker('ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=' + service, '--filter', 'label=com.docker.compose.oneoff=False')).split('\n'); assert.equal(ids.length, 1);
+      sharedImages[service] = await docker('inspect', ids[0], '--format', '{{.Config.Image}}');
+    }
+    const ledgerImage = await docker('inspect', manifest.ledger, '--format', '{{.Image}}');
+    const ledgerImageReference = await docker('inspect', manifest.ledger, '--format', '{{.Config.Image}}');
+    const result = { passed: true, protocol: managed ? 'managed-v3' : 'complete-v2', scope: 'real registered builder artifacts, app-owned HTTP ledger, migration/probe containers, coordinator restart and routed TLS HTTP; no SQL engine or retained-volume acceptance',
+      a, b, initial: activeA, interrupted, final: replacement?.final ?? activeB, replay, ledger: snapshot, migrationContinuedWithoutCoordinator: true, migrationStarts: 2, probeStarts: 1,
+      replacementCases: replacement?.results ?? [], requests: requests.filter((value) => value.kind === 'short').length,
+      failedRequests: failures.length + (replacement?.results.reduce((total, value) => total + value.requests.failed, 0) ?? 0),
+      prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, appProbeRecoveredFailure: true, previousReleaseDrainingResponses: requests.filter((value) => value.release === 'A' && value.ready === false).length, versions, sharedImages, ledgerImage, ledgerImageReference, compose: await docker('compose', 'version', '--short'), node: process.version, os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
+    await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); event('passed', result);
   }
-  phase = 'stable'; await pause(30000); await stop(); stop = undefined;
-  const snapshot = await ledger(); for (const identity of [a.receipt.request, b.receipt.request]) { assert.equal(snapshot.calls[identity + ':schema'], 1); assert.equal(snapshot.effects[identity + ':schema'], 1); }
-  const starts = events.filter((value) => value.Action === 'start' && value.Actor?.Attributes?.['com.kayra.job']);
-  const probeName = jobName({ app: manifest.app, incarnation, run: b.receipt.request, step: 'schema', purpose: 'probe', attempt: 1 });
-  const expectedJobs = [jobName({ app: manifest.app, incarnation, run: a.receipt.request, step: 'schema', purpose: 'migration', attempt: 1 }), migration, probeName];
-  assert.deepEqual(starts.map((value) => value.Actor.Attributes['com.kayra.job']).sort(), expectedJobs.sort()); assert.ok(starts.every((value) => value.Actor.Attributes['com.kayra.barrier'] === 'false'));
-  const failures = requests.filter((value) => value.error !== undefined || value.status !== 200); const premature = prematureCandidateRequests(requests, 'B'); assert.equal(failures.length, 0); assert.equal(premature.length, 0);
-  assert.ok(requests.some((value) => value.release === 'A') && requests.filter((value) => value.phase === 'stable').every((value) => value.release === 'B'));
-  assert.ok(requests.filter((value) => value.phase === 'stable').length >= 570); assert.ok(requests.some((value) => value.connection === 'fresh') && requests.some((value) => value.connection === 'persistent'));
-  assert.equal(eventError, undefined);
-  const rate = (requests.length - 1) / ((requests.at(-1).at - requests[0].at) / 1000); const maxGapMs = Math.max(...requests.map((value) => value.gapMs ?? 0));
-  assert.ok(rate >= 19, 'traffic observer missed its request rate'); assert.ok(maxGapMs <= 250, 'traffic observer was suspended or starved');
-  const failedMigration = events.find((value) => value.Action === 'die' && value.Actor?.ID === originalJob.Id && value.Actor.Attributes.exitCode === '1');
-  const probeStart = starts.find((value) => value.Actor.Attributes['com.kayra.job'] === probeName);
-  const probeFinished = events.find((value) => value.Action === 'die' && value.Actor?.ID === probeStart?.Actor.ID && value.Actor.Attributes.exitCode === '0');
-  const candidateStarted = events.find((value) => value.Action === 'start' && !value.Actor?.Attributes?.['com.kayra.job'] && value.Actor?.Attributes?.['com.kayra.plan'] === b.nativePlan);
-  assert.ok(failedMigration && probeFinished && candidateStarted); assert.ok(failedMigration.timeNano < probeStart.timeNano && probeFinished.timeNano < candidateStarted.timeNano);
-  const replacement = managed && manifest.commits.C !== undefined
-    ? await runCompleteHttpCases({ manifest, target, submit, terminal, readNativePlan, events, requests, event,
-      setPhase: (value) => { phase = value; }, baseline: b })
-    : null;
-  phase = 'complete'; stream.kill('SIGTERM'); await streamExit; clearInterval(sampler); sampler = undefined;
-  const versions = JSON.parse(await docker('version', '--format', '{{json .}}'));
-  const sharedImages = {};
-  for (const service of ['traefik', 'socket-proxy']) {
-    const ids = (await docker('ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=' + service, '--filter', 'label=com.docker.compose.oneoff=False')).split('\n'); assert.equal(ids.length, 1);
-    sharedImages[service] = await docker('inspect', ids[0], '--format', '{{.Config.Image}}');
-  }
-  const ledgerImage = await docker('inspect', manifest.ledger, '--format', '{{.Image}}');
-  const ledgerImageReference = await docker('inspect', manifest.ledger, '--format', '{{.Config.Image}}');
-  const result = { passed: true, protocol: managed ? 'managed-v3' : 'complete-v2', scope: 'real registered builder artifacts, app-owned HTTP ledger, migration/probe containers, coordinator restart and routed TLS HTTP; no SQL engine or retained-volume acceptance',
-    a, b, initial: activeA, interrupted, final: replacement?.final ?? activeB, replay, ledger: snapshot, migrationContinuedWithoutCoordinator: true, migrationStarts: 2, probeStarts: 1,
-    replacementCases: replacement?.results ?? [], requests: requests.filter((value) => value.kind === 'short').length,
-    failedRequests: failures.length + (replacement?.results.reduce((total, value) => total + value.requests.failed, 0) ?? 0),
-    prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, appProbeRecoveredFailure: true, previousReleaseDrainingResponses: requests.filter((value) => value.release === 'A' && value.ready === false).length, versions, sharedImages, ledgerImage, ledgerImageReference, compose: await docker('compose', 'version', '--short'), node: process.version, os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
-  await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); event('passed', result);
 } catch (error) {
   await writeFile(join(output, 'failure.json'), JSON.stringify({ error: String(error), phase, manifest }, null, 2)); console.error(JSON.stringify({ error: String(error), output })); process.exitCode = 1;
 } finally {

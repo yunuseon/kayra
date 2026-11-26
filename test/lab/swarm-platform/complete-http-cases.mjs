@@ -7,17 +7,18 @@ import { request, traffic } from './http-probe.mjs';
 const candidates = [
   { release: 'C', name: 'slow-readiness', previous: 'B', expected: 'C' },
   { release: 'D', name: 'never-ready', previous: 'C', expected: 'C' },
-  { release: 'E', name: 'failure-after-readiness', previous: 'C', expected: 'C' },
+  { release: 'E', name: 'failure-after-readiness', previous: 'C', expected: 'C', failure: 'exit' },
   { release: 'F', name: 'long-request', previous: 'C', expected: 'F' },
+  { release: 'G', name: 'candidate-memory-exhaustion', previous: 'F', expected: 'F', failure: 'oom' },
 ];
 
-export async function runCompleteHttpCases({ manifest, target, submit, terminal, readNativePlan, events, requests, setPhase, event, baseline }) {
+export async function runCompleteHttpCases({ manifest, target, submit, terminal, readNativePlan, events, requests, setPhase, event, baseline, after = 'B' }) {
   const results = [];
   let previousPlan = baseline.nativePlan;
   let final;
-  for (const item of candidates) {
+  for (const item of candidates.filter(({ release }) => release > after && manifest.commits[release] !== undefined)) {
     const { release, name, expected, previous } = item;
-    const interrupted = release === 'E';
+    const interrupted = item.failure !== undefined;
     const successful = release === expected;
     const samples = [];
     setPhase(name + ':baseline');
@@ -57,7 +58,8 @@ export async function runCompleteHttpCases({ manifest, target, submit, terminal,
       if (successful) assert.equal(candidatePlan, nativePlan);
       const lifecycle = duringUpdate.filter((entry) => entry.Actor.Attributes['com.kayra.plan'] === candidatePlan);
       const healthy = lifecycle.find((entry) => entry.Action === 'health_status: healthy');
-      const crash = lifecycle.find((entry) => entry.Action === 'die' && entry.Actor.Attributes.exitCode === '42');
+      const crash = lifecycle.find((entry) => item.failure === 'oom' ? entry.Action === 'oom' :
+        entry.Action === 'die' && entry.Actor.Attributes.exitCode === '42');
       const recoveryMs = crash === undefined ? null : convergedAt - crash.timeNano / 1e6;
       const long = longResponse === undefined ? null : { kind: 'long', phase: name, ...await longResponse };
       if (long !== null) requests.push(long);
@@ -69,7 +71,7 @@ export async function runCompleteHttpCases({ manifest, target, submit, terminal,
       const summary = summarizeRequests(samples);
       const premature = prematureCandidateRequests(samples, release);
       const result = { name, release, expected, nativePlan, candidatePlan, submittedAt, convergedAt,
-        recoveryMs, operation: final.operation, requests: summary, long, prematureExposure: premature.length };
+        recoveryMs, failure: item.failure ?? null, operation: final.operation, requests: summary, long, prematureExposure: premature.length };
       event('http-case', result);
       assert.ok(baselineSamples.length >= 50 && baselineSamples.every((value) => value.status === 200 && value.release === previous && value.ready));
       assert.ok(stable.length >= 570 && stable.every((value) => value.status === 200 && value.release === expected && value.ready));
@@ -88,6 +90,9 @@ export async function runCompleteHttpCases({ manifest, target, submit, terminal,
       if (interrupted) {
         assert.ok(healthy && crash && healthy.Actor.ID === crash.Actor.ID && healthy.timeNano < crash.timeNano);
         assert.ok(recoveryMs >= 0 && recoveryMs <= 90000, 'post-readiness recovery took more than 90 seconds');
+        if (item.failure === 'oom') {
+          assert.ok(lifecycle.some((entry) => entry.Action === 'die' && entry.Actor.ID === crash.Actor.ID && entry.Actor.Attributes.exitCode === '137'));
+        }
       }
       if (long !== null) {
         assert.equal(long.status, 200);

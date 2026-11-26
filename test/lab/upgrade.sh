@@ -800,30 +800,32 @@ if [ "$indexed_registration" = true ]; then
         managed_b="$(git -C "$managed_repo" rev-parse HEAD)"
         yq -i 'del(.rollout.migrations)' "${managed_repo}/app.yml"
         managed_add_http_release() {
-            local release="$1" delay="$2" never="$3" crash="$4"
-            RELEASE="$release" READY_DELAY="$delay" NEVER_READY="$never" CRASH_DELAY="$crash" yq -i '
+            local release="$1" delay="$2" never="$3" crash="$4" memory="$5"
+            RELEASE="$release" READY_DELAY="$delay" NEVER_READY="$never" CRASH_DELAY="$crash" OOM_BYTES="$memory" yq -i '
                 .services.web.environment.RELEASE = strenv(RELEASE) |
                 .services.web.environment.READY_DELAY_MS = strenv(READY_DELAY) |
                 .services.web.environment.NEVER_READY = strenv(NEVER_READY) |
                 .services.web.environment.FAIL_AFTER_READY_MS = strenv(CRASH_DELAY) |
+                .services.web.environment.OOM_BYTES = strenv(OOM_BYTES) |
                 del(.services.web.environment.FAIL_AFTER_EFFECT, .services.web.environment.MIGRATION_HOLD_MS)
             ' "${managed_repo}/deploy/compose.yml"
             git -C "$managed_repo" add -A
             git -C "$managed_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "managed HTTP rollout $release"
             git -C "$managed_repo" rev-parse HEAD
         }
-        managed_c="$(managed_add_http_release C 15000 false 0)"
-        managed_d="$(managed_add_http_release D 0 true 0)"
-        managed_e="$(managed_add_http_release E 0 false 8000)"
-        managed_f="$(managed_add_http_release F 0 false 0)"
+        managed_c="$(managed_add_http_release C 15000 false 0 0)"
+        managed_d="$(managed_add_http_release D 0 true 0 0)"
+        managed_e="$(managed_add_http_release E 0 false 8000 0)"
+        managed_f="$(managed_add_http_release F 0 false 0 0)"
+        managed_g="$(managed_add_http_release G 0 false 0 268435456)"
         git clone -q --bare "$managed_repo" "${served}/lab/managed.git"
-        managed_requests="$(python3 -c 'import json,uuid; print(json.dumps({key:str(uuid.uuid4()) for key in "ABCDEF"}))')"
+        managed_requests="$(python3 -c 'import json,uuid; print(json.dumps({key:str(uuid.uuid4()) for key in "ABCDEFG"}))')"
         jq -n --arg repo "http://${host_ip}:${port}/lab/managed.git" --arg a "$managed_a" --arg b "$managed_b" \
-            --arg c "$managed_c" --arg d "$managed_d" --arg e "$managed_e" --arg f "$managed_f" --argjson requests "$managed_requests" '{
+            --arg c "$managed_c" --arg d "$managed_d" --arg e "$managed_e" --arg f "$managed_f" --arg g "$managed_g" --argjson requests "$managed_requests" '{
             fixture_app: "managed-complete", fixture_runtime: "swarm", fixture_hosts: ["managed-complete.lab.test"],
             fixture_grants: {memory_bytes: 536870912, cpu_millicores: 1000, maintenance: false},
             fixture_configuration: {MODE: "lab", DB_HOST: "kayra-managed-ledger"}, fixture_ledger: "kayra-managed-ledger",
-            fixture_repo: $repo, fixture_commit: $a, fixture_commits: {A: $a, B: $b, C: $c, D: $d, E: $e, F: $f}, fixture_requests: $requests,
+            fixture_repo: $repo, fixture_commit: $a, fixture_commits: {A: $a, B: $b, C: $c, D: $d, E: $e, F: $f, G: $g}, fixture_requests: $requests,
             kayra_lab_swarm: true, kayra_lab_managed_rollouts: true
         }' > "${work}/managed-registration-inputs.json"
         ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \

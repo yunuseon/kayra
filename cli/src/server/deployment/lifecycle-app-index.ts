@@ -24,6 +24,7 @@ import type { ManagedForwardSelectionRequest } from "../../contracts/managed-for
 import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
 import { managedHistorySelection, readManagedHistoryRelease } from "./managed-history-selection.ts";
 import { managedRestorePlan } from "./managed-release.ts";
+import { managedRunReport } from "./managed-run-report.ts";
 import { managedMigrationAudit } from "./managed-migration-audit.ts";
 import { parseManagedApplicationPlan, managedApplicationDigest } from "../../contracts/managed-application-plan.ts";
 import type { ManagedApplicationPlan } from "../../contracts/managed-application-plan.ts";
@@ -1522,6 +1523,40 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (retirement !== undefined) return retirement;
       if (ports === undefined) throw new Error("managed deployment reporting is unavailable");
       return useManagedRead(app, ports, (state, source) => managedDeploymentStatus(state, source, ports));
+    },
+    publishedDeploymentRuns: async (app: string, run: string | undefined, ports: ManagedDeploymentReadPort) => {
+      if (!(await managedReporting(app))) return null;
+      return useIndexed(app, async (store, indexed) => {
+        if (run !== undefined && !z.uuid().safeParse(run).success) throw new Error("invalid managed deployment run identity");
+        const envelope = await store.read();
+        if (envelope === undefined || indexed.protocol !== "managed-v3") throw new Error("managed run reporting lacks indexed ownership");
+        const requests = run === undefined ? (envelope.managed ?? []).slice(-20).toReversed() : (envelope.managed ?? []).filter((item) => item.run === run);
+        const open = async () => {
+          if (indexed.managedRoot !== "ready" || !requests.some((item) => item.completion === null)) return undefined;
+          const path = join(appDirectory(app), "managed"); await requireDirectory(path);
+          const root = await journals(path, "existing");
+          try { return parseManagedLifecycleStore(await root.read()); } finally { await root.close(); }
+        };
+        const current = await open();
+        const deadline = ports.now() + 10_000;
+        const read = async (digest: string) => {
+          const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest));
+          if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed run reporting evidence is unavailable");
+          return bytes;
+        };
+        const reports = await Promise.all(requests.map(async (request) => {
+          const bytes = await read(request.source);
+          const source = parseManagedLifecycleSource(JSON.parse(bytes));
+          const gate = managedIndexGate({ owner: indexed, envelope, source });
+          if (!gate.ok || bytes !== JSON.stringify(source) || JSON.stringify(gate.value.request) !== JSON.stringify(request)) throw new Error("managed run report source binding disagrees");
+          const snapshot = request.completion?.rootSnapshot;
+          const state = typeof snapshot === "string" ? parseManagedLifecycleStore(JSON.parse(await read(snapshot))) :
+            request.completion === null && current?.operation.run === request.run ? current : undefined;
+          return managedRunReport(request, source, state, { read }, envelope.removalTombstone?.withdrawnAt);
+        }));
+        const live = run === undefined && envelope.removal === undefined ? reports[0]?.live : undefined;
+        return Object.freeze({ app, protocol: "managed-v3" as const, runs: Object.freeze(reports.map((value) => value.row)), ...(live === undefined ? {} : { live }) });
+      });
     },
     publishedDeploymentImagePins: async (app: string, ports: ManagedDeploymentReadPort) => {
       if (!(await managedReporting(app))) return useReady(app, (store) => legacyPins(app, store, ports));

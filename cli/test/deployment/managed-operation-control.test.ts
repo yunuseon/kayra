@@ -34,6 +34,31 @@ test("public managed commands return source-bound acceptance and cancellation re
   const complete = await lab.commands().cancel({ app: "shop", request: run }); assert.equal(complete.phase, "complete"); assert.equal(complete.disposition, "cancelled"); assert.equal(complete.deadline, receipt.value.deadline); assert.deepEqual(lab.calls, []);
 });
 
+test("managed run pages reconstruct accepted and terminal outcomes from owned records across restart", async (t) => {
+  const lab = await fixture(t); const run = randomUUID(); const app = "shop";
+  const control = () => deploymentControl({ index: lab.index(), now: lab.runtime.now, enabled: () => Promise.resolve(true),
+    canAccess: (name) => Promise.resolve(name === app), managed: lab.commands(), artifacts: lab.artifacts });
+  const report = (request?: string) => control()("/deployment/runs", request === undefined ? { app } : { app, request });
+  assert.deepEqual(await report(), { app, protocol: "managed-v3", runs: [] });
+  await lab.commands().prepare({ app, request: run, commit: lab.plan.commit });
+  const accepted = await lab.index().publishedDeploymentRuns(app, run, lab.runtime);
+  assert.deepEqual(accepted?.runs[0]?.managed, { protocol: "managed-v3", phase: "admitting", outcome: null, requiredAction: "none", activeRelease: null });
+  assert.deepEqual(await report(run), accepted);
+  assert.equal(accepted.runs[0].sha, lab.plan.commit);
+  await lab.commands().cancel({ app, request: run });
+  for (let i = 0; i < 12; i++) { const state = await lab.index().tickManagedDeployment(app, run, lab.runtime); if (state?.operation.phase === "complete") break; }
+  await lab.reopen();
+  const finished = await lab.index().publishedDeploymentRuns(app, run, lab.runtime);
+  assert.deepEqual(finished?.runs[0]?.managed, { protocol: "managed-v3", phase: "complete", outcome: "absent", requiredAction: "none", activeRelease: null });
+  assert.equal(finished.runs[0].state, "failure");
+  assert.ok(finished.runs[0].finished);
+  assert.deepEqual(await report(), finished);
+  assert.deepEqual(await report(randomUUID()), { app, protocol: "managed-v3", runs: [] });
+  await assert.rejects(control()("/deployment/runs", { app: "another" }), /outside deployment scope/);
+  assert.equal(await control()("/deployment/runs", { app, request: "not-a-run" }), undefined);
+  assert.equal(lab.hostCalls(), 0);
+});
+
 test("managed public prepare requires a retained build and never starts the builder inside the control request", async (t) => {
   const lab = await fixture(t);
   await assert.rejects(lab.commands().prepare({ app: "shop", request: randomUUID(), commit: "b".repeat(40) }), /requires a retained build/); assert.deepEqual(lab.calls, []); assert.deepEqual(await lab.index().pendingManagedDeployments(), []);

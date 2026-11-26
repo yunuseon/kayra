@@ -7868,6 +7868,10 @@
                     "app": {
                       "type": "string"
                     },
+                    "protocol": {
+                      "type": "string",
+                      "const": "managed-v3"
+                    },
                     "live": {
                       "type": "object",
                       "properties": {
@@ -7956,6 +7960,77 @@
                               ],
                               "additionalProperties": false
                             }
+                          },
+                          "managed": {
+                            "readOnly": true,
+                            "type": "object",
+                            "properties": {
+                              "protocol": {
+                                "type": "string",
+                                "const": "managed-v3"
+                              },
+                              "phase": {
+                                "type": "string",
+                                "enum": [
+                                  "accepted",
+                                  "admitting",
+                                  "allocating",
+                                  "quiescing",
+                                  "preparing",
+                                  "updating",
+                                  "verifying",
+                                  "recovering",
+                                  "recovery-verifying",
+                                  "settling",
+                                  "complete",
+                                  "held"
+                                ]
+                              },
+                              "outcome": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "deployed",
+                                      "rolled-back",
+                                      "absent",
+                                      "unchanged",
+                                      "removed",
+                                      "superseded"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "requiredAction": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "inspect-and-resolve"
+                                ]
+                              },
+                              "activeRelease": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{40}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "protocol",
+                              "phase",
+                              "outcome",
+                              "requiredAction",
+                              "activeRelease"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -12996,6 +13071,10 @@
           "app": {
             "type": "string"
           },
+          "protocol": {
+            "type": "string",
+            "const": "managed-v3"
+          },
           "live": {
             "type": "object",
             "properties": {
@@ -13084,6 +13163,77 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "managed": {
+                  "readOnly": true,
+                  "type": "object",
+                  "properties": {
+                    "protocol": {
+                      "type": "string",
+                      "const": "managed-v3"
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "accepted",
+                        "admitting",
+                        "allocating",
+                        "quiescing",
+                        "preparing",
+                        "updating",
+                        "verifying",
+                        "recovering",
+                        "recovery-verifying",
+                        "settling",
+                        "complete",
+                        "held"
+                      ]
+                    },
+                    "outcome": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "deployed",
+                            "rolled-back",
+                            "absent",
+                            "unchanged",
+                            "removed",
+                            "superseded"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "requiredAction": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "inspect-and-resolve"
+                      ]
+                    },
+                    "activeRelease": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{40}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "protocol",
+                    "phase",
+                    "outcome",
+                    "requiredAction",
+                    "activeRelease"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [

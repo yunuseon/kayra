@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { lstat } from "node:fs/promises";
 import { releasesAnswer, runAnswer, runsAnswer } from "./answers.ts";
 import { field } from "../app.ts";
 import { appOwner, appName, owner as mintOwner, runId, type AppName, type Owner, type RunId } from "../brand.ts";
@@ -6,6 +7,7 @@ import { ended, type RunMeta } from "../runs/records.ts";
 import { log, meta, runsOf } from "../runs/read.ts";
 import { legacyReleases } from "../runs/release-read.ts";
 import { typed } from "../../lib/typed.ts";
+import type { RunsAnswer } from "../../contracts/reporting.ts";
 
 /**
  * The operator's side, run inside the deployer container by `kayra app …` and
@@ -81,11 +83,35 @@ const start = async (payload: object, json: boolean) => {
 };
 
 const releasesOf = (app: AppName) => legacyReleases(platformDir, app).releases;
+type ManagedRuns = Readonly<{ kind: "legacy" | "unavailable" }> | Readonly<{ kind: "managed"; value: RunsAnswer }>;
+const managedRuns = async (app: AppName, request?: string): Promise<ManagedRuns> => {
+  const indexed = await lstat(join(platformDir, "managed-apps", app + ".json")).then(() => true, (error: unknown) =>
+    typeof error === "object" && error !== null && field(error, "code") === "ENOENT" ? false : undefined);
+  if (indexed === undefined) return { kind: "unavailable" };
+  if (!indexed) return { kind: "legacy" } as const;
+  const response = await fetch("http://127.0.0.1:8091/deployment/runs", {
+    method: "POST", body: JSON.stringify(request === undefined ? { app } : { app, request }), signal: AbortSignal.timeout(15_000),
+  }).catch(() => undefined);
+  if (!response?.ok) return { kind: "unavailable" } as const;
+  const raw: unknown = await response.json().catch(() => undefined);
+  if (raw === null) return { kind: "legacy" } as const;
+  const contracts = await import("../../contracts/run-reporting.ts").catch(() => undefined);
+  const checked = contracts?.runsSchema.safeParse(raw);
+  return checked?.success === true && checked.data.app === app && checked.data.protocol === "managed-v3" && checked.data.runs.every((row) => request === undefined || row.id === request)
+    ? { kind: "managed", value: checked.data } as const : { kind: "unavailable" } as const;
+};
 
 const commands: Readonly<Record<string, (args: readonly string[], json: boolean) => Promise<number> | number>> = {
-  runs: ([app], json) => {
+  runs: async ([app], json) => {
     const name = appName(app ?? "");
     if (!name.ok) return fail(name.error);
+    const indexed = await managedRuns(name.value);
+    if (indexed.kind === "unavailable") return fail("indexed run reporting is unavailable");
+    if (indexed.kind === "managed") {
+      if (json) console.log(JSON.stringify(indexed.value));
+      else indexed.value.runs.forEach((row) => { console.log([row.id, row.managed?.phase, row.managed?.outcome, row.sha, row.why, row.managed?.requiredAction].filter(Boolean).join("  ")); });
+      return 0;
+    }
     const latest = runsOf(runs, appOwner(name.value)).slice(0, 20);
     if (json) {
       console.log(JSON.stringify(runsAnswer(name.value, latest, releasesOf(name.value)[0])));
@@ -96,9 +122,21 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     });
     return 0;
   },
-  log: ([who, id]) => {
+  log: async ([who, id]) => {
     const minted = mintOwner(who === "gc" || who === "renovate" ? `_${who}` : (who ?? ""));
     if (!minted.ok) return fail(minted.error);
+    const app = appName(who ?? "");
+    if (app.ok && (id === undefined || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))) {
+      const indexed = await managedRuns(app.value, id);
+      if (indexed.kind === "unavailable") return fail("indexed run reporting is unavailable");
+      if (indexed.kind === "managed") {
+        const row = indexed.value.runs[0];
+        const lifecycle = row?.managed;
+        if (row === undefined || lifecycle === undefined) return fail(`no such managed run of ${app.value}`);
+        console.log(`Run ${row.id}\nRequested commit: ${row.sha ?? "none"}\nPhase: ${lifecycle.phase}\nOutcome: ${lifecycle.outcome ?? "pending"}\nVerified active release at this phase: ${lifecycle.activeRelease ?? "none"}\nRequired action: ${lifecycle.requiredAction}`);
+        return 0;
+      }
+    }
     const given = id === undefined ? undefined : runId(id);
     const run = given === undefined ? runsOf(runs, minted.value)[0]?.id : given.ok ? given.value : undefined;
     const text = run === undefined ? undefined : log(runs, minted.value, run);

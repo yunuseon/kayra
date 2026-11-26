@@ -1,4 +1,5 @@
 import type { RunId, Sha } from "./identity.ts";
+import type { ManagedRunReport } from "./managed-run-report.ts";
 
 export type Why = "push" | "poll" | "deploy" | "rollback" | "restore";
 export type JobWhy = "schedule" | "manual";
@@ -36,7 +37,8 @@ export type RunAnswer = {
   readonly error?: string;
   readonly urls?: readonly string[];
   readonly checks?: readonly Check[];
+  readonly managed?: ManagedRunReport;
 };
 export type Deployed = { readonly sha: string; readonly time: string };
-export type RunsAnswer = { readonly app: string; readonly live?: Deployed; readonly runs: readonly RunAnswer[] };
+export type RunsAnswer = { readonly app: string; readonly protocol?: "managed-v3"; readonly live?: Deployed; readonly runs: readonly RunAnswer[] };
 export type ReleasesAnswer = { readonly app: string; readonly releases: readonly (Deployed & { readonly live: boolean })[] };

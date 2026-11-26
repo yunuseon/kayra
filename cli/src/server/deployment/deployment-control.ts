@@ -10,7 +10,7 @@ import { parseMigrationResolutionQuery, parseMigrationResolutionRequest, parseMi
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 import type { managedOperationControl } from "./managed-operation-control.ts";
 
-type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "deploymentProtocol" | "prepareRollout" | "httpOperation" | "prepareHttpRollout" | "publishedDeploymentStatus" | "publishedDeploymentImagePins" | "publishedDeploymentHealth" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit" | "rolloutOperation" | "cancelManagedRollout">>;
+type Index = Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "deploymentProtocol" | "prepareRollout" | "httpOperation" | "prepareHttpRollout" | "publishedDeploymentStatus" | "publishedDeploymentRuns" | "publishedDeploymentImagePins" | "publishedDeploymentHealth" | "cancelHttpRollout" | "resolveMigration" | "migrationAudit" | "requestMigrationCleanup" | "migrationCleanupAudit" | "rolloutOperation" | "cancelManagedRollout">>;
 type Ports = {
   readonly index: Index;
   readonly canAccess: (app: string) => Promise<boolean>;
@@ -87,6 +87,14 @@ export const deploymentControl = ({ index, canAccess, enabled, plans, rollouts, 
     if (!query.ok) return undefined;
     if (!(await canAccess(query.value.app))) throw new Error("app is outside deployment scope");
     return index.publishedDeploymentStatus(query.value.app, artifacts === undefined ? undefined : { read: artifacts.read, now });
+  }
+  if (path === "/deployment/runs") {
+    const query = parseDeploymentQuery(input);
+    const detail = parseDeploymentCancellation(input);
+    if (!query.ok && !detail.ok || artifacts === undefined) return undefined;
+    const app = detail.ok ? detail.value.app : query.ok ? query.value.app : undefined;
+    if (app === undefined || !await canAccess(app)) throw new Error("app is outside deployment scope");
+    return index.publishedDeploymentRuns(app, detail.ok ? detail.value.request : undefined, { read: artifacts.read, now });
   }
   if (path === "/deployment/restore") {
     const requested = deploymentRestoreSchema.safeParse(input);

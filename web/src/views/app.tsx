@@ -24,22 +24,22 @@ const useAnswer = <T,>(load: () => Promise<Answer<T>>, key: string) => {
 
 const stateTone = (state: AppRuns["runs"][number]["state"]) => (state === "success" ? "ok" : state === "failure" ? "bad" : "waiting");
 
-const Runs = ({ server, app, open }: { readonly server: string; readonly app: string; readonly open: (run: string) => void }) => {
-  const [answer] = useAnswer(() => operation<AppRuns>("app.runs", {server, app}), `${server}/${app}`);
+const Runs = ({ answer, open }: { readonly answer: Answer<AppRuns> | undefined; readonly open: (run: string) => void }) => {
   if (answer === undefined) return <Waiting what="Asking the deployer" />;
   if (!answer.ok) return <Problem failure={answer.failure} />;
   const now = Date.now();
   const { live, runs } = answer.value;
+  const managed = answer.value.protocol === "managed-v3";
   return (
     <>
-      <p class="sub">{live === undefined ? "Not deployed yet." : `Live: ${live.sha.slice(0, 7)} since ${ago(now - Date.parse(live.time))}`}</p>
+      <p class="sub">{live === undefined ? managed ? "No verified active release." : "Not deployed yet." : `${managed ? "Verified active" : "Live"}: ${live.sha.slice(0, 7)} since ${ago(now - Date.parse(live.time))}`}</p>
       <table class="table">
         <thead>
           <tr>
             <th />
             <th>Commit</th>
             <th>Why</th>
-            <th>What</th>
+            <th>{managed ? "Phase and outcome" : "What"}</th>
             <th class="right">When</th>
             <th class="right">Took</th>
           </tr>
@@ -54,7 +54,10 @@ const Runs = ({ server, app, open }: { readonly server: string; readonly app: st
                 <code>{run.sha?.slice(0, 7) ?? ""}</code>
               </td>
               <td>{run.why}</td>
-              <td>{run.what}</td>
+              <td>{run.managed === undefined ? run.what : <>
+                {run.managed.phase}{run.managed.outcome === null ? null : <> · {run.managed.outcome}</>}
+                {run.managed.requiredAction === "inspect-and-resolve" ? <div class="tone-bad">Operator action required</div> : null}
+              </>}</td>
               <td class="right tone-muted">{ago(now - Date.parse(run.started))}</td>
               <td class="right tone-muted">{run.finished === undefined ? "" : duration(Date.parse(run.finished) - Date.parse(run.started))}</td>
             </tr>
@@ -159,10 +162,20 @@ export const AppView = ({ server, app }: { readonly server: string; readonly app
   const [tab, setTab] = useState<Tab>("runs");
   const [run, setRun] = useState<string | undefined>(undefined);
   const [ref, setRef] = useState("");
+  const [runs, refreshRuns] = useAnswer(() => operation<AppRuns>("app.runs", { server, app }), `${server}/${app}/runs`);
+  const managed = runs?.ok === true && runs.value.protocol === "managed-v3";
+  const exactCommit = /^[a-f0-9]{40}$/.test(ref.trim());
+  const selected = managed && tab === "releases" ? "deployment" : tab;
   return (
     <>
       <Header kicker="app" title={app} sub={`on ${server}`}>
-        <form
+        {runs?.ok !== true ? null : managed ? <div class="inline">
+          <input value={ref} onInput={(event) => { setRef(event.currentTarget.value); }} placeholder="Full commit SHA" spellcheck={false} aria-label="Full commit SHA" />
+          <button type="button" class="button" disabled={!exactCommit} onClick={() => { show({ name: "app.build", server, app, commit: ref.trim() }); }}>Build</button>
+          <button type="button" class="button primary" disabled={!exactCommit} onClick={() => {
+            show({ name: "app.deployment.prepare", server, app, commit: ref.trim(), request: crypto.randomUUID() });
+          }}>Deploy retained build</button>
+        </div> : <form
           class="inline"
           onSubmit={(event) => {
             event.preventDefault();
@@ -173,29 +186,28 @@ export const AppView = ({ server, app }: { readonly server: string; readonly app
           <button type="submit" class="button primary">
             Deploy
           </button>
-        </form>
+        </form>}
       </Header>
       <nav class="tabs" role="tablist">
-        {(["runs", "releases", "deployment", "log"] as const).map((each) => (
-          <button key={each} role="tab" aria-selected={tab === each} class={tab === each ? "tab current" : "tab"} onClick={() => { setTab(each); }}>
+        {(["runs", "releases", "deployment", "log"] as const).filter((each) => !managed || each !== "releases").map((each) => (
+          <button key={each} role="tab" aria-selected={selected === each} class={selected === each ? "tab current" : "tab"} onClick={() => { setTab(each); if (each === "runs") refreshRuns(); }}>
             {each}
             {each === "log" && run !== undefined ? ` · ${run}` : ""}
           </button>
         ))}
       </nav>
       <section class="card">
-        {tab === "runs" ? (
+        {selected === "runs" ? (
           <Runs
-            server={server}
-            app={app}
+            answer={runs}
             open={(id) => {
               setRun(id);
               setTab("log");
             }}
           />
-        ) : tab === "deployment" ? (
+        ) : selected === "deployment" ? (
           <Deployment key={`${server}/${app}`} server={server} app={app} />
-        ) : tab === "releases" ? (
+        ) : selected === "releases" ? (
           <Releases server={server} app={app} />
         ) : (
           <Log server={server} app={app} run={run} />

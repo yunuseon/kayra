@@ -84,6 +84,20 @@
     compose_env:
       COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml:docker-compose.swarm.yml:registration-lab.yml
   tasks:
+    - name: Locate the managed fixture app's private migration network
+      ansible.builtin.command:
+        argv: [docker, network, ls, -q, --no-trunc, --filter, "label=com.kayra.app={{ fixture_app }}", --filter, "label=com.kayra.network-kind=app"]
+      register: complete_private_overlay
+      changed_when: false
+      failed_when: complete_private_overlay.stdout_lines | length != 1
+      when: kayra_lab_managed_rollouts | default(false) | bool
+
+    - name: Attach only the fixture ledger to the selected app overlay
+      ansible.builtin.command:
+        argv: [docker, network, connect, "{{ complete_private_overlay.stdout | trim }}", "{{ fixture_ledger }}"]
+      changed_when: true
+      when: kayra_lab_managed_rollouts | default(false) | bool
+
     - name: Retain the second immutable build through the real builder
       ansible.builtin.command:
         argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ fixture_app }}", "{{ fixture_commits.B }}"]
@@ -131,7 +145,7 @@
 
     - name: Persist the measurement identities before contacting deployment control
       ansible.builtin.copy:
-        content: "{{ {'version': 1, 'app': fixture_app, 'host': fixture_hosts[0], 'commits': fixture_commits, 'requests': fixture_requests, 'ledger': fixture_ledger, 'migrationCeilingSeconds': 90} | to_json }}\n"
+        content: "{{ {'version': 1, 'app': fixture_app, 'host': fixture_hosts[0], 'commits': fixture_commits, 'requests': fixture_requests, 'ledger': fixture_ledger, 'migrationCeilingSeconds': 90, 'managed': kayra_lab_managed_rollouts | default(false) | bool} | to_json }}\n"
         dest: "{{ complete_source.path }}/manifest.json"
         owner: root
         group: root

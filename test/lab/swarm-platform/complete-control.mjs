@@ -13,7 +13,9 @@ import { request, traffic } from './http-probe.mjs';
 import { prematureCandidateRequests } from './http-observations.mjs';
 
 const [manifestPath, output] = process.argv.slice(2); assert.ok(manifestPath && output);
-const manifest = JSON.parse(await readFile(manifestPath, 'utf8')); assert.equal(manifest.version, 1); assert.equal(manifest.app, 'rollout-complete');
+const manifest = JSON.parse(await readFile(manifestPath, 'utf8')); assert.equal(manifest.version, 1);
+const managed = manifest.managed === true;
+assert.equal(manifest.app, managed ? 'managed-complete' : 'rollout-complete');
 await mkdir(output, { mode: 0o700 }); await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2));
 const run = promisify(execFile); const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const env = { ...process.env, COMPOSE_FILE: 'docker-compose.yml:docker-compose.ci.yml:docker-compose.swarm.yml:registration-lab.yml' };
@@ -28,14 +30,21 @@ const wait = async (condition, label, timeout = 180000) => {
   while (performance.now() < deadline) { if (eventError) throw new Error(eventError); const value = await condition(); if (value) return value; await pause(250); }
   throw new Error('timed out: ' + label);
 };
+const currentOperation = (value) => managed ? value?.operation : value?.operation ?? value?.preparation;
 const terminal = (receipt) => wait(async () => {
-  const value = await status(); const current = value.operation ?? value.preparation; assert.equal(current.request, receipt.request);
+  const value = await status(); const current = currentOperation(value);
+  if (current === undefined) return undefined;
+  assert.equal(managed ? current.run : current.request, receipt.request);
   event('status', value); assert.ok(!['held', 'failed', 'cancelled'].includes(current.phase), 'fixture rollout did not converge');
-  return current.phase === 'succeeded' ? value : undefined;
+  if (!managed) return current.phase === 'succeeded' ? value : undefined;
+  if (current.phase !== 'complete') return undefined;
+  assert.equal(current.outcome, 'deployed'); assert.equal(current.settled, true);
+  return value;
 }, 'verified release ' + receipt.request);
 const submit = async (release) => {
-  const receipt = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits[release], manifest.requests[release]); assert.equal(receipt.version, 2);
+  const receipt = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits[release], manifest.requests[release]); assert.equal(receipt.version, managed ? 3 : 2);
   assert.equal(receipt.request, manifest.requests[release]); assert.equal(receipt.commit, manifest.commits[release]); assert.ok(!['succeeded', 'failed', 'cancelled', 'held'].includes(receipt.phase));
+  if (managed) { assert.equal(receipt.phase, 'accepted'); return { receipt }; }
   const preview = await ctl('preview', manifest.app, manifest.commits[release]); const nativePlan = nativeHttpIntent(receipt, preview);
   assert.equal(preview.plan.policy.migrationTimeoutCeilingSeconds, manifest.migrationCeilingSeconds); return { receipt, nativePlan, preview: preview.plan };
 };
@@ -70,14 +79,26 @@ try {
   const originalJob = JSON.parse(await docker('inspect', migration))[0]; assert.equal(originalJob.State.Running, true);
   const deployers = (await docker('ps', '-q', '--filter', 'label=com.docker.compose.project=platform', '--filter', 'label=com.docker.compose.service=deployer', '--filter', 'label=com.docker.compose.oneoff=False')).split('\n'); assert.equal(deployers.length, 1);
   const deployer = deployers[0]; const originalStart = await docker('inspect', deployer, '--format', '{{.State.StartedAt}}'); const interrupted = await status();
-  assert.equal(interrupted.preparation.request, b.receipt.request); assert.equal(interrupted.preparation.deadline, b.receipt.deadline);
+  const pending = managed ? interrupted.operation : interrupted.preparation;
+  assert.equal(managed ? pending.run : pending.request, b.receipt.request);
+  assert.equal(pending.deadline, b.receipt.deadline);
+  if (managed) assert.equal(pending.admissionDeadline, b.receipt.admissionDeadline);
   phase = 'interruption'; event('before-coordinator-kill', { status: interrupted, job: { id: originalJob.Id, running: originalJob.State.Running } });
   await docker('kill', '--signal', 'KILL', deployer); await pause(3000);
   const independent = JSON.parse(await docker('inspect', originalJob.Id))[0]; assert.equal(independent.State.Running, true); event('migration-continued-without-coordinator', { id: independent.Id, running: true });
   await docker('start', deployer); await wait(async () => { try { return await status(); } catch { return undefined; } }, 'coordinator restart', 30000);
   assert.notEqual(await docker('inspect', deployer, '--format', '{{.State.StartedAt}}'), originalStart);
   phase = 'recovery'; const activeB = await terminal(b.receipt); assert.equal(activeB.verifiedActive.plan, b.receipt.plan); assert.equal(activeB.verifiedActive.commit, manifest.commits.B);
-  const replay = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits.B, b.receipt.request); assert.equal(replay.deadline, b.receipt.deadline); assert.equal(replay.plan, b.receipt.plan); assert.equal(replay.phase, 'succeeded');
+  const replay = await ctl('lifecycle', 'prepare', manifest.app, manifest.commits.B, b.receipt.request); assert.equal(replay.deadline, b.receipt.deadline); assert.equal(replay.plan, b.receipt.plan); assert.equal(replay.phase, managed ? 'complete' : 'succeeded');
+  if (managed) {
+    assert.equal(replay.outcome, 'deployed');
+    assert.equal(replay.admissionDeadline, b.receipt.admissionDeadline);
+    const services = (await docker('service', 'ls', '-q', '--filter', 'label=com.kayra.app=' + manifest.app)).split('\n');
+    assert.equal(services.length, 1);
+    const [service] = JSON.parse(await docker('service', 'inspect', services[0]));
+    b.nativePlan = service.Spec.TaskTemplate.ContainerSpec.Labels['com.kayra.plan'];
+    assert.match(b.nativePlan, /^[a-f0-9]{64}$/);
+  }
   phase = 'stable'; await pause(30000); await stop(); stop = undefined;
   const snapshot = await ledger(); for (const identity of [a.receipt.request, b.receipt.request]) { assert.equal(snapshot.calls[identity + ':schema'], 1); assert.equal(snapshot.effects[identity + ':schema'], 1); }
   const starts = events.filter((value) => value.Action === 'start' && value.Actor?.Attributes?.['com.kayra.job']);
@@ -104,7 +125,7 @@ try {
   }
   const ledgerImage = await docker('inspect', manifest.ledger, '--format', '{{.Image}}');
   const ledgerImageReference = await docker('inspect', manifest.ledger, '--format', '{{.Config.Image}}');
-  const result = { passed: true, scope: 'real registered builder artifacts, app-owned HTTP ledger, migration/probe containers, coordinator restart and routed TLS HTTP; no SQL engine or retained-volume acceptance',
+  const result = { passed: true, protocol: managed ? 'managed-v3' : 'complete-v2', scope: 'real registered builder artifacts, app-owned HTTP ledger, migration/probe containers, coordinator restart and routed TLS HTTP; no SQL engine or retained-volume acceptance',
     a, b, initial: activeA, interrupted, final: activeB, replay, ledger: snapshot, migrationContinuedWithoutCoordinator: true, migrationStarts: 2, probeStarts: 1,
     requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, appProbeRecoveredFailure: true, previousReleaseDrainingResponses: requests.filter((value) => value.release === 'A' && value.ready === false).length, versions, sharedImages, ledgerImage, ledgerImageReference, compose: await docker('compose', 'version', '--short'), node: process.version, os: await readFile('/etc/os-release', 'utf8'), kernel: os.release(), architecture: os.arch() };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); event('passed', result);

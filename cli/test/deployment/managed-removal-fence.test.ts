@@ -1,4 +1,5 @@
 /* eslint-disable functional/no-let, functional/prefer-immutable-types, functional/immutable-data -- drives native fixture effects and records their order */
+import { managedReceipt } from "../../src/server/deployment/managed-receipt.ts";
 import { managedRemovalRuntime } from "../../src/server/composition/managed-removal-runtime.ts";
 import { jobPlanDigest } from "../../src/contracts/one-shot-job.ts";
 import type { JobCleanupPort } from "../../src/contracts/job-cleanup.ts";
@@ -206,6 +207,8 @@ test("removal effects stop consumers before retained services and reopen their d
   assert.deepEqual(removed.value.managed?.at(-1)?.completion, {
     outcome: "removed", disposition: "cancelled", rootSnapshot: inventory.checkpoint, removal: request,
   });
+  const archived = await lab.index().acceptedManagedRequest("shop", lab.source.run, lab.runtime); assert.ok(archived);
+  assert.equal(managedReceipt(archived.source, archived.request).outcome, "removed");
   assert.equal(await lab.index().managedDeploymentStatus("shop", lab.runtime), null);
   assert.deepEqual(await lab.index().managedHealthContexts(lab.runtime), []);
   assert.deepEqual(await lab.index().pendingManagedDeployments(), []);

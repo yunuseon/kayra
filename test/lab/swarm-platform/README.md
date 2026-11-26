@@ -2350,3 +2350,13 @@ This run used Engine/CLI 29.10.1, API 1.57, Compose 5.8.0, Node 24.22.1,
 Ubuntu 24.04.5 ARM64 and kernel 6.8.0-147-generic. Its image digests are recorded
 in the evidence. These internal fixtures do not establish HTTP continuity,
 normal mutation dispatch, full TLS/Authelia integration or remove/purge acceptance.
+
+Run the managed-v3 path through the same upgraded platform with
+`test/lab/upgrade.sh --from 0.23.0 --managed-rollouts --vm-name <unique-lab-name>`.
+The opt-in adds a new app after the existing Compose and indexed Swarm checks.
+It submits exact commits through the real builder and loopback deployment
+control, kills and restarts the deployer during the app-owned migration, and
+compares routed HTTPS traffic before and after release promotion. The observer
+keeps the same fresh and persistent connection measurement and checks the
+original admission and operation deadlines. It retains the per-request data,
+Docker events, state trace, resource samples and exact versions.

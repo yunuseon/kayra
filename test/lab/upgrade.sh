@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -35,6 +35,7 @@ from=""
 keep=false
 indexed_registration=false
 swarm_host=false
+managed_rollouts=false
 vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -42,8 +43,9 @@ while [ $# -gt 0 ]; do
         --vm-name) [ $# -ge 2 ] || { echo "--vm-name requires a name" >&2; exit 2; }; vm_name="$2"; shift 2 ;;
         --indexed-registration) indexed_registration=true; shift ;;
         --swarm-host) swarm_host=true; shift ;;
+        --managed-rollouts) managed_rollouts=true; indexed_registration=true; swarm_host=true; shift ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts] [--keep]" >&2; exit 2 ;;
     esac
 done
 [[ "$vm_name" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { echo "invalid Multipass VM name: ${vm_name}" >&2; exit 2; }
@@ -675,6 +677,42 @@ if [ "$indexed_registration" = true ]; then
         cp "${work}/runtime-health.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.runtime-health.source.json"
         echo "✓ runtime health ignores historical tasks without changing the certified release"
 
+    fi
+    if [ "$managed_rollouts" = true ]; then
+        step "8  opted-in managed rollout with the real builder, migration probe and routed traffic"
+        managed_repo="${work}/managed-complete"
+        cp -R "${KAYRA_ROOT}/test/lab/swarm-platform/complete-fixture" "$managed_repo"
+        yq -i '.name = "managed-complete" | .routes[0].host = "managed-complete"' "${managed_repo}/app.yml"
+        jq '.image = "managed-complete/web"' "${managed_repo}/web/docker/image.json" > "${work}/managed-image.json"
+        mv "${work}/managed-image.json" "${managed_repo}/web/docker/image.json"
+        git -C "$managed_repo" init -q -b main
+        git -C "$managed_repo" add -A
+        git -C "$managed_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "managed rollout A"
+        managed_a="$(git -C "$managed_repo" rev-parse HEAD)"
+        yq -i '.services.web.environment.RELEASE = "B" |
+            .services.web.environment.FAIL_AFTER_EFFECT = "true" |
+            .services.web.environment.MIGRATION_HOLD_MS = "30000"' "${managed_repo}/deploy/compose.yml"
+        git -C "$managed_repo" add -A
+        git -C "$managed_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "managed rollout B with app-provided recovery"
+        managed_b="$(git -C "$managed_repo" rev-parse HEAD)"
+        git clone -q --bare "$managed_repo" "${served}/lab/managed.git"
+        managed_requests="$(python3 -c 'import json,uuid; print(json.dumps({"A":str(uuid.uuid4()),"B":str(uuid.uuid4())}))')"
+        jq -n --arg repo "http://${host_ip}:${port}/lab/managed.git" --arg a "$managed_a" --arg b "$managed_b" --argjson requests "$managed_requests" '{
+            fixture_app: "managed-complete", fixture_runtime: "swarm", fixture_hosts: ["managed-complete.lab.test"],
+            fixture_grants: {memory_bytes: 268435456, cpu_millicores: 500, maintenance: false},
+            fixture_configuration: {MODE: "lab", DB_HOST: "kayra-managed-ledger"}, fixture_ledger: "kayra-managed-ledger",
+            fixture_repo: $repo, fixture_commit: $a, fixture_commits: {A: $a, B: $b}, fixture_requests: $requests,
+            kayra_lab_swarm: true, kayra_lab_managed_rollouts: true
+        }' > "${work}/managed-registration-inputs.json"
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/complete-control.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e "@${work}/managed-registration-inputs.json" \
+            -e "report_path=${work}/managed-control.json" >> "$log" 2>&1 || die "managed builder, migration, restart and routed HTTP"
+        for evidence in "" .tar .source.json .clock.json; do
+            install -m 600 "${work}/managed-control.json${evidence}" "/tmp/kayra-swarm-platform-${vm_name}.managed-control.json${evidence}"
+        done
+        echo "✓ opted-in managed rollouts verified after real coordinator interruption"
     fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi

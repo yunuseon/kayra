@@ -207,7 +207,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.keys(input).length === 2 && "request" in input && typeof input.request === "string" &&
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.request) ? managed.removal.finalize(input.app, input.request) : undefined;
       }
-      if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, managedAudit: managed?.commands.audit, managedObservations: route === "/deployment/health" ? await managed?.healthSnapshot() : undefined, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
+      if (route.startsWith("/deployment/")) return deploymentControl({ observations: healthPorts, managed: managedSwarm ? managed?.commands : undefined, managedAudit: managed?.commands.audit, managedObservations: route === "/deployment/health" ? await managed?.healthSnapshot() : undefined, artifacts, index: await opening, canAccess: canRegister, now: Date.now,
         enabled: async () => swarmAuthority !== undefined && (await readSwarmAuthority(swarmAuthority)).ok,
         plans: plans === undefined || artifacts === undefined ? undefined : { ...plans, now: Date.now, retain: artifacts.retain },
         rollouts: rollouts === undefined || artifacts === undefined ? undefined : { ...rollouts, now: Date.now, retain: artifacts.retain },

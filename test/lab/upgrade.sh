@@ -818,6 +818,7 @@ if [ "$indexed_registration" = true ]; then
         managed_e="$(managed_add_http_release E 0 false 8000 0)"
         managed_f="$(managed_add_http_release F 0 false 0 0)"
         managed_g="$(managed_add_http_release G 0 false 0 268435456)"
+        managed_enospc="$(managed_add_http_release ENOSPC 0 false 0 0)"
         git clone -q --bare "$managed_repo" "${served}/lab/managed.git"
         managed_requests="$(python3 -c 'import json,uuid; print(json.dumps({key:str(uuid.uuid4()) for key in "ABCDEFG"}))')"
         jq -n --arg repo "http://${host_ip}:${port}/lab/managed.git" --arg a "$managed_a" --arg b "$managed_b" \
@@ -837,6 +838,17 @@ if [ "$indexed_registration" = true ]; then
             install -m 600 "${work}/managed-control.json${evidence}" "/tmp/kayra-swarm-platform-${vm_name}.managed-control.json${evidence}"
         done
         echo "✓ opted-in managed rollouts verified after real coordinator interruption"
+        step "8a  bounded metadata exhaustion and restart under managed control"
+        managed_enospc_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+        ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
+            -i "servers/${server}/inventory.ini" \
+            "${KAYRA_ROOT}/test/lab/swarm-platform/lifecycle-enospc.yml" \
+            -e "kayra_root=${KAYRA_ROOT}" -e fixture_app=managed-complete \
+            -e "fixture_commit=${managed_enospc}" -e "fixture_request=${managed_enospc_request}" \
+            -e "report_path=${work}/managed-enospc.json" >> "$log" 2>&1 || die "managed bounded metadata exhaustion"
+        for evidence in "" .tar .source.json .clock.json; do
+            install -m 600 "${work}/managed-enospc.json${evidence}" "/tmp/kayra-swarm-platform-${vm_name}.managed-enospc.json${evidence}"
+        done
     fi
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi

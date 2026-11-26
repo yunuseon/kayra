@@ -7,12 +7,17 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { managedServiceDigest } from '../../../cli/src/contracts/managed-service-plan.ts';
 import { nativeHttpIntent } from './http-intent.mjs';
 import { prematureCandidateRequests } from './http-observations.mjs';
 import { traffic } from './http-probe.mjs';
 
 const [app, commit, identity, storage, output] = process.argv.slice(2);
-assert.equal(app, 'rollout-complete'); assert.match(commit, /^[a-f0-9]{40}$/); assert.match(identity, /^[a-f0-9-]{36}$/); assert.ok(storage && output);
+assert.ok(['rollout-complete', 'managed-complete'].includes(app)); assert.match(commit, /^[a-f0-9]{40}$/); assert.match(identity, /^[a-f0-9-]{36}$/); assert.ok(storage && output);
+const managed = app === 'managed-complete';
+const previousRelease = managed ? 'F' : 'B';
+const currentOperation = (value) => managed ? value.operation : value.operation ?? value.preparation;
+const runIdentity = (operation) => managed ? operation.run : operation.request;
 await mkdir(output, { mode: 0o700 });
 const run = promisify(execFile); const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const env = { ...process.env, COMPOSE_FILE: 'docker-compose.yml:docker-compose.ci.yml:docker-compose.swarm.yml:registration-lab.yml' };
@@ -42,7 +47,7 @@ try {
     try { metrics.push({ at: Date.now(), phase, meminfo: await readFile('/proc/meminfo', 'utf8'), cpu: (await readFile('/proc/stat', 'utf8')).split('\n')[0] }); }
     catch { evidenceError = 'resource observer failed'; }
   }, 1000);
-  const target = { host: 'complete.lab.test', ca: await readFile('/var/lib/kayra/swarm/lab-ca.pem', 'utf8') };
+  const target = { host: (managed ? 'managed-complete' : 'complete') + '.lab.test', ca: await readFile('/var/lib/kayra/swarm/lab-ca.pem', 'utf8') };
   phase = 'baseline'; stop = traffic(target, (value) => requests.push({ ...value, phase })); await pause(30000);
   phase = 'storage-setup'; await docker('stop', '--time', '10', deployer); const staged = await filesystem('stage'); await docker('start', deployer);
   await wait(async () => { try { return await status(); } catch { return undefined; } }, 'coordinator on bounded ext4', 30000);
@@ -55,9 +60,13 @@ try {
     const send=async(path,body)=>{const response=await fetch('http://127.0.0.1:8091'+path,{method:'POST',body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error('control unavailable');return response.json()};
     const receipt=await send('/deployment/prepare',{app:${JSON.stringify(app)},commit:${JSON.stringify(commit)},request:${JSON.stringify(identity)}});
     const status=await send('/deployment/status',{app:${JSON.stringify(app)}});
-    if(status.preparation?.phase!=='prepared')throw new Error('observer missed prepared checkpoint');
+    const pending = ${managed} ? status.operation?.run === receipt.request && ['admitting','allocating','preparing'].includes(status.operation.phase) : status.preparation?.phase === 'prepared';
+    if(!pending)throw new Error('observer missed prepared checkpoint');
     process.kill(1,'SIGSTOP');console.log(JSON.stringify({receipt,status}));`));
-  const receipt = accepted.receipt; const candidatePlan = nativeHttpIntent(receipt, preview); await pause(1500);
+  const receipt = accepted.receipt;
+  const candidatePlan = managed ? managedServiceDigest(preview.plan.services.web) : nativeHttpIntent(receipt, preview);
+  assert.equal(receipt.version, managed ? 3 : 2);
+  await pause(1500);
   const candidateEvents = () => events.filter((value) => value.Actor?.Attributes?.['com.kayra.plan'] === candidatePlan && ['create', 'start'].includes(value.Action));
   assert.equal(candidateEvents().length, 0);
   phase = 'full'; const full = await filesystem('fill'); assert.equal(full.uid, 1000); assert.ok(full.availableBytes <= 4096);
@@ -68,29 +77,34 @@ try {
   assert.deepEqual(writeProbe, { uid: 1000, code: 'ENOSPC' });
   await docker('kill', '--signal', 'CONT', deployer); await pause(5000);
   const whileFull = await status().catch(() => null);
-  if (whileFull !== null) { assert.equal(whileFull.verifiedActive.plan, previous.plan); assert.equal((whileFull.operation ?? whileFull.preparation).request, identity); assert.notEqual((whileFull.operation ?? whileFull.preparation).phase, 'succeeded'); }
+  if (whileFull !== null) {
+    assert.equal(whileFull.verifiedActive.plan, previous.plan);
+    assert.equal(runIdentity(currentOperation(whileFull)), identity);
+    assert.ok(!['succeeded', 'complete'].includes(currentOperation(whileFull).phase));
+  }
   const unavailableWhileFull = whileFull === null; assert.equal(candidateEvents().length, 0);
   phase = 'space-restored'; const released = await filesystem('release'); const releasedAt = Date.now(); assert.ok(released.availableBytes > 16 * 1024 * 1024);
   const afterSpaceRestored = await status().catch(() => null);
   const controlUnavailableAfterSpaceRestored = afterSpaceRestored === null;
   phase = 'restart'; await docker('kill', '--signal', 'KILL', deployer); await docker('start', deployer);
   const reopened = await wait(async () => { try { return await status(); } catch { return undefined; } }, 'reopened journal after space restoration', 30000);
-  if (reopened.preparation !== null) assert.equal(reopened.preparation.admissionDeadline, accepted.status.preparation.admissionDeadline);
-  else assert.equal(reopened.operation.request, identity);
+  assert.equal(runIdentity(currentOperation(reopened)), identity);
+  if (managed || reopened.preparation !== null) assert.equal(currentOperation(reopened).admissionDeadline, currentOperation(accepted.status).admissionDeadline);
   const replay = await ctl('lifecycle', 'prepare', app, commit, identity); assert.equal(replay.plan, receipt.plan); assert.equal(replay.deadline, receipt.deadline);
   phase = 'reconciling'; const recovered = await wait(async () => {
-    const value = await status(); trace.push({ at: Date.now(), value }); const current = value.operation ?? value.preparation; assert.equal(current.request, identity);
-    assert.ok(!['held', 'failed', 'cancelled'].includes(current.phase)); return current.phase === 'succeeded' ? value : undefined;
+    const value = await status(); trace.push({ at: Date.now(), value }); const current = currentOperation(value); assert.equal(runIdentity(current), identity);
+    assert.ok(!['held', 'failed', 'cancelled'].includes(current.phase));
+    return (managed ? current.phase === 'complete' && current.outcome === 'deployed' : current.phase === 'succeeded') ? value : undefined;
   }, 'same accepted operation converges after ENOSPC', 90000);
   assert.equal(recovered.verifiedActive.plan, receipt.plan); assert.equal(recovered.lastKnownGood.plan, receipt.plan);
   phase = 'stable'; await pause(30000); await stop(); stop = undefined;
   assert.equal(candidateEvents().filter((value) => value.Action === 'start').length, 1);
   assert.ok(candidateEvents().every((value) => value.timeNano / 1e6 >= releasedAt));
   const failures = requests.filter((value) => value.error !== undefined || value.status !== 200); assert.equal(failures.length, 0); const premature = prematureCandidateRequests(requests, 'ENOSPC'); assert.equal(premature.length, 0);
-  for (const name of ['baseline', 'stable']) { const values = requests.filter((value) => value.phase === name); assert.ok(values.length >= 570); assert.ok(values.every((value) => value.release === (name === 'baseline' ? 'B' : 'ENOSPC'))); }
-  assert.ok(requests.filter((value) => ['storage-setup', 'accepted', 'full', 'space-restored'].includes(value.phase)).every((value) => value.release === 'B'));
+  for (const name of ['baseline', 'stable']) { const values = requests.filter((value) => value.phase === name); assert.ok(values.length >= 570); assert.ok(values.every((value) => value.release === (name === 'baseline' ? previousRelease : 'ENOSPC'))); }
+  assert.ok(requests.filter((value) => ['storage-setup', 'accepted', 'full', 'space-restored'].includes(value.phase)).every((value) => value.release === previousRelease));
   const rate = (requests.length - 1) / ((requests.at(-1).at - requests[0].at) / 1000); const maxGapMs = Math.max(...requests.map((value) => value.gapMs ?? 0)); assert.ok(rate >= 19); assert.ok(maxGapMs <= 250); assert.equal(evidenceError, undefined);
-  const result = { passed: true, scope: '64 MiB lab ext4 lifecycle metadata filesystem, accepted-intent ENOSPC and process restart; not Docker-root/inode exhaustion, app-data or host-loss recovery', app, commit, identity, previous, build, receipt, acceptedStatus: accepted.status, staged, mountProbe, full, writeProbe, released, unavailableWhileFull, whileFull, afterSpaceRestored, controlUnavailableAfterSpaceRestored, releasedAt, reopened, replay, recovered,
+  const result = { passed: true, protocol: managed ? 'managed-v3' : 'complete-v2', scope: '64 MiB lab ext4 lifecycle metadata filesystem, accepted-intent ENOSPC and process restart; not Docker-root/inode exhaustion, app-data or host-loss recovery', app, commit, identity, previous, build, receipt, acceptedStatus: accepted.status, staged, mountProbe, full, writeProbe, released, unavailableWhileFull, whileFull, afterSpaceRestored, controlUnavailableAfterSpaceRestored, releasedAt, reopened, replay, recovered,
     candidateStarts: 1, requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, versions: JSON.parse(await docker('version', '--format', '{{json .}}')), node: process.version };
   await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
 } catch (error) {

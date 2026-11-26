@@ -158,15 +158,9 @@ to_sops() {
     (cd "$fleet" && sops encrypt --in-place "servers/${server}/secrets.yml")
 }
 [ "$sops_fleet" = false ] || to_sops
+# No required_providers: the module names the providers and their ranges,
+# as in a fleet, whose root only locks the exact versions.
 cat > "${fleet}/servers/${server}/terraform/main.tf" <<'EOF'
-terraform {
-  required_providers {
-    multipass = { source = "todoroff/multipass", version = "~> 1.7" }
-    tls       = { source = "hashicorp/tls", version = "~> 4.0" }
-    local     = { source = "hashicorp/local", version = "~> 2.5" }
-  }
-}
-
 module "instance" {
   source         = "../../../node_modules/@yunuseon/kayra/terraform/modules/multipass-instance"
   name           = "kayra-lab"

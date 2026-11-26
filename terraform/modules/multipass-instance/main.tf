@@ -8,13 +8,16 @@
 terraform {
   required_providers {
     multipass = {
-      source = "todoroff/multipass"
+      source  = "todoroff/multipass"
+      version = "~> 2.0"
     }
     tls = {
-      source = "hashicorp/tls"
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
     }
     local = {
-      source = "hashicorp/local"
+      source  = "hashicorp/local"
+      version = "~> 2.5"
     }
   }
 }

@@ -315,7 +315,9 @@ the app secrets, and Traefik never routes to it.
   unsafe while pushing). The GC script stops and restarts it itself.
 - **Every version is pinned exactly** *(checked for images)* — images, base images, `buildctl`, `yq`,
   the Renovate image (`compose/deployer/Dockerfile.deployer`), Ansible collections (`ansible/requirements.yml`),
-  OpenTofu providers (the committed `.terraform.lock.hcl`). Updates arrive as
+  OpenTofu providers (the committed `.terraform.lock.hcl`; the range each provider may move in is
+  the module's `required_providers`, so a provider's major is a kayra change, through the lab, and a
+  fleet's root declares none of its own). Updates arrive as
   Renovate PRs (`renovate.json`, and the Renovate job on each server with
   `renovate_repositories`); no
   floating tags such as `latest` or `lts`.

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "scope": "Selected managed coordinator observations across resumed sessions. Full fresh integrated acceptance pending.",
+  "date": "2026-11-26",
+  "vm": "kayra-managed-upgrade-20261126102726",
+  "baseSource": "a8fda8bec457b8e9c517a6cfbf20c0162c2dca61",
+  "evidenceDirectory": ".cache/lab-evidence/kayra-managed-upgrade-20261126102726",
+  "versions": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "architecture": "arm64",
+    "kernel": "6.8.0-147-generic",
+    "engine": "29.10.1",
+    "cli": "29.10.1",
+    "api": "1.57",
+    "compose": "5.8.0",
+    "node": "24.22.1",
+    "traefik": "traefik:v3.7.16@sha256:c8a121e4bb1347e8fd52657fab12f2cb70b68f8a018895e2068f92c9e519b9c2",
+    "socketProxy": "tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459"
+  },
+  "cases": {
+    "migration-and-deployer-interruption": {"requests": 3245, "failed": 0, "prematureExposure": 0, "maxStartGapMs": 175.438, "archive": "managed-http-partial.tar"},
+    "slow-readiness": {"requests": 1871, "failed": 0, "prematureExposure": 0, "maxStartGapMs": 193.647, "archive": "managed-http-partial.tar"},
+    "never-ready": {"requests": 2593, "failed": 0, "prematureExposure": 0, "maxStartGapMs": 176.150, "firstHeldMs": 36671, "settledMs": 96568, "observerExit": "asserted full settlement in 90 seconds", "archive": "managed-never-ready.tar"},
+    "failure-after-readiness": {"requests": 2448, "failed": 92, "prematureExposure": 0, "maxStartGapMs": 182.508, "verifiedRecoveryMs": 64443, "failureSampleSpanMs": 14502, "archive": "managed-disruption-control.json.tar"},
+    "long-request": {"requests": 1724, "failed": 0, "prematureExposure": 0, "maxStartGapMs": 186.962, "originalStatus": 200, "originalLatencyMs": 20039.554, "archive": "managed-disruption-control.json.tar"},
+    "candidate-oom": {"requests": 2199, "failed": 84, "prematureExposure": 0, "maxStartGapMs": 180.956, "verifiedRecoveryMs": 48867, "failureSampleSpanMs": 6147, "archive": "managed-disruption-control.json.tar"},
+    "lifecycle-enospc": {"requests": 2611, "failed": 0, "prematureExposure": 0, "maxStartGapMs": 193.569, "candidateStarts": 1, "archive": "managed-enospc.json.tar"},
+    "admission-race": {"requests": 1705, "failed": 0, "maxStartGapMs": 166.476, "winnerStarts": 1, "loserWorkloadObjects": 0, "archive": "managed-admission.json.tar"}
+  },
+  "archiveSha256": {
+    "managed-http-partial.tar": "ccc99fea1a1847cf16f11dd6c92ba2f43a7d26c176171adc7f84376d211d19d6",
+    "managed-never-ready.tar": "c4ff196a92739359bfa0dbd3a8cdaee26da61aeffae55d34e0350a43a4e165fe",
+    "managed-disruption-control.json.tar": "cdbf5d9ba451b5c2f58d966ff1d0b1ec7c5b05a92d1ed4177368374360ddcd57",
+    "managed-enospc.json.tar": "703f414447e21e226dedca1b20b445370403757e9b7efcb2b38e35ca9f79b9c9",
+    "managed-admission.json.tar": "8fab68dae2d19d35da32c260c65663255a60957def0f438de2c409a81fadece8"
+  },
+  "rejectedLaterTiming": {
+    "vm": "kayra-managed-matrix-20261127000543",
+    "case": "candidate-oom",
+    "nativeRecoveryVerified": true,
+    "requests": 2424,
+    "failed": 94,
+    "maxStartGapMs": 261.809,
+    "maxAllowedStartGapMs": 250
+  }
+}

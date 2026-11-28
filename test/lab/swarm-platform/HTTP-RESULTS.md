@@ -104,3 +104,58 @@ through #243 passed legacy deployment, routing/TLS/auth, indexed registration,
 real HTTP promotion and final verification; its successful VM was destroyed.
 Its logs are `/tmp/kayra-http-control-20261112100739.log` and its reports are
 `/tmp/kayra-swarm-platform-kayra-http-control-20261112100739*.json`.
+
+## Managed coordinator observations after the initial matrix
+
+The managed coordinator was exercised through Kayra's real builder, deployer
+and HTTPS routing on November 26. The observations below came from separate
+sessions in the same lab VM. The initial replacement included a deployed
+migration, a deployer process kill, and recovery using the original operation.
+The test found one run of the app migration. Subsequent individual cases
+measured routed readiness and automatic recovery.
+
+| Case | Short requests | Failed requests | Premature candidate requests | Outcome |
+|---|---:|---:|---:|---|
+| Healthy replacement with migration and deployer restart | 3,245 | 0 | 0 | Verified B |
+| 15-second readiness delay | 1,871 | 0 | 0 | Verified C |
+| Candidate never becomes ready | 2,593 | 0 | 0 | Failure observed after 36.671 s, previous release verified again after 96.568 s |
+| Failure after readiness | 2,448 | 92 | 0 | Automatic verified recovery 64.443 s after the native exit |
+| 20-second request on the old release | 1,724 | 0 | 0 | The original request completed on C with HTTP 200 in 20.040 s |
+| Candidate container OOM | 2,199 | 84 | 0 | Automatic verified recovery 48.867 s after the native OOM |
+| Bounded lifecycle metadata ENOSPC | 2,611 | 0 | 0 | One candidate start after space returned |
+| Competing admission across restart | 1,705 | 0 | — | One winner start, zero workload objects for the loser |
+
+In the two disruptive cases, the first failed request start to last failed
+completion spanned 14.502 s after an ordinary candidate exit and 6.147 s after a
+candidate OOM. These intervals describe the observed requests. The never-ready
+case met the failure-reporting deadline while final settlement took longer. Its
+original observer asserted that settlement itself had to take at most 90 s and
+retained the run as a failed observer result. The replacement retained C and
+returned successful responses throughout the measured window.
+
+The November 26 VM was Ubuntu 24.04.5 LTS ARM64, kernel 6.8.0-147-generic, with
+2 CPUs, 4 GiB RAM and 20 GiB disk. Engine and CLI were 29.10.1, Compose was
+5.8.0 and the observer used Node 24.22.1. Its Traefik and socket-proxy image
+digests matched the earlier matrix. The upstream merge later changed the
+pinned Traefik v3.7.16 digest to
+`sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65`.
+A subsequent run using the new pin verified native rollback after a candidate
+OOM. One 261.809 ms request-start gap exceeded the 250 ms measurement limit,
+so that run is excluded from timing acceptance.
+
+`MANAGED-RESULTS.json` records the selected observations and raw archive
+identities. The private archives contain individual requests, Docker events,
+runtime observations and resource samples under
+`.cache/lab-evidence/kayra-managed-upgrade-20261126102726/`. The rejected
+measurement is kept under
+`.cache/lab-evidence/kayra-managed-matrix-20261127000543/`.
+Reproduce the integrated cases on a fresh upgrade VM with:
+
+```bash
+bash test/lab/upgrade.sh --from 0.26.1 --managed-rollouts \
+  --vm-name "kayra-managed-matrix-$(date -u +%Y%m%d%H%M%S)"
+```
+
+These observations are evidence for keeping the experimental VIP adapter.
+A complete fresh run using the current image pin is still required for the
+integrated HTTP and resource matrix.

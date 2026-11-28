@@ -683,7 +683,7 @@ if [ "$managed_forward" = true ]; then
         jq -e --arg operation "$forward_run_b:schema" '.schema == 2 and .attempts == [$operation]' >/dev/null ||
         die "fixture migration did not persist exactly one attempt"
 
-    yq -i 'del(.rollout.migrations)' "$forward_repo/app.yml"
+    yq -i 'del(.rollout.migrations) | .rollout.rollback_compatible = true' "$forward_repo/app.yml"
     yq -i '.services.web.environment = {"RELEASE":"C", "SCHEMA":"2", "CHECK_FAIL":"false"}' "$forward_repo/deploy/compose.yml"
     forward_c="$(forward_commit "Forward repair compatible with the retained schema")"
     git -C "$forward_repo" push -q "${served}/lab/managed-forward.git" HEAD:refs/heads/main

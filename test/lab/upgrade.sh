@@ -667,16 +667,41 @@ if [ "$managed_forward" = true ]; then
     [[ "$db_before" =~ ^[a-f0-9]{12,64}$ ]] || die "the forward fixture did not have exactly one running database task"
 
     yq -i '.rollout.strategy = "maintenance" | .rollout.mixed_version_compatible = false | .rollout.rollback_compatible = false |
-        .rollout.migrations = [{"id":"schema", "service":"web", "command":["node","/fixture.mjs","migrate"], "timeout_seconds":30, "recovery":{"kind":"replay-safe"}}] |
+        .rollout.migrations = [{"id":"schema", "service":"web", "command":["node","/fixture.mjs","migrate"], "timeout_seconds":30,
+            "recovery":{"kind":"status-probe","command":["node","/fixture.mjs","probe"],"timeout_seconds":10}}] |
         .rollout.checks = [{"id":"application", "service":"web", "command":["node","/fixture.mjs","check"], "timeout_seconds":10}]' "$forward_repo/app.yml"
     yq -i '.services.web.environment = {"RELEASE":"B", "SCHEMA":"2", "CHECK_FAIL":"true"}' "$forward_repo/deploy/compose.yml"
     forward_b="$(forward_commit "Apply the incompatible schema and block release certification")"
     git -C "$forward_repo" push -q "${served}/lab/managed-forward.git" HEAD:refs/heads/main
     forward_run_b="$(new_uuid)"
     forward_prepare "$forward_b" "$forward_run_b"
-    await_managed_phase managed-forward "$forward_run_b" held "${work}/forward-held.json"
+    await_managed_phase managed-forward "$forward_run_b" held "${work}/forward-migration-unknown.json"
     jq -e '.compatibilityEpoch == 1 and .rollback == "data-fenced" and .verifiedActive == null and
-        .migrations.phase == "succeeded" and .operation.reason == "verification"' "${work}/forward-held.json" >/dev/null ||
+        .migrations.phase == "held" and .migrations.reason == "probe-unknown" and .migrations.step == "schema"' "${work}/forward-migration-unknown.json" >/dev/null ||
+        die "forward fixture did not hold an ambiguous migration"
+    multipass exec "$vm_name" -- sudo docker exec "$db_before" cat /data/ledger.json |
+        jq -e --arg operation "$forward_run_b:schema" '.schema == 2 and .attempts == [$operation]' >/dev/null ||
+        die "the fixture database did not prove the migration outcome"
+    kayra_cmd app migration resolve "$server" managed-forward "$forward_run_b" schema applied --reason "Verified the fixture schema and exact operation in the retained ledger" >> "$log" 2>&1 ||
+        die "recording the ambiguous migration outcome through the operator CLI"
+    # The same run briefly remains visible as held while command and observer reconcile.
+    for _ in $(seq 1 45); do
+        ctl lifecycle status managed-forward > "${work}/forward-held.json"
+        if jq -e --arg run "$forward_run_b" '.operation.run == $run and .operation.phase == "held" and .operation.reason != "preparation"' "${work}/forward-held.json" >/dev/null; then break; fi
+        sleep 2
+    done
+    install -m 600 "${work}/forward-held.json" "/tmp/kayra-swarm-platform-${vm_name}.forward-held.json"
+    audit_query="$(jq -nc --arg run "$forward_run_b" '{app:"managed-forward",run:$run,step:"schema"}' |
+        python3 -c 'import base64,sys;print(base64.urlsafe_b64encode(sys.stdin.buffer.read()).decode().rstrip("="))')"
+    ctl migration audit "$audit_query" > "${work}/forward-migration-audit.json" ||
+        die "reading audited resolution through deployed control"
+    jq -e --arg run "$forward_run_b" '.audit.scope.run == $run and .audit.scope.step == "schema" and
+        .audit.outcome == "applied" and .audit.actor.kind == "operator-control"' "${work}/forward-migration-audit.json" >/dev/null ||
+        die "audit did not bind the operator outcome to the migration"
+    install -m 600 "${work}/forward-migration-audit.json" "/tmp/kayra-swarm-platform-${vm_name}.forward-migration-audit.json"
+    jq -e '.compatibilityEpoch == 1 and .rollback == "data-fenced" and .verifiedActive == null and
+        .migrations.phase == "succeeded" and .operation.reason == "verification" and
+        (.migrations.resolutions | any(.step == "schema" and .outcome == "applied"))' "${work}/forward-held.json" >/dev/null ||
         die "forward fixture did not hold at the incompatible data epoch"
     [ "$(database_id)" = "$db_before" ] || die "maintenance replaced the retained dependency"
     multipass exec "$vm_name" -- sudo docker exec "$db_before" cat /data/ledger.json |

@@ -72,6 +72,9 @@ switch (process.argv[2]) {
     break;
   case "migrate":
     await query("db", "/migrate", { method: "POST", headers: { "x-operation": process.env.KAYRA_OPERATION_ID } });
+    throw new Error("fixture lost acknowledgement after committing the schema");
+  case "probe":
+    console.log(JSON.stringify({ version: 1, outcome: "unknown" }));
     break;
   case "check":
     if (process.env.CHECK_FAIL === "true") throw new Error("fixture release failed its completion check");

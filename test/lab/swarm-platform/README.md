@@ -2389,9 +2389,11 @@ the upgrade log are in `.cache/lab-evidence/kayra-recreate-fleet-20261128022518/
 
 Run `test/lab/upgrade.sh --from 0.26.1 --managed-forward --vm-name <unique-lab-name>`
 to exercise audited forward recovery through the ordinary fleet path. The app
-advances its retained ledger schema in a maintenance deployment, then fails
-its completion check. Kayra should hold the data epoch and withdraw the active
-release. The fixture requests an exact fix through `kayra app deployment forward`,
+advances its retained ledger schema in a maintenance deployment and loses the
+acknowledgement. Its probe reports an unknown outcome. Kayra holds until the
+operator checks the ledger and records an audited applied outcome. The
+candidate then fails its completion check. Kayra holds the new data epoch, and
+the fixture requests an exact fix through `kayra app deployment forward`,
 kills and restarts the deployer, and verifies the repaired release through HTTPS
 with the original database task and one recorded migration attempt. It also
 replays the same request. The successful VM is cleaned up and the reports for

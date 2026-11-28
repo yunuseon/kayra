@@ -874,6 +874,19 @@ PYTHON
     worker_sql "SELECT json_agg(history ORDER BY id) FROM history" > "${work}/worker-history.json"
     install -m 600 "${work}/worker-history.json" "/tmp/kayra-swarm-platform-${vm_name}.worker-history.json"
     expect_serves v4
+    # The job may acknowledge before Docker has observed its replacement's
+    # health check. Preserve current and historical task evidence once ready.
+    worker_health="${work}/worker-health.json"
+    healthy_replacement() {
+        jq -e '.state == "available" and (.services | any(.name == "worker" and .currentTasks == 1 and
+            .healthyTasks == 1 and .ignoredHistoricalTasks > 0))' "$worker_health" >/dev/null
+    }
+    for _ in $(seq 1 25); do
+        if ctl lifecycle health managed-workers > "$worker_health" 2>> "$log" && healthy_replacement; then break; fi
+        sleep 2
+    done
+    install -m 600 "$worker_health" "/tmp/kayra-swarm-platform-${vm_name}.worker-health.json"
+    healthy_replacement || die "worker replacement did not pass its native health check"
     kayra_cmd verify "$server" >> "$log" 2>&1 || die "fleet verification after worker replacements"
     echo "✓ the stop-first worker drained before replacement and redelivered killed jobs with app-owned effect handling"
 fi

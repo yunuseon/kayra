@@ -8,6 +8,40 @@
 # command is just `docker compose ...` run in {{ platform_dir }}.
 # =============================================================================
 
+- name: Protect managed ownership before disabling rollout support
+  when: not managed_swarm_rollouts | bool
+  become: true
+  block:
+    - name: Inspect the managed ownership directory
+      ansible.builtin.stat:
+        path: "{{ platform_dir }}/managed-apps"
+        follow: false
+      register: managed_ownership
+
+    - name: Require a real managed ownership directory when present
+      ansible.builtin.assert:
+        that: managed_ownership.stat.isdir | default(false)
+        fail_msg: Cannot disable managed_swarm_rollouts with invalid managed ownership state
+        quiet: true
+      when: managed_ownership.stat.exists
+
+    - name: Read managed ownership records
+      ansible.builtin.find:
+        paths: "{{ platform_dir }}/managed-apps"
+        file_type: any
+        hidden: true
+      register: managed_ownership_entries
+      when: managed_ownership.stat.exists
+
+    - name: Require an empty readable ownership directory before disabling managed rollouts
+      ansible.builtin.assert:
+        that:
+          - managed_ownership_entries.matched == 0
+          - managed_ownership_entries.skipped_paths | length == 0
+        fail_msg: Cannot disable managed_swarm_rollouts while managed ownership records remain or cannot be inspected
+        quiet: true
+      when: managed_ownership.stat.exists
+
 - name: Require explicit Swarm infrastructure for managed rollouts
   ansible.builtin.assert:
     that: experimental_swarm.enabled | default(false) | bool

@@ -2781,7 +2781,16 @@ registration's runtime are refused.
 Retain an exact application build using `kayra app build`, then submit that
 commit and an operation UUID with `kayra app deployment prepare`. Use
 `kayra app deployment status` to distinguish acceptance from verified release
-activation. Fleet pruning includes incomplete managed removals and preserves
+activation. Managed Swarm deployments use these explicit requests. Compose
+webhooks and polling continue to handle registered Compose apps.
+
+Legacy registry GC is disabled as soon as managed rollouts are enabled,
+including before the first registration. Setup requires an empty, readable
+ownership directory before disabling managed support. Ownership tombstones
+remain after removal and purge, so retiring a managed host requires a separate
+maintenance operation.
+
+Fleet pruning includes incomplete managed removals and preserves
 their volumes. The explicit purge command requires the recorded removal and
 current ownership and attachment evidence.
 

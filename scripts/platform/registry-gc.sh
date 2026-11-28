@@ -21,12 +21,20 @@ platform_dir="${PLATFORM_DIR:?}"
 releases="${platform_dir}/releases"
 
 managed="${platform_dir}/managed-apps"
+if [ "${KAYRA_MANAGED_ROLLOUTS:-false}" = true ]; then
+    echo "ERROR: registry GC is disabled on managed rollout hosts; their recovery image pins require pin-aware GC." >&2
+    exit 1
+fi
 if [ -e "$managed" ] || [ -L "$managed" ]; then
     if [ ! -d "$managed" ] || [ -L "$managed" ]; then
         echo "ERROR: managed app ownership state is invalid; registry GC refused." >&2
         exit 1
     fi
-    if [ -n "$(find "$managed" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    if ! ownership="$(find "$managed" -mindepth 1 -maxdepth 1 -print -quit)"; then
+        echo "ERROR: managed app ownership state is unreadable; registry GC refused." >&2
+        exit 1
+    fi
+    if [ -n "$ownership" ]; then
         echo "ERROR: registry GC is disabled while coordinator-managed apps exist; their recovery image pins require pin-aware GC." >&2
         exit 1
     fi

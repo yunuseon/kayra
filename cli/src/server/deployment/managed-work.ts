@@ -14,7 +14,7 @@ export const reconcileManagedWork = async (index: Index, ports: ManagedWorkPorts
     const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, 10_000);
     try { return await Promise.race([Promise.resolve().then(() => ports.forRun(context)).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
   };
-  const pending = await index.pendingManagedDeployments();
+  const pending = await index.pendingManagedDeployments(ports.now());
   return Object.freeze(await Promise.all(pending.map(async (item) => {
     try {
       const context = await index.managedExecutionContext(item.app, item.run, ports); if (context === undefined) return Object.freeze({ ...item, outcome: "settled" as const });

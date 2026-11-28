@@ -186,6 +186,10 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   assert.deepEqual(await lab.index().recordedManagedVolumes("shop", lab.volumes), births);
   assert.deepEqual((await lab.index().resourceSnapshot())?.charges, []);
   assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
+  assert.deepEqual(await lab.index().pendingManagedRecreations(runtime.now()), []);
+  const registering = await lab.index().publishedDeploymentStatus("shop", ports);
+  assert.ok(registering?.version === 1);
+  assert.deepEqual(registering.recreation, { request: request.request, removal: remove, deadline: receipt.deadline, phase: "registering" });
   await assert.rejects(lab.index().reserveRegistration("shop", request.generation, "swarm"), /owns the successor registration/);
   const registration = () => lab.index().reserveRecreatedRegistration("shop", request.request, request.generation, ports);
   await assert.rejects(lab.index().reserveRecreatedRegistration("shop", request.request, randomUUID(), ports), /scope disagrees/);
@@ -204,9 +208,20 @@ test("a retired verified app reserves its exact data custody and fences purge ac
     ...ports, compare: () => Promise.resolve("unchanged"),
   }), /requires its verified release rebind/);
   await assert.rejects(lab.index().requestManagedDeployment("shop", source, runtime), /requires its verified release rebind/);
-  await lab.reopen(); lab.clock(100_000);
+  await lab.reopen(); lab.clock(6_000);
+  assert.deepEqual(await lab.index().pendingManagedRecreations(runtime.now()), [{ app: "shop", run: request.request }]);
+  assert.deepEqual(await lab.index().pendingManagedRecreations(receipt.deadline), []);
+  const preparing = await lab.index().publishedDeploymentStatus("shop", ports);
+  assert.ok(preparing?.version === 1);
+  assert.equal(preparing.recreation?.phase, "preparing");
+  const expired = await lab.index().publishedDeploymentStatus("shop", { ...ports, now: () => receipt.deadline });
+  assert.ok(expired?.version === 1);
+  assert.equal(expired.recreation?.phase, "held");
+  assert.equal(expired.requiredAction, "inspect-and-resolve");
+  assert.equal(expired.verifiedActive, null);
+  await assert.rejects(lab.index().reserveManagedRebind("shop", request.request, { ...ports, now: () => receipt.deadline, rebind: unreachable }), /preparation expired/);
   assert.deepEqual(await lab.index().reserveRecreatedRegistration("shop", request.request, request.generation, {
-    ...ports, authorize: () => Promise.resolve(false),
+    ...ports, now: () => receipt.deadline, authorize: () => Promise.resolve(false),
   }), ticket);
 
   const rebind = (previous: typeof lab.plan, registration: typeof verified) => {
@@ -229,6 +244,7 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   const rebound = await lab.index().reserveManagedRebind("shop", request.request, { ...ports, rebind });
   assert.equal(rebound.candidate.commit, plan.value.commit);
   assert.equal(rebound.recreation?.release, ready.active.record);
+  assert.deepEqual(await lab.index().pendingManagedRecreations(runtime.now()), []);
   assert.equal(rebound.candidate.infrastructure.ownership.dataOwner, lab.ownership.dataOwner);
   assert.notEqual(rebound.candidate.services["db"]?.nativeName, plan.value.services["db"]?.nativeName);
   assert.deepEqual(rebound.candidate.services["db"]?.mounts, plan.value.services["db"]?.mounts);
@@ -241,8 +257,10 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   };
   assert.equal(await lab.index().acceptedManagedRequest("shop", request.request, ports), undefined);
   await lab.reopen();
-  const repeated = await lab.index().reserveManagedRebind("shop", request.request, { ...ports, rebind: unreachable });
+  const repeated = await lab.index().reserveManagedRebind("shop", request.request, { ...ports, now: () => receipt.deadline, rebind: unreachable });
   assert.deepEqual(repeated, rebound);
+  assert.deepEqual(await lab.index().pendingManagedDeployments(receipt.deadline), []);
+  await assert.rejects(lab.index().requestManagedDeployment("shop", rebound, { ...restartRuntime, now: () => receipt.deadline }), /preparation expired/);
   assert.deepEqual(await lab.index().pendingManagedDeployments(), [{ app: "shop", run: request.request }]);
   for (let attempt = 0; attempt < 120; attempt++) {
     const work = await reconcileManagedWork(lab.index(), { ...ports, forRun: () => Promise.resolve(restartRuntime) });

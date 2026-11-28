@@ -2824,6 +2824,11 @@ charge as immutable archive evidence. The platform publishes a new protected reg
 configuration and secrets match the archived release. The deployment
 coordinator then rebinds that exact image and workload plan to the new
 incarnation, keeping the data epoch and inherited volume receipts. The
+observer can resume a verified registration within the original preparation
+window and hand off to the rollout observer once the source is durable.
+If preparation expires before admission, the published status shows the held
+recreation and its original deadline. The coordinator preserves the volumes.
+The
 retained release's migrations are skipped. Admission and verification must
 succeed before the successor accepts ordinary rollouts.
 

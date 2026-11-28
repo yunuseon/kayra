@@ -131,8 +131,9 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
     <dl class="facts deployment-facts">
       <div class="fact"><dt>Runtime</dt><dd>{state.runtime}{state.runtime === "swarm" ? <> <Pill tone="warn">experimental</Pill></> : null}</dd></div>
       {state.version === 1 ? <div class="fact"><dt>Lifecycle</dt><dd>{state.lifecycle}</dd></div> : <div class="fact"><dt>Deployment strategy</dt><dd>{state.operation.strategy}</dd></div>}
-      <div class="fact"><dt>{view.retirement === undefined ? "Rollout phase" : view.retirement.kind === "remove" ? "Removal phase" : "Purge phase"}</dt><dd><Pill tone={view.phaseTone}>{view.phase}</Pill></dd></div>
+      <div class="fact"><dt>{view.recreation !== undefined ? "Recreation phase" : view.retirement === undefined ? "Rollout phase" : view.retirement.kind === "remove" ? "Removal phase" : "Purge phase"}</dt><dd><Pill tone={view.phaseTone}>{view.phase}</Pill></dd></div>
       {view.retirement === undefined ? null : <div class="fact"><dt>Remaining volume allocations</dt><dd>{view.retirement.remainingVolumes}</dd></div>}
+      {view.recreation === undefined ? null : <div class="fact"><dt>Recreation deadline</dt><dd>{new Date(view.recreation.deadline).toISOString()}</dd></div>}
       <div class="fact"><dt>Certified active release</dt><dd><Release commit={view.active} /></dd></div>
       <div class="fact"><dt>Last known good</dt><dd><Release commit={view.lastKnownGood} /></dd></div>
       <div class="fact"><dt>Requested release</dt><dd><Release commit={view.requested} /></dd></div>

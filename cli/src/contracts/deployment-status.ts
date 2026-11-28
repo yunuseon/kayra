@@ -33,6 +33,11 @@ const retirement = z.object({
   (value.kind === "remove" ? !["preflight", "deleting"].includes(value.phase) :
     !["requested", "fencing-jobs", "stopping", "settling", "withdrawing"].includes(value.phase)));
 
+const recreation = z.object({
+  request: z.uuid(), removal: z.uuid(), phase: z.enum(["registering", "preparing", "held"]),
+  deadline: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+}).strict().readonly().refine(({ request, removal }) => request !== removal);
+
 const schema = z.object({
   version: z.literal(1), app: z.string().regex(names.app.pattern), incarnation: z.uuid(), runtime: z.enum(["compose", "swarm"]),
   lifecycle: z.enum(["registering", "registered", "removal-requested", "removing", "removed", "purging", "purged"]),
@@ -41,19 +46,25 @@ const schema = z.object({
   operation: operation.nullable(), requiredAction: z.enum(["none", "inspect-and-resolve"]),
   preparation: preparation.nullable().default(null),
   retirement: retirement.exactOptional(),
+  recreation: recreation.exactOptional(),
   // A certified release is historical evidence, not a fresh runtime health observation.
   runtimeObservation: z.literal("not-observed"),
 }).strict().readonly().superRefine((value, context) => {
   const life = value.retirement;
+  const reopen = value.recreation;
   if ((life !== undefined && (value.runtime !== "swarm" || value.requested !== null || value.desired !== null ||
     value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null || value.preparation !== null ||
     (life.kind === "remove" ? value.lifecycle !== (life.phase === "complete" ? "removed" : "removal-requested") :
       value.lifecycle !== (life.phase === "complete" ? "purged" : "purging")))) ||
+    (reopen !== undefined && (life !== undefined || value.runtime !== "swarm" || value.operation !== null || value.preparation !== null ||
+      value.requested !== null || value.desired !== null || value.verifiedActive !== null || value.lastKnownGood !== null ||
+      !["registering", "registered"].includes(value.lifecycle) ||
+      reopen.phase === "registering" && value.lifecycle !== "registering" || reopen.phase === "preparing" && value.lifecycle !== "registered")) ||
     (value.runtime === "compose" && (value.verification !== "legacy-unverified" || value.requested !== null || value.desired !== null || value.verifiedActive !== null || value.lastKnownGood !== null || value.operation !== null || value.preparation !== null)) ||
     (value.runtime === "swarm" && value.verification !== (value.verifiedActive === null ? "unverified" : "verified")) ||
     (value.operation?.phase === "cancelled" && value.operation.cancelRequestedAt === null) ||
     (value.operation?.cancelRequestedAt !== undefined && value.operation.cancelRequestedAt !== null && !["recovering", "held", "cancelled"].includes(value.operation.phase)) ||
-    value.requiredAction !== (value.operation?.phase === "held" || value.preparation?.phase === "held" || life?.phase === "held" ? "inspect-and-resolve" : "none") ||
+    value.requiredAction !== (value.operation?.phase === "held" || value.preparation?.phase === "held" || life?.phase === "held" || reopen?.phase === "held" ? "inspect-and-resolve" : "none") ||
     value.preparation !== null && (value.operation !== null || value.requested === null ||
       value.preparation.completedAt === null && JSON.stringify(value.requested) !== JSON.stringify(value.desired) ||
       (value.preparation.phase === "cancelled" || value.preparation.phase === "failed") !== (value.preparation.completedAt !== null) ||

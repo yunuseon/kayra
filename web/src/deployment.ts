@@ -13,7 +13,8 @@ const recoveryText = {
 export const deploymentView = (status: NonNullable<DeploymentStatus>, health?: DeploymentHealth) => {
   const current = status.version === 3 ? status.operation : status.operation ?? status.preparation;
   const retirement = status.version === 1 ? status.retirement : undefined;
-  const phase = retirement?.phase ?? current?.phase ?? "idle";
+  const recreation = status.version === 1 ? status.recreation : undefined;
+  const phase = retirement?.phase ?? recreation?.phase ?? current?.phase ?? "idle";
   const phaseTone = typed<Tone>(retirement?.phase === "complete" || phase === "succeeded" || status.version === 3 && status.operation.outcome === "deployed" ? "ok" : phase === "failed" || phase === "held" || status.version === 3 && status.operation.outcome === "absent" ? "bad" : phase === "cancelled" || status.version === 3 && ["rolled-back", "unchanged"].includes(status.operation.outcome ?? "") ? "warn" : phase === "idle" ? "muted" : "active");
   const recovery = status.version === 1 ? (status.operation ?? status.preparation)?.recovery : null;
   const managedRecovery = status.version !== 3 || status.operation.outcome === null ? null : ({ deployed: "Deployment verified", "rolled-back": "Previous release restored", unchanged: "Previous release preserved", absent: "No certified active release" } as const)[status.operation.outcome];
@@ -34,9 +35,9 @@ export const deploymentView = (status: NonNullable<DeploymentStatus>, health?: D
   const retirementAction = retirement?.reason === "attachments" ? "Inspect the volume attachments" :
     retirement?.reason === "registration" ? "Verify the platform registration withdrawal" :
     retirement?.phase === "held" ? "Inspect the retained operation evidence" : null;
-  return Object.freeze({ phase, phaseTone, retirement, recoveryPhase, pendingCheckContainers: progress === null ? 0 : progress.checks.containers - progress.checks.stopped, recovery: managedRecovery ?? (recovery === null || recovery === undefined ? "None recorded" : recoveryText[recovery]), runtime, runtimeTone,
+  return Object.freeze({ phase, phaseTone, retirement, recreation, recoveryPhase, pendingCheckContainers: progress === null ? 0 : progress.checks.containers - progress.checks.stopped, recovery: managedRecovery ?? (recovery === null || recovery === undefined ? "None recorded" : recoveryText[recovery]), runtime, runtimeTone,
     rollback: status.version === 1 ? null : ({ eligible: "Permitted", "no-previous-release": "No previous release", "application-incompatible": "Application declares rollback unsafe", "data-fenced": "Data changed; forward recovery required" } as const)[status.rollback],
-    action: retirementAction ?? (status.requiredAction !== "inspect-and-resolve" ? "None required" : status.version === 3 && status.rollback === "data-fenced" ? "Forward recovery is required; preserve retained data and inspect the blocked operation" : progress?.phase === "held" && progress.checks.containers > progress.checks.stopped ? "Prove the interrupted check containers stopped before restoring services" : "Inspect the blocked operation and record a recovery decision"),
+    action: recreation?.phase === "held" ? "Inspect the expired recreation. Kayra has kept the retained data." : retirementAction ?? (status.requiredAction !== "inspect-and-resolve" ? "None required" : status.version === 3 && status.rollback === "data-fenced" ? "Forward recovery is required; preserve retained data and inspect the blocked operation" : progress?.phase === "held" && progress.checks.containers > progress.checks.stopped ? "Prove the interrupted check containers stopped before restoring services" : "Inspect the blocked operation and record a recovery decision"),
     active: status.verifiedActive?.commit ?? null, desired: status.desired?.commit ?? null, requested: status.requested?.commit ?? null, lastKnownGood: status.lastKnownGood?.commit ?? null,
     observedAt: matching ? health.observedAt : null, services: matching ? health.services : Object.freeze([]),
     cancelRequest, migrationResolution,

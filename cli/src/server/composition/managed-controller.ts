@@ -3,7 +3,7 @@ import { reconcileManagedWork } from "../deployment/managed-work.ts";
 
 type Index = Parameters<typeof reconcileManagedWork>[0];
 type Work = readonly { readonly app: string; readonly run: string; readonly outcome: string }[];
-type Ports = Parameters<typeof reconcileManagedWork>[1] & { readonly reconcileForward?: () => Promise<Work> };
+type Ports = Parameters<typeof reconcileManagedWork>[1] & { readonly reconcileForward?: () => Promise<Work>; readonly reconcileRecreation?: (() => Promise<Work>) | undefined };
 type Report = { readonly status: "ready"; readonly work: Work } | { readonly status: "unavailable" };
 
 /** Optional composition hook, not a new process or Docker socket holder. Runtime/input loading happens before each indexed tick. */
@@ -29,5 +29,6 @@ export const startManagedController = (index: Index, ports: Ports, report: (valu
 
   const ordinary = watch(() => reconcileManagedWork(index, ports));
   const forward = ports.reconcileForward === undefined ? undefined : watch(ports.reconcileForward);
-  return Object.freeze({ close: () => Promise.all([ordinary(), forward?.()]).then(() => undefined) });
+  const recreation = ports.reconcileRecreation === undefined ? undefined : watch(ports.reconcileRecreation);
+  return Object.freeze({ close: () => Promise.all([ordinary(), forward?.(), recreation?.()]).then(() => undefined) });
 };

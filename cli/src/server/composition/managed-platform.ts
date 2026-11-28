@@ -39,7 +39,7 @@ type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof manage
   "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval" |
   "managedRemovalIntent" | "managedRemovalTombstone" | "managedPurgeIntent" | "requestManagedPurge" | "tickManagedPurge" |
   "reserveManagedRecreation" | "prepareManagedRecreationWorkspace" | "switchManagedRecreationOwnership" | "reserveRecreatedRegistration" |
-  "reserveManagedRebind" | "requestManagedDeployment">>;
+  "pendingManagedRecreations" | "reserveManagedRebind" | "requestManagedDeployment">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
 type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined; readonly actor?: MigrationResolutionActor | undefined };
 
@@ -153,17 +153,24 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
       read, now, authorize: (intent) => ports.canAccess(intent.predecessor.app),
     });
   };
-  const recreateRelease = async (input: unknown) => {
-    const parsed = managedRecreationReleaseRequest.safeParse(input);
-    if (!parsed.success || ports.actor === undefined || !await ports.canAccess(parsed.data.app)) throw new Error("app is outside managed recreation scope");
-    const { app, request } = parsed.data;
+  const rebindRelease = async (app: string, request: string) => {
+    if (!await ports.canAccess(app)) throw new Error("app is outside managed recreation scope");
     const source = await index.reserveManagedRebind(app, request, { read, retain, now, ...recreated });
     return index.requestManagedDeployment(app, source, await forRun(managedSourceContext(source)));
   };
+  const recreateRelease = (input: unknown) => {
+    const parsed = managedRecreationReleaseRequest.safeParse(input);
+    if (!parsed.success || ports.actor === undefined) throw new Error("app is outside managed recreation scope");
+    return rebindRelease(parsed.data.app, parsed.data.request);
+  };
+  const reconcileRecreation = async () => Object.freeze(await Promise.all((await index.pendingManagedRecreations(now())).map(async (work) => {
+    const outcome = await rebindRelease(work.app, work.run).then(() => "accepted", () => "unavailable");
+    return Object.freeze({ ...work, outcome });
+  })));
   return Object.freeze({
     prepare, preview: preparation.preview, forward, removal, purge, recreateRegistration, recreateRelease,
     commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, restore: preparation.restore, forRun, actor: ports.actor }),
-    work: Object.freeze({ read, now, forRun, reconcileForward }),
+    work: Object.freeze({ read, now, forRun, reconcileForward, reconcileRecreation }),
     health,
     healthSnapshot: async () => {
       const contexts = await index.managedHealthContexts({ read, now }); const readers = new Map(await Promise.all(contexts.map(async (context) => [context.owner.app, await health(context)] as const)));

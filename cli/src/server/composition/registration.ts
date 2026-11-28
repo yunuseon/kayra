@@ -146,7 +146,7 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
     if (controller !== undefined || executionPorts === undefined) return;
     if (builds !== undefined && publicRegistrations !== undefined && privateRegistrations !== undefined && swarmAuthority !== undefined && migrationPolicy !== undefined) {
       managed = managedPlatform(index, { publicRegistrations, privateRegistrations, swarmAuthority, migrationPolicy, domain }, { builds, api, canAccess: canRegister, actor: { kind: "operator-control", identity: "local-control:uid:" + String(process.getuid?.() ?? "unknown") } });
-      managedController = startManagedController(index, managed.work, (result) => { if (result.status !== "ready" || result.work.length > 0) console.log("managed-coordinator: " + JSON.stringify(result)); });
+      managedController = startManagedController(index, { ...managed.work, reconcileRecreation: managedSwarm ? managed.work.reconcileRecreation : undefined }, (result) => { if (result.status !== "ready" || result.work.length > 0) console.log("managed-coordinator: " + JSON.stringify(result)); });
     }
     rolloutController = startRolloutController(index, { ...executionPorts, jobs: oneShotJob(api), cleanup: oneShotCleanup(api) }, (result) => {
       if (result.status !== "ready" || result.work.length > 0) console.log("rollout-coordinator: " + JSON.stringify(result));

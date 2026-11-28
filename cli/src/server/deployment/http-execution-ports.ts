@@ -13,4 +13,3 @@ export type HttpExecutionPorts = HostObserver & {
   readonly native: SwarmServicePort;
   readonly readiness: RoutedReadinessPort;
 };
-

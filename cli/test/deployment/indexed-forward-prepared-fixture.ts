@@ -17,4 +17,3 @@ export const preparedForwardFixture = async (t: TestContext) => {
   const envelope = join(lab.selectionDirectory, "..", "..", "..", "state.json");
   return { ...lab, selected, built, operator, candidate: candidate.value, ports, envelope, denyReservation: () => { allowed = false; }, authorizations: () => authorizations, readEnvelope: async () => { const parsed = parseLifecycleEnvelope(JSON.parse(await readFile(envelope, "utf8"))); assert.ok(parsed.ok); return parsed.value; } };
 };
-

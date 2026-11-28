@@ -13,4 +13,3 @@ export const environmentBindings = (environment: Readonly<Record<string, string>
   if (literal.includes("$")) return err("only literal environment values and exact declared input references are supported");
   return ok<readonly [string, EnvironmentBinding]>([name, Object.freeze({ kind: "literal", value: literal.replaceAll("\0", "$") })]);
 }));
-

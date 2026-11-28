@@ -58,4 +58,3 @@ export const indexedForwardFixture = async (t: TestContext) => {
   let allowed = true; const ports = { ...lab.artifacts, now: lab.runtime.now, authorize: () => Promise.resolve(allowed) };
   return { ...lab, runtime, source, held, request, actor, ports, cut: (point: typeof cut) => { cut = point; }, decisions: () => decisions, pauseRootOpen: () => { const gate = { entered: Promise.withResolvers<undefined>(), release: Promise.withResolvers<undefined>() }; rootGate = gate; return { entered: gate.entered.promise, release: () => { gate.release.resolve(undefined); } }; }, allow: () => { allowed = true; }, deny: () => { allowed = false; }, selectionDirectory: join(lab.directory, createHash("sha256").update("shop").digest("hex"), "managed", "forward", request.request) };
 };
-

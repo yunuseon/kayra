@@ -39,4 +39,3 @@ export const fixture = async (t: TestContext) => {
   };
   return { path, artifacts, index, ports, builds };
 };
-

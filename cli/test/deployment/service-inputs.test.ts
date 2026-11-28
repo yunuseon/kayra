@@ -73,4 +73,3 @@ test("real platform reader reports absent registration generations without priva
   const port = platformServiceInputs("/nonexistent-kayra-inputs-public", "/nonexistent-kayra-inputs-private", 1000);
   assert.equal(await port.compare(before, after), "unavailable"); assert.deepEqual(await port.materialize(before), { ok: false, error: "service inputs are unavailable" });
 });
-

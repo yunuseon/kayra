@@ -1209,11 +1209,14 @@ if [ "$indexed_registration" = true ]; then
         echo "✓ opted-in managed rollouts verified after real coordinator interruption"
         step "8a  bounded metadata exhaustion and restart under managed control"
         managed_enospc_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+        # Reuse the filesystem holding the live journals from the stage 7 fault.
+        enospc_storage="$(jq -er '.staged.storage | select(type == "string" and length > 0)' "${work}/lifecycle-enospc.json")" || die "read bounded lifecycle storage identity"
         ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
             -i "servers/${server}/inventory.ini" \
             "${KAYRA_ROOT}/test/lab/swarm-platform/lifecycle-enospc.yml" \
             -e "kayra_root=${KAYRA_ROOT}" -e fixture_app=managed-complete \
             -e "fixture_commit=${managed_enospc}" -e "fixture_request=${managed_enospc_request}" \
+            -e "fixture_enospc_storage=${enospc_storage}" \
             -e "report_path=${work}/managed-enospc.json" >> "$log" 2>&1 || die "managed bounded metadata exhaustion"
         for evidence in "" .tar .source.json .clock.json; do
             install -m 600 "${work}/managed-enospc.json${evidence}" "/tmp/kayra-swarm-platform-${vm_name}.managed-enospc.json${evidence}"

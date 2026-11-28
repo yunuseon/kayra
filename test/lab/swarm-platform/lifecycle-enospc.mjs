@@ -12,8 +12,9 @@ import { nativeHttpIntent } from './http-intent.mjs';
 import { prematureCandidateRequests } from './http-observations.mjs';
 import { traffic } from './http-probe.mjs';
 
-const [app, commit, identity, storage, output] = process.argv.slice(2);
+const [app, commit, identity, storage, output, storageMode = 'stage'] = process.argv.slice(2);
 assert.ok(['rollout-complete', 'managed-complete'].includes(app)); assert.match(commit, /^[a-f0-9]{40}$/); assert.match(identity, /^[a-f0-9-]{36}$/); assert.ok(storage && output);
+assert.ok(['stage', 'reopen'].includes(storageMode));
 const managed = app === 'managed-complete';
 const previousRelease = managed ? 'F' : 'B';
 const currentOperation = (value) => managed ? value.operation : value.operation ?? value.preparation;
@@ -49,7 +50,10 @@ try {
   }, 1000);
   const target = { host: (managed ? 'managed-complete' : 'complete') + '.lab.test', ca: await readFile('/var/lib/kayra/swarm/lab-ca.pem', 'utf8') };
   phase = 'baseline'; stop = traffic(target, (value) => requests.push({ ...value, phase })); await pause(30000);
-  phase = 'storage-setup'; await docker('stop', '--time', '10', deployer); const staged = await filesystem('stage'); await docker('start', deployer);
+  phase = 'storage-setup';
+  if (storageMode === 'stage') await docker('stop', '--time', '10', deployer);
+  const staged = await filesystem(storageMode);
+  if (storageMode === 'stage') await docker('start', deployer);
   await wait(async () => { try { return await status(); } catch { return undefined; } }, 'coordinator on bounded ext4', 30000);
   const mountProbe = JSON.parse(await docker('exec', deployer, 'node', '--input-type=module', '--eval', 'import {statfs} from "node:fs/promises"; console.log(JSON.stringify({uid:process.getuid(),fs:await statfs("/opt/platform/lifecycle")}))'));
   assert.equal(mountProbe.uid, 1000); assert.ok(mountProbe.fs.blocks * mountProbe.fs.bsize <= 67108864); assert.equal(mountProbe.fs.type, 0xef53);

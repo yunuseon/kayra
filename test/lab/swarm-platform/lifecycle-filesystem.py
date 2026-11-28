@@ -10,28 +10,45 @@ import sys
 
 mode, raw_storage = sys.argv[1:]
 storage = Path(raw_storage)
+assert os.getuid() == 0
 assert storage.is_absolute() and storage.parent == Path('/var/lib/kayra/swarm')
 assert storage.name.startswith('lifecycle-storage-') and storage.resolve(strict=True) == storage
-assert storage.stat().st_uid == 0 and stat.S_IMODE(storage.stat().st_mode) == 0o700
+assert storage.is_dir() and storage.stat().st_uid == 0 and stat.S_IMODE(storage.stat().st_mode) == 0o700
 lifecycle = Path('/opt/platform/lifecycle')
 image = storage / 'filesystem.ext4'
 mounted = storage / 'mounted'
 filler = lifecycle / '.lab-enospc-fill'
+image_size = 64 * 1024 * 1024
 
 
 def command(*args):
     return subprocess.check_output(args, text=True).strip()
 
 
+def verify_mounted_storage():
+    image_stat = image.lstat()
+    assert stat.S_ISREG(image_stat.st_mode) and image_stat.st_size == image_size
+    assert image_stat.st_uid == 0 and stat.S_IMODE(image_stat.st_mode) == 0o600 and image_stat.st_nlink == 1
+    assert mounted.is_dir() and not mounted.is_symlink()
+    assert lifecycle.is_dir() and not lifecycle.is_symlink()
+    mounted_stat = mounted.stat()
+    lifecycle_stat = lifecycle.stat()
+    assert (mounted_stat.st_dev, mounted_stat.st_ino) == (lifecycle_stat.st_dev, lifecycle_stat.st_ino)
+    loop, filesystem, root = command('findmnt', '-rn', '-o', 'SOURCE,FSTYPE,FSROOT', '--mountpoint', str(mounted)).split()
+    assert loop.startswith('/dev/loop') and filesystem == 'ext4' and root == '/'
+    assert command('findmnt', '-rn', '-o', 'SOURCE,FSTYPE,FSROOT', '--mountpoint', str(lifecycle)).split() == [loop, filesystem, root]
+    assert command('losetup', '--noheadings', '--output', 'BACK-FILE', loop) == str(image)
+
+
 if mode == 'stage':
-    assert os.getuid() == 0 and not os.path.ismount(lifecycle)
+    assert not os.path.ismount(lifecycle)
     assert lifecycle.is_dir() and not lifecycle.is_symlink()
     assert lifecycle.stat().st_uid == 1000
     assert int(command('du', '-sb', str(lifecycle)).split()[0]) < 16 * 1024 * 1024
     assert os.statvfs(storage).f_bavail * os.statvfs(storage).f_frsize > 1024 * 1024 * 1024
     with image.open('xb') as file:
         os.chmod(image, 0o600)
-        file.truncate(64 * 1024 * 1024)
+        file.truncate(image_size)
         file.flush()
         os.fsync(file.fileno())
     command('mkfs.ext4', '-q', '-F', '-m', '0', str(image))
@@ -40,13 +57,14 @@ if mode == 'stage':
     command('cp', '-a', str(lifecycle) + '/.', str(mounted))
     os.sync()
     command('mount', '--bind', str(mounted), str(lifecycle))
-    assert os.stat(lifecycle).st_dev == os.stat(mounted).st_dev
-elif mode in ('fill', 'release'):
-    assert os.getuid() == 0 and os.path.ismount(lifecycle)
-    assert os.stat(lifecycle).st_dev == os.stat(mounted).st_dev
-    assert command('findmnt', '-n', '-o', 'FSTYPE', '--target', str(lifecycle)) == 'ext4'
-    assert stat.S_ISREG(image.stat().st_mode) and image.stat().st_size == 64 * 1024 * 1024
-    if mode == 'release':
+    verify_mounted_storage()
+elif mode in ('reopen', 'fill', 'release'):
+    verify_mounted_storage()
+    if mode == 'reopen':
+        assert not filler.exists() and not filler.is_symlink()
+        space = os.statvfs(lifecycle)
+        assert space.f_bavail * space.f_frsize > 16 * 1024 * 1024
+    elif mode == 'release':
         assert filler.lstat().st_uid == 1000 and stat.S_ISREG(filler.lstat().st_mode)
         filler.unlink()
         os.sync()
@@ -68,11 +86,11 @@ elif mode in ('fill', 'release'):
                 assert error.errno == errno.ENOSPC
         finally:
             os.close(file)
-        assert written < 64 * 1024 * 1024
+        assert written < image_size
 else:
     raise ValueError('unknown fault mode')
 
 space = os.statvfs(lifecycle)
-print(json.dumps({'mode': mode, 'storage': str(storage), 'imageBytes': 64 * 1024 * 1024,
+print(json.dumps({'mode': mode, 'storage': str(storage), 'imageBytes': image_size,
                   'filesystem': command('findmnt', '-n', '-o', 'SOURCE,FSTYPE', '--target', str(lifecycle)),
                   'availableBytes': space.f_bavail * space.f_frsize, 'uid': os.getuid()}))

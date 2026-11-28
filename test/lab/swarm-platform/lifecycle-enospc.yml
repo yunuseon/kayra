@@ -47,10 +47,19 @@
         path: /var/lib/kayra/swarm
         prefix: lifecycle-storage-
       register: enospc_storage
+      when: fixture_enospc_storage is not defined
 
     - name: Require recovery of the same accepted intent after bounded ENOSPC
       ansible.builtin.command:
-        argv: ["{{ enospc_source.path }}/node", "{{ enospc_source.path }}/test/lab/swarm-platform/lifecycle-enospc.mjs", "{{ fixture_app }}", "{{ fixture_commit }}", "{{ fixture_request }}", "{{ enospc_storage.path }}", "{{ enospc_source.path }}/results"]
+        argv:
+          - "{{ enospc_source.path }}/node"
+          - "{{ enospc_source.path }}/test/lab/swarm-platform/lifecycle-enospc.mjs"
+          - "{{ fixture_app }}"
+          - "{{ fixture_commit }}"
+          - "{{ fixture_request }}"
+          - "{{ fixture_enospc_storage if fixture_enospc_storage is defined else enospc_storage.path }}"
+          - "{{ enospc_source.path }}/results"
+          - "{{ 'reopen' if fixture_enospc_storage is defined else 'stage' }}"
       changed_when: true
 
     - name: Require synchronized clocks after the bounded ENOSPC experiment

@@ -81,6 +81,7 @@ step() { printf '\n── %s\n' "$*"; }
 die() { echo "✗ $*" >&2; echo "  the lab: ${work} (log: ${log})" >&2; exit 1; }
 
 passed=false
+oom_timing_invalid=false
 retain_lab_log() {
     [ -f "$log" ] || return 0
     local archive
@@ -926,8 +927,16 @@ if [ "$indexed_registration" = true ]; then
         if [ -f "${work}/candidate-oom.json.tar" ]; then
             install -m 600 "${work}/candidate-oom.json.tar" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.tar"
         fi
-        [ "$oom_outcome" -eq 0 ] || die "candidate memory exhaustion and automatic recovery"
-        echo "✓ container OOM recovered the previous release without promoting the failed candidate"
+        if [ "$oom_outcome" -eq 0 ]; then
+            echo "✓ container OOM recovered the previous release without promoting the failed candidate"
+        elif [ -f "${work}/candidate-oom.json" ] &&
+            jq -e '.passed == false and .recovered.operation.recovery == "automatic-rollback" and
+                (.achievedRequestsPerSecond < 19 or .maxRequestStartGapMs > 250)' "${work}/candidate-oom.json" >/dev/null; then
+            oom_timing_invalid=true
+            echo "! candidate OOM restored the previous release, but its request timing failed measurement thresholds"
+        else
+            die "candidate memory exhaustion and automatic recovery"
+        fi
 
         prepare_admission_inputs "" "${work}/admission-inputs.json" 1024m 1073741824
         ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
@@ -1048,5 +1057,6 @@ if [ "$indexed_registration" = true ]; then
     kayra_cmd verify "$server" || die "platform verification after indexed registration"
 fi
 
+[ "$oom_timing_invalid" = false ] || die "candidate OOM timing needs a repeat; subsequent results are retained"
 passed=true
 step "the upgrade from ${from} holds"

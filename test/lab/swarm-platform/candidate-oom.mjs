@@ -69,7 +69,8 @@ try {
   const failures = requests.filter((value) => value.error !== undefined || value.status !== 200); const premature = prematureCandidateRequests(requests, 'OOM'); assert.equal(premature.length, 0);
   for (const name of ['baseline', 'stable']) { const values = requests.filter((value) => value.phase === name); assert.ok(values.length >= 570); assert.ok(values.every((value) => value.status === 200 && value.error === undefined && value.release === 'B')); }
   assert.ok(requests.some((value) => value.release === 'OOM')); assert.ok(requests.some((value) => value.connection === 'fresh') && requests.some((value) => value.connection === 'persistent'));
-  const rate = (requests.length - 1) / ((requests.at(-1).at - requests[0].at) / 1000); const maxGapMs = Math.max(...requests.map((value) => value.gapMs ?? 0)); assert.ok(rate >= 19); assert.ok(maxGapMs <= 250);
+  const rate = (requests.length - 1) / ((requests.at(-1).at - requests[0].at) / 1000);
+  const maxGapMs = Math.max(...requests.map((value) => value.gapMs ?? 0));
   assert.ok(metrics.length >= 60); const minimumAvailableMemoryBytes = Math.min(...metrics.map((value) => value.memory.MemAvailable)); assert.ok(minimumAvailableMemoryBytes >= 536870912, 'host memory pressure exceeded the bounded container experiment');
   const firstFailureAt = failures.length === 0 ? null : Math.min(...failures.map((value) => value.at)); const lastFailureEndedAt = failures.length === 0 ? null : Math.max(...failures.map((value) => value.endedAt));
   const nextSuccess = failures.length === 0 ? undefined : requests.find((value) => value.at > Math.max(...failures.map((failure) => failure.at)) && value.status === 200 && value.error === undefined);
@@ -84,11 +85,20 @@ try {
     if (container === oom.Actor.ID) assert.ok(logs.includes('"kind":"oom-allocation"'));
   }
   assert.equal(evidenceError, undefined);
-  const result = { passed: true, scope: 'real builder/coordinator, container cgroup OOM and native rollback; disruption is measured, not uninterrupted rollback or global OOM acceptance', app, commit, identity, build, receipt, candidatePlan, before, recovered, replay,
+  const timingValid = rate >= 19 && maxGapMs <= 250;
+  const result = { passed: timingValid, scope: 'real builder/coordinator, container cgroup OOM and native rollback; disruption is measured, not uninterrupted rollback or global OOM acceptance', app, commit, identity, build, receipt, candidatePlan, before, recovered, replay,
     oom: { at: oomAt, container: oom.Actor.ID, state }, nativeUpdate: update, taskState, restoredAt, recoveryMs: restoredAt - oomAt,
     requests: requests.length, failedRequests: failures.length, prematureExposure: premature.length, firstFailureAt, lastFailureEndedAt, failureWindowMs: failures.length === 0 ? 0 : lastFailureEndedAt - firstFailureAt, nextSuccessAt: nextSuccess?.at ?? null,
     achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs, minimumAvailableMemoryBytes, peakCpuBusyFraction: Math.max(...metrics.map((value) => value.cpuBusyFraction ?? 0)), versions: JSON.parse(await docker('version', '--format', '{{json .}}')), node: process.version, applicationLogs };
-  await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
+  await writeFile(join(output, 'result.json'), JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result));
+  if (!timingValid) {
+    await writeFile(join(output, 'failure.json'), JSON.stringify({
+      kind: 'measurement-quality', app, commit, identity, recoveryVerified: true,
+      achievedRequestsPerSecond: rate, maxRequestStartGapMs: maxGapMs,
+    }, null, 2));
+    process.exitCode = 1;
+  }
 } catch (error) {
   await writeFile(join(output, 'failure.json'), JSON.stringify({ error: String(error), phase, app, commit, identity }, null, 2)); process.exitCode = 1; console.error(JSON.stringify({ error: String(error), output }));
 } finally {

@@ -2820,5 +2820,17 @@ original deadline. The index can then switch the current owner in one journal
 replacement, after checking the workspace and exact detached volumes again.
 That replacement points to the validated new journal, preserves the old
 journal at its existing path, and retains its build receipts and settled
-charge as immutable archive evidence. Publication of the successor's
-registration and activation of its release remain separate transitions.
+charge as immutable archive evidence. The platform publishes a new protected registration generation only when its
+configuration and secrets match the archived release. The deployment
+coordinator then rebinds that exact image and workload plan to the new
+incarnation, keeping the data epoch and inherited volume receipts. The
+retained release's migrations are skipped. Admission and verification must
+succeed before the successor accepts ordinary rollouts.
+
+To reopen a removed experimental Swarm app, restore its unchanged declaration
+in `server.yml` and its configuration and secret inputs. Read the
+removal UUID with `kayra app deployment status SERVER APP` and run
+`kayra app deployment recreate SERVER APP REMOVAL REQUEST --reason REASON`.
+Keep the request UUID when retrying the same action. Request acceptance is
+reported separately from verified activation. The archived release and its
+image digests must still be available, with all retained volumes detached.

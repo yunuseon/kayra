@@ -23,7 +23,7 @@ export const managedRunReport = async (request: ManagedLifecycleRequest, source:
     id: request.run,
     state: phase === "complete" ? outcome === "deployed" ? "success" : outcome === "superseded" ? "superseded" : "failure" :
       phase === "accepted" ? "queued" : phase === "held" ? "failure" : "running",
-    why: source.restore !== null ? "restore" : source.version === 3 ? "forward recovery" : "deploy",
+    why: source.restore !== null ? "restore" : source.version === 3 ? "forward recovery" : source.version === 2 && source.recreation !== undefined ? "recreate" : "deploy",
     what: source.candidate.rollout.strategy,
     sha: source.candidate.commit,
     started: new Date(request.createdAt).toISOString(),

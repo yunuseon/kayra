@@ -28,6 +28,7 @@ export const reaches = {
   "app.deployment.prepare": { label: "Request experimental rollout", icon: "▶" },
   "app.deployment.restore": { label: "Restore verified release", icon: "↶" },
   "app.deployment.forward": { label: "Recover forward", icon: "↦" },
+  "app.deployment.recreate": { label: "Recreate app", icon: "↻" },
   "app.deployment.health": { label: "Runtime health", icon: "≡" },
   "app.deployment.pins": { label: "Deployment image pins", icon: "≡" },
   "app.deployment.status": { label: "Deployment state", icon: "≡" },

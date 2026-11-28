@@ -11,6 +11,8 @@ import type { IndexedManagedRuntime } from "../../src/server/deployment/indexed-
 import { openJournal } from "../../src/server/deployment/journal.ts";
 import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
 import { parseVolumeCreationCatalog } from "../../src/server/deployment/volume-creation-catalog-state.ts";
+import { recreatedManagedPlan } from "../../src/server/deployment/managed-recreation-plan.ts";
+import { reconcileManagedWork } from "../../src/server/deployment/managed-work.ts";
 import { managedRemovalRuntime } from "../../src/server/composition/managed-removal-runtime.ts";
 import { managedIndexRuntimeFixture } from "./managed-index-runtime-fixture.ts";
 
@@ -206,4 +208,51 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   assert.deepEqual(await lab.index().reserveRecreatedRegistration("shop", request.request, request.generation, {
     ...ports, authorize: () => Promise.resolve(false),
   }), ticket);
+
+  const rebind = (previous: typeof lab.plan, registration: typeof verified) => {
+    const before = previous.infrastructure;
+    const scope = before.overlay.scope;
+    const plan = recreatedManagedPlan(previous, {
+      ...previous,
+      infrastructure: { ...before, registration,
+        ownership: { ...before.ownership, incarnation: registration.incarnation },
+        overlay: { id: "r".repeat(25), scope: { ...scope, incarnation: registration.incarnation, name: "kayra-app-" + registration.incarnation } },
+      },
+    });
+    if (!plan.ok) throw new Error(plan.error);
+    return Promise.resolve(plan.value);
+  };
+  const fromMigrationPlan = await rebind(lab.plan, verified);
+  assert.ok(lab.plan.rollout.migrations.length > 0);
+  assert.deepEqual(fromMigrationPlan.rollout.migrations, []);
+  assert.deepEqual(fromMigrationPlan.images, lab.plan.images);
+  const rebound = await lab.index().reserveManagedRebind("shop", request.request, { ...ports, rebind });
+  assert.equal(rebound.candidate.commit, plan.value.commit);
+  assert.equal(rebound.recreation?.release, ready.active.record);
+  assert.equal(rebound.candidate.infrastructure.ownership.dataOwner, lab.ownership.dataOwner);
+  assert.notEqual(rebound.candidate.services["db"]?.nativeName, plan.value.services["db"]?.nativeName);
+  assert.deepEqual(rebound.candidate.services["db"]?.mounts, plan.value.services["db"]?.mounts);
+  // The native adapter distinguishes the scrubbed predecessor by incarnation.
+  lab.services.clear();
+  const restartRuntime: IndexedManagedRuntime = { ...runtime,
+    readiness: { check: (action) => Promise.resolve({ app: action.app, incarnation: action.incarnation, service: action.service,
+      action: action.action, plan: action.plan, checkedAt: runtime.now(), status: "ready" }) },
+    managedData: { native: { observe: native.observe, create: unreachable }, workloads: () => lab.runtime.services },
+  };
+  assert.equal(await lab.index().acceptedManagedRequest("shop", request.request, ports), undefined);
+  await lab.reopen();
+  const repeated = await lab.index().reserveManagedRebind("shop", request.request, { ...ports, rebind: unreachable });
+  assert.deepEqual(repeated, rebound);
+  assert.deepEqual(await lab.index().pendingManagedDeployments(), [{ app: "shop", run: request.request }]);
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const work = await reconcileManagedWork(lab.index(), { ...ports, forRun: () => Promise.resolve(restartRuntime) });
+    assert.ok(work.every((item) => item.outcome !== "held" && item.outcome !== "unavailable"), JSON.stringify(work));
+    if (work.length === 0) break;
+  }
+  const restored = await lab.index().managedDeploymentStatus("shop", ports);
+  assert.equal(restored?.operation.phase, "complete");
+  assert.equal(restored.verifiedActive?.commit, plan.value.commit);
+  assert.equal(restored.compatibilityEpoch, ready.compatibilityEpoch);
+  assert.deepEqual(await lab.index().recordedManagedVolumes("shop", lab.volumes), births);
+  assert.equal(lab.jobs.size, 0);
 });

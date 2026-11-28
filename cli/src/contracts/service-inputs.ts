@@ -21,6 +21,7 @@ export type ServiceInputs = {
   readonly environment: Readonly<Record<string, EnvironmentBinding>>;
 };
 export type RetainedInputsPort = { readonly compare: (previous: ServiceInputs, candidate: ServiceInputs) => Promise<"unchanged" | "changed" | "unavailable"> };
+export type RecreatedInputsPort = { readonly compareRecreated: RetainedInputsPort["compare"] };
 export type RuntimeInputsPort = { readonly materialize: (reference: ServiceInputs) => Promise<Result<Readonly<Record<string, string>>, string>> };
 export const parseServiceInputs = (input: unknown) => {
   const checked = schema.safeParse(input); if (!checked.success) return err("invalid service input references");

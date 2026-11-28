@@ -18,6 +18,14 @@ const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.st
 export const managedIndexScope = (input: Omit<Context, "state">) => {
   try {
     const entry = lifecycleIndexEntry.parse(input.owner); const source = parseManagedLifecycleSource(input.source); const envelope = parseLifecycleEnvelope(input.envelope); const description = managedLifecycleDescription(source);
+    const lineage = entry.lineage;
+    const recreation = source.recreation;
+    if (recreation === undefined ? lineage !== undefined && lineage.rebind?.verified == null :
+      lineage?.rebind?.source !== managedLifecycleSourceDigest(source) || lineage.archive !== recreation.archive ||
+      lineage.reservation.release !== recreation.release || lineage.reservation.epoch !== recreation.epoch ||
+      lineage.reservation.predecessor.incarnation !== recreation.predecessor || lineage.reservation.request !== source.run) {
+      return err("managed rollout lacks its indexed recreation binding");
+    }
     const owner = parseDataOwnership({ version: 1, app: entry.app, incarnation: entry.incarnation, dataOwner: entry.dataOwner });
     const volumesRegistered = [...Object.values(source.candidate.services), ...Object.values(source.previous?.source.application.services ?? {}), ...source.retired.map((item) => item.plan)].every((service) => service.mounts.every((mount) => entry.volumes.some((volume) => same(volume, mount.volume))));
     const completed = envelope.ok ? envelope.value.managed?.find((item) => item.run === source.run && item.source === managedLifecycleSourceDigest(source) && item.completion !== null) : undefined;

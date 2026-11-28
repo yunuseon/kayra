@@ -202,6 +202,10 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
         return managed.recreateRegistration(input);
       }
+      if (route === "/deployment/recreate-release") {
+        if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
+        return managed.recreateRelease(input);
+      }
       if (route === "/deployment/forward") {
         if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
         return managed.forward(input);

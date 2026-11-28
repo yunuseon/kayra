@@ -4,7 +4,7 @@ import type { ManagedExecutionContext } from "../../contracts/managed-execution-
 import type { ManagedHealthReadPort } from "../../contracts/managed-deployment-read.ts";
 import type { ImageResolutionPort } from "../../contracts/image-admission.ts";
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
-import { managedRecreationRegistrationRequest } from "../../contracts/managed-recreation.ts";
+import { managedRecreationRegistrationRequest, managedRecreationReleaseRequest } from "../../contracts/managed-recreation.ts";
 import type { openLifecycleAppIndex } from "../deployment/lifecycle-app-index.ts";
 import type { dockerApi } from "../runtime/docker-api.ts";
 import { managedPreparation } from "../deployment/managed-preparation.ts";
@@ -19,7 +19,7 @@ import { checkContainerFences } from "../runtime/check-container-fence.ts";
 import { oneShotCleanup, oneShotJob } from "../runtime/one-shot-job.ts";
 import { observeSwarmHost } from "../runtime/swarm-host.ts";
 import { registryImages } from "../runtime/registry-images.ts";
-import { platformManagedPlans } from "./managed-plans.ts";
+import { platformManagedPlans, platformManagedRecreationPlan } from "./managed-plans.ts";
 import { registrationWithdrawalObservation } from "../platform/registration-withdrawal.ts";
 import { readRegistrationOwnership } from "../platform/registration-ownership.ts";
 import { readPublicRegistration, readPublicRegistrationGeneration } from "../platform/public-registration.ts";
@@ -38,7 +38,8 @@ import { typed } from "../../lib/typed.ts";
 type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Parameters<typeof managedForwardOperation>[0] & Parameters<typeof reconcileManagedForwardWork>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts" |
   "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval" |
   "managedRemovalIntent" | "managedRemovalTombstone" | "managedPurgeIntent" | "requestManagedPurge" | "tickManagedPurge" |
-  "reserveManagedRecreation" | "prepareManagedRecreationWorkspace" | "switchManagedRecreationOwnership" | "reserveRecreatedRegistration">>;
+  "reserveManagedRecreation" | "prepareManagedRecreationWorkspace" | "switchManagedRecreationOwnership" | "reserveRecreatedRegistration" |
+  "reserveManagedRebind" | "requestManagedDeployment">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
 type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined; readonly actor?: MigrationResolutionActor | undefined };
 
@@ -51,6 +52,7 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
     receipts: { read: (references) => index.recordedManagedVolumes(context.owner.app, references) }, native, observeHost: (host) => observeSwarmHost(host, ports.api) });
   const forRun = (context: ManagedExecutionContext) => Promise.resolve(makeRuntime(context));
   const plans = platformManagedPlans(paths, { read, images: ports.images ?? registryImages() });
+  const recreated = platformManagedRecreationPlan(paths, { read, images: ports.images ?? registryImages() });
   const preparation = managedPreparation(index, { builds: ports.builds, plans, inputs: environment, runtime: forRun });
   const prepare = async (app: string, run: string, commit: string) => { if (!await ports.canAccess(app)) throw new Error("app is outside managed deployment scope"); return preparation.prepare(app, run, commit); };
   const health = async (context: ManagedExecutionContext) => { const runtime = await forRun(context); return typed<ManagedHealthReadPort>({ read, now, services: { observe: runtime.services.observe, observeDesired: runtime.services.observeDesired } }); };
@@ -151,8 +153,15 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
       read, now, authorize: (intent) => ports.canAccess(intent.predecessor.app),
     });
   };
+  const recreateRelease = async (input: unknown) => {
+    const parsed = managedRecreationReleaseRequest.safeParse(input);
+    if (!parsed.success || ports.actor === undefined || !await ports.canAccess(parsed.data.app)) throw new Error("app is outside managed recreation scope");
+    const { app, request } = parsed.data;
+    const source = await index.reserveManagedRebind(app, request, { read, retain, now, ...recreated });
+    return index.requestManagedDeployment(app, source, await forRun(managedSourceContext(source)));
+  };
   return Object.freeze({
-    prepare, preview: preparation.preview, forward, removal, purge, recreateRegistration,
+    prepare, preview: preparation.preview, forward, removal, purge, recreateRegistration, recreateRelease,
     commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, restore: preparation.restore, forRun, actor: ports.actor }),
     work: Object.freeze({ read, now, forRun, reconcileForward }),
     health,

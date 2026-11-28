@@ -503,6 +503,8 @@ if [ "$managed_fleet" = true ]; then
         "services": {"web": {"role": "http", "overlap": "allowed"}}}' "$fleet_repo/app.yml"
     yq -i 'del(.services.web.mem_limit, .services.web.environment.GREETING) |
         .services.web.deploy.resources = {"limits": {"memory": "64m", "cpus": "0.1"}, "reservations": {"memory": "32m", "cpus": "0.05"}} |
+        .services.web.volumes = [{"type":"volume", "source":"fixture-data", "target":"/data", "volume":{"nocopy":true}}] |
+        .volumes = {"fixture-data": {}} |
         .services.web.healthcheck = {"test": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"], "interval": "1s", "timeout": "1s", "start_period": "1s", "retries": 3} |
         .services.web.stop_grace_period = "30s"' "$fleet_repo/deploy/compose.yml"
     jq '.image = "managed-fleet/web"' "$fleet_repo/web/docker/image.json" > "${work}/managed-fleet-image.json"
@@ -527,13 +529,31 @@ if [ "$managed_fleet" = true ]; then
         local request="$1" commit="$2" report="$3"
         for _ in $(seq 1 80); do
             ctl lifecycle status managed-fleet > "$report"
-            if jq -e --arg run "$request" --arg sha "$commit" '.operation.run == $run and .operation.outcome == "deployed" and .verifiedActive.commit == $sha' "$report" >/dev/null; then return 0; fi
+            if jq -e --arg run "$request" --arg sha "$commit" '.operation.run == $run and .operation.phase == "complete" and .operation.outcome == "deployed" and .verifiedActive.commit == $sha' "$report" >/dev/null; then return 0; fi
             jq -e '.operation.phase == "held"' "$report" >/dev/null && die "managed fleet deployment held"
             sleep 2
         done
         die "managed fleet release did not converge"
     }
     await_fleet_release "$fleet_request" "$fleet_commit" "${work}/fleet-status.json"
+    fleet_container() {
+        local id
+        id="$(multipass exec "$vm_name" -- sudo docker ps --filter 'label=com.kayra.app=managed-fleet' --filter 'label=com.kayra.service=web' --format '{{.ID}}')"
+        [[ "$id" =~ ^[a-f0-9]{12,64}$ ]] || die "the managed fixture did not have exactly one running web task"
+        printf '%s\n' "$id"
+    }
+    fleet_volume() {
+        multipass exec "$vm_name" -- sudo docker inspect "$(fleet_container)" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}'
+    }
+    data_volume="$(fleet_volume)"
+    [[ "$data_volume" =~ ^kayra-data-[a-f0-9-]{36}$ ]] || die "fixture volume was not owned by Kayra"
+    data_birth="$(multipass exec "$vm_name" -- sudo docker volume inspect "$data_volume" --format '{{.CreatedAt}}')"
+    multipass exec "$vm_name" -- sudo docker exec "$(fleet_container)" sh -ec 'echo previous-incarnation > /data/marker'
+    expect_fleet_data() {
+        [ "$(fleet_volume)" = "$data_volume" ] || die "managed data allocation changed"
+        [ "$(multipass exec "$vm_name" -- sudo docker volume inspect "$data_volume" --format '{{.CreatedAt}}')" = "$data_birth" ] || die "managed volume birth changed"
+        [ "$(multipass exec "$vm_name" -- sudo docker exec "$(fleet_container)" cat /data/marker)" = previous-incarnation ] || die "managed data did not survive"
+    }
     routed="$(curl -sf -m 10 --resolve "managed-fleet.${domain}:443:${address}" "https://managed-fleet.${domain}/" | tr -d '\n')"
     [ "$routed" = fleet-managed ] || die "the managed fleet release was not routed"
     ctl runs managed-fleet --json | jq -e --arg run "$fleet_request" '.protocol == "managed-v3" and (.runs[0] | .id == $run and .managed.outcome == "deployed")' >/dev/null || die "fleet rollout did not reach run reporting"
@@ -547,28 +567,49 @@ if [ "$managed_fleet" = true ]; then
     successor_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
     ctl lifecycle prepare managed-fleet "$fleet_successor" "$successor_request" >/dev/null || die "managed successor acceptance"
     await_fleet_release "$successor_request" "$fleet_successor" "${work}/fleet-successor.json"
+    expect_fleet_data
     restore_record="$(jq -er --arg sha "$fleet_commit" '.previousRelease | select(.commit == $sha) | .record' "${work}/fleet-successor.json")"
     restore_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
     ctl lifecycle restore managed-fleet "$restore_record" "$restore_request" >/dev/null || die "managed restore acceptance"
     await_fleet_release "$restore_request" "$fleet_commit" "${work}/fleet-restored.json"
+    expect_fleet_data
     restored="$(curl -sf -m 10 --resolve "managed-fleet.${domain}:443:${address}" "https://managed-fleet.${domain}/" | tr -d '\n')"
     [ "$restored" = fleet-managed ] || die "the restored managed release was not routed"
     ctl runs managed-fleet --json | jq -e --arg run "$restore_request" '.runs[0] | .id == $run and .why == "restore" and .managed.outcome == "deployed"' >/dev/null || die "managed restore history"
     expect_serves v4
     kayra_cmd verify "$server" >> "$log" 2>&1 || die "mixed-runtime fleet verification"
+    cp "${fleet}/servers/${server}/server.yml" "${work}/fleet-managed-registered.yml"
     yq -i '.apps |= map(select(.name != "managed-fleet"))' "${fleet}/servers/${server}/server.yml"
     kayra_cmd apps "$server" >> "$log" 2>&1 || die "retiring the managed fleet app"
     ctl lifecycle status managed-fleet > "${work}/fleet-removed.json"
     jq -e '.lifecycle == "removed" and .verifiedActive == null' "${work}/fleet-removed.json" >/dev/null || die "managed fleet removal status"
+    step "6c  explicitly recreate the managed app with its original data"
+    recreate_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    removal="$(jq -er '.retirement.request' "${work}/fleet-removed.json")"
+    cp "${work}/fleet-managed-registered.yml" "${fleet}/servers/${server}/server.yml"
+    kayra_cmd app deployment recreate "$server" managed-fleet "$removal" "$recreate_request" --reason "Reopen the verified fixture data" >> "$log" 2>&1 ||
+        die "managed fixture recreation"
+    await_fleet_release "$recreate_request" "$fleet_commit" "${work}/fleet-recreated.json"
+    [ "$(jq -r '.incarnation' "${work}/fleet-recreated.json")" != "$(jq -r '.incarnation' "${work}/fleet-status.json")" ] || die "managed recreation reused its workload owner"
+    expect_fleet_data
+    [ "$(curl -sf -m 10 --resolve "managed-fleet.${domain}:443:${address}" "https://managed-fleet.${domain}/" | tr -d '\n')" = fleet-managed ] ||
+        die "the recreated verified release was not routed"
+    kayra_cmd apps "$server" >> "$log" 2>&1 || die "ordinary registration replay after recreation"
+    await_fleet_release "$recreate_request" "$fleet_commit" "${work}/fleet-recreated.json"
+    expect_fleet_data
+    ctl runs managed-fleet --json | jq -e --arg run "$recreate_request" '.runs[0] | .id == $run and .why == "recreate" and .managed.outcome == "deployed"' >/dev/null || die "managed recreation history"
+    yq -i '.apps |= map(select(.name != "managed-fleet"))' "${fleet}/servers/${server}/server.yml"
+    kayra_cmd apps "$server" >> "$log" 2>&1 || die "retiring the recreated managed app"
     multipass exec "$vm_name" -- sudo /opt/platform/bin/app-purge managed-fleet >> "$log" 2>&1 || die "purging the disposable managed fleet app"
     ctl lifecycle status managed-fleet > "${work}/fleet-purged.json"
     jq -e '.lifecycle == "purged" and .retirement.remainingVolumes == 0' "${work}/fleet-purged.json" >/dev/null || die "managed fleet purge status"
+    if multipass exec "$vm_name" -- sudo docker volume inspect "$data_volume" >> "$log" 2>&1; then die "purged fixture volume is still present"; fi
     expect_serves v4
     kayra_cmd verify "$server" >> "$log" 2>&1 || die "Compose verification after managed fleet retirement"
-    for stage in status successor restored removed purged; do
+    for stage in status successor restored removed recreated purged; do
         install -m 600 "${work}/fleet-${stage}.json" "/tmp/kayra-swarm-platform-${vm_name}.fleet-${stage}.json"
     done
-    echo "✓ an explicitly enabled fleet registered, deployed, restored and removed Swarm alongside its Compose app"
+    echo "✓ an explicitly enabled fleet registered, deployed, restored removed, recreated and purged Swarm alongside its Compose app"
 fi
 
 if [ "$swarm_host" = true ]; then

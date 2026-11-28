@@ -18,11 +18,15 @@ const forwardCertificate = z.object({
   blocked: z.object({ run: z.uuid(), action: z.string().max(80), source: digest, checkpoint: digest, epoch: positive }).strict().readonly(),
   reservation: digest, decision: digest, cleanupSource: digest, cleanupState: digest,
 }).strict().readonly();
+const recreationCertificate = z.object({
+  archive: digest, release: digest, predecessor: z.uuid(), epoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+}).strict().readonly();
 const schema = z.object({ version: z.union([z.literal(1), z.literal(2), z.literal(3)]), run: z.uuid(), action: z.string().max(80), createdAt: positive,
   restore: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
   candidate: z.unknown(), previous: z.unknown().nullable(),
   retained: z.array(z.object({ name: z.string(), kind: z.enum(["active", "barrier", "forward"]), action: z.unknown(), native }).strict().readonly()).max(32).readonly(),
   forward: forwardCertificate.optional(),
+  recreation: recreationCertificate.optional(),
   retired: z.array(z.object({ plan: z.unknown(), barrier: z.unknown() }).strict().readonly()).max(32).readonly(),
 }).strict().readonly();
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -36,6 +40,11 @@ export const parseManagedLifecycleSource = (input: unknown) => {
   const plan = admission.value.plan; const owner = plan.infrastructure.ownership;
   if (!new RegExp(`^${owner.incarnation}:[1-9][0-9]*$`).test(raw.action) || !Number.isSafeInteger(Number(raw.action.split(":")[1]))) throw new Error("invalid managed lifecycle action");
   const forward = raw.forward;
+  const recreation = raw.recreation;
+  if (recreation !== undefined && (raw.version !== 2 || previous !== null || raw.restore !== null || raw.retained.length !== 0 ||
+    raw.retired.length !== 0 || plan.rollout.migrations.length !== 0 || recreation.predecessor === owner.incarnation)) {
+    throw new Error("managed recreation source disagrees");
+  }
   if ((raw.version === 3) !== (forward !== undefined) ||
     forward !== undefined && (previous !== null || raw.restore !== null || plan.rollout.strategy !== "maintenance" ||
       forward.blocked.run === raw.run || !new RegExp(`^${owner.incarnation}:[1-9][0-9]*$`).test(forward.blocked.action) ||
@@ -73,7 +82,8 @@ export const parseManagedLifecycleSource = (input: unknown) => {
     retired.some((value) => plan.services[value.plan.service] !== undefined && !retained.some((reference) => reference.name === value.plan.service && reference.kind === "barrier"))) throw new Error("managed lifecycle retained coverage disagrees");
   const deadline = raw.createdAt + duration(plan, previousPlan) + (raw.version === 1 ? 0 : 90_000);
   if (!Number.isSafeInteger(deadline)) throw new Error("managed lifecycle deadline exceeds clock range");
-  return Object.freeze({ version: raw.version, run: raw.run, action: raw.action, createdAt: raw.createdAt, restore: raw.restore, candidate: plan, previous, retained, retired, ...(forward === undefined ? {} : { forward }) });
+  return Object.freeze({ version: raw.version, run: raw.run, action: raw.action, createdAt: raw.createdAt, restore: raw.restore, candidate: plan, previous, retained, retired,
+    ...(forward === undefined ? {} : { forward }), ...(recreation === undefined ? {} : { recreation }) });
 };
 export type ManagedLifecycleSource = ReturnType<typeof parseManagedLifecycleSource>;
 export const managedLifecycleSourceDigest = (input: ManagedLifecycleSource) => createHash("sha256").update(JSON.stringify(parseManagedLifecycleSource(input))).digest("hex");

@@ -55,6 +55,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   const source = async (state: ManagedLifecycleStore) => {
     const bytes = await artifact(state.operation.source); const raw: unknown = JSON.parse(bytes); const value = parseManagedLifecycleSource(raw); const description = managedLifecycleDescription(value);
     if (bytes !== JSON.stringify(value) || value.run !== state.operation.run || value.action !== state.operation.action || value.createdAt !== state.operation.createdAt || !same(value.candidate.infrastructure.ownership, owner) || description.admission.planDigest !== state.operation.plan || description.previous !== state.operation.previous || state.operation.previousPlan !== (description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous)) || description.admissionDeadline !== state.operation.admissionDeadline || description.deadline !== state.operation.deadline || state.operation.compatibilityFencedAt !== null && value.candidate.rollout.rollback_compatible || value.version === 1 && state.operation.allocation !== undefined || value.version === 2 && state.operation.admitted && state.operation.allocation === undefined ||
+      value.recreation !== undefined && state.compatibilityEpoch !== value.recreation.epoch ||
       value.version === 3 && (!state.operation.admitted || state.compatibilityEpoch < (value.forward?.blocked.epoch ?? Infinity) ||
         state.operation.phase !== "held" && state.operation.allocation === undefined)) throw new Error("managed lifecycle source disagrees");
     if (state.operation.recoverySource !== null) { const raw: unknown = JSON.parse(await artifact(state.operation.recoverySource)); const recovery = managedRecoverySnapshot(raw);
@@ -93,6 +94,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
   if (!same(value.candidate.infrastructure.ownership, owner)) throw new Error("managed lifecycle source ownership disagrees");
     const current = await load(); if (current?.operation.run === value.run) { if (current.operation.source !== identity) throw new Error("managed lifecycle run conflicts"); await source(current); return Object.freeze({ value, description, identity, current, at: current.operation.enteredAt, existing: true }); }
     if (value.version === 3) throw new Error("managed forward source requires the owning admission handoff");
+    if (value.recreation !== undefined && current !== undefined) throw new Error("managed recreation requires an empty lifecycle");
     if (current === undefined ? value.previous !== null : current.operation.phase !== "complete" || (current.active?.record ?? null) !== description.previous || Number(value.action.split(":")[1]) <= current.sequence) throw new Error("managed lifecycle previous release or settled operation disagrees");
     const carried = current?.operation.unstartedAt !== null && current?.operation.unstartedAt !== undefined ? managedUnstartedInventoryCarry(await source(current), value) : current?.operation.outcome === "rolled-back" || current?.operation.outcome === "absent" ? managedRecoveredInventoryCarry(await source(current), current.operation.recovery, value) : managedSuccessfulInventoryCarry(current === undefined ? null : await source(current), value); if (!carried.ok) throw new Error(carried.error);
     if (value.restore !== null || (current?.compatibilityEpoch ?? 0) > 0) {
@@ -143,7 +145,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
     fenceCompatibility: (run: string, expected: ManagedLifecycleStore["operation"]["phase"]) => serial(async () => {
       const state = await required(); const operation = state.operation;
       if (operation.run !== run || operation.phase !== expected || !["preparing", "updating", "verifying"].includes(operation.phase) || operation.cancelRequestedAt !== null || !operation.admitted || time(operation.createdAt) >= operation.deadline) return false;
-      const input = await source(state); if (input.candidate.rollout.rollback_compatible || operation.compatibilityFencedAt !== null) return true;
+      const input = await source(state); if (input.recreation !== undefined || input.candidate.rollout.rollback_compatible || operation.compatibilityFencedAt !== null) return true;
       const next = state.compatibilityEpoch + 1; if (!Number.isSafeInteger(next)) throw new Error("managed compatibility epoch exhausted"); const at = time(operation.createdAt); if (at >= operation.deadline) return false;
       await write({ ...state, compatibilityEpoch: next, operation: { ...operation, compatibilityEpoch: next, compatibilityFencedAt: at } }); return true;
     }),
@@ -169,7 +171,7 @@ export const managedLifecycleStore = (journal: OperationJournal, requested: Data
       if (await retain(JSON.stringify(value)) !== identity) throw new Error("managed lifecycle source retention failed");
         const historyBytes = current === undefined ? null : JSON.stringify({ previous: current.history, state: current });
         const history = historyBytes === null ? null : await retain(historyBytes); if (historyBytes !== null && history !== hash(historyBytes)) throw new Error("managed lifecycle history retention failed");
-        const compatibilityEpoch = current?.compatibilityEpoch ?? 0;
+        const compatibilityEpoch = current?.compatibilityEpoch ?? value.recreation?.epoch ?? 0;
         const state = await write({ version: 3, protocol: "managed-v3", runtime: "swarm", owner, sequence: Number(value.action.split(":")[1]), compatibilityEpoch, active: current?.active ?? null, lastGood: current?.lastGood ?? null, history,
           operation: { run: value.run, action: value.action, source: identity, plan: description.admission.planDigest, previous: description.previous, previousPlan: description.admission.previous === null ? null : managedApplicationDigest(description.admission.previous), createdAt: value.createdAt, admissionDeadline: description.admissionDeadline, deadline: description.deadline, phase: held === undefined ? "admitting" : "held", enteredAt: at, reason: held ?? null, outcome: null, settlement: null, unstartedAt: null, failure: null, recoverySource: null, recoveryStartedAt: null, recoveryDeadline: null, recovery: null, recoveryVerification: null, admitted: false, settled: false, cancelRequestedAt: null, compatibilityEpoch, compatibilityFencedAt: null, resolutionReceipts: [], quiescence: null, preparation: null, consumers: null, verification: null } });
         // eslint-disable-next-line functional/immutable-data -- obsolete views retain their bound run and can never write the next operation

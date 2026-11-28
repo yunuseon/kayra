@@ -8,7 +8,7 @@ import { appCheck, appInit } from "../recipes/app-check.ts";
 import { launch } from "../recipes/launch.ts";
 import { appHook } from "../recipes/app-hook.ts";
 import { doctor } from "../recipes/doctor.ts";
-import { appPurge, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
+import { appPurge, appRecreate, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
 import type { Engine } from "../recipes/steps.ts";
 import { adopt, deploy, down, hosts, preview, provision, setup, up, verify } from "../recipes/host.ts";
 import { backupTest } from "../recipes/backup.ts";
@@ -76,6 +76,7 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("app.deployment.prepare"), input: operations["app.deployment.prepare"].input }),
   z.strictObject({ name: z.literal("app.deployment.restore"), input: operations["app.deployment.restore"].input }),
   z.strictObject({ name: z.literal("app.deployment.forward"), input: operations["app.deployment.forward"].input }),
+  z.strictObject({ name: z.literal("app.deployment.recreate"), input: operations["app.deployment.recreate"].input }),
   z.strictObject({ name: z.literal("app.deployment.health"), input: operations["app.deployment.health"].input }),
   z.strictObject({ name: z.literal("app.deployment.pins"), input: operations["app.deployment.pins"].input }),
   z.strictObject({ name: z.literal("app.deployment.status"), input: operations["app.deployment.status"].input }),
@@ -168,6 +169,8 @@ const plans: Plans = {
   "app.deployment.prepare": onDeployer<"app.deployment.prepare">((app, input) => ({ kind: "lifecycle-prepare", app, commit: input.commit, request: input.request } as const)),
   "app.deployment.restore": onDeployer<"app.deployment.restore">((app, input) => ({ kind: "lifecycle-restore", app, record: input.record, request: input.request } as const)),
   "app.deployment.forward": onDeployer<"app.deployment.forward">((app, { blockedRun, commit, request, reason }) => ({ kind: "lifecycle-forward", app, payload: { app, blockedRun, commit, request, reason } } as const)),
+  "app.deployment.recreate": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appRecreate(ctx.engine, target, app,
+    { removal: input.removal, request: input.request, reason: input.reason })),
   "app.deployment.health": onDeployer<"app.deployment.health">((app) => ({ kind: "lifecycle", app, operation: "health", request: undefined } as const)),
   "app.deployment.pins": onDeployer<"app.deployment.pins">((app) => ({ kind: "lifecycle", app, operation: "pins", request: undefined } as const)),
   "app.deployment.status": onDeployer<"app.deployment.status">((app) => ({ kind: "lifecycle", app, operation: "status", request: undefined } as const)),

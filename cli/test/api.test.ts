@@ -80,7 +80,8 @@ const fixture = async (clients: Clients = { ui: true, api: true }, reports?: { r
     *wait*) exec sleep 30 ;;
     *) echo READY; read -r line; printf 'answer:%s\\n' "$line" ;;
   esac`);
-  const labServer = server("lab", "target: multipass\ndomain: lab.test\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" });
+  const labServer = server("lab", "target: multipass\ndomain: lab.test\napps: [{name: shop, repo: https://git.example/shop.git, runtime: swarm, grants: {memory_bytes: 268435456, cpu_millicores: 500, maintenance: false}}]",
+    { secrets: "a: b\n", vars: "managed_swarm_rollouts: true\nexperimental_swarm: {enabled: true, advertise_address: 192.0.2.1, memory_bytes: 3221225472, cpu_millicores: 2000, platform_memory_bytes: 1073741824, platform_cpu_millicores: 500}\n" });
   const lab = { ...labServer, secrets: { ...labServer.secrets, file: must(absolutePath(join(dir, "lab-secrets.yml"))) }, backupDir: must(remotePath("/backup")) };
   const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example");
   const store = server("store", "target: hetzner\ndomain: store.example\napps: [{name: shop, repo: https://git.example/shop.git}]");
@@ -161,6 +162,7 @@ const samples = {
   "app.deployment.prepare": { server: "lab", app: "shop", commit: "a".repeat(40), request: "12345678-1234-4234-8234-123456789abc" },
   "app.deployment.restore": { server: "lab", app: "shop", record: "a".repeat(64), request: "12345678-1234-4234-8234-123456789abc" },
   "app.deployment.forward": { server: "lab", app: "shop", blockedRun: "12345678-1234-4234-8234-123456789abc", commit: "a".repeat(40), request: "23456789-1234-4234-8234-123456789abc", reason: "Deploy the reviewed forward fix" },
+  "app.deployment.recreate": { server: "lab", app: "shop", removal: "12345678-1234-4234-8234-123456789abc", request: "23456789-1234-4234-8234-123456789abc", reason: "Restore the retained app data" },
   "app.deployment.health": { server: "lab", app: "shop" },
   "app.deployment.pins": { server: "lab", app: "shop" },
   "app.deployment.status": { server: "lab", app: "shop" },

@@ -702,6 +702,30 @@ Preview: `POST /api/operations/app.deployment.forward/preview`. Returns a JSON p
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.deployment.recreate`
+
+Recreate a removed Swarm app from its verified release and retained data.
+
+`POST /api/operations/app.deployment.recreate`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `removal` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `reason` | `string` | yes | — | Minimum length: 8. |
+
+Preview: `POST /api/operations/app.deployment.recreate/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.deployment.health`
 
 Observe current runtime service health separately from release certification and historical task failures.

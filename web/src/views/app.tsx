@@ -160,6 +160,10 @@ const Deployment = ({ server, app }: { readonly server: string; readonly app: st
       <button class="button" onClick={() => { openOperation("app.deployment.forward", { server, app, blockedRun: state.operation.run, request: crypto.randomUUID() }); }}>
         Request forward recovery
       </button>}
+    {state.version === 1 && state.lifecycle === "removed" && state.retirement?.protocol === "managed-v3" && state.retirement.kind === "remove" ?
+      <button class="button" onClick={() => {
+        openOperation("app.deployment.recreate", { server, app, removal: state.retirement?.request, request: crypto.randomUUID() });
+      }}>Recreate from retained data</button> : null}
   </>;
 };
 

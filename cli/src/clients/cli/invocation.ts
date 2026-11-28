@@ -57,6 +57,8 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "app.deployment.restore", input: { server: command.server, app: command.app, record: command.record, request: command.request } });
     case "app deployment forward":
       return plainly({ name: "app.deployment.forward", input: { server: command.server, app: command.app, blockedRun: command.blockedRun, commit: command.commit, request: command.request, reason: command.reason } });
+    case "app deployment recreate":
+      return plainly({ name: "app.deployment.recreate", input: { server: command.server, app: command.app, removal: command.removal, request: command.request, reason: command.reason } });
     case "app deployment health":
       return plainly({ name: "app.deployment.health", input: { server: command.server, app: command.app } });
     case "app deployment pins":
@@ -131,6 +133,7 @@ export const reaches = {
   "app.deployment.prepare": ["app", "deployment", "prepare", "SERVER", "APP", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "12345678-1234-4234-8234-123456789abc"],
   "app.deployment.restore": ["app", "deployment", "restore", "SERVER", "APP", "a".repeat(64), "12345678-1234-4234-8234-123456789abc"],
   "app.deployment.forward": ["app", "deployment", "forward", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "a".repeat(40), "23456789-1234-4234-8234-123456789abc", "--reason", "Deploy the reviewed forward fix"],
+  "app.deployment.recreate": ["app", "deployment", "recreate", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "23456789-1234-4234-8234-123456789abc", "--reason", "Restore the retained app data"],
   "app.deployment.health": ["app", "deployment", "health", "SERVER", "APP"],
   "app.deployment.pins": ["app", "deployment", "pins", "SERVER", "APP"],
   "app.deployment.status": ["app", "deployment", "status", "SERVER", "APP"],

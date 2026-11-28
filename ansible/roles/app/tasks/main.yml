@@ -92,9 +92,9 @@
 
 - name: Register the managed Swarm app through the platform
   ansible.builtin.command:
-    argv: [python3, -B, "{{ platform_dir }}/registration-lib/registration_command.py", register, --root,
+    argv: [python3, -B, "{{ platform_dir }}/registration-lib/registration_command.py", "{{ 'recreate' if app_recreation is defined else 'register' }}", --root,
            /var/lib/kayra/registrations, --private-gid, "1000", --platform-dir, "{{ platform_dir }}"]
-    stdin: "{{ request | to_json }}"
+    stdin: "{{ (request | combine({'recreation': app_recreation}) if app_recreation is defined else request) | to_json }}"
   vars:
     config_keys: "{{ manifest.config | default([]) }}"
     secret_keys: "{{ manifest.secrets | default([]) }}"

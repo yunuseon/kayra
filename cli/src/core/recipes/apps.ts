@@ -6,6 +6,13 @@ import { ansibleEnv, ansiblePath, collections, fromMain, inventory, withSecrets,
 import { sshTo } from "./ssh.ts";
 import { typed } from "../../lib/typed.ts";
 
+type Recreation = { readonly removal: string; readonly request: string; readonly reason: string };
+const registerApp = (engine: Engine, server: Server, app: Server["apps"][number], recreation?: Recreation) =>
+  withSecrets(run(`App ${app.name}`, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", "app.yml"),
+    "-e", `server=${server.name}`, "-e", `server_dir=${server.dir}`, "-e", `domain=${server.domain}`,
+    "-e", recreation === undefined ? `{"app": ${JSON.stringify(app.entry)}}` : JSON.stringify({ app: app.entry, app_recreation: recreation }),
+  ], ansibleEnv(engine, {})), server);
+
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server) => {
   const managed = server.apps.find((app) => app.entry["runtime"] === "swarm");
@@ -23,18 +30,7 @@ export const apps = (engine: Engine, server: Server) => {
         ? [
             ...server.apps.flatMap((app) => Object.freeze([
               collections(engine, {}),
-              withSecrets(playbook(
-                `App ${app.name}`,
-                "app.yml",
-                "-e",
-                `server=${server.name}`,
-                "-e",
-                `server_dir=${server.dir}`,
-                "-e",
-                `domain=${server.domain}`,
-                "-e",
-                `{"app": ${JSON.stringify(app.entry)}}`,
-              ), server),
+              registerApp(engine, server, app),
             ])),
             collections(engine, {}),
             playbook(
@@ -49,6 +45,14 @@ export const apps = (engine: Engine, server: Server) => {
         : []),
     ]),
   );
+};
+
+export const appRecreate = (engine: Engine, server: Server, app: AppName, recreation: Recreation) => {
+  const entry = server.apps.find((candidate) => candidate.name === app);
+  if (server.kind !== "platform" || entry?.entry["runtime"] !== "swarm" || server.vars["managed_swarm_rollouts"] !== true) {
+    return err("Managed recreation requires an opted-in Swarm application declared in server.yml");
+  }
+  return ok<Plan>(Object.freeze([fromMain(engine, server), collections(engine, {}), registerApp(engine, server, entry, recreation)]));
 };
 
 /** A removed app's volumes: its data, irreversibly. */

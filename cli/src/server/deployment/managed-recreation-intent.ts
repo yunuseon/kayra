@@ -42,6 +42,7 @@ export type ManagedRecreationIntent = z.infer<typeof managedRecreationIntentSche
 export const managedRecreationLineageSchema = z.object({
   archive: digest,
   reservation: managedRecreationIntentSchema,
+  rebind: z.object({ source: digest, verified: digest.nullable() }).strict().readonly().exactOptional(),
 }).strict().readonly().refine((value) => value.reservation.workspace === "ready");
 
 export const managedRecreationRequestSchema = managedRecreationRequestFields.readonly().refine((value) => value.request !== value.removal);

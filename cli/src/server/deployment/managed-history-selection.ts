@@ -23,7 +23,7 @@ export const readManagedHistoryRelease = (bytes: string, owner: ManagedLifecycle
   return release;
 };
 /** Metadata only: a historical commit cannot disguise an old data epoch as a fresh deployment. */
-export const managedHistorySelection = async (input: ManagedLifecycleStore, selection: z.input<typeof request>, ports: { readonly read: (digest: string) => Promise<string>; readonly expired: () => boolean }) => {
+export const managedHistorySelection = async (input: ManagedLifecycleStore, selection: z.input<typeof request>, ports: { readonly read: (digest: string) => Promise<string>; readonly expired: () => boolean }, minimumEpoch = input.compatibilityEpoch) => {
   const current = parseManagedLifecycleStore(input); const selected = request.parse(selection); const owner = current.owner;
   const artifact = async (identity: string) => { const bytes = await ports.read(identity); if (ports.expired()) throw new Error("managed release history inspection expired"); if (createHash("sha256").update(bytes).digest("hex") !== identity) throw new Error("managed release history artifact integrity failed"); return bytes; };
   // eslint-disable-next-line functional/no-let -- walks authenticated decreasing history under the caller's bounded metadata window
@@ -37,8 +37,8 @@ export const managedHistorySelection = async (input: ManagedLifecycleStore, sele
       if (selected.restore !== null) { if (pointer.record === selected.restore) return pointer; continue; }
       const release = readManagedHistoryRelease(await artifact(pointer.record), owner, pointer);
       const application = release.source.application;
-      if (pointer.epoch === current.compatibilityEpoch && pointer.plan === selected.plan) return pointer;
-      if (pointer.epoch < current.compatibilityEpoch && application.commit === selected.commit) historical = pointer;
+      if (pointer.epoch === minimumEpoch && pointer.plan === selected.plan) return pointer;
+      if (pointer.epoch < minimumEpoch && application.commit === selected.commit) historical = pointer;
     }
     if (cursor.history === null) { if (selected.restore !== null) throw new Error("unknown managed restore record"); return Object.freeze({ historical }); }
     cursor = readPrior(await artifact(cursor.history), cursor);

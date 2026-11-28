@@ -7,3 +7,7 @@ export type ManagedPlanPort = {
   readonly volumeKeys: (registration: RegistrationGeneration, commit: string, artifact: string) => Promise<readonly string[]>;
   readonly preview: (registration: RegistrationGeneration, commit: string, artifact: string, volumes: readonly OwnedVolume[]) => Promise<ManagedApplicationPlan>;
 };
+
+export type ManagedRecreationPlanPort = {
+  readonly rebind: (verified: ManagedApplicationPlan, registration: RegistrationGeneration) => Promise<ManagedApplicationPlan>;
+};

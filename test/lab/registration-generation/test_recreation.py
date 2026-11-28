@@ -167,6 +167,7 @@ class RecreatedPublisher(unittest.TestCase):
         self.assertEqual(perform(), {"status": "verified"})
         self.assertEqual(perform(), {"status": "terminal", "outcome": "success"})
         self.assertEqual(len(set(generations)), 1)
+        self.assertEqual(storage.stage_initial_registration(self.fd, **publication), generations[0])
         self.assert_published()
 
 

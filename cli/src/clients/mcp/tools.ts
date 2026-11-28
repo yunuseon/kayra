@@ -39,6 +39,7 @@ export const reaches = {
   "app.deployment.prepare": { tool: "app_deployment_prepare" },
   "app.deployment.restore": { tool: "app_deployment_restore" },
   "app.deployment.forward": { tool: "app_deployment_forward" },
+  "app.deployment.recreate": { tool: "app_deployment_recreate" },
   "app.deployment.health": { tool: "app_deployment_health" },
   "app.deployment.pins": { tool: "app_deployment_pins" },
   "app.deployment.status": { tool: "app_deployment_status" },

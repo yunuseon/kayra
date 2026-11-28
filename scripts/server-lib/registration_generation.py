@@ -285,8 +285,56 @@ def publish_staged_recreated_registration(root, metadata, request, private_gid, 
         generation, payload = _read_staged(staged, expected["app"])
         _require(generation == expected["registrationGeneration"], "recreated staged registration generation conflicts")
         os.fsync(staged)
-    return publish_recreated(root, expected, **payload, private_gid=private_gid, ownership=ownership,
-                             infrastructure=infrastructure, withdrawal=withdrawal, deadline=deadline)
+    result = publish_recreated(root, expected, **payload, private_gid=private_gid, ownership=ownership,
+                               infrastructure=infrastructure, withdrawal=withdrawal, deadline=deadline)
+    # The host's app lock spans publication and promotion. Keep later ordinary
+    # registration replays bound to this generation and its immutable payload.
+    with _staging(root, expected["app"], create=True) as directory:
+        lock = os.open(".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=directory)
+        try:
+            _check(lock, 0o600, 0, False)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                current_generation, current_payload = _read_staged(directory, expected["app"])
+            except FileNotFoundError:
+                current_generation, current_payload = None, None
+            if current_generation == generation:
+                _require(current_payload == payload, "recreation staging conflicts with the published inputs")
+            else:
+                previous = _withdrawal_identity(withdrawal)["registration"]
+                _require(current_generation in (None, previous["registrationGeneration"]), "recreation staging predecessor disagrees")
+                temporary = ".request-" + uuid.uuid4().hex + ".tmp"
+                _new_file(directory, temporary, _encoded({"generation": generation, **payload}, MAX_STAGED_BYTES), 0o400)
+                os.replace(temporary, "request.json", src_dir_fd=directory, dst_dir_fd=directory)
+            os.fsync(directory)
+        finally:
+            os.close(lock)
+    return result
+
+
+def verify_recreation_inputs(root, app, removal, configuration, secrets, private_gid):
+    """Check the retained operator inputs before accepting new custody."""
+    configuration = _values(configuration)
+    secrets = _values(secrets)
+    with _app(root, {"app": app}, private_gid) as (public, _, private_generations):
+        if _pointer(public, app) is not None:
+            # Replays bind the current publication to the exact staged request.
+            return
+        recorded = _withdrawal(public)
+        completed = _withdrawal(public, "withdrawn.json")
+        _require(recorded is not None and recorded == completed and recorded["request"] == removal
+                 and recorded["registration"]["app"] == app, "recreation requires a completed withdrawal")
+        old = recorded["registration"]
+        with _dir(private_generations, old["registrationGeneration"], 0o550, private_gid) as directory:
+            _require(_metadata(_decode(_read_file(directory, "manifest.json", 0o440, private_gid))) == old,
+                     "recreation predecessor changed")
+            config = _values(_decode(_read_file(directory, "configuration.json", 0o440, private_gid)))
+            _require(config == configuration, "recreation requires the previous application configuration")
+            with _dir(directory, "secrets", 0o550, private_gid) as values:
+                _require(set(os.listdir(values)) == set(secrets), "recreation requires the previous secret keys")
+                for name, value in secrets.items():
+                    _require(_read_file(values, name, 0o440, private_gid) == value.encode("utf8"),
+                             "recreation requires the previous secret values")
 
 
 @contextlib.contextmanager

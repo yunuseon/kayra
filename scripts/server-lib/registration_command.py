@@ -182,6 +182,7 @@ def register(root, gid, request, ctl, platform_ctl=None, recreation=None, recrea
     else:
         storage._require(recreation_ctl is not None and request["registration"]["runtime"] == "swarm",
                          "recreation requires the managed Swarm registration owner")
+        storage.verify_recreation_inputs(root, app, recreation["removal"], request["configuration"], request["secrets"], gid)
         generation = storage.stage_initial_registration(root, **request, recreation=recreation["request"])
         encoded = base64.urlsafe_b64encode(storage._encoded({"app": app, "generation": generation, **recreation})).rstrip(b"=").decode("ascii")
         reservation = recreation_ctl("recreate-registration", encoded)
@@ -344,6 +345,8 @@ def main():
                                       lambda *values: docker_platform_control(args.platform_dir, *values),
                                       recreation=recreation,
                                       recreation_ctl=lambda *values: _docker_control(args.platform_dir, "lifecycle", 95, *values))
+                    if recreation is not None:
+                        result = _docker_control(args.platform_dir, "lifecycle", 95, "recreate-release", app, recreation["request"])
             else:
                 result = execute(root, args.mode, args.private_gid, request)
         print(json.dumps(result))

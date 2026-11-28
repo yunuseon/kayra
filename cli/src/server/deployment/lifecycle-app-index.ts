@@ -6,6 +6,9 @@ import type { ManagedPurge } from "./managed-purge-state.ts";
 import { managedRecreationBaseline } from "./managed-recreation-baseline.ts";
 import { managedRecreationIntentSchema, managedRecreationRequestSchema, managedRecreationVolumeCatalog } from "./managed-recreation-intent.ts";
 import type { ManagedRecreationIntent } from "./managed-recreation-intent.ts";
+import { validateRecreatedHistory } from "./managed-recreation-history.ts";
+import { recreatedManagedPlan } from "./managed-recreation-plan.ts";
+import type { ManagedRecreationPlanPort } from "../../contracts/managed-plan.ts";
 import { parseRegistrationWithdrawal, parseRegistrationWithdrawalIdentity } from "../../contracts/registration-withdrawal.ts";
 import { managedRemovalAccounting } from "./managed-removal-accounting.ts";
 import { managedRemovalEffects, managedRemovalInventoryDigest, readManagedRemovalProgress } from "./managed-removal-effects.ts";
@@ -420,8 +423,25 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     useManagedRead(app, ports, async (state, source, indexed, reservation) => managedDeploymentStatus(state, source, ports,
       reservation === undefined ? undefined : { reservation, cleanupHeld: await forwardCleanupHeld(indexed, reservation) }));
 
-  const useManaged = <T>(app: string, ports: IndexedManagedRuntime, use: (controller: ReturnType<typeof indexedManagedLifecycle>) => Promise<T>) => useIndexed(app, async (store, indexed) => {
-    if (indexed.lineage !== undefined) throw new Error("managed recreation requires its verified release rebind");
+  const pendingRebind = (indexed: IndexEntry, run?: string) => {
+    const lineage = indexed.lineage;
+    return lineage?.rebind?.verified === null && (run === undefined || run === lineage.reservation.request) ? lineage.reservation.request : undefined;
+  };
+  const retainedRebindSource = async (indexed: IndexEntry, ports: ManagedDeploymentReadPort) => {
+    const lineage = indexed.lineage;
+    if (lineage?.rebind === undefined) throw new Error("managed recreation rebind is unavailable");
+    const digest = lineage.rebind.source;
+    const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(digest));
+    if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed recreation rebind evidence unavailable");
+    const source = parseManagedLifecycleSource(JSON.parse(bytes));
+    if (JSON.stringify(source) !== bytes || source.run !== lineage.reservation.request || source.recreation?.archive !== lineage.archive) {
+      throw new Error("managed recreation rebind source disagrees");
+    }
+    return source;
+  };
+
+  const useManaged = <T>(app: string, ports: IndexedManagedRuntime, use: (controller: ReturnType<typeof indexedManagedLifecycle>, store: EnvelopeStore, indexed: IndexEntry) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+    if (indexed.lineage !== undefined && indexed.lineage.rebind === undefined) throw new Error("managed recreation requires its verified release rebind");
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
     const path = join(appDirectory(indexed), "managed"); await requireDirectory(path); const rootJournal = await journals(path, indexed.managedRoot === "ready" ? "existing" : "initialize");
@@ -432,14 +452,28 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         ownership: ownership.value, envelope: store, journal: rootJournal, indexedOwner,
         preparedBuild: async (source) => {
           const state = await serialIndex(readIndex); const plan = source.candidate;
+          if (source.recreation !== undefined) return state.apps.find((entry) => entry.app === app)?.lineage?.rebind?.source === managedLifecycleSourceDigest(source);
           if (!state.builds.some((build) => build.artifact === plan.artifact && build.commit === plan.commit && JSON.stringify(build.registration) === JSON.stringify(plan.infrastructure.registration))) return false;
+          if (indexed.lineage !== undefined && source.restore === null) {
+            const baseline = parseManagedLifecycleStore(await rootJournal.read());
+            const expires = performance.now() + 10_000;
+            await validateRecreatedHistory(indexed, plan.commit, baseline.compatibilityEpoch, {
+              read: ports.read, expired: () => performance.now() >= expires,
+            });
+          }
           const bytes = await ports.read(plan.artifact); return createHash("sha256").update(bytes).digest("hex") === plan.artifact;
         },
         ready: (root, source) => serialIndex(async () => {
           const state = await readIndex(); const entry = state.apps.find((item) => item.app === app); const gate = managedIndexGate({ owner: entry, envelope: await store.read(), source });
           if (!gate.ok || root.operation.source !== gate.value.request.source || root.owner.dataOwner !== ownership.value.dataOwner) throw new Error("managed root initialization lacks indexed ownership");
-          if (entry?.managedRoot === "ready") return;
-          await journal.write({ ...state, apps: state.apps.map((item) => item.app === app ? { ...item, managedRoot: "ready" } : item) });
+          const lineage = entry?.lineage;
+          const rebind = lineage?.rebind;
+          const promotion = source.recreation !== undefined && root.operation.phase === "complete" && root.operation.outcome === "deployed" &&
+            root.active?.run === source.run && rebind?.verified === null && rebind.source === root.operation.source ? root.active.record : undefined;
+          if (entry?.managedRoot === "ready" && promotion === undefined) return;
+          await journal.write({ ...state, apps: state.apps.map((item) => item.app === app ? { ...item, managedRoot: "ready",
+            ...(promotion === undefined || lineage === undefined || rebind === undefined ? {} : { lineage: { ...lineage, rebind: { ...rebind, verified: promotion } } }),
+          } : item) });
         }),
         admission: (read) => {
           const accounting = (state: Awaited<ReturnType<typeof readIndex>>) => ({ resources: state.resources, bindings: state.managedBindings ?? [] });
@@ -473,7 +507,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const allocation = managedVolumePreparation(volumeJournal, ownership.value, { native: data.native, now: ports.now });
         return Object.freeze({ ...ports, allocations: allocation, services: data.workloads(allocation.receipts) });
       })();
-      const controller = indexedManagedLifecycle(context, bound); await controller.synchronize(); return await use(controller);
+      const controller = indexedManagedLifecycle(context, bound); await controller.synchronize(); return await use(controller, store, indexed);
     } finally { try { if (volumeJournal !== undefined) await volumeJournal.close(); } finally { await rootJournal.close(); } }
   });
 
@@ -602,7 +636,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   /** Managed builders wait outside the application writer. Only intent and authenticated receipt publication hold that writer. */
   const prepareManagedBuild = async (app: string, commit: string, ports: BuildPorts, forward?: ForwardBuildContext) => {
     const prepared = await useIndexed(app, async (store, indexed) => {
-      if (indexed.lineage !== undefined) throw new Error("managed recreation requires its verified release rebind");
+      if (indexed.lineage !== undefined && indexed.lineage.rebind?.verified == null) throw new Error("managed recreation requires its verified release rebind");
       if (indexed.protocol !== "managed-v3" || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("managed build scope unavailable");
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       if (envelope?.registrationAllocation?.runtime !== "swarm") throw new Error("managed build requires its registered Swarm runtime");
@@ -730,6 +764,11 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   const executionContext = (app: string, ports: ManagedDeploymentReadPort, run?: string, pendingOnly = true) => useIndexed(app, async (store, indexed) => {
     if (indexed.protocol !== "managed-v3" || run !== undefined && !z.uuid().safeParse(run).success) throw new Error("managed execution scope unavailable");
     const envelope = await store.read(); const request = run === undefined ? envelope?.managed?.at(-1) : envelope?.managed?.find((item) => item.run === run);
+    if (request === undefined && run !== undefined && pendingOnly && pendingRebind(indexed, run) !== undefined && envelope?.fence?.lifecycle.phase === "registered") {
+      const source = await retainedRebindSource(indexed, ports);
+      const scope = managedIndexScope({ owner: indexed, envelope, source });
+      return scope.ok && ports.now() < scope.value.description.admissionDeadline ? managedSourceContext(source) : undefined;
+    }
     if (envelope?.removalTombstone !== undefined || request === undefined || pendingOnly && request.completion !== null) return undefined;
     const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(request.source));
     if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== request.source) throw new Error("managed execution source unavailable");
@@ -958,7 +997,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return managedRestorePlan(readManagedHistoryRelease(bytes, state.owner, selected));
     }),
     proposeManagedDeployment: (app: string, candidateInput: ManagedApplicationPlan, run: string, ports: ManagedDeploymentReadPort & RetainedInputsPort, restore: string | null = null) => useIndexed(app, async (store, indexed) => {
-      if (indexed.lineage !== undefined) throw new Error("managed recreation requires its verified release rebind");
+      if (indexed.lineage !== undefined && indexed.lineage.rebind?.verified == null) throw new Error("managed recreation requires its verified release rebind");
       const checked = parseManagedApplicationPlan(candidateInput); const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner }); const envelope = await store.read();
       if (!checked.ok || !ownership.ok || !z.uuid().safeParse(run).success || indexed.protocol !== "managed-v3" || indexed.managedVolumes !== 1 || indexed.managedRoot === undefined || envelope === undefined) throw new Error("managed proposal scope unavailable");
       const candidate = checked.value; if (JSON.stringify(candidate.infrastructure.ownership) !== JSON.stringify(ownership.value)) throw new Error("managed proposal candidate lacks indexed ownership"); const existing = envelope.managed?.find((item) => item.run === run);
@@ -1250,6 +1289,58 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
           return lineage;
         });
       }),
+    reserveManagedRebind: (app: string, request: string, ports: ManagedDeploymentReadPort & ManagedRecreationPlanPort & Pick<BuildPorts, "retain">) =>
+      useIndexed(app, async (store, indexed) => {
+        const lineage = indexed.lineage;
+        if (lineage?.reservation.request !== request) throw new Error("managed recreation rebind request disagrees");
+        const deadline = ports.now() + 90_000;
+        const read = async (digest: string) => {
+          const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(digest));
+          if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== digest) throw new Error("managed recreation rebind evidence unavailable");
+          return bytes;
+        };
+        if (lineage.rebind !== undefined) return retainedRebindSource(indexed, ports);
+        const { reservation } = lineage;
+        const envelope = await store.read();
+        const registration = verifiedRegistration(app, envelope);
+        if (envelope === undefined) throw new Error("managed recreation requires its verified successor registration");
+        const fence = envelope.fence;
+        if (registration.registrationGeneration !== reservation.targetGeneration || fence?.lifecycle.phase !== "registered" ||
+          fence.lifecycle.active !== null || indexed.managedRoot !== "empty" || envelope.managed?.length) throw new Error("managed recreation requires its verified successor registration");
+        const snapshot = parseManagedLifecycleStore(JSON.parse(await read(reservation.checkpoint)));
+        if (JSON.stringify(snapshot.owner) !== JSON.stringify(reservation.predecessor) || snapshot.compatibilityEpoch !== reservation.epoch ||
+          snapshot.active?.epoch !== reservation.epoch || snapshot.active.record !== reservation.release ||
+          snapshot.operation.phase !== "complete") throw new Error("managed recreation archived release disagrees");
+        const old = readManagedHistoryRelease(await read(reservation.release), snapshot.owner, snapshot.active).source.application;
+        const rebound = await boundedManagedRead(deadline, ports.now, () => ports.rebind(old, registration));
+        if (rebound === undefined || JSON.stringify(rebound.infrastructure.registration) !== JSON.stringify(registration)) throw new Error("managed recreation rebind unavailable");
+        const checked = recreatedManagedPlan(old, {
+          infrastructure: rebound.infrastructure, host: rebound.host, grants: rebound.grants, hosts: rebound.hosts,
+          secrets: rebound.secrets, configurationIdentity: rebound.configurationIdentity, policy: rebound.policy,
+        });
+        if (!checked.ok || JSON.stringify(checked.value) !== JSON.stringify(rebound)) throw new Error("managed recreation rebind changes the verified workload");
+        const createdAt = ports.now();
+        if (createdAt >= deadline) throw new Error("managed recreation rebind preparation expired");
+        const source = parseManagedLifecycleSource({
+          version: 2, run: request, action: lifecycleActionId(fence, fence.nextAction), createdAt, candidate: checked.value,
+          previous: null, retained: [], retired: [], recreation: { archive: lineage.archive, release: reservation.release,
+            predecessor: reservation.predecessor.incarnation, epoch: reservation.epoch },
+        });
+        const digest = managedLifecycleSourceDigest(source);
+        if (await boundedManagedRead(deadline, ports.now, () => ports.retain(JSON.stringify(source))) !== digest) {
+          throw new Error("managed recreation rebind retention failed");
+        }
+        await serialIndex(async () => {
+          const index = await readIndex();
+          if (JSON.stringify(index.apps.find((item) => item.app === app)) !== JSON.stringify(indexed) || ports.now() >= deadline) {
+            throw new Error("managed recreation rebind owner changed");
+          }
+          await journal.write({ ...index, apps: index.apps.map((item) => item.app === app ? {
+            ...item, lineage: { ...lineage, rebind: { source: digest, verified: null } },
+          } : item) });
+        });
+        return source;
+      }),
     managedPurgeIntent: (app: string, removal: string, ports: ManagedPurgePorts) =>
       usePurgeScope(app, removal, ports, ({ envelope }) => Promise.resolve(envelope.managedPurge)),
     requestManagedPurge: (app: string, removal: string, request: string, operator: ManagedPurge["operator"], ports: ManagedPurgePorts) =>
@@ -1284,7 +1375,12 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     observeManagedRemovalCompletion: (app: string, request: string, ports: ManagedRemovalEffectsPorts) =>
       useRemovalEffects(app, request, ports, false, (owner) => owner.observeCompletion()),
     requestManagedDeployment: (app: string, source: ManagedLifecycleSource, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.prepare(source)),
-    tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.tick(run)),
+    tickManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, async (controller, store, indexed) => {
+      if (pendingRebind(indexed, run) !== undefined && !(await store.read())?.managed?.some((item) => item.run === run)) {
+        await controller.prepare(await retainedRebindSource(indexed, ports));
+      }
+      return controller.tick(run);
+    }),
     cancelManagedDeployment: (app: string, run: string, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.cancel(run)),
     resolveManagedMigration: (app: string, request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: IndexedManagedRuntime) => useManaged(app, ports, (controller) => controller.resolve(request, actor)),
     managedMigrationAudit: (app: string, run: string, step: string, ports: ManagedDeploymentReadPort) => useIndexed(app, async (store, indexed) => {
@@ -1344,10 +1440,14 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     },
     pendingManagedDeployments: async () => {
       if (closed) throw new Error("lifecycle app index is closed"); const snapshot = await serialIndex(readIndex);
-      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useIndexed(app.app, async (store) => {
+      const work = await Promise.all(snapshot.apps.filter((app) => app.phase === "ready" && app.protocol === "managed-v3").map((app) => useIndexed(app.app, async (store, indexed) => {
         const envelope = await store.read();
         const fenced = envelope?.fence?.lifecycle.phase !== "registered" || envelope.forward !== undefined;
-        return Object.freeze(fenced ? [] : (envelope.managed ?? []).filter((item) => item.completion === null).map((item) => Object.freeze({ app: app.app, run: item.run })));
+        if (fenced) return Object.freeze([]);
+        const requests = envelope.managed ?? [];
+        const rebind = pendingRebind(indexed);
+        const pending = requests.filter((item) => item.completion === null).map((item) => Object.freeze({ app: app.app, run: item.run }));
+        return Object.freeze(rebind === undefined || requests.some((item) => item.run === rebind) ? pending : [...pending, Object.freeze({ app: app.app, run: rebind })]);
       })));
       return Object.freeze(work.flat());
     },
@@ -1911,9 +2011,12 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
     },
     registrationProvisioning,
     registrationOwnership: async (app: string, ticket: string, generation: string) => (await registrationProvisioning(app, ticket, generation)).reference,
-    reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useIndexed(app, (store, owner) => {
+    reserveRegistration: (app: string, generation?: string, runtime: Runtime = "compose") => useIndexed(app, async (store, owner) => {
       if (owner.protocol === "managed-v3" && runtime !== "swarm") throw new Error("managed-v3 registration requires Swarm");
-      if (owner.lineage !== undefined) throw new Error("managed recreation owns the successor registration");
+      if (owner.lineage !== undefined && (generation !== owner.lineage.reservation.targetGeneration ||
+        (await store.read())?.registrationReceipt?.metadata.registrationGeneration !== generation)) {
+        throw new Error("managed recreation owns the successor registration");
+      }
       return store.reserveRegistration(generation, runtime);
     }),
     reserveRecreatedRegistration: (app: string, request: string, generation: string, ports: ManagedDeploymentReadPort & {

@@ -44,39 +44,60 @@
     - name: Build and deploy the memory-exhausting candidate through the existing coordinator
       ansible.builtin.command:
         argv: ["{{ oom_source.path }}/node", "{{ oom_source.path }}/test/lab/swarm-platform/candidate-oom.mjs", "{{ fixture_app }}", "{{ fixture_commit }}", "{{ fixture_request }}", "{{ oom_source.path }}/results"]
+      register: oom_observer
       changed_when: true
+      failed_when: false
 
-    - name: Require synchronized clocks after the bounded OOM experiment
+    - name: Read the VM clock immediately after the bounded OOM experiment
       ansible.builtin.command:
         argv: [date, "+%s"]
       register: oom_after_clock
       changed_when: false
       check_mode: false
-      failed_when: ((oom_after_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Capture the host clock beside the VM observation
+      ansible.builtin.set_fact:
+        oom_after_host_epoch: "{{ lookup('pipe', 'date +%s') | int }}"
 
     - name: Retain experiment clock observations
       ansible.builtin.copy:
-        content: "{{ {'beforeVmEpochSeconds': oom_before_clock.stdout | int, 'afterVmEpochSeconds': oom_after_clock.stdout | int} | to_json }}\n"
+        content: "{{ {'beforeVmEpochSeconds': oom_before_clock.stdout | int, 'afterVmEpochSeconds': oom_after_clock.stdout | int, 'afterHostEpochSeconds': oom_after_host_epoch | int} | to_json }}\n"
         dest: "{{ report_path }}.clock.json"
         mode: "0600"
       delegate_to: localhost
       become: false
 
-    - name: Retain the candidate OOM result
-      ansible.builtin.fetch:
-        src: "{{ oom_source.path }}/results/result.json"
-        dest: "{{ report_path }}"
-        flat: true
+    - name: Check for retained candidate OOM evidence
+      ansible.builtin.stat:
+        path: "{{ oom_source.path }}/results"
+      register: oom_evidence
 
     - name: Archive raw candidate OOM evidence
       ansible.builtin.command:
         argv: [tar, -cf, "{{ oom_source.path }}/evidence.tar", -C, "{{ oom_source.path }}/results", .]
       changed_when: true
+      when: oom_evidence.stat.isdir | default(false)
 
     - name: Retain the raw candidate OOM evidence
       ansible.builtin.fetch:
         src: "{{ oom_source.path }}/evidence.tar"
         dest: "{{ report_path }}.tar"
+        flat: true
+      when: oom_evidence.stat.isdir | default(false)
+
+    - name: Require the candidate OOM observer to pass
+      ansible.builtin.assert:
+        that: oom_observer.rc == 0
+        fail_msg: "Candidate OOM observation failed. Raw evidence, when available, is retained at {{ report_path }}.tar."
+
+    - name: Require synchronized clocks after the bounded OOM experiment
+      ansible.builtin.assert:
+        that: ((oom_after_clock.stdout | int) - (oom_after_host_epoch | int)) | abs <= 5
+
+    - name: Retain the candidate OOM result
+      ansible.builtin.fetch:
+        src: "{{ oom_source.path }}/results/result.json"
+        dest: "{{ report_path }}"
         flat: true
 
     - name: Remove only the successful candidate OOM observer

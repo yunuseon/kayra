@@ -813,16 +813,22 @@ if [ "$indexed_registration" = true ]; then
         echo "✓ inherited image volume refused without accepting a rollout or creating app containers/volumes"
 
         oom_request="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+        oom_outcome=0
         ANSIBLE_CONFIG="${KAYRA_ROOT}/ansible/ansible.cfg" ansible-playbook \
             -i "servers/${server}/inventory.ini" \
             "${KAYRA_ROOT}/test/lab/swarm-platform/candidate-oom.yml" \
             -e "kayra_root=${KAYRA_ROOT}" -e fixture_app=rollout-complete \
             -e "fixture_commit=${complete_oom}" -e "fixture_request=${oom_request}" \
-            -e "report_path=${work}/candidate-oom.json" >> "$log" 2>&1 || die "candidate memory exhaustion and automatic recovery"
-        cp "${work}/candidate-oom.json" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.json"
-        cp "${work}/candidate-oom.json.tar" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.tar"
-        cp "${work}/candidate-oom.json.source.json" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.source.json"
-        cp "${work}/candidate-oom.json.clock.json" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.clock.json"
+            -e "report_path=${work}/candidate-oom.json" >> "$log" 2>&1 || oom_outcome=$?
+        for suffix in json json.source.json json.clock.json; do
+            if [ -f "${work}/candidate-oom.${suffix}" ]; then
+                install -m 600 "${work}/candidate-oom.${suffix}" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.${suffix}"
+            fi
+        done
+        if [ -f "${work}/candidate-oom.json.tar" ]; then
+            install -m 600 "${work}/candidate-oom.json.tar" "/tmp/kayra-swarm-platform-${vm_name}.candidate-oom.tar"
+        fi
+        [ "$oom_outcome" -eq 0 ] || die "candidate memory exhaustion and automatic recovery"
         echo "✓ container OOM recovered the previous release without promoting the failed candidate"
 
         prepare_admission_inputs "" "${work}/admission-inputs.json" 1024m 1073741824

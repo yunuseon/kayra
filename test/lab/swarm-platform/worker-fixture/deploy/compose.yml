@@ -1,0 +1,44 @@
+services:
+  db:
+    image: ${DB_IMAGE:?}
+    environment:
+      POSTGRES_DB: lab
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - type: volume
+        source: data
+        target: /var/lib/postgresql
+        volume: {nocopy: true}
+    deploy:
+      resources:
+        limits: {memory: 192m, cpus: "0.25"}
+        reservations: {memory: 96m, cpus: "0.125"}
+    healthcheck:
+      test: [CMD, pg_isready, -h, "127.0.0.1", -U, lab, -d, lab]
+      interval: 1s
+      timeout: 1s
+      start_period: 10s
+      retries: 5
+    stop_grace_period: 30s
+  worker:
+    image: ${WORKER_IMAGE:?}
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?}
+      RELEASE: A
+      IDEMPOTENT: "true"
+    deploy:
+      resources:
+        limits: {memory: 128m, cpus: "0.25"}
+        reservations: {memory: 64m, cpus: "0.125"}
+    healthcheck:
+      test: [CMD, node, /app/fixture.mjs, health]
+      interval: 1s
+      timeout: 1s
+      start_period: 5s
+      retries: 3
+    stop_grace_period: 30s
+volumes:
+  data: {}

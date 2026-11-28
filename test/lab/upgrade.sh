@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet | --managed-forward] [--egress-mtu <1280-1500>] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet | --managed-forward | --managed-workers] [--egress-mtu <1280-1500>] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -38,6 +38,7 @@ swarm_host=false
 managed_rollouts=false
 managed_fleet=false
 managed_forward=false
+managed_workers=false
 egress_mtu=""
 vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
@@ -49,13 +50,14 @@ while [ $# -gt 0 ]; do
         --managed-rollouts) managed_rollouts=true; indexed_registration=true; swarm_host=true; shift ;;
         --managed-fleet) managed_fleet=true; shift ;;
         --managed-forward) managed_forward=true; shift ;;
+        --managed-workers) managed_workers=true; shift ;;
         --egress-mtu) [ $# -ge 2 ] || { echo "--egress-mtu requires a value" >&2; exit 2; }; egress_mtu="$2"; shift 2 ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet | --managed-forward] [--egress-mtu <1280-1500>] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet | --managed-forward | --managed-workers] [--egress-mtu <1280-1500>] [--keep]" >&2; exit 2 ;;
     esac
 done
-if { [ "$managed_fleet" = true ] || [ "$managed_forward" = true ]; } && { [ "$indexed_registration" = true ] || [ "$swarm_host" = true ]; }; then
-    echo "Managed fleet and forward labs use the production provisioning path in their own VM" >&2
+if { [ "$managed_fleet" = true ] || [ "$managed_forward" = true ] || [ "$managed_workers" = true ]; } && { [ "$indexed_registration" = true ] || [ "$swarm_host" = true ]; }; then
+    echo "Managed fleet, forward and worker labs use the production provisioning path in their own VM" >&2
     exit 2
 fi
 if [ -n "$egress_mtu" ] && { ! [[ "$egress_mtu" =~ ^[0-9]{4}$ ]] || [ "$egress_mtu" -lt 1280 ] || [ "$egress_mtu" -gt 1500 ]; }; then
@@ -201,6 +203,24 @@ cd "$fleet"
 # ── Waiting on runs, and asking the app what it serves ──────────────────────
 # The deployer's ctl as text, which every kayra the lab runs has: what `kayra app …` draws from it may change.
 ctl() { kayra_cmd ssh "$server" -- cd /opt/platform '&&' docker compose exec -T deployer kayra-deployer ctl "$@"; }
+new_uuid() { python3 -c 'import uuid; print(uuid.uuid4())'; }
+await_managed_phase() {
+    local app="$1" run="$2" phase="$3" report="$4"
+    for _ in $(seq 1 110); do
+        if ctl lifecycle status "$app" > "$report" 2>> "$log"; then
+            if jq -e --arg run "$run" --arg phase "$phase" '.operation.run == $run and .operation.phase == $phase' "$report" >/dev/null; then
+                install -m 600 "$report" "/tmp/kayra-swarm-platform-${vm_name}.$(basename "$report")"
+                return 0
+            fi
+            if jq -e --arg run "$run" '.operation.run == $run and (.operation.phase == "held" or .operation.phase == "complete")' "$report" >/dev/null; then
+                install -m 600 "$report" "/tmp/kayra-swarm-platform-${vm_name}.$(basename "$report")"
+                die "$app reached an unexpected terminal phase"
+            fi
+        fi
+        sleep 2
+    done
+    die "$app did not reach ${phase}"
+}
 newest_run() { ctl runs sample 2>/dev/null | head -1; }
 # Waits for a run newer than $1 to end; prints its line (id state sha why what).
 await_run() {
@@ -485,14 +505,14 @@ grep -q " poll " <<< "$run" || die "v4 deployed, but not by the poll: ${run}"
 expect_serves v4
 echo "✓ a push with no webhook deployed by deploy_poll"
 
-if [ "$swarm_host" = true ] || [ "$managed_fleet" = true ] || [ "$managed_forward" = true ]; then
+if [ "$swarm_host" = true ] || [ "$managed_fleet" = true ] || [ "$managed_forward" = true ] || [ "$managed_workers" = true ]; then
     step "6a  explicit Swarm host setup alongside Compose"
     KAYRA_LAB_ADVERTISE_ADDRESS="$address" yq -i '.experimental_swarm = {
         "enabled": true, "advertise_address": strenv(KAYRA_LAB_ADVERTISE_ADDRESS),
         "memory_bytes": 3221225472, "cpu_millicores": 2000,
         "platform_memory_bytes": 1073741824, "platform_cpu_millicores": 500
     }' "${fleet}/servers/${server}/vars.yml"
-    if [ "$managed_fleet" = true ] || [ "$managed_forward" = true ]; then
+    if [ "$managed_fleet" = true ] || [ "$managed_forward" = true ] || [ "$managed_workers" = true ]; then
         yq -i '.managed_swarm_rollouts = true' "${fleet}/servers/${server}/vars.yml"
     fi
     kayra_cmd plan "$server" >> "$log" 2>&1 || die "previewing explicit Swarm setup"
@@ -533,13 +553,9 @@ if [ "$managed_fleet" = true ]; then
     ctl lifecycle prepare managed-fleet "$fleet_commit" "$fleet_request" | jq -e --arg run "$fleet_request" '.version == 3 and .request == $run' >/dev/null || die "managed fleet deployment acceptance"
     await_fleet_release() {
         local request="$1" commit="$2" report="$3"
-        for _ in $(seq 1 80); do
-            ctl lifecycle status managed-fleet > "$report"
-            if jq -e --arg run "$request" --arg sha "$commit" '.operation.run == $run and .operation.phase == "complete" and .operation.outcome == "deployed" and .verifiedActive.commit == $sha' "$report" >/dev/null; then return 0; fi
-            jq -e '.operation.phase == "held"' "$report" >/dev/null && die "managed fleet deployment held"
-            sleep 2
-        done
-        die "managed fleet release did not converge"
+        await_managed_phase managed-fleet "$request" complete "$report"
+        jq -e --arg sha "$commit" '.operation.outcome == "deployed" and .verifiedActive.commit == $sha' "$report" >/dev/null ||
+            die "managed fleet release did not converge"
     }
     await_fleet_release "$fleet_request" "$fleet_commit" "${work}/fleet-status.json"
     fleet_container() {
@@ -633,33 +649,16 @@ if [ "$managed_forward" = true ]; then
     FLEET_REPO="http://${host_ip}:${port}/lab/managed-forward.git" yq -i '.apps += [{"name": "managed-forward", "ref": "main", "path": ".", "repo": strenv(FLEET_REPO),
         "runtime": "swarm", "grants": {"memory_bytes": 402653184, "cpu_millicores": 750, "maintenance": true}}]' "${fleet}/servers/${server}/server.yml"
     kayra_cmd apps "$server" >> "$log" 2>&1 || die "registering the forward recovery fixture"
-    new_uuid() { python3 -c 'import uuid; print(uuid.uuid4())'; }
     forward_prepare() {
         ctl build managed-forward "$1" | jq -e --arg commit "$1" '.commit == $commit' >/dev/null || die "retaining the forward lab build"
         ctl lifecycle prepare managed-forward "$1" "$2" | jq -e --arg run "$2" '.version == 3 and .request == $run' >/dev/null || die "accepting the forward lab deployment"
-    }
-    await_forward() {
-        local run="$1" phase="$2" report="$3"
-        for _ in $(seq 1 110); do
-            if ctl lifecycle status managed-forward > "$report"; then
-                if jq -e --arg run "$run" --arg phase "$phase" '.operation.run == $run and .operation.phase == $phase' "$report" >/dev/null; then
-                    install -m 600 "$report" "/tmp/kayra-swarm-platform-${vm_name}.$(basename "$report")"
-                    return 0
-                fi
-                if jq -e --arg run "$run" '.operation.run == $run and (.operation.phase == "held" or .operation.phase == "complete")' "$report" >/dev/null; then
-                    die "forward fixture reached an unexpected terminal phase"
-                fi
-            fi
-            sleep 2
-        done
-        die "forward fixture did not reach ${phase}"
     }
     forward_response() {
         curl -sf -m 10 --resolve "forward.${domain}:443:${address}" "https://forward.${domain}/version"
     }
     forward_run_a="$(new_uuid)"
     forward_prepare "$forward_base" "$forward_run_a"
-    await_forward "$forward_run_a" complete "${work}/forward-baseline.json"
+    await_managed_phase managed-forward "$forward_run_a" complete "${work}/forward-baseline.json"
     forward_response | jq -e '.release == "A" and .schema == 1' >/dev/null || die "forward fixture baseline"
     database_id() {
         multipass exec "$vm_name" -- sudo docker ps --filter 'label=com.kayra.app=managed-forward' --filter 'label=com.kayra.service=db' --format '{{.ID}}'
@@ -675,7 +674,7 @@ if [ "$managed_forward" = true ]; then
     git -C "$forward_repo" push -q "${served}/lab/managed-forward.git" HEAD:refs/heads/main
     forward_run_b="$(new_uuid)"
     forward_prepare "$forward_b" "$forward_run_b"
-    await_forward "$forward_run_b" held "${work}/forward-held.json"
+    await_managed_phase managed-forward "$forward_run_b" held "${work}/forward-held.json"
     jq -e '.compatibilityEpoch == 1 and .rollback == "data-fenced" and .verifiedActive == null and
         .migrations.phase == "succeeded" and .operation.reason == "verification"' "${work}/forward-held.json" >/dev/null ||
         die "forward fixture did not hold at the incompatible data epoch"
@@ -696,7 +695,7 @@ if [ "$managed_forward" = true ]; then
         die "interrupting the disposable deployer after forward acceptance"
     multipass exec "$vm_name" -- sudo docker compose --project-directory /opt/platform up -d deployer >> "$log" 2>&1 ||
         die "restarting the disposable deployer"
-    await_forward "$forward_run_c" complete "${work}/forward-recovered.json"
+    await_managed_phase managed-forward "$forward_run_c" complete "${work}/forward-recovered.json"
     jq -e --arg commit "$forward_c" '.compatibilityEpoch == 1 and .verifiedActive.commit == $commit and .operation.outcome == "deployed"' "${work}/forward-recovered.json" >/dev/null ||
         die "forward recovery did not certify the requested release"
     [ "$(database_id)" = "$db_before" ] || die "forward recovery replaced the retained dependency"
@@ -708,10 +707,115 @@ if [ "$managed_forward" = true ]; then
         die "forward recovery run history"
     kayra_cmd app deployment forward "$server" managed-forward "$forward_run_b" "$forward_c" "$forward_run_c" --reason "$forward_reason" >> "$log" 2>&1 ||
         die "replaying the accepted forward recovery"
-    await_forward "$forward_run_c" complete "${work}/forward-recovered.json"
+    await_managed_phase managed-forward "$forward_run_c" complete "${work}/forward-recovered.json"
     expect_serves v4
     kayra_cmd verify "$server" >> "$log" 2>&1 || die "fleet verification after forward recovery"
     echo "✓ audited forward recovery repaired a fenced deployment after a deployer restart using the original retained data"
+fi
+
+if [ "$managed_workers" = true ]; then
+    step "6c  app-owned worker drain, redelivery and effects across Swarm rollout"
+    worker_repo="${work}/managed-workers"
+    cp -R "${KAYRA_ROOT}/test/lab/swarm-platform/worker-fixture" "$worker_repo"
+    git -C "$worker_repo" init -q -b main
+    worker_commit() {
+        git -C "$worker_repo" add -A
+        git -C "$worker_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "$1"
+        git -C "$worker_repo" rev-parse HEAD
+    }
+    worker_a="$(worker_commit "Worker A drains and deduplicates through the application ledger")"
+    yq -i '.services.worker.environment.RELEASE = "B" | .services.worker.environment.IDEMPOTENT = "false"' "$worker_repo/deploy/compose.yml"
+    worker_b="$(worker_commit "Worker B has no effect deduplication")"
+    yq -i '.services.worker.environment.RELEASE = "C" | .services.worker.environment.IDEMPOTENT = "true"' "$worker_repo/deploy/compose.yml"
+    worker_c="$(worker_commit "Worker C deduplicates repeat effects in the application")"
+    git clone -q --bare "$worker_repo" "${served}/lab/managed-workers.git"
+    FLEET_REPO="http://${host_ip}:${port}/lab/managed-workers.git" yq -i '.apps += [{"name": "managed-workers", "ref": "main", "path": ".", "repo": strenv(FLEET_REPO),
+        "runtime": "swarm", "grants": {"memory_bytes": 536870912, "cpu_millicores": 1000, "maintenance": false}}]' "${fleet}/servers/${server}/server.yml"
+    SOPS_AGE_KEY_FILE="${work}/age-key.txt" sops set "servers/${server}/secrets.yml" '["app_secrets"]["managed-workers"]'         '{"POSTGRES_PASSWORD":"lab-only-worker","DATABASE_URL":"postgres://lab:lab-only-worker@db:5432/lab"}' >> "$log" 2>&1 ||
+        die "writing disposable worker fixture secrets"
+    kayra_cmd apps "$server" >> "$log" 2>&1 || die "registering the managed worker fixture"
+    for release in "$worker_a" "$worker_b" "$worker_c"; do
+        ctl build managed-workers "$release" | jq -e --arg sha "$release" '.commit == $sha' >/dev/null || die "retaining a worker release"
+    done
+    worker_deploy() {
+        ctl lifecycle prepare managed-workers "$1" "$2" | jq -e --arg run "$2" '.version == 3 and .request == $run' >/dev/null || die "accepting managed worker deployment"
+    }
+    worker_status() {
+        local commit="$1" run="$2" report="$3"
+        await_managed_phase managed-workers "$run" complete "$report"
+        jq -e --arg commit "$commit" '.verifiedActive.commit == $commit and .operation.outcome == "deployed"' "$report" >/dev/null ||
+            die "worker release did not verify"
+    }
+    worker_container() {
+        local id
+        id="$(multipass exec "$vm_name" -- sudo docker ps --filter 'label=com.kayra.app=managed-workers' --filter "label=com.kayra.service=$1" --format '{{.ID}}')"
+        [[ "$id" =~ ^[a-f0-9]{12,64}$ ]] || die "expected one running worker fixture $1 container"
+        printf '%s\n' "$id"
+    }
+    worker_sql() {
+        multipass exec "$vm_name" -- sudo docker exec "$worker_db" psql -U lab -d lab -X -v ON_ERROR_STOP=1 -Atc "$1"
+    }
+    wait_worker_sql() {
+        local query="$1" description="$2"
+        for _ in $(seq 1 120); do
+            [ "$(worker_sql "$query")" != t ] || return 0
+            sleep 0.25
+        done
+        die "$description"
+    }
+    worker_run_a="$(new_uuid)"
+    worker_deploy "$worker_a" "$worker_run_a"
+    worker_status "$worker_a" "$worker_run_a" "${work}/worker-baseline.json"
+    worker_db="$(worker_container db)"
+    worker_old="$(worker_container worker)"
+    worker_service="$(multipass exec "$vm_name" -- sudo docker inspect "$worker_old" --format '{{ index .Config.Labels "com.docker.swarm.service.id" }}')"
+    [[ "$worker_service" =~ ^[a-z0-9]{25}$ ]] || die "worker service identity"
+    worker_sql "INSERT INTO jobs(id,duration_ms) VALUES (0,18000)" >/dev/null
+    wait_worker_sql "SELECT EXISTS (SELECT 1 FROM history WHERE job_id=0 AND kind='claimed' AND release='A')" "worker A never claimed the drain fixture"
+    worker_run_b="$(new_uuid)"
+    worker_deploy "$worker_b" "$worker_run_b"
+    worker_status "$worker_b" "$worker_run_b" "${work}/worker-stop-first.json"
+    [ "$(multipass exec "$vm_name" -- sudo docker service inspect "$worker_service" --format '{{.Spec.UpdateConfig.Order}}')" = stop-first ] || die "worker update order is not stop-first"
+    [ "$(worker_sql "SELECT exists (SELECT 1 FROM jobs WHERE id=0 AND state='done' AND attempts=1) AND
+        (SELECT max(id) FROM history WHERE kind='claimed' AND job_id=0 AND release='A') <
+        (SELECT min(id) FROM history WHERE kind='shutdown-requested' AND release='A') AND
+        (SELECT max(id) FROM history WHERE kind='shutdown-requested' AND release='A') <
+        (SELECT min(id) FROM history WHERE kind='acknowledged' AND job_id=0 AND release='A') AND
+        (SELECT max(id) FROM history WHERE kind='acknowledged' AND job_id=0 AND release='A') <
+        (SELECT min(id) FROM history WHERE kind='drained' AND release='A') AND
+        (SELECT max(id) FROM history WHERE kind='drained' AND release='A') <
+        (SELECT min(id) FROM history WHERE kind='started' AND release='B')")" = t ] ||
+        die "worker A did not acknowledge and drain before B started"
+
+    redeliver_worker_job() {
+        local job="$1" table="$2" expected="$3" killed report
+        worker_sql "INSERT INTO jobs(id,duration_ms,pause_after_effect) VALUES ($job,100,true)" >/dev/null
+        wait_worker_sql "SELECT EXISTS (SELECT 1 FROM history WHERE job_id=$job AND kind='before-ack-paused')" "worker never reached the post-effect crash point"
+        killed="$(worker_container worker)"
+        multipass exec "$vm_name" -- sudo docker kill --signal SIGKILL "$killed" >> "$log" 2>&1 || die "killing the disposable worker task"
+        wait_worker_sql "SELECT EXISTS (SELECT 1 FROM jobs WHERE id=$job AND state='done')" "worker lease did not redeliver and settle the job"
+        [ "$(worker_sql "SELECT (SELECT attempts FROM jobs WHERE id=$job)=2 AND
+            (SELECT count(DISTINCT task) FROM history WHERE job_id=$job AND kind='claimed')=2 AND
+            (SELECT count(*) FROM $table WHERE job_id=$job)=$expected AND
+            (SELECT count(*) FROM history WHERE job_id=$job AND kind='acknowledged')=1")" = t ] ||
+            die "redelivered worker job evidence disagrees"
+        report="${work}/worker-delivery-${job}.json"
+        worker_sql "SELECT json_build_object('job',(SELECT row_to_json(j) FROM jobs j WHERE id=$job),
+            'history',(SELECT json_agg(h ORDER BY id) FROM history h WHERE job_id=$job),
+            'effects',(SELECT json_agg(e ORDER BY attempt) FROM $table e WHERE job_id=$job))" > "$report"
+        install -m 600 "$report" "/tmp/kayra-swarm-platform-${vm_name}.$(basename "$report")"
+    }
+    redeliver_worker_job 1 raw_effects 2
+    worker_run_c="$(new_uuid)"
+    worker_deploy "$worker_c" "$worker_run_c"
+    worker_status "$worker_c" "$worker_run_c" "${work}/worker-idempotent.json"
+    redeliver_worker_job 2 effects 1
+    [ "$(worker_container db)" = "$worker_db" ] || die "worker updates replaced the retained database"
+    worker_sql "SELECT json_agg(history ORDER BY id) FROM history" > "${work}/worker-history.json"
+    install -m 600 "${work}/worker-history.json" "/tmp/kayra-swarm-platform-${vm_name}.worker-history.json"
+    expect_serves v4
+    kayra_cmd verify "$server" >> "$log" 2>&1 || die "fleet verification after worker replacements"
+    echo "✓ the stop-first worker drained before replacement and redelivered killed jobs with app-owned effect handling"
 fi
 
 if [ "$swarm_host" = true ]; then

@@ -2387,3 +2387,12 @@ kills and restarts the deployer, and verifies the repaired release through HTTPS
 with the original database task and one recorded migration attempt. It also
 replays the same request. The successful VM is cleaned up and the reports for
 the baseline, held and recovered releases and ledger are retained.
+
+Run `test/lab/upgrade.sh --from 0.26.1 --managed-workers --vm-name <unique-lab-name>`
+to exercise app-owned delivery under the real coordinator. The PostgreSQL
+fixture records claims, shutdown, acknowledgements and effects. An in-flight
+job must finish after A receives SIGTERM and before B starts. Two deliberately
+killed worker tasks then demonstrate redelivery after effect-before-ack, once
+with two recorded effects and once with one because the app deduplicates.
+The fixture keeps its retained database task and exports the lifecycle reports
+and queue history.

@@ -2372,6 +2372,18 @@ the native crash to verified recovery separately from the continuity cases.
 Use `test/lab/upgrade.sh --from 0.23.0 --managed-fleet --vm-name <unique-lab-name>`
 to exercise the regular fleet configuration and Ansible app role in a fresh
 upgrade VM. This mode registers a Compose app and an opted-in Swarm app using
-their own configuration files, deploys the Swarm app through real HTTPS routing,
-and checks its managed run report. It takes the ordinary platform setup path
-with no registration lab Compose override.
+their own configuration files. It verifies HTTPS release and restore, writes a
+marker to a named volume, and checks that its allocation, creation timestamp
+and contents survive removal and explicit recreation. It then retires and
+purges the fixture. It takes the ordinary platform setup path with no
+registration lab Compose override.
+
+Run `test/lab/upgrade.sh --from 0.26.1 --managed-forward --vm-name <unique-lab-name>`
+to exercise audited forward recovery through the ordinary fleet path. The app
+advances its retained ledger schema in a maintenance deployment, then fails
+its completion check. Kayra should hold the data epoch and withdraw the active
+release. The fixture requests an exact fix through `kayra app deployment forward`,
+kills and restarts the deployer, and verifies the repaired release through HTTPS
+with the original database task and one recorded migration attempt. It also
+replays the same request. The successful VM is cleaned up and the reports for
+the baseline, held and recovered releases and ledger are retained.

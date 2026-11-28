@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet] [--egress-mtu <1280-1500>] [--keep] — the upgrade lab.
+# test/lab/upgrade.sh [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet | --managed-forward] [--egress-mtu <1280-1500>] [--keep] — the upgrade lab.
 #
 # What broke on real servers broke on upgrades, not fresh installs. This
 # brings a throwaway platform server up as a Multipass VM at the last
@@ -37,6 +37,7 @@ indexed_registration=false
 swarm_host=false
 managed_rollouts=false
 managed_fleet=false
+managed_forward=false
 egress_mtu=""
 vm_name="kayra-lab"
 while [ $# -gt 0 ]; do
@@ -47,13 +48,14 @@ while [ $# -gt 0 ]; do
         --swarm-host) swarm_host=true; shift ;;
         --managed-rollouts) managed_rollouts=true; indexed_registration=true; swarm_host=true; shift ;;
         --managed-fleet) managed_fleet=true; shift ;;
+        --managed-forward) managed_forward=true; shift ;;
         --egress-mtu) [ $# -ge 2 ] || { echo "--egress-mtu requires a value" >&2; exit 2; }; egress_mtu="$2"; shift 2 ;;
         --keep) keep=true; shift ;;
-        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet] [--egress-mtu <1280-1500>] [--keep]" >&2; exit 2 ;;
+        *) echo "Usage: $0 [--from <version>] [--vm-name <name>] [--indexed-registration] [--swarm-host] [--managed-rollouts | --managed-fleet | --managed-forward] [--egress-mtu <1280-1500>] [--keep]" >&2; exit 2 ;;
     esac
 done
-if [ "$managed_fleet" = true ] && { [ "$indexed_registration" = true ] || [ "$swarm_host" = true ]; }; then
-    echo "--managed-fleet uses the production provisioning path in its own VM" >&2
+if { [ "$managed_fleet" = true ] || [ "$managed_forward" = true ]; } && { [ "$indexed_registration" = true ] || [ "$swarm_host" = true ]; }; then
+    echo "Managed fleet and forward labs use the production provisioning path in their own VM" >&2
     exit 2
 fi
 if [ -n "$egress_mtu" ] && { ! [[ "$egress_mtu" =~ ^[0-9]{4}$ ]] || [ "$egress_mtu" -lt 1280 ] || [ "$egress_mtu" -gt 1500 ]; }; then
@@ -482,14 +484,14 @@ grep -q " poll " <<< "$run" || die "v4 deployed, but not by the poll: ${run}"
 expect_serves v4
 echo "✓ a push with no webhook deployed by deploy_poll"
 
-if [ "$swarm_host" = true ] || [ "$managed_fleet" = true ]; then
+if [ "$swarm_host" = true ] || [ "$managed_fleet" = true ] || [ "$managed_forward" = true ]; then
     step "6a  explicit Swarm host setup alongside Compose"
     KAYRA_LAB_ADVERTISE_ADDRESS="$address" yq -i '.experimental_swarm = {
         "enabled": true, "advertise_address": strenv(KAYRA_LAB_ADVERTISE_ADDRESS),
         "memory_bytes": 3221225472, "cpu_millicores": 2000,
         "platform_memory_bytes": 1073741824, "platform_cpu_millicores": 500
     }' "${fleet}/servers/${server}/vars.yml"
-    if [ "$managed_fleet" = true ]; then
+    if [ "$managed_fleet" = true ] || [ "$managed_forward" = true ]; then
         yq -i '.managed_swarm_rollouts = true' "${fleet}/servers/${server}/vars.yml"
     fi
     kayra_cmd plan "$server" >> "$log" 2>&1 || die "previewing explicit Swarm setup"
@@ -613,6 +615,102 @@ if [ "$managed_fleet" = true ]; then
         install -m 600 "${work}/fleet-${stage}.json" "/tmp/kayra-swarm-platform-${vm_name}.fleet-${stage}.json"
     done
     echo "✓ an explicitly enabled fleet registered, deployed, restored removed, recreated and purged Swarm alongside its Compose app"
+fi
+
+if [ "$managed_forward" = true ]; then
+    step "6b  audited forward recovery after an incompatible migration"
+    forward_repo="${work}/managed-forward"
+    cp -R "${KAYRA_ROOT}/test/lab/swarm-platform/forward-fixture" "$forward_repo"
+    git -C "$forward_repo" init -q -b main
+    forward_commit() {
+        git -C "$forward_repo" add -A
+        git -C "$forward_repo" -c user.name="Kayra lab" -c user.email=lab@kayra.test -c commit.gpgsign=false commit -qm "$1"
+        git -C "$forward_repo" rev-parse HEAD
+    }
+    forward_base="$(forward_commit "Application before the new schema")"
+    git clone -q --bare "$forward_repo" "${served}/lab/managed-forward.git"
+    FLEET_REPO="http://${host_ip}:${port}/lab/managed-forward.git" yq -i '.apps += [{"name": "managed-forward", "ref": "main", "path": ".", "repo": strenv(FLEET_REPO),
+        "runtime": "swarm", "grants": {"memory_bytes": 402653184, "cpu_millicores": 750, "maintenance": true}}]' "${fleet}/servers/${server}/server.yml"
+    kayra_cmd apps "$server" >> "$log" 2>&1 || die "registering the forward recovery fixture"
+    new_uuid() { python3 -c 'import uuid; print(uuid.uuid4())'; }
+    forward_prepare() {
+        ctl build managed-forward "$1" | jq -e --arg commit "$1" '.commit == $commit' >/dev/null || die "retaining the forward lab build"
+        ctl lifecycle prepare managed-forward "$1" "$2" | jq -e --arg run "$2" '.version == 3 and .request == $run' >/dev/null || die "accepting the forward lab deployment"
+    }
+    await_forward() {
+        local run="$1" phase="$2" report="$3"
+        for _ in $(seq 1 110); do
+            if ctl lifecycle status managed-forward > "$report"; then
+                if jq -e --arg run "$run" --arg phase "$phase" '.operation.run == $run and .operation.phase == $phase' "$report" >/dev/null; then
+                    install -m 600 "$report" "/tmp/kayra-swarm-platform-${vm_name}.$(basename "$report")"
+                    return 0
+                fi
+                if jq -e --arg run "$run" '.operation.run == $run and (.operation.phase == "held" or .operation.phase == "complete")' "$report" >/dev/null; then
+                    die "forward fixture reached an unexpected terminal phase"
+                fi
+            fi
+            sleep 2
+        done
+        die "forward fixture did not reach ${phase}"
+    }
+    forward_response() {
+        curl -sf -m 10 --resolve "forward.${domain}:443:${address}" "https://forward.${domain}/version"
+    }
+    forward_run_a="$(new_uuid)"
+    forward_prepare "$forward_base" "$forward_run_a"
+    await_forward "$forward_run_a" complete "${work}/forward-baseline.json"
+    forward_response | jq -e '.release == "A" and .schema == 1' >/dev/null || die "forward fixture baseline"
+    database_id() {
+        multipass exec "$vm_name" -- sudo docker ps --filter 'label=com.kayra.app=managed-forward' --filter 'label=com.kayra.service=db' --format '{{.ID}}'
+    }
+    db_before="$(database_id)"
+    [[ "$db_before" =~ ^[a-f0-9]{12,64}$ ]] || die "the forward fixture did not have exactly one running database task"
+
+    yq -i '.rollout.strategy = "maintenance" | .rollout.mixed_version_compatible = false | .rollout.rollback_compatible = false |
+        .rollout.migrations = [{"id":"schema", "service":"web", "command":["node","/fixture.mjs","migrate"], "timeout_seconds":30, "recovery":{"kind":"replay-safe"}}] |
+        .rollout.checks = [{"id":"application", "service":"web", "command":["node","/fixture.mjs","check"], "timeout_seconds":10}]' "$forward_repo/app.yml"
+    yq -i '.services.web.environment = {"RELEASE":"B", "SCHEMA":"2", "CHECK_FAIL":"true"}' "$forward_repo/deploy/compose.yml"
+    forward_b="$(forward_commit "Apply the incompatible schema and block release certification")"
+    git -C "$forward_repo" push -q "${served}/lab/managed-forward.git" HEAD:refs/heads/main
+    forward_run_b="$(new_uuid)"
+    forward_prepare "$forward_b" "$forward_run_b"
+    await_forward "$forward_run_b" held "${work}/forward-held.json"
+    jq -e '.compatibilityEpoch == 1 and .rollback == "data-fenced" and .verifiedActive == null and
+        .migrations.phase == "succeeded" and .operation.reason == "verification"' "${work}/forward-held.json" >/dev/null ||
+        die "forward fixture did not hold at the incompatible data epoch"
+    [ "$(database_id)" = "$db_before" ] || die "maintenance replaced the retained dependency"
+    multipass exec "$vm_name" -- sudo docker exec "$db_before" cat /data/ledger.json |
+        jq -e --arg operation "$forward_run_b:schema" '.schema == 2 and .attempts == [$operation]' >/dev/null ||
+        die "fixture migration did not persist exactly one attempt"
+
+    yq -i 'del(.rollout.migrations)' "$forward_repo/app.yml"
+    yq -i '.services.web.environment = {"RELEASE":"C", "SCHEMA":"2", "CHECK_FAIL":"false"}' "$forward_repo/deploy/compose.yml"
+    forward_c="$(forward_commit "Forward repair compatible with the retained schema")"
+    git -C "$forward_repo" push -q "${served}/lab/managed-forward.git" HEAD:refs/heads/main
+    forward_run_c="$(new_uuid)"
+    forward_reason="Deploy the reviewed fixture repair for schema two"
+    kayra_cmd app deployment forward "$server" managed-forward "$forward_run_b" "$forward_c" "$forward_run_c" --reason "$forward_reason" >> "$log" 2>&1 ||
+        die "accepting audited forward recovery through the operator CLI"
+    multipass exec "$vm_name" -- sudo docker compose --project-directory /opt/platform kill -s SIGKILL deployer >> "$log" 2>&1 ||
+        die "interrupting the disposable deployer after forward acceptance"
+    multipass exec "$vm_name" -- sudo docker compose --project-directory /opt/platform up -d deployer >> "$log" 2>&1 ||
+        die "restarting the disposable deployer"
+    await_forward "$forward_run_c" complete "${work}/forward-recovered.json"
+    jq -e --arg commit "$forward_c" '.compatibilityEpoch == 1 and .verifiedActive.commit == $commit and .operation.outcome == "deployed"' "${work}/forward-recovered.json" >/dev/null ||
+        die "forward recovery did not certify the requested release"
+    [ "$(database_id)" = "$db_before" ] || die "forward recovery replaced the retained dependency"
+    multipass exec "$vm_name" -- sudo docker exec "$db_before" cat /data/ledger.json > "${work}/forward-ledger.json"
+    jq -e --arg operation "$forward_run_b:schema" '.schema == 2 and .attempts == [$operation]' "${work}/forward-ledger.json" >/dev/null || die "forward recovery repeated a migration"
+    install -m 600 "${work}/forward-ledger.json" "/tmp/kayra-swarm-platform-${vm_name}.forward-ledger.json"
+    forward_response | jq -e '.release == "C" and .schema == 2' >/dev/null || die "forward fixture repair is not routed"
+    ctl runs managed-forward --json | jq -e --arg run "$forward_run_c" '.runs[0] | .id == $run and .why == "forward recovery" and .managed.outcome == "deployed"' >/dev/null ||
+        die "forward recovery run history"
+    kayra_cmd app deployment forward "$server" managed-forward "$forward_run_b" "$forward_c" "$forward_run_c" --reason "$forward_reason" >> "$log" 2>&1 ||
+        die "replaying the accepted forward recovery"
+    await_forward "$forward_run_c" complete "${work}/forward-recovered.json"
+    expect_serves v4
+    kayra_cmd verify "$server" >> "$log" 2>&1 || die "fleet verification after forward recovery"
+    echo "✓ audited forward recovery repaired a fenced deployment after a deployer restart using the original retained data"
 fi
 
 if [ "$swarm_host" = true ]; then

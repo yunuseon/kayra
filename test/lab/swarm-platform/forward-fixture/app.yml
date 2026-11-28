@@ -1,0 +1,11 @@
+name: managed-forward
+compose: [deploy/compose.yml]
+routes:
+  - {host: forward, service: web, port: 8080, check: /version}
+rollout:
+  strategy: rolling
+  mixed_version_compatible: true
+  rollback_compatible: true
+  services:
+    db: {role: retained-dependency, overlap: forbidden}
+    web: {role: http, overlap: allowed}

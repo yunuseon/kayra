@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { indexedForwardFixture } from "./indexed-forward-fixture.ts";
 import { managedIndexFixture } from "./managed-index-fixture.ts";
 import { parseManagedDeploymentStatus } from "../../src/contracts/managed-deployment-status.ts";
 import { managedDeploymentStatus } from "../../src/server/deployment/managed-deployment-status.ts";
@@ -24,4 +25,24 @@ test("managed status is a read-only projection with original deadlines and no im
   lab.clock(status.operation.deadline + 1000); await lab.reopen(); const reopened = await lab.index().managedDeploymentStatus("shop", lab.runtime); assert.deepEqual(reopened, status);
   await lab.index().cancelManagedDeployment("shop", lab.source.run, lab.runtime); await lab.index().tickManagedDeployment("shop", lab.source.run, lab.runtime); await lab.index().tickManagedDeployment("shop", lab.source.run, lab.runtime);
   const done = await lab.index().managedDeploymentStatus("shop", lab.runtime); assert.equal(done?.operation.outcome, "absent"); assert.equal(done.desired, null); assert.equal(done.verifiedActive, null); assert.equal(done.operation.deadline, status.operation.deadline);
+});
+
+test("an incompatible data epoch withholds the previous release from active status and run reporting", async (t) => {
+  const lab = await indexedForwardFixture(t);
+  const status = await lab.index().managedDeploymentStatus("shop", lab.runtime);
+  assert.ok(status?.lastKnownGood);
+  assert.equal(status.operation.phase, "held");
+  assert.equal(status.rollback, "data-fenced");
+  assert.equal(status.verifiedActive, null);
+  assert.ok(status.lastKnownGood.compatibilityEpoch < status.compatibilityEpoch);
+  assert.equal(parseManagedDeploymentStatus({ ...status, verifiedActive: status.lastKnownGood }).ok, false);
+
+  const runs = await lab.index().publishedDeploymentRuns("shop", undefined, lab.runtime);
+  assert.equal(runs?.live, undefined);
+  assert.equal(runs?.runs[0]?.managed?.activeRelease, null);
+  const pins = await lab.index().managedDeploymentImagePins("shop", lab.runtime);
+  const previous = pins?.plans.find((pin) => pin.plan === status.lastKnownGood?.plan);
+  assert.ok(previous);
+  assert.ok(previous.roles.includes("last-known-good"));
+  assert.equal(previous.roles.includes("active"), false);
 });

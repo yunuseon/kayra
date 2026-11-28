@@ -18,6 +18,7 @@ export const managedDeploymentStatus = async (input: unknown, sourceInput: unkno
   const requested = target(source.candidate);
   const desired = operation.outcome !== null ? active === null ? null : Object.freeze({ plan: active.plan, commit: active.commit }) :
     operation.recoverySource === null ? requested : source.previous === null ? null : target(source.previous.source.application);
+  const fenced = source.version === 3 || operation.compatibilityFencedAt !== null || state.active !== null && state.active.epoch !== state.compatibilityEpoch;
   const parsed = parseManagedDeploymentStatus({ version: 3, protocol: "managed-v3", runtime: "swarm", app: state.owner.app, incarnation: state.owner.incarnation,
     requested, desired, verifiedActive: active, lastKnownGood: lastGood, compatibilityEpoch: state.compatibilityEpoch,
     ...(previousRelease === undefined ? {} : { previousRelease }),
@@ -25,7 +26,7 @@ export const managedDeploymentStatus = async (input: unknown, sourceInput: unkno
       request: reservation.run, phase: forward?.cleanupHeld === true ? "held" : reservation.phase,
       deadline: reservation.phase === "transferring" ? reservation.handoff.deadline : reservation.deadline,
     } }),
-    rollback: source.version === 3 ? "data-fenced" : source.previous === null ? "no-previous-release" : operation.compatibilityFencedAt !== null || state.active !== null && state.active.epoch !== state.compatibilityEpoch ? "data-fenced" : source.candidate.rollout.rollback_compatible ? "eligible" : "application-incompatible",
+    rollback: fenced ? "data-fenced" : source.previous === null ? "no-previous-release" : source.candidate.rollout.rollback_compatible ? "eligible" : "application-incompatible",
     operation: { run: operation.run, strategy: source.candidate.rollout.strategy, phase: operation.phase, reason: operation.reason, outcome: operation.outcome,
       admissionDeadline: operation.admissionDeadline, deadline: operation.deadline, recoveryDeadline: operation.recoveryDeadline, cancelRequestedAt: operation.cancelRequestedAt, admitted: operation.admitted, settled: operation.settled },
     migrations: { phase: operation.preparation?.sequence?.phase ?? "not-started", reason: operation.preparation?.sequence?.reason ?? null,

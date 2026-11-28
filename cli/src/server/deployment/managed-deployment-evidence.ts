@@ -20,6 +20,7 @@ export const managedDeploymentEvidence = async (input: unknown, sourceInput: unk
       managedApplicationDigest(application) !== pointer.plan || release.verification.run !== pointer.run || release.verification.verified?.at !== pointer.verifiedAt) throw new Error("managed status verified release disagrees");
     return Object.freeze({ release, pointer });
   };
-  const [active, lastGood] = await Promise.all([verified(state.active), verified(state.lastGood)]);
+  const [prior, lastGood] = await Promise.all([verified(state.active), verified(state.lastGood)]);
+  const active = prior?.pointer.epoch === state.compatibilityEpoch ? prior : null;
   return Object.freeze({ state, source, active, lastGood });
 };

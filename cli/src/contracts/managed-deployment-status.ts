@@ -45,7 +45,8 @@ const schema = z.object({
     value.operation.settled !== (value.operation.phase === "complete") ||
     (value.operation.outcome !== null) !== ["settling", "complete"].includes(value.operation.phase) ||
     value.operation.admissionDeadline >= value.operation.deadline || value.operation.recoveryDeadline !== null && value.operation.recoveryDeadline > value.operation.deadline ||
-    [value.verifiedActive, value.lastKnownGood].some((item) => item !== null && item.compatibilityEpoch > value.compatibilityEpoch)) context.addIssue({ code: "custom", message: "inconsistent managed deployment status" });
+    value.verifiedActive !== null && value.verifiedActive.compatibilityEpoch !== value.compatibilityEpoch ||
+    value.lastKnownGood !== null && value.lastKnownGood.compatibilityEpoch > value.compatibilityEpoch) context.addIssue({ code: "custom", message: "inconsistent managed deployment status" });
 });
 
 export type ManagedDeploymentStatus = z.infer<typeof schema>;

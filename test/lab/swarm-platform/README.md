@@ -2378,6 +2378,15 @@ and contents survive removal and explicit recreation. It then retires and
 purges the fixture. It takes the ordinary platform setup path with no
 registration lab Compose override.
 
+The November 28 run upgraded from 0.26.1 at frozen source `234b8d0`. It verified
+both releases and an exact restore, then removed and recreated the app with a
+new incarnation. The original volume allocation, creation timestamp and marker
+survived. Replaying ordinary fleet registration preserved the active release.
+A second removal and the guarded purge deleted the fixture volume, and the
+Compose app kept serving. The successful VM was destroyed. The machine-readable
+record is in `MANAGED-RESULTS.json`. Private receipts, volume inspections and
+the upgrade log are in `.cache/lab-evidence/kayra-recreate-fleet-20261128022518/`.
+
 Run `test/lab/upgrade.sh --from 0.26.1 --managed-forward --vm-name <unique-lab-name>`
 to exercise audited forward recovery through the ordinary fleet path. The app
 advances its retained ledger schema in a maintenance deployment, then fails

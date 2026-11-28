@@ -34,6 +34,32 @@
     "managed-enospc.json.tar": "703f414447e21e226dedca1b20b445370403757e9b7efcb2b38e35ca9f79b9c9",
     "managed-admission.json.tar": "8fab68dae2d19d35da32c260c65663255a60957def0f438de2c409a81fadece8"
   },
+  "fleetRecreation": {
+    "date": "2026-11-28",
+    "source": "234b8d06cfa9fb315f3e5f8216112026d787ca40",
+    "upgradeFrom": "0.26.1",
+    "vm": "kayra-recreate-fleet-20261128022518",
+    "vmDestroyed": true,
+    "passed": true,
+    "releasesVerified": 2,
+    "verifiedRestore": true,
+    "sameVerifiedCommitAfterRecreation": true,
+    "newWorkloadIncarnation": true,
+    "sameVolumeAllocationAndBirth": true,
+    "markerPreserved": true,
+    "ordinaryRegistrationReplay": true,
+    "purgeRemovedVolume": true,
+    "composeContinuedServing": true,
+    "versions": {
+      "multipass": "1.17.2+mac",
+      "os": "Ubuntu 24.04.5 LTS",
+      "architecture": "arm64",
+      "engine": "29.10.1",
+      "cli": "29.10.1",
+      "compose": "5.8.1",
+      "traefik": "traefik:v3.7.16@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65"
+    }
+  },
   "rejectedLaterTiming": {
     "vm": "kayra-managed-matrix-20261127000543",
     "case": "candidate-oom",

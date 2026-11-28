@@ -1,7 +1,8 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { appOwner, jobOwner } from "../../src/deployer/brand.ts";
 import { describe, empty, enqueue, finish, jobRequest, type Queue, type Request } from "../../src/deployer/runs/queue.ts";
+import { describe as ownedDescribe, empty as ownedEmpty, enqueue as ownedEnqueue, finish as ownedFinish } from "../../src/server/deployment/legacy-queue.ts";
 import { name, rid } from "./support.ts";
 
 const push = (app: string, ref = "main"): Request => ({
@@ -13,6 +14,13 @@ const gc = jobRequest(rid, "gc", false, "schedule");
 
 const after = (queue: Queue, ...requests: readonly Request[]): Queue =>
   requests.reduce((so, request) => enqueue(so, request).queue, queue);
+
+test("legacy queue compatibility exports share the deployment-owned decisions", () => {
+  strictEqual(describe, ownedDescribe);
+  strictEqual(empty, ownedEmpty);
+  strictEqual(enqueue, ownedEnqueue);
+  strictEqual(finish, ownedFinish);
+});
 
 test("a request starts at once while there is room", () => {
   const { queue, start } = enqueue(empty(2), push("shop"));

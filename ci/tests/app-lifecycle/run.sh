@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# Contract tests for the existing Compose removal and purge scripts.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+root="$(cd "$here/../../.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/stubs"
+cat > "$tmp/stubs/docker" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$CALLS"
+case "$*" in
+    'compose -p shop down --remove-orphans')
+        test ! -e "$PLATFORM/apps/shop.json" || { echo 'registration still present' >&2; exit 92; }
+        if [ "${CHECK_PURGE:-0}" = 1 ]; then
+            if bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/concurrent" 2>&1; then
+                exit 94
+            fi
+            grep -q 'another remove or purge is in progress' "$PLATFORM/concurrent"
+        fi
+        exit "${DOWN_EXIT:-0}"
+        ;;
+    'compose -p a-0- down --remove-orphans')
+        test ! -e "$PLATFORM/apps/a-0-.json" || exit 92
+        ;;
+    'volume ls -q --filter label=com.docker.compose.project=shop')
+        test "${LIST_EXIT:-0}" = 0 || exit "$LIST_EXIT"
+        printf '%s' "${VOLUMES:-}"
+        ;;
+    'volume ls -q --filter label=com.docker.compose.project=a-0-') ;;
+    'volume rm '*) exit "${REMOVE_EXIT:-0}" ;;
+    *) echo "unexpected Docker command: $*" >&2; exit 93 ;;
+esac
+STUB
+chmod +x "$tmp/stubs/docker"
+export PATH="$tmp/stubs:$PATH"
+
+fixture() {
+    PLATFORM="$tmp/$1"
+    CALLS="$PLATFORM/calls"
+    export PLATFORM CALLS
+    mkdir -p "$PLATFORM/bin" "$PLATFORM/apps" "$PLATFORM/removing" "$PLATFORM/removal-locks" "$PLATFORM/managed-apps" "$PLATFORM/app-secrets/shop" "$PLATFORM/runs/shop" "$PLATFORM/releases/shop" "$PLATFORM/data/shop" "$PLATFORM/data/other"
+    cp "$root/scripts/server/app-apply" "$root/scripts/server/app-remove" "$root/scripts/server/app-purge" "$root/scripts/server/app-restore" "$PLATFORM/bin/"
+    printf 'APPS_DIR=%s/data\n' "$PLATFORM" > "$PLATFORM/.env"
+    : > "$PLATFORM/apps/shop.json"
+    : > "$PLATFORM/app-secrets/shop/secret"
+    : > "$PLATFORM/runs/shop/run"
+    : > "$PLATFORM/releases/shop/release"
+    : > "$PLATFORM/data/shop/.env"
+    : > "$PLATFORM/data/other/keep"
+    : > "$CALLS"
+}
+
+fixture removed
+output="$(CHECK_PURGE=1 bash "$PLATFORM/bin/app-remove" shop)"
+test "$output" = 'Removed shop. Its volumes are kept — app-purge shop deletes them.'
+test ! -e "$PLATFORM/apps/shop.json"
+test ! -e "$PLATFORM/app-secrets/shop"
+test ! -e "$PLATFORM/runs/shop"
+test ! -e "$PLATFORM/releases/shop"
+test ! -e "$PLATFORM/data/shop"
+test -e "$PLATFORM/data/other/keep"
+test "$(cat "$CALLS")" = 'compose -p shop down --remove-orphans'
+echo '  ✓ removal unregisters before stopping Compose, retains volumes and leaves unrelated files'
+
+fixture invalid-names
+: > "$PLATFORM/outside.json"
+mkdir -p "$PLATFORM/outside"
+: > "$PLATFORM/outside/keep"
+for script in app-remove app-purge app-restore; do
+    for bad in '../outside' '../data/other' 'a/b' '-option' 'Shop' 'shop_name' $'shop\nother'; do
+        if PLATFORM_DIR="$PLATFORM" bash "$PLATFORM/bin/$script" "$bad" > "$PLATFORM/output" 2>&1; then
+            echo "  ✗ $script accepted an invalid app name" >&2
+            exit 1
+        fi
+        grep -q 'invalid app name' "$PLATFORM/output"
+        test ! -s "$CALLS"
+        test -e "$PLATFORM/apps/shop.json"
+        test -e "$PLATFORM/outside.json"
+        test -e "$PLATFORM/outside/keep"
+        test -e "$PLATFORM/data/other/keep"
+    done
+done
+echo '  ✓ lifecycle scripts reject invalid and traversal names before Docker or file changes'
+
+fixture valid-name-edges
+: > "$PLATFORM/apps/a-0-.json"
+mkdir -p "$PLATFORM/data/a-0-"
+bash "$PLATFORM/bin/app-remove" a-0- > "$PLATFORM/output"
+bash "$PLATFORM/bin/app-purge" a-0- > "$PLATFORM/output"
+PLATFORM_DIR="$PLATFORM" bash "$PLATFORM/bin/app-restore" a-0- > "$PLATFORM/output"
+test "$(cat "$PLATFORM/output")" = 'never deployed'
+test "$(cat "$CALLS")" = $'compose -p a-0- down --remove-orphans\nvolume ls -q --filter label=com.docker.compose.project=a-0-'
+echo '  ✓ valid names with digits and trailing dashes retain existing behavior'
+
+fixture stop-failure
+if DOWN_EXIT=1 bash "$PLATFORM/bin/app-remove" shop > "$PLATFORM/output" 2>&1; then
+    echo '  ✗ failed Compose stop succeeded' >&2
+    exit 1
+fi
+test ! -e "$PLATFORM/apps/shop.json"
+test -e "$PLATFORM/app-secrets/shop/secret"
+test -e "$PLATFORM/runs/shop/run"
+test -e "$PLATFORM/releases/shop/release"
+test -e "$PLATFORM/data/shop/.env"
+if bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output" 2>&1; then
+    echo '  ✗ purge proceeded after a failed Compose stop' >&2
+    exit 1
+fi
+grep -q 'removal of shop is incomplete' "$PLATFORM/output"
+test "$(cat "$CALLS")" = 'compose -p shop down --remove-orphans'
+bash "$PLATFORM/bin/app-remove" shop > "$PLATFORM/output"
+test ! -e "$PLATFORM/removing/shop.json"
+bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output"
+echo '  ✓ a failed Compose stop fences purge until removal succeeds on retry'
+
+fixture registered
+if bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output" 2>&1; then
+    echo '  ✗ purging a registered app succeeded' >&2
+    exit 1
+fi
+grep -q 'still registered' "$PLATFORM/output"
+test ! -s "$CALLS"
+echo '  ✓ purge refuses a registered app without invoking Docker'
+
+fixture empty
+rm "$PLATFORM/apps/shop.json"
+output="$(bash "$PLATFORM/bin/app-purge" shop)"
+test "$output" = 'No volumes left for shop.'
+test "$(cat "$CALLS")" = 'volume ls -q --filter label=com.docker.compose.project=shop'
+echo '  ✓ purge is a no-op when no volumes have the app project label'
+
+fixture volumes
+rm "$PLATFORM/apps/shop.json"
+VOLUMES=$'shop_db\nshop_files\n' bash "$PLATFORM/bin/app-purge" shop
+expected=$'volume ls -q --filter label=com.docker.compose.project=shop\nvolume rm shop_db shop_files'
+test "$(cat "$CALLS")" = "$expected"
+echo '  ✓ purge removes only volumes selected by the app project label'
+
+fixture list-failure
+rm "$PLATFORM/apps/shop.json"
+if LIST_EXIT=1 bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output" 2>&1; then
+    echo '  ✗ failed volume lookup succeeded' >&2
+    exit 1
+fi
+test "$(cat "$CALLS")" = 'volume ls -q --filter label=com.docker.compose.project=shop'
+echo '  ✓ a failed volume lookup does not remove volumes'
+
+fixture remove-failure
+rm "$PLATFORM/apps/shop.json"
+if VOLUMES='shop_db' REMOVE_EXIT=1 bash "$PLATFORM/bin/app-purge" shop > "$PLATFORM/output" 2>&1; then
+    echo '  ✗ failed volume removal succeeded' >&2
+    exit 1
+fi
+test "$(cat "$CALLS")" = $'volume ls -q --filter label=com.docker.compose.project=shop\nvolume rm shop_db'
+echo '  ✓ a failed Docker volume removal is reported'
+
+fixture managed
+rm "$PLATFORM/apps/shop.json"
+touch "$PLATFORM/managed-apps/shop.json"
+for script in app-apply app-remove app-purge; do
+    if bash "$PLATFORM/bin/$script" shop < /dev/null > "$PLATFORM/output" 2>&1; then
+        echo "  ✗ $script accepted a coordinator-owned app" >&2
+        exit 1
+    fi
+    grep -q 'deployment coordinator owns shop' "$PLATFORM/output"
+    test ! -s "$CALLS"
+    test -e "$PLATFORM/app-secrets/shop/secret"
+done
+echo '  ✓ legacy mutations refuse names owned by the coordinator'

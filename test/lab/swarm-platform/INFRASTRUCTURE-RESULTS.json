@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "date": "2026-11-15",
+  "source": "1e32190c0fad2cf2eebf8f58239a22196d4b629a",
+  "vm": "kayra-infra-upgrade-20261115131133",
+  "vmDestroyed": true,
+  "upgradeFrom": "0.23.0",
+  "passed": true,
+  "versions": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "engine": "29.9.3",
+    "cli": "29.9.3",
+    "compose": "5.7.1",
+    "traefik": "traefik:v3.7.16@sha256:c8a121e4bb1347e8fd52657fab12f2cb70b68f8a018895e2068f92c9e519b9c2",
+    "socketProxy": "tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459"
+  },
+  "node": "24.22.1",
+  "architecture": "arm64",
+  "kernel": "6.8.0-147-generic",
+  "vmResources": {
+    "cpus": 2,
+    "memory": "4G",
+    "disk": "20G"
+  },
+  "checks": {
+    "privatePlatformStateMount": true,
+    "physicalOverlayGrantSurvivedContainerRecreation": true,
+    "discoveryWritesDisabled": true,
+    "composeCompatibility": true,
+    "tlsAuthelia": true,
+    "finalPlatformVerification": true
+  },
+  "cases": {
+    "complete": {
+      "passed": true,
+      "migrationContinuedWithoutCoordinator": true,
+      "migrationStarts": 2,
+      "probeStarts": 1,
+      "requests": 2990,
+      "failedRequests": 0,
+      "prematureExposure": 0,
+      "achievedRequestsPerSecond": 19.995718548052608,
+      "maxRequestStartGapMs": 210.2793110000057
+    },
+    "candidate-oom": {
+      "passed": true,
+      "recoveryMs": 37329.096435546875,
+      "requests": 2482,
+      "failedRequests": 110,
+      "prematureExposure": 0,
+      "failureWindowMs": 7400,
+      "achievedRequestsPerSecond": 19.997098365412516,
+      "maxRequestStartGapMs": 220.2720479999989
+    },
+    "admission-race": {
+      "passed": true,
+      "killedWhileAdmissionPending": true,
+      "loserWorkloadObjects": 0,
+      "winnerStarts": 1,
+      "originalAdmissionDeadline": true,
+      "requests": 3053,
+      "failedRequests": 0,
+      "achievedRequestsPerSecond": 19.98886596587746,
+      "maxRequestStartGapMs": 193.2991719999991
+    },
+    "lifecycle-enospc": {
+      "passed": true,
+      "candidateStarts": 1,
+      "requests": 2418,
+      "failedRequests": 0,
+      "prematureExposure": 0,
+      "achievedRequestsPerSecond": 19.99966901664846,
+      "maxRequestStartGapMs": 177.82129600000007
+    },
+    "runtime-health": {
+      "passed": true
+    }
+  },
+  "evidenceDirectory": ".cache/lab-evidence/kayra-infra-upgrade-20261115131133",
+  "evidenceManifest": "SHA256SUMS.json",
+  "reproduction": [
+    "bash",
+    "test/lab/upgrade.sh",
+    "--from",
+    "0.23.0",
+    "--vm-name",
+    "<fresh-unique-name>",
+    "--indexed-registration",
+    "--swarm-host"
+  ],
+  "limitations": [
+    "Candidate OOM rollback was disruptive; failureWindowMs is a sampled first-failure-start to last-failure-completion span, not an exact continuous outage duration",
+    "Source predates owned managed runtime extraction (#300), managed transition admission (#301) and managed migration binding (#302)",
+    "No managed group, retained database, workers, singleton, maintenance, removal/recreation or purge acceptance",
+    "Bounded metadata ENOSPC only; no global OOM, Docker-root/inode exhaustion, host loss or multi-node guarantee",
+    "Earlier failed labs remain failed and preserved"
+  ]
+}

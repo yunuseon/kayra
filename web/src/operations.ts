@@ -24,6 +24,19 @@ export const reaches = {
   "app.secret.import": { label: "Import app secret", icon: "+" },
   "app.secret.generate": { label: "Generate app secret", icon: "+" },
   "app.purge": { label: "Purge app data", icon: "×" },
+  "app.build": { label: "Retain experimental build", icon: "⚙" },
+  "app.deployment.prepare": { label: "Request experimental rollout", icon: "▶" },
+  "app.deployment.restore": { label: "Restore verified release", icon: "↶" },
+  "app.deployment.forward": { label: "Recover forward", icon: "↦" },
+  "app.deployment.recreate": { label: "Recreate app", icon: "↻" },
+  "app.deployment.health": { label: "Runtime health", icon: "≡" },
+  "app.deployment.pins": { label: "Deployment image pins", icon: "≡" },
+  "app.deployment.status": { label: "Deployment state", icon: "≡" },
+  "app.deployment.cancel": { label: "Cancel deployment", icon: "×" },
+  "app.migration.cleanup": { label: "Fence held migration attempt", icon: "×" },
+  "app.migration.cleanup.audit": { label: "Migration cleanup audit", icon: "≡" },
+  "app.migration.resolve": { label: "Resolve migration outcome", icon: "✓" },
+  "app.migration.audit": { label: "Migration recovery audit", icon: "≡" },
   "app.runs": { label: "App runs", icon: "≡" },
   "app.log": { label: "App log", icon: "≡" },
   "app.deploy": { label: "Deploy app", icon: "↑" },
@@ -53,6 +66,8 @@ export type Field = {
   readonly choices: readonly string[];
   readonly default: unknown;
   readonly minLength: number | undefined;
+  readonly minimum: number | undefined;
+  readonly maximum: number | undefined;
   readonly pattern: string | undefined;
   readonly supported: boolean;
 };
@@ -67,16 +82,18 @@ export const fields = (schema: Schema) =>
       choices: strings(field["enum"]),
       default: field["default"],
       minLength: typeof field["minLength"] === "number" ? field["minLength"] : undefined,
+      minimum: typeof field["minimum"] === "number" ? field["minimum"] : undefined,
+      maximum: typeof field["maximum"] === "number" ? field["maximum"] : undefined,
       pattern: typeof field["pattern"] === "string" ? field["pattern"] : undefined,
       supported:
         field["type"] === "string" ||
-        field["type"] === "boolean" ||
+        field["type"] === "boolean" || field["type"] === "integer" ||
         (field["type"] === "array" && object(field["items"])["type"] === "string"),
     } as const;
   }));
 
 const editValue = (value: unknown) =>
-  typeof value === "boolean" ? value : typeof value === "string" ? value : Array.isArray(value) ? strings(value).join("\n") : typed<string | boolean>("");
+  typeof value === "boolean" ? value : typeof value === "string" ? value : typeof value === "number" ? String(value) : Array.isArray(value) ? strings(value).join("\n") : typed<string | boolean>("");
 export const defaults = (schema: Schema, seed: Schema) =>
   Object.freeze(Object.fromEntries(fields(schema).map((field) => [field.name, editValue(seed[field.name] ?? field.default)] as const)));
 
@@ -86,7 +103,7 @@ export const inputOf = (schema: Schema, values: Values) =>
       const value = values[field.name];
       if (field.type === "boolean") return typed<readonly (readonly [string, unknown])[]>([[field.name, value === true]]);
       if (typeof value !== "string" || value === "") return typed<readonly (readonly [string, unknown])[]>([]);
-      return typed<readonly (readonly [string, unknown])[]>([[field.name, field.type === "array" ? value.split(/\r?\n/) : value]]);
+      return typed<readonly (readonly [string, unknown])[]>([[field.name, field.type === "array" ? value.split(/\r?\n/) : field.type === "integer" ? Number(value) : value]]);
     }),
   ));
 

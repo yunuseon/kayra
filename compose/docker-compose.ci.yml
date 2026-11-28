@@ -146,6 +146,10 @@ services:
       - ./apps:/opt/platform/apps:ro
       - ./runs:/opt/platform/runs
       - ./releases:/opt/platform/releases
+      - ./lifecycle:/opt/platform/lifecycle
+      - ./platform-state:/opt/platform/platform-state
+      - ./removal-locks:/opt/platform/removal-locks:ro
+      - ./removing:/opt/platform/removing:ro
       # The alerts open now: one file per key, holding where it is open.
       - ./alerts:/opt/platform/alerts
       # The notifier's key; mounted nowhere else.

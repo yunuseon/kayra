@@ -52,7 +52,7 @@ export const setup = (engine: Engine, server: Server) =>
       fromMain(engine, server),
       // mkcert where Let's Encrypt cannot reach: test VMs, and home servers without DNS-01.
       ...(server.kind === "platform" && server.target !== "hetzner" && !server.usesAcmeDns
-        ? [certs(engine, server.domain, [appSubdomains(engine, server), ...server.stackHosts])]
+        ? [certs(engine, server.domain, [appSubdomains(engine, server), ...server.stackHosts], server.vars["managed_swarm_rollouts"] === true)]
         : []),
       ...reachable(engine, server),
       collections(engine, {}),

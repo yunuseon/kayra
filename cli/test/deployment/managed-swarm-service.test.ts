@@ -1,0 +1,218 @@
+/* eslint-disable functional/no-let, functional/prefer-immutable-types, functional/immutable-data -- fixture owns transport responses, clock and caller mutation probes */
+import { strict as assert } from "node:assert";
+import { randomUUID } from "node:crypto";
+import { test } from "node:test";
+import { parseManagedServicePlan, managedServiceName, managedServiceDigest } from "../../src/contracts/managed-service-plan.ts";
+import { ownedVolume } from "../../src/contracts/owned-volume.ts";
+import { parseManagedServiceAction } from "../../src/contracts/managed-swarm-service.ts";
+import type { ManagedServiceAction } from "../../src/contracts/managed-swarm-service.ts";
+import type { VolumeObservation } from "../../src/contracts/owned-volume.ts";
+import { managedSwarmService, renderNativeManagedService } from "../../src/server/runtime/managed-swarm-service.ts";
+import { dockerApi } from "../../src/server/runtime/docker-api.ts";
+
+const fixture = () => {
+  const owner = { version: 1, app: "shop", incarnation: randomUUID(), dataOwner: randomUUID() } as const;
+  const volume = ownedVolume(owner.app, owner.dataOwner, randomUUID(), "data"); assert.ok(volume.ok);
+  const parsed = parseManagedServicePlan({ version: 1, runtime: "swarm", owner, service: "worker", nativeName: managedServiceName(owner, "worker"), role: "worker", overlap: "forbidden", handoffCheck: null,
+    image: "localhost:5000/shop/worker@sha256:" + "a".repeat(64), inputs: { version: 1, registration: { version: 1, app: "shop", incarnation: owner.incarnation, actionId: owner.incarnation + ":1", registrationGeneration: randomUUID() }, configurationIdentity: "sha256:" + "b".repeat(64), environment: { TOKEN: { kind: "secret", key: "TOKEN" }, RELEASE: { kind: "literal", value: "A" } } },
+    command: ["node", "/worker.js"], entrypoint: null, resources: { memoryBytes: 134217728, reserveMemoryBytes: 67108864, nanoCpus: 250000000, reserveNanoCpus: 125000000 },
+    health: { command: ["node", "/health.js"], intervalSeconds: 2, timeoutSeconds: 1, startPeriodSeconds: 5, retries: 2 }, stopGraceSeconds: 30,
+    host: { node: "n".repeat(25), cluster: "c".repeat(25), routingNetwork: null }, privateNetwork: { id: "p".repeat(25), name: `kayra-app-${owner.incarnation}` },
+    mounts: [{ volume: volume.value, target: "/data", readOnly: false, noCopy: true }], dependencies: [],
+  }); assert.ok(parsed.ok); const plan = parsed.value;
+  const action: ManagedServiceAction = { app: owner.app, service: plan.service, incarnation: owner.incarnation, dataOwner: owner.dataOwner, action: owner.incarnation + ":2", plan: managedServiceDigest(plan), deadline: 91000, effect: "apply" };
+  const receipt = { volume: volume.value, createdAt: "2026-11-15T12:00:00Z" }; const inputs = { environment: { RELEASE: "A", TOKEN: "PRIVATE-TOKEN" }, routing: {}, volumes: [receipt] };
+  const spec = renderNativeManagedService(plan, action, inputs); const id = "s".repeat(25); const version = { id, version: 42 };
+  let now = 1000; let actual: unknown = { ID: id, Version: { Index: 100 }, Spec: spec, UpdateStatus: { State: "completed" } }; let exists = true;
+  let observation: VolumeObservation = { status: "owned", receipt }; let volumeReads = 0; const calls: { method: string; path: string; body: unknown }[] = [];
+  const api: ReturnType<typeof dockerApi> = { request: (method, path, body) => {
+    calls.push({ method, path, body });
+    if (method === "GET") return Promise.resolve(path.startsWith("/services/") ? { status: exists ? 200 : 404, value: actual } : { status: 200, value: [] });
+    assert.equal(method, "POST"); return Promise.resolve({ status: exists ? 200 : 201, value: null });
+  } };
+  const observer = { observe: () => { volumeReads += 1; return Promise.resolve(observation); } };
+  return { owner, plan, action, inputs, receipt, spec, id, version, calls, api, observer, now: () => now, adapter: managedSwarmService(api, observer, () => now),
+    setTime: (time: number) => { now = time; }, setService: (value: unknown) => { actual = value; }, absent: () => { exists = false; }, volume: (value: VolumeObservation) => { observation = value; }, volumeReads: () => volumeReads };
+};
+
+test("managed rendering pins private DNS, placement and owned mounts, with declared stop-first updates", () => {
+  const f = fixture(); assert.equal(f.spec.Name, f.plan.nativeName); assert.equal(f.spec.Labels["com.kayra.data-owner"], f.owner.dataOwner);
+  assert.deepEqual(f.spec.TaskTemplate.Networks, [{ Target: f.plan.privateNetwork.id, Aliases: ["worker"] }]);
+  assert.deepEqual(f.spec.TaskTemplate.ContainerSpec.Mounts, [{ Type: "volume", Source: f.receipt.volume.name, Target: "/data", VolumeOptions: { NoCopy: true } }]);
+  assert.deepEqual(f.spec.TaskTemplate.Placement.Constraints, ["node.id==" + f.plan.host.node]); assert.equal(f.spec.TaskTemplate.ContainerSpec.StopGracePeriod, 30e9);
+  assert.deepEqual(f.spec.TaskTemplate.ContainerSpec.Healthcheck.Test, ["CMD", "node", "/health.js"]); assert.equal(f.spec.UpdateConfig.Order, "stop-first"); assert.equal(f.spec.RollbackConfig.Order, "stop-first");
+});
+
+test("HTTP and coordinated singleton updates use start-first while HTTP alone joins the routing overlay", () => {
+  const f = fixture();
+  for (const role of ["http", "singleton"] as const) {
+    const parsed = parseManagedServicePlan({ ...f.plan, role, overlap: role === "http" ? "allowed" : "coordinated", handoffCheck: role === "singleton" ? "handoff" : null, host: { ...f.plan.host, routingNetwork: role === "http" ? "r".repeat(25) : null } }); assert.ok(parsed.ok);
+    const routing = role === "http" ? { "traefik.enable": "true", "traefik.swarm.network": "platform-swarm", "traefik.swarm.lbswarm": "true" } : {};
+    const spec = renderNativeManagedService(parsed.value, { ...f.action, plan: managedServiceDigest(parsed.value) }, { ...f.inputs, routing });
+    assert.equal(spec.UpdateConfig.Order, "start-first"); assert.equal(spec.TaskTemplate.Networks.length, role === "http" ? 2 : 1);
+    assert.equal(spec.UpdateConfig.Monitor, 30e9);
+  }
+});
+
+test("managed effects verify recorded creation evidence then use the exact persisted CAS once", async () => {
+  const f = fixture(); assert.equal(await f.adapter.apply(f.action, f.version, f.plan, f.inputs), "acknowledged"); assert.equal(f.volumeReads(), 1);
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[0]?.method, "GET"); assert.equal(f.calls[1]?.path, `/services/${f.id}/update?version=42`); assert.deepEqual(f.calls[1].body, f.spec);
+  f.calls.length = 0; f.absent(); assert.equal(await f.adapter.apply(f.action, null, f.plan, f.inputs), "acknowledged"); assert.equal(f.calls[1].path, "/services/create");
+});
+
+test("missing, replaced or foreign volumes refuse before workload Docker reads or writes", async () => {
+  const f = fixture();
+  for (const observation of [{ status: "absent" }, { status: "foreign" }, { status: "unavailable" }, { status: "owned", receipt: { ...f.receipt, createdAt: "2026-11-15T13:00:00Z" } }] as const) {
+    f.volume(observation); assert.equal(await f.adapter.apply(f.action, f.version, f.plan, f.inputs), "refused");
+  }
+  assert.equal(f.calls.length, 0);
+  assert.equal(await f.adapter.apply(f.action, f.version, f.plan, { ...f.inputs, volumes: [] }), "refused"); assert.equal(f.calls.length, 0);
+});
+
+test("ordinary replacement cannot update or restart an existing retained dependency", async () => {
+  const f = fixture(); const parsed = parseManagedServicePlan({ ...f.plan, role: "retained-dependency" }); assert.ok(parsed.ok);
+  const action = { ...f.action, plan: managedServiceDigest(parsed.value) };
+  assert.equal(await f.adapter.apply(action, f.version, parsed.value, f.inputs), "refused"); assert.equal(f.calls.length, 0); assert.equal(f.volumeReads(), 0);
+  f.absent(); assert.equal(await f.adapter.apply(action, null, parsed.value, f.inputs), "acknowledged"); assert.equal(f.calls[1]?.path, "/services/create");
+});
+
+test("expired writes and wrong owner, digest, environment or routing cannot mutate workloads", async () => {
+  const f = fixture(); f.setTime(f.action.deadline);
+  assert.equal(await f.adapter.apply(f.action, f.version, f.plan, f.inputs), "refused"); f.setTime(1000);
+  for (const action of [{ ...f.action, dataOwner: randomUUID() }, { ...f.action, plan: "f".repeat(64) }]) assert.equal(await f.adapter.apply(action, f.version, f.plan, f.inputs), "refused");
+  assert.equal(await f.adapter.apply(f.action, f.version, f.plan, { ...f.inputs, environment: { ...f.inputs.environment, RELEASE: "changed" } }), "refused");
+  assert.equal(await f.adapter.apply(f.action, f.version, f.plan, { ...f.inputs, routing: { "traefik.enable": "true" } }), "refused"); assert.equal(f.calls.length, 0);
+});
+
+test("fresh readonly desired observations remain available after effect expiry without granting another write", async () => {
+  const f = fixture(); f.setTime(100000);
+  const observed = await f.adapter.observeDesired(f.action, f.plan, f.inputs); assert.equal(observed.status, "owned");
+  assert.equal(observed.specMatches, true); assert.equal(JSON.stringify(observed).includes("PRIVATE"), false); assert.ok(f.calls.every((call) => call.method === "GET"));
+  assert.equal(await f.adapter.apply(f.action, f.version, f.plan, f.inputs), "refused");
+});
+
+test("desired verification refuses native bind/driver/privilege drift while accepting harmless volume defaults", async () => {
+  const f = fixture(); const container = f.spec.TaskTemplate.ContainerSpec; const mount = container.Mounts?.[0]; assert.ok(mount);
+  for (const replacement of [ { ...mount, Type: "bind" }, { ...mount, VolumeOptions: { NoCopy: true, DriverConfig: { Name: "local", Options: { device: "/etc" } } } }, { ...mount, Source: "unrelated-volume" } ]) {
+    f.setService({ ID: f.id, Version: { Index: 100 }, Spec: { ...f.spec, TaskTemplate: { ...f.spec.TaskTemplate, ContainerSpec: { ...container, Mounts: [replacement] } } } });
+    const observed = await f.adapter.observeDesired(f.action, f.plan, f.inputs); assert.equal(observed.status, "owned"); assert.equal(observed.specMatches, false);
+  }
+  f.setService({ ID: f.id, Version: { Index: 100 }, Spec: { ...f.spec, TaskTemplate: { ...f.spec.TaskTemplate, ContainerSpec: { ...container, Mounts: [{ ...mount, ReadOnly: false, VolumeOptions: { NoCopy: true, Labels: null, DriverConfig: null } }] } } } });
+  const observed = await f.adapter.observeDesired(f.action, f.plan, f.inputs); assert.equal(observed.status, "owned"); assert.equal(observed.specMatches, true);
+});
+
+test("materialized inputs are snapshotted before asynchronous volume observations", async () => {
+  const f = fixture(); const inputs = { ...f.inputs, environment: { ...f.inputs.environment }, volumes: [...f.inputs.volumes] };
+  const adapter = managedSwarmService(f.api, { observe: () => { inputs.environment.TOKEN = "CHANGED-PRIVATE"; inputs.volumes[0] = { ...f.receipt, createdAt: "2026-11-15T13:00:00Z" }; return Promise.resolve({ status: "owned", receipt: f.receipt }); } }, f.now);
+  assert.equal(await adapter.apply(f.action, f.version, f.plan, inputs), "acknowledged"); assert.deepEqual(f.calls[1]?.body, f.spec);
+});
+
+const retainedBarrier = (f: ReturnType<typeof fixture>) => {
+  const parsed = parseManagedServicePlan({ ...f.plan, role: "retained-dependency" }); assert.ok(parsed.ok);
+  const plan = parsed.value; const digest = managedServiceDigest(plan);
+  const labels = { ...f.spec.Labels, "com.kayra.plan": digest, "com.kayra.effect": "scrub", "com.kayra.action": f.owner.incarnation + ":3:scrub:1", "com.kayra.tombstone": "true" };
+  const spec = { Name: plan.nativeName, Labels: labels, TaskTemplate: { ContainerSpec: { Image: plan.image, Labels: labels } }, Mode: { Replicated: { Replicas: 0 } }, EndpointSpec: { Mode: "dnsrr" } };
+  const actual = { ID: f.id, Version: { Index: 100 }, Spec: spec, PreviousSpec: spec };
+  f.setService(actual);
+  return { plan, actual, action: { ...f.action, action: f.owner.incarnation + ":4", plan: digest }, expected: { id: f.id, version: 100 } };
+};
+
+test("explicit retained reactivation requires the unchanged digest and a fully scrubbed owned barrier", async () => {
+  const f = fixture(); const retained = retainedBarrier(f);
+  assert.equal(await f.adapter.apply(retained.action, retained.expected, retained.plan, f.inputs), "refused");
+  assert.equal(await f.adapter.reactivate(retained.action, retained.expected, retained.plan, f.inputs), "acknowledged");
+  assert.equal(f.calls.filter((call) => call.method === "POST").length, 1);
+  assert.equal(f.calls.at(-1)?.path, `/services/${f.id}/update?version=100`);
+  for (const actual of [
+    { ...retained.actual, PreviousSpec: f.spec },
+    { ...retained.actual, UpdateStatus: { State: "updating" } },
+    { ...retained.actual, Spec: { ...retained.actual.Spec, Mode: { Replicated: { Replicas: 1 } } } },
+    { ...retained.actual, Spec: { ...retained.actual.Spec, Labels: { ...retained.actual.Spec.Labels, "com.kayra.plan": "f".repeat(64) } } },
+  ]) {
+    f.setService(actual); f.calls.length = 0;
+    assert.equal(await f.adapter.reactivate(retained.action, retained.expected, retained.plan, f.inputs), "refused"); assert.ok(f.calls.every((call) => call.method === "GET"));
+  }
+  f.setService(retained.actual); f.calls.length = 0;
+  assert.equal(await f.adapter.reactivate(retained.action, { ...retained.expected, version: 99 }, retained.plan, f.inputs), "refused");
+  const changed = parseManagedServicePlan({ ...retained.plan, resources: { ...retained.plan.resources, memoryBytes: retained.plan.resources.memoryBytes + 1 } }); assert.ok(changed.ok);
+  assert.equal(await f.adapter.reactivate({ ...retained.action, plan: managedServiceDigest(changed.value) }, retained.expected, changed.value, f.inputs), "refused");
+  assert.ok(f.calls.every((call) => call.method === "GET"));
+  f.calls.length = 0; f.volume({ status: "absent" });
+  assert.equal(await f.adapter.reactivate(retained.action, retained.expected, retained.plan, f.inputs), "refused"); assert.equal(f.calls.length, 0);
+});
+
+test("managed writes snapshot the exact expected CAS before asynchronous volume observations", async () => {
+  for (const reactivation of [false, true]) {
+    const f = fixture(); const retained = retainedBarrier(f); const expected = { ...(reactivation ? retained.expected : f.version) };
+    const adapter = managedSwarmService(f.api, { observe: () => { expected.id = "x".repeat(25); expected.version = 999; return Promise.resolve({ status: "owned", receipt: f.receipt }); } }, f.now);
+    const result = reactivation ? await adapter.reactivate(retained.action, expected, retained.plan, f.inputs) : await adapter.apply(f.action, expected, f.plan, f.inputs);
+    assert.equal(result, "acknowledged");
+    assert.equal(f.calls.at(-1)?.path, `/services/${f.id}/update?version=${reactivation ? "100" : "42"}`);
+  }
+});
+
+
+test("Docker's omitted or null empty environment is normalized without accepting unexpected entries", async () => {
+  const f = fixture(); const parsed = parseManagedServicePlan({ ...f.plan, inputs: { ...f.plan.inputs, environment: {} } }); assert.ok(parsed.ok);
+  const action = { ...f.action, plan: managedServiceDigest(parsed.value) }; const inputs = { ...f.inputs, environment: {} };
+  const spec = renderNativeManagedService(parsed.value, action, inputs);
+  const container = { ...spec.TaskTemplate.ContainerSpec, Env: undefined };
+  for (const actual of [container, { ...container, Env: null }]) {
+    f.setService({ ID: f.id, Version: { Index: 100 }, Spec: { ...spec, TaskTemplate: { ...spec.TaskTemplate, ContainerSpec: actual } } });
+    const observed = await f.adapter.observeDesired(action, parsed.value, inputs); assert.equal(observed.status, "owned"); assert.equal(observed.specMatches, true);
+  }
+  f.setService({ ID: f.id, Version: { Index: 100 }, Spec: { ...spec, TaskTemplate: { ...spec.TaskTemplate, ContainerSpec: { ...container, Env: ["UNDECLARED=value"] } } } });
+  const unexpected = await f.adapter.observeDesired(action, parsed.value, inputs); assert.equal(unexpected.status, "owned"); assert.equal(unexpected.specMatches, false);
+});
+
+for (const namespace of ["quiesce", "recover"] as const) test(`native ${namespace} barrier labels survive observation without aliasing ordinary removal`, async () => {
+  const f = fixture(); const action = { ...f.action, action: f.owner.incarnation + ":3:" + namespace + ":remove:1", effect: "remove" as const };
+  assert.equal(await f.adapter.tombstone(action, f.version, f.plan.image), "acknowledged");
+  const body = f.calls.at(-1)?.body; assert.ok(body && typeof body === "object");
+  f.setService({ ID: f.id, Version: { Index: 43 }, Spec: body, UpdateStatus: { State: "completed" } });
+  const observed = await f.adapter.observe({ app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" });
+  assert.equal(observed.status, "owned");
+  assert.equal(observed.action, action.action); assert.equal(observed.effect, "remove"); assert.equal(observed.replicas, 0);
+  assert.notEqual(observed.action, f.owner.incarnation + ":3:remove:1");
+});
+
+test("zero replicas and terminal task history do not prove container cessation; retained and orphan containers are inspected separately", async () => {
+  const f = fixture(); retainedBarrier(f);
+  const container = { Id: "c".repeat(64), State: "running", Labels: { ...f.spec.Labels, "com.docker.swarm.service.id": f.id } };
+  let rows: unknown = [container];
+  const api: ReturnType<typeof dockerApi> = { request: (method, path, body, options) => path.startsWith("/containers/json?") ? Promise.resolve({ status: 200, value: rows }) : f.api.request(method, path, body, options) };
+  const native = managedSwarmService(api, f.observer, f.now);
+  const scope = { app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" };
+  const running = await native.observe(scope); assert.equal(running.status, "owned"); assert.equal(running.tasks.length, 0); assert.equal(running.containersStopped, false);
+  for (const state of ["paused", "restarting", "created", "removing"]) { rows = [{ ...container, State: state }]; const value = await native.observe(scope); assert.equal(value.status, "owned"); assert.equal(value.containersStopped, false); }
+  rows = [{ ...container, State: "exited" }]; const stopped = await native.observe(scope); assert.equal(stopped.status, "owned"); assert.equal(stopped.containersStopped, true);
+  rows = []; const absent = await native.observe(scope); assert.equal(absent.status, "owned"); assert.equal(absent.containersStopped, true);
+  rows = [{ ...container, State: "exited", Labels: { ...container.Labels, "com.kayra.data-owner": randomUUID() } }]; assert.equal((await native.observe(scope)).status, "unavailable");
+  rows = {}; assert.equal((await native.observe(scope)).status, "unavailable");
+});
+
+test("healthy current tasks do not hide old running containers or a missing current Docker container", async () => {
+  const f = fixture(); const task = { ID: "t".repeat(25), ServiceID: f.id, DesiredState: "running", Status: { State: "running", ContainerStatus: { ContainerID: "c".repeat(64) } }, Spec: { ContainerSpec: { Labels: f.spec.Labels } } };
+  const current = { Id: "c".repeat(64), State: "running", Labels: { ...f.spec.Labels, "com.docker.swarm.service.id": f.id, "com.docker.swarm.task.id": task.ID } };
+  const old = { Id: "d".repeat(64), State: "running", Labels: { ...current.Labels, "com.docker.swarm.task.id": "u".repeat(25), "com.kayra.action": f.owner.incarnation + ":1" } };
+  let rows: unknown = [current, old];
+  const api: ReturnType<typeof dockerApi> = { request: (method, path, body, options) => path.startsWith("/containers/json?") ? Promise.resolve({ status: 200, value: rows }) : path.startsWith("/tasks?") ? Promise.resolve({ status: 200, value: [task] }) : f.api.request(method, path, body, options) };
+  const native = managedSwarmService(api, f.observer, f.now); const scope = { app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" };
+  const lingering = await native.observe(scope); assert.equal(lingering.status, "owned"); assert.equal(lingering.containersConverged, false);
+  rows = [current, { ...old, State: "exited" }]; const ready = await native.observe(scope); assert.equal(ready.status, "owned"); assert.equal(ready.containersConverged, true);
+  rows = []; const missing = await native.observe(scope); assert.equal(missing.status, "owned"); assert.equal(missing.containersConverged, false);
+  rows = [{ ...current, Labels: { ...current.Labels, "com.docker.swarm.task.id": "x".repeat(25) } }]; const changed = await native.observe(scope); assert.equal(changed.status, "owned"); assert.equal(changed.containersConverged, false);
+});
+
+
+test("unrecognized native update state cannot be normalized into an absent update", async () => {
+  const f = fixture(); f.setService({ ID: f.id, Version: { Index: 100 }, Spec: f.spec, UpdateStatus: { State: "unsupported-new-state" } });
+  const value = await f.adapter.observe({ app: f.owner.app, incarnation: f.owner.incarnation, dataOwner: f.owner.dataOwner, service: "worker" }); assert.equal(value.status, "owned"); assert.equal(value.update, "unknown");
+});
+
+
+test("check cessation namespace permits only stop and scrub actions", () => {
+  const { action } = fixture();
+  for (const effect of ["remove", "scrub"] as const) assert.equal(parseManagedServiceAction({ ...action, effect, action: action.action + ":checks:" + effect + ":1" }).ok, true);
+  for (const effect of ["apply", "restore", "fence"] as const) assert.equal(parseManagedServiceAction({ ...action, effect, action: action.action + ":checks:" + effect + ":1" }).ok, false);
+});

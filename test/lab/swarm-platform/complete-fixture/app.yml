@@ -1,0 +1,21 @@
+name: rollout-complete
+compose: [deploy/compose.yml]
+routes:
+  - {host: complete, service: web, port: 8080, check: /version}
+secrets: [GREETING]
+config: [MODE, DB_HOST]
+rollout:
+  strategy: rolling
+  mixed_version_compatible: true
+  rollback_compatible: true
+  services:
+    web: {role: http, overlap: allowed}
+  migrations:
+    - id: schema
+      service: web
+      command: [node, /migration.mjs, apply]
+      timeout_seconds: 45
+      recovery:
+        kind: status-probe
+        command: [node, /migration.mjs, probe]
+        timeout_seconds: 5

@@ -6,7 +6,7 @@ import { serveDeployer } from "./deployer.ts";
 /** One program, three roles: `builder`, `deployer` (the two daemons) and `ctl` (the operator, inside the deployer). */
 const [role, ...args] = process.argv.slice(2);
 if (role === "builder") serveBuilder(process.env);
-else if (role === "deployer") serveDeployer(process.env);
+else if (role === "deployer") await serveDeployer(process.env);
 else if (role === "ctl") {
   // eslint-disable-next-line functional/immutable-data -- the exit status; process.exit() could cut piped output short
   process.exitCode = await ctl(args);

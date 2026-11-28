@@ -1,0 +1,10 @@
+name: managed-workers
+compose: [deploy/compose.yml]
+secrets: [POSTGRES_PASSWORD, DATABASE_URL]
+rollout:
+  strategy: rolling
+  mixed_version_compatible: true
+  rollback_compatible: true
+  services:
+    db: {role: retained-dependency, overlap: forbidden}
+    worker: {role: worker, overlap: forbidden}

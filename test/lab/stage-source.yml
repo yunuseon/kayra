@@ -1,0 +1,49 @@
+---
+- name: Allocate the trusted lab source archive
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .tar
+    prefix: kayra-lab-source-
+  delegate_to: localhost
+  become: false
+  register: staged_source_archive
+
+- name: Archive the explicit engine source paths
+  ansible.builtin.command:
+    argv: "{{ ['tar', '--no-xattrs', '-cf', staged_source_archive.path, '-C', stage_source_root] + stage_source_paths }}"
+  environment:
+    COPYFILE_DISABLE: "1"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Record the exact source archive digest
+  ansible.builtin.stat:
+    path: "{{ staged_source_archive.path }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: staged_source_identity
+
+- name: Extract the trusted engine source archive
+  ansible.builtin.unarchive:
+    src: "{{ staged_source_archive.path }}"
+    dest: "{{ stage_source_destination }}"
+    owner: root
+    group: root
+    mode: "u=rwX,go=rX"
+
+- name: Retain the exact staged source identity
+  ansible.builtin.copy:
+    content: "{{ {'sourceRoot': stage_source_root, 'paths': stage_source_paths, 'destination': stage_source_destination, 'archiveSha256': staged_source_identity.stat.checksum} | to_json }}\n"
+    dest: "{{ stage_source_manifest }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Remove the successfully transferred controller archive
+  ansible.builtin.file:
+    path: "{{ staged_source_archive.path }}"
+    state: absent
+  delegate_to: localhost
+  become: false

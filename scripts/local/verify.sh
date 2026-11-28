@@ -55,6 +55,7 @@ port="$(field ansible_port)"
 user="$(field ansible_user)"
 key="$(field ansible_ssh_private_key_file)"
 registered_wanted="$(yq -r '.apps // [] | .[].name' "${dir}/server.yml")"
+managed_wanted="$(yq -r '.apps // [] | .[] | select(.runtime == "swarm") | .name' "${dir}/server.yml" | sort)"
 
 # ── From outside ────────────────────────────────────────────────────────────
 # "<status> <redirect> <verify result> <issuer CN>" for a host (and path), pinned to the server.
@@ -115,7 +116,7 @@ while read -r other target; do
     done
 done <<< "$redirects"
 
-first_app="$(head -1 <<< "$registered_wanted")"
+first_app="$(yq -r '.apps // [] | .[] | select(.runtime != "swarm") | .name' "${dir}/server.yml" | sed -n '1p')"
 if [ -n "$first_app" ]; then
     hook() {
         curl -s -o /dev/null -m 10 -X POST --resolve "deploy.${domain}:443:${address}" \
@@ -127,10 +128,10 @@ if [ -n "$first_app" ]; then
     else
         [ "$code" = 401 ] && pass "an unsigned webhook is refused" || fail "an unsigned webhook to /hook/${first_app}: HTTP ${code}, not 401"
     fi
-    while read -r sub path; do
-        [ -z "$sub" ] || check "${sub}.${domain}${path%/} answers" "${sub}.${domain}" GET not_5xx "$path"
-    done < <(bash "${KAYRA_ROOT}/scripts/local/app-manifests.sh" --routes "$name")
 fi
+while read -r sub path; do
+    [ -z "$sub" ] || check "${sub}.${domain}${path%/} answers" "${sub}.${domain}" GET not_5xx "$path"
+done < <(bash "${KAYRA_ROOT}/scripts/local/app-manifests.sh" --routes "$name")
 
 # ── On the server ───────────────────────────────────────────────────────────
 facts="$(ssh -p "${port:-22}" -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
@@ -140,6 +141,19 @@ echo "registered $(ls apps 2>/dev/null | sed -n "s/\.json$//p" | sort | tr "\n" 
 echo "alerts $(ls alerts 2>/dev/null | tr "\n" " ")"
 echo "kayra $(cat /opt/kayra/version 2>/dev/null || true)"
 docker compose ps -a --format "{{.Service}}|{{.State}}|{{.Health}}" | sed "s/^/platform /"
+if grep -Eq "^COMPOSE_FILE=.*:docker-compose[.]managed[.]yml(:|$)" .env; then
+    managed=$(docker compose exec -T deployer kayra-deployer ctl lifecycle list-managed)
+    managed_apps=$(printf "%s\n" "$managed" | jq -r ".[]")
+    for app in $managed_apps; do
+        echo "managed-registration $app"
+        status=$(docker compose exec -T deployer kayra-deployer ctl lifecycle status "$app" 2>/dev/null) || status=unavailable
+        printf "managed-status %s %s\n" "$app" "$status"
+        if [ "$status" != null ] && [ "$status" != unavailable ]; then
+            health=$(docker compose exec -T deployer kayra-deployer ctl lifecycle health "$app" 2>/dev/null) || health=unavailable
+            printf "managed-health %s %s\n" "$app" "$health"
+        fi
+    done
+fi
 for app in $(ls apps 2>/dev/null | sed -n "s/\.json$//p"); do
     docker ps -a --filter "label=com.docker.compose.project=$app" --format "{{.Names}}|{{.State}}|{{.Status}}" | sed "s/^/container $app /"
     last=$(ls runs/$app 2>/dev/null | sort | tail -1)
@@ -147,11 +161,13 @@ for app in $(ls apps 2>/dev/null | sed -n "s/\.json$//p"); do
 done' 2>&1)" || { fail "the server answers over SSH: ${facts}"; exit 1; }
 
 wanted="$(sort <<< "$registered_wanted" | tr '\n' ' ')"
-have="$(sed -n 's/^registered //p' <<< "$facts")"
+managed_have="$(sed -n 's/^managed-registration //p' <<< "$facts" | sort)"
+have="$( { sed -n 's/^registered //p' <<< "$facts" | tr ' ' '\n'; printf '%s\n' "$managed_have"; } | sed '/^$/d' | sort)"
 wanted="$(xargs <<< "$wanted")"
 have="$(xargs <<< "$have")"
 [ "$wanted" = "$have" ] && pass "registered: ${have:-no apps}" \
     || fail "registered: ${have:-nothing}; server.yml says ${wanted:-no apps} (kayra apps ${name})"
+[ "$managed_wanted" = "$managed_have" ] || fail "managed Swarm registrations disagree with server.yml"
 
 running="$(sed -n 's/^kayra //p' <<< "$facts" | xargs)"
 if [ "$running" = "$pin" ]; then pass "set up by kayra ${pin}, the fleet's pin"
@@ -166,6 +182,31 @@ bad_platform="$(sed -n 's/^platform //p' <<< "$facts" | awk -F'|' '$2 != "runnin
 
 while IFS= read -r app; do
     [ -n "$app" ] || continue
+    if grep -Fxq -- "$app" <<< "$managed_wanted"; then
+        status="$(sed -n "s/^managed-status ${app} //p" <<< "$facts")"
+        if [ "$status" = null ]; then pass "${app}: not deployed yet"; continue; fi
+        phase="$(jq -er --arg app "$app" 'select(.app == $app and .protocol == "managed-v3") | .operation.phase' <<< "$status" 2>/dev/null || true)"
+        if [ -z "$phase" ]; then fail "${app}: managed deployment status is unavailable"; continue; fi
+        action="$(jq -r '.requiredAction' <<< "$status")"
+        active="$(jq -r '.verifiedActive.commit // empty' <<< "$status")"
+        if [ "$action" = inspect-and-resolve ]; then
+            fail "${app}: managed rollout ${phase} requires operator action"
+        elif [ -z "$active" ]; then
+            fail "${app}: managed rollout ${phase} has no verified active release"
+        else
+            observed="$(sed -n "s/^managed-health ${app} //p" <<< "$facts")"
+            health="$(jq -er --arg app "$app" --arg incarnation "$(jq -r '.incarnation' <<< "$status")" \
+                'select(.app == $app and .incarnation == $incarnation and .runtime == "swarm") | .state' <<< "$observed" 2>/dev/null || true)"
+            if [ "$health" = available ]; then
+                pass "${app}: verified ${active:0:12}, current Swarm services available"
+                outcome="$(jq -r '.operation.outcome // empty' <<< "$status")"
+                case "$outcome" in rolled-back|unchanged) note "${app}: last rollout outcome ${outcome}" ;; esac
+            else
+                fail "${app}: current Swarm services ${health:-unavailable}"
+            fi
+        fi
+        continue
+    fi
     containers="$(sed -n "s/^container ${app} //p" <<< "$facts")"
     run="$(sed -n "s/^run ${app} //p" <<< "$facts")"
     # One-shot containers (an init, a migration) exit 0 and stay exited.

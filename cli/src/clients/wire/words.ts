@@ -3,6 +3,25 @@ import type { Invocation } from "../../core/operations/catalog.ts";
 /** What follows the server and the app on the command line, by operation. */
 const extra = (call: Invocation) => {
   switch (call.name) {
+    case "app.build":
+      return [call.input.commit];
+    case "app.deployment.prepare":
+      return [call.input.commit, call.input.request];
+    case "app.deployment.restore":
+      return [call.input.record, call.input.request];
+    case "app.deployment.forward":
+      return [call.input.blockedRun, call.input.commit, call.input.request, "--reason", JSON.stringify(call.input.reason)];
+    case "app.deployment.recreate":
+      return [call.input.removal, call.input.request, "--reason", JSON.stringify(call.input.reason)];
+    case "app.deployment.cancel":
+      return [call.input.request];
+    case "app.migration.cleanup":
+      return [call.input.run, call.input.step, call.input.purpose, String(call.input.attempt), call.input.action, "--reason", JSON.stringify(call.input.reason)];
+    case "app.migration.cleanup.audit":
+    case "app.migration.audit":
+      return [call.input.run, call.input.step];
+    case "app.migration.resolve":
+      return [call.input.run, call.input.step, call.input.outcome, "--reason", JSON.stringify(call.input.reason)];
     case "app.config.set":
       return [call.input.key, call.input.value, ...(call.input.dir === undefined ? [] : ["--dir", call.input.dir])];
     case "app.secret.import":
@@ -44,6 +63,9 @@ const extra = (call: Invocation) => {
     case "adopt":
     case "backup.test":
     case "app.purge":
+    case "app.deployment.health":
+    case "app.deployment.pins":
+    case "app.deployment.status":
     case "app.runs":
     case "app.releases":
     case "status":
@@ -55,7 +77,7 @@ const extra = (call: Invocation) => {
 };
 
 /** How the command line spells an operation where its words are not its name's. */
-const spelled: Partial<Readonly<Record<Invocation["name"], string>>> = { "ssh.exec": "ssh", "app.releases": "app rollback", "app.log": "app logs" };
+const spelled: Partial<Readonly<Record<Invocation["name"], string>>> = { "app.migration.cleanup.audit": "app migration cleanup-audit", "ssh.exec": "ssh", "app.releases": "app rollback", "app.log": "app logs" };
 
 /** The command's words, as typed on the command line. */
 export const words = (call: Invocation) => {

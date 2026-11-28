@@ -1,3 +1,4 @@
+import { managedIndexRuntimeFixture } from "./deployment/managed-index-runtime-fixture.ts";
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
@@ -42,7 +43,7 @@ const call = (port: number, path: string, options: Sent = {}): Promise<Answer> =
 const object = (answer: Answer) => z.record(z.string(), z.unknown()).parse(JSON.parse(answer.body));
 const idOf = (answer: Answer): string => z.string().parse(object(answer)[answer.status === 201 ? "session" : "run"]);
 
-const fixture = async (clients: Clients = { ui: true, api: true }) => {
+const fixture = async (clients: Clients = { ui: true, api: true }, reports?: { readonly status: unknown; readonly health: unknown; readonly pins: unknown }) => {
   const dir = mkdtempSync(join(tmpdir(), "kayra-api-"));
   const engine = join(dir, "engine");
   const bin = join(dir, "bin");
@@ -60,14 +61,27 @@ const fixture = async (clients: Clients = { ui: true, api: true }) => {
   program("sops", "echo 'a: b'");
   program("sudo", "exit 1");
   program("tofu", 'case "$*" in *output*) echo 192.0.2.1;; *state*) echo hcloud_server.this;; esac');
+  const deployment = { version: 1, app: "shop", incarnation: "12345678-1234-4234-8234-123456789abc", runtime: "swarm", lifecycle: "registered", verification: "verified",
+    requested: { plan: "b".repeat(64), commit: "b".repeat(40) }, desired: { plan: "a".repeat(64), commit: "a".repeat(40) },
+    verifiedActive: { plan: "a".repeat(64), commit: "a".repeat(40), verifiedAt: 1000 }, lastKnownGood: { plan: "a".repeat(64), commit: "a".repeat(40), verifiedAt: 1000 },
+    operation: { request: "23456789-1234-4234-8234-123456789abc", phase: "failed", reason: "runtime", cancelRequestedAt: null, updateDeadline: 90000, recoveryDeadline: 180000, recovery: "automatic-rollback" },
+    preparation: null, requiredAction: "none", runtimeObservation: "not-observed" };
+  const runtimeHealth = { version: 1, app: "shop", incarnation: deployment.incarnation, runtime: "swarm", scope: "runtime-services", observedAt: 2000, state: "available",
+    services: [{ name: "web", state: "available", currentTasks: 1, healthyTasks: 1, ignoredHistoricalTasks: 3 }] };
+  const deploymentPins = { version: 1, app: "shop", incarnation: deployment.incarnation, runtime: "swarm", scope: "coordinator-plans", gcSafe: false, plans: [] };
   program("ssh", `case "$*" in
+    *'ctl lifecycle status malformed'*) echo '{}' ;;
+    *'ctl lifecycle status'*) echo '${JSON.stringify(reports === undefined ? deployment : reports.status)}' ;;
+    *'ctl lifecycle health'*) echo '${JSON.stringify(reports === undefined ? runtimeHealth : reports.health)}' ;;
+    *'ctl lifecycle pins'*) echo '${JSON.stringify(reports === undefined ? deploymentPins : reports.pins)}' ;;
     *'ctl runs'*) echo '{"app":"shop","runs":[]}' ;;
     *'ctl rollback'*) echo '{"app":"shop","releases":[]}' ;;
     *'ctl log'*) echo 'a test log' ;;
     *wait*) exec sleep 30 ;;
     *) echo READY; read -r line; printf 'answer:%s\\n' "$line" ;;
   esac`);
-  const labServer = server("lab", "target: multipass\ndomain: lab.test\napps: [{name: shop, repo: https://git.example/shop.git}]", { secrets: "a: b\n" });
+  const labServer = server("lab", "target: multipass\ndomain: lab.test\napps: [{name: shop, repo: https://git.example/shop.git, runtime: swarm, grants: {memory_bytes: 268435456, cpu_millicores: 500, maintenance: false}}]",
+    { secrets: "a: b\n", vars: "managed_swarm_rollouts: true\nexperimental_swarm: {enabled: true, advertise_address: 192.0.2.1, memory_bytes: 3221225472, cpu_millicores: 2000, platform_memory_bytes: 1073741824, platform_cpu_millicores: 500}\n" });
   const lab = { ...labServer, secrets: { ...labServer.secrets, file: must(absolutePath(join(dir, "lab-secrets.yml"))) }, backupDir: must(remotePath("/backup")) };
   const prod = server("prod", "kind: edge\ntarget: hetzner\ndomain: prod.example");
   const store = server("store", "target: hetzner\ndomain: store.example\napps: [{name: shop, repo: https://git.example/shop.git}]");
@@ -116,6 +130,21 @@ test("generated browser types, OpenAPI and API reference match the catalog and p
   strictEqual(readFileSync(join(import.meta.dirname, "../../site/src/content/docs/reference/api.md"), "utf8"), apiReference(openapi(version)));
 });
 
+test("deployment queries return validated scoped projections without creating operator runs", async (t) => {
+  const api = await fixture(); t.after(api.cleanup);
+  const before = await call(api.port, "/api/runs", { token: api.token });
+  const status = await api.post("app.deployment.status", { server: "lab", app: "shop" });
+  strictEqual(status.status, 200); const value = schemas.DeploymentStatus.parse(JSON.parse(status.body)); strictEqual(value?.version, 1);
+  strictEqual(value.verifiedActive?.commit, "a".repeat(40)); strictEqual(value.requested?.commit, "b".repeat(40));
+  strictEqual(value.operation?.phase, "failed"); strictEqual(value.operation.recovery, "automatic-rollback");
+  const health = await api.post("app.deployment.health", { server: "lab", app: "shop" });
+  strictEqual(health.status, 200); const observed = schemas.DeploymentHealth.parse(JSON.parse(health.body)); strictEqual(observed?.state, "available"); strictEqual(observed.services[0]?.ignoredHistoricalTasks, 3);
+  const pins = await api.post("app.deployment.pins", { server: "lab", app: "shop" }); strictEqual(pins.status, 200); strictEqual(schemas.DeploymentImagePins.parse(JSON.parse(pins.body))?.gcSafe, false);
+  for (const name of ["app.deployment.status", "app.deployment.health", "app.deployment.pins"]) strictEqual((await api.post(name, { server: "lab", app: "another" })).status, 502);
+  strictEqual((await api.post("app.deployment.status", { server: "lab", app: "malformed" })).status, 502);
+  strictEqual((await call(api.port, "/api/runs", { token: api.token })).body, before.body);
+});
+
 test("run records retain their history and session identity, and only live runs lock a server", () => {
   strictEqual(runId("2026-10-18T20:15:02.123Z", "a1b2c3"), "20261018T201502Z-a1b2c3");
   const text = recordLine({ id: "r1", command: "kayra setup lab", server: "lab", started: "now", session: false }) + recordLine({ kind: "started", index: 0 });
@@ -129,6 +158,19 @@ test("run records retain their history and session identity, and only live runs 
 });
 
 const samples = {
+  "app.build": { server: "lab", app: "shop", commit: "a".repeat(40) },
+  "app.deployment.prepare": { server: "lab", app: "shop", commit: "a".repeat(40), request: "12345678-1234-4234-8234-123456789abc" },
+  "app.deployment.restore": { server: "lab", app: "shop", record: "a".repeat(64), request: "12345678-1234-4234-8234-123456789abc" },
+  "app.deployment.forward": { server: "lab", app: "shop", blockedRun: "12345678-1234-4234-8234-123456789abc", commit: "a".repeat(40), request: "23456789-1234-4234-8234-123456789abc", reason: "Deploy the reviewed forward fix" },
+  "app.deployment.recreate": { server: "lab", app: "shop", removal: "12345678-1234-4234-8234-123456789abc", request: "23456789-1234-4234-8234-123456789abc", reason: "Restore the retained app data" },
+  "app.deployment.health": { server: "lab", app: "shop" },
+  "app.deployment.pins": { server: "lab", app: "shop" },
+  "app.deployment.status": { server: "lab", app: "shop" },
+  "app.deployment.cancel": { server: "lab", app: "shop", request: "12345678-1234-4234-8234-123456789abc" },
+  "app.migration.cleanup": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", purpose: "migration", attempt: 1, action: "23456789-1234-4234-8234-123456789abc", reason: "Fence failed migration before inspecting ledger" },
+  "app.migration.cleanup.audit": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema" },
+  "app.migration.audit": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema" },
+  "app.migration.resolve": { server: "lab", app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", outcome: "applied", reason: "Verified migration ledger" },
   up: { server: "lab" }, provision: { server: "lab" }, deploy: { server: "lab" }, setup: { server: "lab" }, plan: { server: "lab" }, verify: { server: "lab" }, apps: { server: "lab" }, hosts: { server: "lab" },
   down: { server: "lab" }, adopt: { server: "prod" }, "backup.test": { server: "lab" }, ssh: { server: "lab" }, "ssh.exec": { server: "lab", command: ["uptime"] },
   "app.values": { server: "lab", app: "shop", dir: "app" },
@@ -160,6 +202,7 @@ test("every catalog operation is previewed or queried over HTTP; unknown operati
   strictEqual(JSON.stringify(spec).includes('/api/v1'), false);
   strictEqual((await api.post("toString")).status, 404);
   strictEqual((await api.post("setup", { server: "missing" })).status, 400);
+  strictEqual((await api.post("app.deployment.recreate/preview", { ...samples["app.deployment.recreate"], server: "store" })).status, 400);
   strictEqual((await api.post("setup", { server: "lab", unexpected: true })).status, 400);
   strictEqual((await api.post("ssh.exec", { server: "lab", command: [] })).status, 400);
   strictEqual((await api.post("doctor", {}, { options: { columns: "120; evil" } })).status, 400);
@@ -328,4 +371,21 @@ test("shutdown cancels an in-flight SSH query and waits for its child to exit", 
   await request;
   const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
   strictEqual(alive(), false);
+});
+
+
+test("API queries validate managed reports and explicit absence without creating operator runs", async (t) => {
+  const lab = await managedIndexRuntimeFixture(t); await lab.index().requestManagedDeployment("shop", lab.source, lab.runtime);
+  // eslint-disable-next-line functional/no-let -- bounded fixture reconciliation before exercising the API transport
+  for (let count = 0; count < 100; count++) { const state = await lab.index().tickManagedDeployment("shop", lab.source.run, lab.runtime); if (state?.operation.phase === "complete") break; }
+  const reports = { status: await lab.index().managedDeploymentStatus("shop", lab.runtime), health: await lab.index().managedDeploymentHealth("shop", lab.runtime), pins: await lab.index().managedDeploymentImagePins("shop", lab.runtime) };
+  const api = await fixture(undefined, reports); t.after(api.cleanup); const before = await call(api.port, "/api/runs", { token: api.token });
+  const status = await api.post("app.deployment.status", { server: "lab", app: "shop" }); strictEqual(status.status, 200); deepStrictEqual(schemas.DeploymentStatus.parse(JSON.parse(status.body)), reports.status);
+  const pins = await api.post("app.deployment.pins", { server: "lab", app: "shop" }); strictEqual(pins.status, 200); deepStrictEqual(schemas.DeploymentImagePins.parse(JSON.parse(pins.body)), reports.pins);
+  strictEqual((await api.post("app.deployment.status", { server: "lab", app: "another" })).status, 502); strictEqual((await call(api.port, "/api/runs", { token: api.token })).body, before.body);
+});
+
+test("API queries represent an unrequested managed deployment without inventing a release", async (t) => {
+  const idle = await fixture(undefined, { status: null, health: null, pins: null }); t.after(idle.cleanup);
+  for (const name of ["app.deployment.status", "app.deployment.health", "app.deployment.pins"]) { const response = await idle.post(name, { server: "lab", app: "shop" }); strictEqual(response.status, 200); strictEqual(JSON.parse(response.body), null); }
 });

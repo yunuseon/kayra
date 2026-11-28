@@ -1,0 +1,646 @@
+import { beginManagedPurgeEnvelope, updateManagedPurgeEnvelope } from "./managed-purge-transition.ts";
+import type { ManagedPurgeInventory } from "./managed-purge-inventory.ts";
+import type { ManagedPurge } from "./managed-purge-state.ts";
+import { managedRemovalAccountingIntent, managedRemovalEffectsReference } from "./managed-removal-intent.ts";
+import { completeManagedRemovalEnvelope, requestManagedRemovalEnvelope } from "./managed-removal-transition.ts";
+import { reserveManagedForwardEnvelope, publishManagedForwardCleanup, holdManagedForwardInitialization, publishManagedForwardHandoff, activateManagedForwardEnvelope } from "./managed-forward-reservation-transition.ts";
+import { prepareManagedEnvelope, completeManagedEnvelope } from "./managed-envelope-transitions.ts";
+import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
+import { settledMigrationPrefix } from "./migration-prefix.ts";
+/* Owns atomic app-envelope transitions and private phase journal views. The
+ * indexed composition holds the exclusive writer, authenticates registration
+ * and supplies runtime ports checking the matching durable admission. */
+/* eslint-disable functional/prefer-immutable-types */
+import type { RoutedReadiness } from "../../contracts/routed-readiness.ts";
+import { serviceEffectAction } from "../../contracts/swarm-service.ts";
+import type { ServiceAction, ServiceObservation } from "../../contracts/swarm-service.ts";
+import { clearedHttp, convergedHttp, fencedHttpEffects, routedHttp } from "./http-convergence.ts";
+import type { Runtime } from "../../contracts/rollout.ts";
+import type { OperationJournal } from "./operation.ts";
+import { parseRegistrationObservation } from "../../contracts/registration-generation.ts";
+import { claimJournal } from "./journal-claim.ts";
+import { parseLifecycleEnvelope, registrationGenerationId } from "./lifecycle-envelope.ts";
+import { z } from "zod";
+import { httpReleasePlan, parseHttpNativeStep, terminalHttp } from "./http-state.ts";
+import type { HttpNativeStep, HttpRecovery } from "./http-state.ts";
+import { beginLifecycleWork, beginRegistration, lifecycleActionId, settleLifecycleWork } from "./lifecycle-fence.ts";
+import { admitTicket, completeTicket, initialTicketState, reserveTicket } from "./lifecycle-tickets.ts";
+import { cancelledRolloutPreparation, initialRolloutPreparation, parseRolloutPreparation, rolloutPreparation } from "./rollout-preparation.ts";
+import { parseRolloutPlan } from "../../contracts/rollout-plan.ts";
+import type { RolloutPlan } from "../../contracts/rollout-plan.ts";
+import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
+import { resolveRolloutMigration } from "./rollout-resolution.ts";
+import { requestRolloutCleanup, rolloutCleanupRecord, migrationCleanupReceipt } from "./rollout-cleanup.ts";
+import type { MigrationCleanupRequest, MigrationCleanupIdentity } from "../../contracts/migration-cleanup.ts";
+import { parseJobCleanupState } from "../../contracts/job-cleanup.ts";
+import { jobCleanup } from "./job-cleanup.ts";
+
+
+type RegistrationObservation = { readonly app: string; readonly incarnation: string; readonly actionId: string; readonly registrationGeneration: string };
+/** The composition root, never a client request, supplies this trusted read-only port. */
+export type RegistrationObserver = (expected: RegistrationObservation, signal: AbortSignal) => Promise<unknown>;
+
+const observeWithDeadline = async (observe: RegistrationObserver, expected: RegistrationObservation, timeoutMs: number) => {
+  const controller = new AbortController();
+  const deadline = performance.now() + timeoutMs;
+  const timeout = Promise.withResolvers<undefined>();
+  const timer = setTimeout(() => {
+    timeout.resolve(undefined);
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const evidence = await Promise.race([observe(expected, controller.signal), timeout.promise]);
+    if (performance.now() >= deadline) {
+      controller.abort();
+      return undefined;
+    }
+    return parseRegistrationObservation(evidence);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export const openLifecycleEnvelopeStore = (journal: OperationJournal, observeRegistration?: RegistrationObserver, observationTimeoutMs = 10_000) => {
+  if (!Number.isInteger(observationTimeoutMs) || observationTimeoutMs < 1 || observationTimeoutMs > 2_147_483_647) throw new Error("invalid registration observation timeout");
+  claimJournal(journal, "lifecycle envelope journal is already owned");
+  // eslint-disable-next-line functional/no-let -- serialize the exclusive writer
+  let pending = Promise.resolve();
+  // eslint-disable-next-line functional/no-let -- a failed write may nevertheless have committed
+  let poisoned = false;
+  const serial = <T>(task: () => Promise<T>) => {
+    const result = pending.then(() => {
+      if (poisoned) throw new Error("lifecycle write outcome is uncertain; reopen and reconcile");
+      return task();
+    });
+    pending = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  const load = async () => {
+    const raw = await journal.read();
+    if (raw === undefined) return undefined;
+    const parsed = parseLifecycleEnvelope(raw);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.value;
+  };
+  const persist = async (candidate: unknown) => {
+    const checked = parseLifecycleEnvelope(candidate);
+    if (!checked.ok) throw new Error(checked.error);
+    try {
+      await journal.write(checked.value);
+      return checked.value;
+    } catch (error) {
+      poisoned = true;
+      throw error;
+    }
+  };
+  const required = async () => {
+    const value = await load();
+    if (value === undefined) throw new Error("lifecycle envelope is not initialized");
+    return value;
+  };
+  const ownedHttp = (current: Awaited<ReturnType<typeof required>>, ticket: string) => {
+    const request = current.http?.requests.find((item) => item.ticket === ticket);
+    if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+    return Object.freeze({ request, http: current.http, fence: current.fence });
+  };
+  return {
+    read: () => serial(load),
+    /** The caller must establish that this is a new, durably indexed incarnation. */
+    initialize: (app: string, incarnation: string) => serial(async () => {
+      const existing = await load();
+      if (existing !== undefined) {
+        if (!existing.created && existing.tickets.app === app && existing.tickets.incarnation === incarnation) return existing;
+        throw new Error("lifecycle envelope is already initialized");
+      }
+      const tickets = initialTicketState(app, incarnation);
+      if (!tickets.ok) throw new Error(tickets.error);
+      return persist({ version: 1, created: false, fence: null, tickets: tickets.value, operations: [] });
+    }),
+    /** The caller durably retains the generation ID before requesting a ticket. */
+    reserveRegistration: (generation?: string, runtime: Runtime = "compose") => serial(async () => {
+      if (runtime === "swarm" && generation === undefined) throw new Error("Swarm requires an indexed registration generation");
+      if (generation !== undefined && !registrationGenerationId.safeParse(generation).success) throw new Error("invalid registration generation");
+      const current = await required();
+      const allocation = current.registrationAllocation;
+      if (allocation !== undefined) {
+        if (allocation.generation !== generation || allocation.runtime !== runtime) throw new Error("initial registration allocation conflict");
+        return allocation.ticket;
+      }
+      if (current.created) throw new Error("initial registration is already in progress or complete");
+      if (generation !== undefined && current.tickets.active.length !== 0) throw new Error("initial registration has outstanding legacy reservations");
+      const reserved = reserveTicket(current.tickets);
+      if (!reserved.ok) throw new Error(reserved.error);
+      await persist({
+        ...current, tickets: reserved.value.state,
+        ...(generation === undefined ? {} : { registrationAllocation: { generation, ticket: reserved.value.ticket, runtime } }),
+      });
+      return reserved.value.ticket;
+    }),
+    /** A new response acknowledges persisted intent only; reconcile responses never permit replay. */
+    submitRegistration: (ticket: string, registrationGeneration: string) => {
+      if (typeof ticket !== "string" || typeof registrationGeneration !== "string") return Promise.reject(new Error("invalid registration request"));
+      const descriptor = Object.freeze({ kind: "register" as const, registrationGeneration });
+      return serial(async () => {
+        const current = await required();
+        const allocation = current.registrationAllocation;
+        if (allocation !== undefined && (allocation.ticket !== ticket || allocation.generation !== registrationGeneration)) {
+          throw new Error("initial registration allocation conflict");
+        }
+        if (current.registrationReceipt?.ticket === ticket && current.registrationReceipt.metadata.registrationGeneration === registrationGeneration) return Object.freeze({ status: "terminal" as const, outcome: "success" as const });
+        const admitted = admitTicket(current.tickets, ticket, descriptor);
+        if (!admitted.ok) throw new Error(admitted.error);
+        if (admitted.value.status === "terminal") return Object.freeze({ status: "terminal" as const, outcome: admitted.value.outcome });
+        if (admitted.value.status === "accepted") {
+          const fence = current.fence;
+          if (fence?.lifecycle.phase !== "registering" || fence.lifecycle.active.sequence !== 1) throw new Error("ticket is not an initial registration intent");
+          const existing = current.operations.find((operation) => operation.ticket === ticket);
+          if (existing?.action !== lifecycleActionId(fence, 1)) throw new Error("accepted ticket lacks initial registration intent");
+          return Object.freeze({ status: "reconcile" as const, actionId: existing.action });
+        }
+        if (current.created) throw new Error("initial registration is already in progress or complete");
+        const fence = beginRegistration(current.tickets.app, current.tickets.incarnation);
+        if (!fence.ok) throw new Error(fence.error);
+        const actionId = lifecycleActionId(fence.value, 1);
+        await persist({ ...current, created: true, fence: fence.value, tickets: admitted.value.state, operations: [{ ticket, action: actionId, descriptor }] });
+        return Object.freeze({ status: "new" as const, actionId });
+      });
+    },
+    /** The index authenticates ownership/registration and retains artifacts before these synchronized reference-only transitions. */
+    prepareManaged: (input: ManagedLifecycleSource, now: number) => serial(async () => {
+      const next = prepareManagedEnvelope(await required(), input, now); if (next.changed) await persist(next.state); return next.request;
+    }),
+    requestManagedRemoval: (...args: readonly [Parameters<typeof requestManagedRemovalEnvelope>[1], string, Parameters<typeof requestManagedRemovalEnvelope>[3], number]) => serial(async () => {
+      const next = requestManagedRemovalEnvelope(await required(), ...args);
+      if (next.changed) await persist(next.state);
+      return next.removal;
+    }),
+    bindManagedRemovalEffects: (input: unknown) => serial(async () => {
+      const current = await required();
+      const reference = managedRemovalEffectsReference.parse(input);
+      const prior = current.removalEffects;
+      if (current.removal?.request !== reference.request || current.removal.action !== reference.action) throw new Error("managed removal effects lack their intent");
+      if (prior !== undefined) {
+        if (prior.inventory !== reference.inventory || prior.deadline !== reference.deadline) throw new Error("managed removal effects reference conflicts");
+        return prior;
+      }
+      if (reference.journal !== "initializing") throw new Error("managed removal effects require initialization");
+      await persist({ ...current, removalEffects: reference });
+      return reference;
+    }),
+    beginManagedPurge: (request: string, removal: string, createdAt: number, operator: ManagedPurge["operator"], inventory: ManagedPurgeInventory) => serial(async () => {
+      const current = await required();
+      const next = beginManagedPurgeEnvelope(current, request, removal, createdAt, operator, inventory);
+      if (current.managedPurge !== undefined) return current.managedPurge;
+      const purge = (await persist(next)).managedPurge;
+      if (purge === undefined) throw new Error("managed purge intent did not persist");
+      return purge;
+    }),
+    updateManagedPurge: (prior: ManagedPurge, state: ManagedPurge) => serial(async () => {
+      const next = updateManagedPurgeEnvelope(await required(), prior, state);
+      const purge = (await persist(next)).managedPurge;
+      if (purge === undefined) throw new Error("managed purge progress did not persist");
+      return purge;
+    }),
+    completeManagedRemoval: (input: unknown, checkpointRun: string | null) => serial(async () => {
+      const current = await required();
+      const next = completeManagedRemovalEnvelope(current, input, checkpointRun);
+      if (current.removalTombstone !== undefined) return current.removalTombstone;
+      const receipt = (await persist(next)).removalTombstone;
+      if (receipt === undefined) throw new Error("managed removal tombstone did not persist");
+      return receipt;
+    }),
+    bindManagedRemovalAccounting: (input: unknown) => serial(async () => {
+      const intent = managedRemovalAccountingIntent.parse(input);
+      const current = await required();
+      if (current.removalAccounting !== undefined) {
+        if (JSON.stringify(current.removalAccounting) !== JSON.stringify(intent)) throw new Error("managed removal accounting intent conflicts");
+        return current.removalAccounting;
+      }
+      await persist({ ...current, removalAccounting: intent });
+      return intent;
+    }),
+    publishManagedRemovalEffects: (input: unknown) => serial(async () => {
+      const current = await required();
+      const reference = managedRemovalEffectsReference.parse(input);
+      if (reference.journal !== "initializing" || JSON.stringify(current.removalEffects) !== JSON.stringify(reference)) throw new Error("managed removal effects publication conflicts");
+      const next = Object.freeze({ ...reference, journal: "ready" as const });
+      await persist({ ...current, removalEffects: next });
+      return next;
+    }),
+    reserveManagedForward: (input: Parameters<typeof reserveManagedForwardEnvelope>[1]) => serial(async () => {
+      const next = reserveManagedForwardEnvelope(await required(), input); if (next.changed) await persist(next.state); return next.reservation;
+    }),
+    holdManagedForwardInitialization: (expected: Parameters<typeof holdManagedForwardInitialization>[1], at: number) => serial(async () => {
+      const next = holdManagedForwardInitialization(await required(), expected, at); await persist(next.state); return next.reservation;
+    }),
+    publishManagedForwardCleanup: (expected: Parameters<typeof publishManagedForwardCleanup>[1], source: unknown) => serial(async () => {
+      const next = publishManagedForwardCleanup(await required(), expected, source); await persist(next.state); return next.reservation;
+    }),
+    publishManagedForwardHandoff: (expected: Parameters<typeof publishManagedForwardHandoff>[1], source: unknown) => serial(async () => {
+      const next = publishManagedForwardHandoff(await required(), expected, source);
+      await persist(next.state);
+      return next.reservation;
+    }),
+    activateManagedForward: (source: ManagedLifecycleSource, root: unknown) => serial(async () => {
+      const next = activateManagedForwardEnvelope(await required(), source, root);
+      await persist(next.state);
+      return next.request;
+    }),
+    completeManaged: (input: unknown, record: string) => serial(async () => {
+      const next = completeManagedEnvelope(await required(), input, record); if (next.changed) await persist(next.state); return next.request;
+    }),
+    /** Complete plans own the same fence as legacy HTTP work, with their own immutable identity. */
+    prepareRollout: (input: RolloutPlan, request: string, now: number) => serial(async () => {
+      const checked = parseRolloutPlan(input); if (!checked.ok) throw new Error(checked.error);
+      const preparation = initialRolloutPreparation(checked.value, request, now);
+      const current = await required(); const existing = current.rollout;
+      if (existing !== undefined) {
+        if (existing.preparation.run === request) {
+          if (existing.preparation.plan !== preparation.plan) throw new Error("rollout request identity conflicts"); return existing;
+        }
+        const previous = current.http?.requests.find((item) => item.request === existing.preparation.run);
+        if (existing.completion === undefined && (previous === undefined || !terminalHttp(previous.phase))) throw new Error("complete rollout lifecycle is busy");
+        if ((current.rollouts?.length ?? 0) >= 1024) throw new Error("complete rollout history exhausted; intervention required");
+      }
+      if (current.registrationReceipt?.runtime !== "swarm" || current.fence?.lifecycle.phase !== "registered" ||
+        JSON.stringify(current.registrationReceipt.metadata) !== JSON.stringify(checked.value.workload.registration)) throw new Error("complete rollout requires matching verified Swarm registration");
+      const fence = beginLifecycleWork(current.fence, "deploy"); const reserved = reserveTicket(current.tickets);
+      if (!fence.ok || !reserved.ok) throw new Error("rollout lifecycle is busy or exhausted");
+      const descriptor = Object.freeze({ kind: "deploy" as const, planDigest: preparation.plan });
+      const accepted = admitTicket(reserved.value.state, reserved.value.ticket, descriptor);
+      if (!accepted.ok || accepted.value.status !== "new") throw new Error("invalid complete rollout ticket allocation");
+      const action = lifecycleActionId(fence.value, fence.value.nextAction - 1);
+      const next = await persist({ ...current, fence: fence.value, tickets: accepted.value.state,
+        operations: [...current.operations, { ticket: reserved.value.ticket, action, descriptor }],
+        ...(existing === undefined ? {} : { rollouts: [...(current.rollouts ?? []), existing] }),
+        rollout: { ticket: reserved.value.ticket, action, commit: checked.value.workload.commit, admissionDeadline: now + 90_000, admitted: false, preparation } });
+      if (next.rollout === undefined) throw new Error("complete rollout intent was not retained"); return next.rollout;
+    }),
+    /** Called only after the index has durably reserved the complete operation's peak. */
+    admitRollout: (ticket: string) => serial(async () => {
+      const current = await required(); const rollout = current.rollout;
+      if (rollout?.ticket !== ticket || rollout.completion !== undefined) throw new Error("complete rollout request is unavailable or settled");
+      const next = await persist({ ...current, rollout: { ...rollout, admitted: true } });
+      return next.rollout;
+    }),
+    /** No migration or HTTP intent has ever existed; runtime absence is not used as evidence. */
+    completeUnstartedRollout: (ticket: string, reason: "cancelled" | "deadline", now: number) => serial(async () => {
+      const current = await required(); const rollout = current.rollout;
+      if (rollout?.ticket !== ticket) throw new Error("complete rollout request is unavailable");
+      if (rollout.completion !== undefined) return rollout;
+      if (current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== rollout.action ||
+        rollout.preparation.phase !== "prepared" || rollout.preparation.sequence !== null || current.http?.requests.some((item) => item.request === rollout.preparation.run) ||
+        !Number.isSafeInteger(now) || now < rollout.preparation.createdAt || reason === "deadline" && (rollout.admitted || now < rollout.admissionDeadline)) throw new Error("complete rollout may have effects or lacks an unstarted settlement clock");
+      const outcome = reason === "cancelled" ? "cancelled" : "failure"; const fence = settleLifecycleWork(current.fence, rollout.action); const tickets = completeTicket(current.tickets, ticket, outcome);
+      if (!fence.ok || !tickets.ok) throw new Error("invalid unstarted complete rollout settlement");
+      const active = current.http?.active;
+      const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+        rollout: { ...rollout, completion: { kind: "unstarted", outcome: reason === "cancelled" ? "cancelled" : "failed", reason, at: now, previous: active === null || active === undefined ? null : httpReleasePlan(active) } } });
+      if (next.rollout === undefined) throw new Error("unstarted rollout outcome was not retained"); return next.rollout;
+    }),
+    tickRolloutPreparation: (ticket: string, ports: Parameters<typeof rolloutPreparation>[1]) => serial(async () => {
+      const current = await required();
+      if (current.rollout?.ticket !== ticket || !current.rollout.admitted || current.rollout.completion !== undefined) throw new Error("complete rollout lacks active admission");
+      // Every child write returns through persist(), including its uncertain-write poisoning.
+      const view = { read: async () => (await required()).rollout?.preparation,
+        write: async (preparation: unknown) => {
+          const state = await required();
+          if (state.rollout?.ticket !== ticket || !state.rollout.admitted) throw new Error("rollout preparation lost lifecycle ownership");
+          const checked = parseRolloutPreparation(preparation); const before = state.rollout.preparation;
+          if (checked.run !== before.run || checked.plan !== before.plan || checked.workload !== before.workload || checked.source !== before.source ||
+            checked.createdAt !== before.createdAt || checked.deadline !== before.deadline || checked.migrationDeadline !== before.migrationDeadline ||
+            before.phase === "ready" || before.phase === "held") throw new Error("rollout preparation changed immutable intent or settled phase");
+          await persist({ ...state, rollout: { ...state.rollout, preparation: checked } });
+        } };
+      return rolloutPreparation(view, ports).tick();
+    }),
+    cancelRolloutPreparation: (run: string, now: number) => serial(async () => {
+      const current = await required(); const operation = current.rollout;
+      if (operation?.preparation.run !== run || !operation.admitted || operation.completion !== undefined || current.http?.requests.some((item) => item.request === run) ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("preparation cancellation lacks lifecycle ownership");
+      if (operation.preparation.cancelRequestedAt !== undefined) return operation;
+      const next = await persist({ ...current, rollout: { ...operation, preparation: cancelledRolloutPreparation(operation.preparation, now) } });
+      if (next.rollout === undefined) throw new Error("preparation cancellation intent disappeared"); return next.rollout;
+    }),
+    expireRolloutHandoff: (run: string, now: number) => serial(async () => {
+      const current = await required(); const operation = current.rollout;
+      if (operation?.preparation.run !== run) throw new Error("expired handoff is unavailable");
+      if (operation.completion !== undefined) return operation;
+      const preparation = operation.preparation; const proof = settledMigrationPrefix(preparation.sequence);
+      if (!operation.admitted || preparation.phase !== "ready" || preparation.httpDeadline === null || preparation.cancelRequestedAt !== undefined || proof === undefined ||
+        current.http?.requests.some((item) => item.request === run) || !Number.isSafeInteger(now) || now < preparation.httpDeadline ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("HTTP handoff has not expired or lacks exclusive settled preparation");
+      const fence = settleLifecycleWork(current.fence, operation.action); const tickets = completeTicket(current.tickets, operation.ticket, "failure");
+      if (!fence.ok || !tickets.ok) throw new Error("expired HTTP handoff cannot settle lifecycle");
+      const active = current.http?.active;
+      const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== operation.ticket),
+        rollout: { ...operation, completion: { kind: "expired-handoff", outcome: "failed", reason: "deadline", at: now,
+          previous: active === null || active === undefined ? null : httpReleasePlan(active), proof } } });
+      if (next.rollout === undefined) throw new Error("expired handoff completion disappeared"); return next.rollout;
+    }),
+    completeCancelledPreparation: (run: string, now: number) => serial(async () => {
+      const current = await required(); const operation = current.rollout;
+      if (operation?.preparation.run !== run) throw new Error("cancelled preparation is unavailable");
+      if (operation.completion !== undefined) return operation;
+      const requested = operation.preparation.cancelRequestedAt; const proof = settledMigrationPrefix(operation.preparation.sequence);
+      if (requested === undefined || !operation.admitted || current.http?.requests.some((item) => item.request === run) ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("cancelled preparation lacks exclusive intent");
+      if (proof === undefined) return operation;
+      if (!Number.isSafeInteger(now) || now < requested) throw new Error("cancelled preparation clock is unavailable");
+      const fence = settleLifecycleWork(current.fence, operation.action); const tickets = completeTicket(current.tickets, operation.ticket, "cancelled");
+      if (!fence.ok || !tickets.ok) throw new Error("cancelled preparation cannot settle lifecycle");
+      const active = current.http?.active;
+      const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== operation.ticket),
+        rollout: { ...operation, completion: { kind: "cancelled-preparation", outcome: "cancelled", reason: "cancelled", at: now,
+          previous: active === null || active === undefined ? null : httpReleasePlan(active), proof } } });
+      if (next.rollout === undefined) throw new Error("cancelled preparation completion disappeared"); return next.rollout;
+    }),
+    requestMigrationCleanup: (request: MigrationCleanupRequest, actor: MigrationResolutionActor, ports: Parameters<typeof requestRolloutCleanup>[3]) => serial(async () => {
+      const current = await required(); const operation = [...(current.rollouts ?? []), ...(current.rollout === undefined ? [] : [current.rollout])].find((item) => item.preparation.run === request.run);
+      if (operation === undefined) throw new Error("migration cleanup rollout is unavailable");
+      const existing = rolloutCleanupRecord(operation, request);
+      if (existing === undefined && (operation !== current.rollout || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null ||
+        lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action)) throw new Error("migration cleanup no longer owns lifecycle");
+      const next = await requestRolloutCleanup(operation, request, actor, ports);
+      if (next.changed) await persist({ ...current, rollout: next.operation });
+      return next.receipt;
+    }),
+    tickMigrationCleanup: (identity: MigrationCleanupIdentity, ports: Omit<Parameters<typeof jobCleanup>[1], "authorize">) => serial(async () => {
+      const current = await required(); const operation = current.rollout; const record = operation === undefined ? undefined : rolloutCleanupRecord(operation, identity);
+      if (operation?.preparation.run !== identity.run || identity.app !== current.tickets.app || record === undefined || operation.completion !== undefined ||
+        operation.preparation.phase !== "held" || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null ||
+        lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action) throw new Error("migration cleanup lost lifecycle ownership");
+      const view = { read: async () => rolloutCleanupRecord((await required()).rollout ?? operation, identity)?.state,
+        write: async (input: unknown) => {
+          const state = parseJobCleanupState(input); const current = await required(); const owner = current.rollout;
+          const previous = owner === undefined ? undefined : rolloutCleanupRecord(owner, identity);
+          if (owner?.preparation.run !== identity.run || owner.completion !== undefined || owner.preparation.phase !== "held" || previous === undefined ||
+            JSON.stringify(previous.state.authority) !== JSON.stringify(state.authority)) throw new Error("migration cleanup immutable authority changed");
+          const sequence = owner.preparation.sequence; if (sequence === null) throw new Error("migration cleanup sequence disappeared");
+          const resume = state.phase === "complete" && state.completedAt !== null && state.completedAt < owner.preparation.migrationDeadline;
+          await persist({ ...current, rollout: { ...owner, preparation: { ...owner.preparation, phase: resume ? "migrating" : "held", reason: resume ? null : owner.preparation.reason,
+            sequence: { ...sequence, phase: resume ? "running" : "held", reason: resume ? null : sequence.reason,
+              steps: sequence.steps.map((step) => step.id !== identity.step ? step : { ...step, phase: resume ? "running" : "held", reason: resume ? null : step.reason,
+                attempts: step.attempts.map((attempt) => attempt.purpose !== identity.purpose || attempt.attempt !== identity.attempt ? attempt : {
+                  ...attempt, cleanups: attempt.cleanups?.map((item) => item.state.authority.action === identity.action ? { ...item, state } : item),
+                }) }) } } } });
+        } };
+      const state = await jobCleanup(view, { ...ports, authorize: () => Promise.resolve(true) }).tick();
+      return migrationCleanupReceipt(identity, { ...record, state });
+    }),
+    migrationCleanupAudit: (run: string, step: string) => serial(async () => {
+      const current = await required(); const operation = [...(current.rollouts ?? []), ...(current.rollout === undefined ? [] : [current.rollout])].find((item) => item.preparation.run === run);
+      return Object.freeze(operation?.preparation.sequence?.steps.find((item) => item.id === step)?.attempts.flatMap((attempt) => attempt.cleanups === undefined ? [] : [Object.freeze({ purpose: attempt.purpose, attempt: attempt.attempt, records: attempt.cleanups })]) ?? []);
+    }),
+    resolveMigration: (request: MigrationResolutionRequest, actor: MigrationResolutionActor, ports: Parameters<typeof resolveRolloutMigration>[4]) => serial(async () => {
+      const current = await required();
+      const operation = [...(current.rollouts ?? []), ...(current.rollout === undefined ? [] : [current.rollout])].find((item) => item.preparation.run === request.run);
+      if (operation === undefined) throw new Error("migration resolution rollout is unavailable");
+      const existing = operation.preparation.sequence?.steps.find((step) => step.id === request.step)?.resolution;
+      if (existing === undefined && (operation !== current.rollout || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null ||
+        lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== operation.action)) throw new Error("migration resolution no longer owns lifecycle");
+      const active = current.http?.active; const previous = active === null || active === undefined ? null : httpReleasePlan(active);
+      const resolved = await resolveRolloutMigration(operation, request, actor, previous, ports);
+      if (!resolved.changed) return resolved.receipt;
+      const completed = resolved.operation.completion !== undefined;
+      const fence = completed && current.fence !== null ? settleLifecycleWork(current.fence, operation.action) : undefined;
+      const tickets = completed ? completeTicket(current.tickets, operation.ticket, resolved.operation.completion.outcome === "cancelled" ? "cancelled" : "failure") : undefined;
+      if (completed && (!fence?.ok || !tickets?.ok)) throw new Error("resolved migration cannot settle its lifecycle");
+      await persist({ ...current, ...(fence?.ok ? { fence: fence.value } : {}), ...(tickets?.ok ? { tickets: tickets.value } : {}),
+        operations: completed ? current.operations.filter((item) => item.ticket !== operation.ticket) : current.operations,
+        rollout: resolved.operation });
+      return resolved.receipt;
+    }),
+    /** The parent hands its existing action to HTTP; no new ticket, lease or deadline is minted. */
+    handoffRollout: (ticket: string, service: string, now: number) => serial(async () => {
+      const current = await required(); const owner = current.rollout; const preparation = owner?.preparation;
+      if (owner?.ticket !== ticket || !owner.admitted || preparation?.phase !== "ready" || preparation.httpDeadline === null || preparation.cancelRequestedAt !== undefined ||
+        current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== owner.action) throw new Error("rollout is not ready for HTTP handoff");
+      const existing = current.http?.requests.find((item) => item.request === preparation.run);
+      if (existing !== undefined) return existing;
+      if (!Number.isSafeInteger(now) || now < preparation.httpDeadline - 90_000 || now >= preparation.httpDeadline) throw new Error("HTTP handoff deadline expired or clock is unavailable");
+      if ((current.http?.requests.length ?? 0) >= 1024) throw new Error("HTTP request history exhausted; intervention required");
+      const request = { request: preparation.run, ticket, action: owner.action, plan: preparation.workload, deployment: preparation.plan, commit: owner.commit,
+        service, deadline: preparation.httpDeadline, previous: current.http?.active ?? null, recoveryDeadline: null, phase: "admitted", reason: null, steps: [], verified: null };
+      const next = await persist({ ...current, http: { version: 1, app: current.tickets.app, incarnation: current.tickets.incarnation,
+        requested: preparation.plan, desired: preparation.plan, active: current.http?.active ?? null, lastKnownGood: current.http?.lastKnownGood ?? null,
+        requests: [...(current.http?.requests ?? []), request] } });
+      const saved = next.http?.requests.find((item) => item.request === preparation.run); if (saved === undefined) throw new Error("HTTP handoff was not retained"); return saved;
+    }),
+    /** Internal lifecycle owner only. A prepared request cannot dispatch effects. */
+    prepareHttp: (input: { readonly request: string; readonly plan: string; readonly commit: string; readonly service: string }, now: number) => {
+      const parsed = z.object({ request: z.uuid(), plan: z.string().regex(/^[0-9a-f]{64}$/), commit: z.string().regex(/^[0-9a-f]{40}$/), service: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/) }).strict().safeParse(input);
+      if (!parsed.success || !Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + 90_000)) return Promise.reject(new Error("invalid HTTP request or clock"));
+      const requested = Object.freeze(parsed.data);
+      return serial(async () => {
+        const current = await required();
+        if (current.registrationReceipt?.runtime !== "swarm" || current.fence?.lifecycle.phase !== "registered") throw new Error("verified Swarm registration required");
+        const existing = current.http?.requests.find((item) => item.request === requested.request);
+        if (existing !== undefined) {
+          if (existing.plan !== requested.plan || existing.commit !== requested.commit || existing.service !== requested.service) throw new Error("HTTP request identity has conflicting intent");
+          return existing;
+        }
+        if ((current.http?.requests.length ?? 0) >= 1024) throw new Error("HTTP request history exhausted; intervention required");
+        const fence = beginLifecycleWork(current.fence, "deploy");
+        const reserved = reserveTicket(current.tickets);
+        if (!fence.ok || !reserved.ok) throw new Error("HTTP lifecycle is busy or exhausted");
+        const descriptor = Object.freeze({ kind: "deploy" as const, planDigest: requested.plan });
+        const admitted = admitTicket(reserved.value.state, reserved.value.ticket, descriptor);
+        if (!admitted.ok || admitted.value.status !== "new") throw new Error("invalid HTTP ticket allocation");
+        const action = lifecycleActionId(fence.value, fence.value.nextAction - 1);
+        const operation = { ...requested, ticket: reserved.value.ticket, action, deadline: now + 90_000,
+          previous: current.http?.active ?? null, recoveryDeadline: null, phase: "prepared", reason: null, steps: [], verified: null };
+        const next = await persist({ ...current, fence: fence.value, tickets: admitted.value.state,
+          operations: [...current.operations, { ticket: reserved.value.ticket, action, descriptor }],
+          http: { version: 1, app: current.tickets.app, incarnation: current.tickets.incarnation,
+            requested: requested.plan, desired: requested.plan, active: current.http?.active ?? null, lastKnownGood: current.http?.lastKnownGood ?? null,
+            requests: [...(current.http?.requests ?? []), operation] },
+        });
+        const saved = next.http?.requests.find((item) => item.request === requested.request);
+        if (saved === undefined) throw new Error("HTTP intent was not retained");
+        return saved;
+      });
+    },
+    /** Call only after matching host-wide admission is durable. */
+    admitHttp: (ticket: string) => serial(async () => {
+      const current = await required();
+      const request = current.http?.requests.find((item) => item.ticket === ticket);
+      if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+      if (request.phase === "admitted") return request;
+      if (request.phase !== "prepared") throw new Error("HTTP action cannot be admitted in this phase");
+      const next = await persist({ ...current, http: { ...current.http, requests: current.http.requests.map((item) => item === request ? { ...request, phase: "admitted" } : item) } });
+      return next.http?.requests.find((item) => item.ticket === ticket);
+    }),
+    /** Persist exact native CAS authority before dispatch; replay must observe first. */
+    recordHttpStep: (ticket: string, input: HttpNativeStep) => {
+      const parsed = parseHttpNativeStep(input);
+      if (!parsed.ok) return Promise.reject(new Error(parsed.error));
+      const step = parsed.value;
+      return serial(async () => {
+        const current = await required();
+        const request = current.http?.requests.find((item) => item.ticket === ticket);
+        if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+        const existing = request.steps.find((item) => item.effect === step.effect);
+        if (existing !== undefined) {
+          if (JSON.stringify(existing) !== JSON.stringify(step)) throw new Error("native HTTP intent conflicts; versions cannot be refreshed");
+          return Object.freeze({ status: "reconcile" as const, request });
+        }
+        if (request.phase !== "admitted" || step.effect !== "apply" || step.plan !== request.plan || step.deadline !== request.deadline) throw new Error("native HTTP intent is outside admitted phase");
+        const next = await persist({ ...current, http: { ...current.http, requests: current.http.requests.map((item) => item === request ? { ...request, phase: "applying", steps: [...request.steps, step] } : item) } });
+        return Object.freeze({ status: "new" as const, request: next.http?.requests.find((item) => item.ticket === ticket) });
+      });
+    },
+    cancelHttp: (ticket: string, now: number) => serial(async () => {
+      const original = await required(); const { request, http, fence: ownership } = ownedHttp(original, ticket);
+      const root = original.rollout;
+      const current = root?.preparation.run === request.request && root.preparation.cancelRequestedAt === undefined
+        ? { ...original, rollout: { ...root, preparation: cancelledRolloutPreparation(root.preparation, now) } } : original;
+      if (request.phase === "held" || request.cancelRequestedAt !== null) {
+        if (current !== original) await persist(current); return request;
+      }
+      if (!Number.isSafeInteger(now) || now <= 0 || now < request.deadline - 90_000) throw new Error("HTTP cancellation clock is unavailable");
+      if (request.steps.length === 0) {
+        const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "cancelled");
+        if (!fence.ok || !tickets.ok) throw new Error("invalid unstarted HTTP cancellation");
+        const next = await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+          http: { ...http, desired: request.previous === null ? null : httpReleasePlan(request.previous), requests: http.requests.map((item) => item === request ? { ...request, phase: "cancelled", cancelRequestedAt: now, reason: "cancelled",
+            recovery: { kind: "unstarted", verified: null, cleared: null } } : item) } });
+        return next.http?.requests.find((item) => item.ticket === ticket);
+      }
+      const deadline = request.recoveryDeadline ?? Math.min(now + 90_000, request.deadline + 90_000);
+      if (!Number.isSafeInteger(deadline)) throw new Error("HTTP cancellation deadline is invalid");
+      const expired = deadline <= now || deadline < request.deadline;
+      const next = await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request,
+        cancelRequestedAt: now, phase: expired ? "held" : "recovering", reason: expired ? "deadline" : request.reason ?? "cancelled", recoveryDeadline: deadline } : item) } });
+      return next.http?.requests.find((item) => item.ticket === ticket);
+    }),
+    beginHttpRecovery: (ticket: string, reason: "deadline" | "admission" | "runtime" | "routed", now: number) => serial(async () => {
+      const current = await required();
+      const { request, http } = ownedHttp(current, ticket);
+      if (request.phase === "recovering" || request.phase === "held") return request;
+      if ((request.phase !== "applying" && request.phase !== "verifying") || !Number.isSafeInteger(now) || now <= 0) throw new Error("HTTP recovery has no native intent or valid clock");
+      const deadline = Math.min(now + 90_000, request.deadline + 90_000);
+      const held = !Number.isSafeInteger(deadline) || deadline <= now || deadline < request.deadline;
+      const next = await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request,
+        phase: held ? "held" : "recovering", reason: held ? "deadline" : reason, recoveryDeadline: held ? request.recoveryDeadline : deadline } : item) } });
+      return next.http?.requests.find((item) => item.ticket === ticket);
+    }),
+    holdHttp: (ticket: string, reason: "deadline" | "admission" | "runtime" | "routed") => serial(async () => {
+      const current = await required(); const { request, http } = ownedHttp(current, ticket);
+      await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request, phase: "held", reason } : item) } });
+    }),
+    recordHttpRecoveryStep: (ticket: string, input: HttpNativeStep, observed: ServiceObservation, now: number) => {
+      const parsed = parseHttpNativeStep(input);
+      if (!parsed.ok) return Promise.reject(new Error(parsed.error));
+      const step = parsed.value;
+      return serial(async () => {
+        const current = await required(); const { request, http } = ownedHttp(current, ticket);
+        if (request.phase !== "recovering" || request.recoveryDeadline === null || step.deadline !== request.recoveryDeadline || now >= step.deadline || !Number.isSafeInteger(now) || now < Math.max(request.deadline - 90_000, request.cancelRequestedAt ?? 0)) throw new Error("HTTP recovery deadline or ownership expired");
+        const existing = request.steps.find((item) => item.effect === step.effect && item.attempt === step.attempt);
+        if (existing !== undefined) {
+          if (JSON.stringify(existing) !== JSON.stringify(step)) throw new Error("recovery intent conflicts; revisions cannot be refreshed");
+          return Object.freeze({ status: "reconcile" as const, step: existing });
+        }
+        if (step.effect === "apply" || (step.effect === "restore" ? step.plan !== request.previous?.plan : step.plan !== request.plan) ||
+          ((step.effect === "remove" || step.effect === "scrub") && request.previous !== null)) throw new Error("recovery effect is outside recorded rollback policy");
+        if (step.expected === null ? observed.status !== "absent" || step.effect !== "remove" : observed.status !== "owned" || observed.id !== step.expected.id || observed.version !== step.expected.version) throw new Error("recovery CAS intent lacks current ownership evidence");
+        const next = await persist({ ...current, http: { ...http, requests: http.requests.map((item) => item === request ? { ...request, steps: [...request.steps, step] } : item) } });
+        return Object.freeze({ status: "new" as const, step: next.http?.requests.find((item) => item.ticket === ticket)?.steps.at(-1) });
+      });
+    },
+    finishHttpUnstarted: (ticket: string, reason: "deadline" | "admission" | "runtime") => serial(async () => {
+      const current = await required(); const { request, http, fence: ownership } = ownedHttp(current, ticket);
+      if (request.steps.length !== 0) throw new Error("HTTP action may already have native effects");
+      const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, "failure");
+      if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP unstarted settlement");
+      await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+        http: { ...http, desired: request.previous === null ? null : httpReleasePlan(request.previous), requests: http.requests.map((item) => item === request ? { ...request, phase: "failed", reason,
+          recovery: { kind: "unstarted", verified: null, cleared: null } } : item) } });
+    }),
+    finishHttpRecovery: (ticket: string, kind: Exclude<HttpRecovery["kind"], "unstarted">, native: ServiceObservation, routed: RoutedReadiness | null, now: number) => serial(async () => {
+      const current = await required(); const { request, http, fence: ownership } = ownedHttp(current, ticket);
+      if (request.phase !== "recovering" || request.recoveryDeadline === null || !Number.isSafeInteger(now) || now < Math.max(request.deadline - 90_000, request.cancelRequestedAt ?? 0) || now > request.recoveryDeadline || native.status !== "owned" || !fencedHttpEffects(request.steps, native)) throw new Error("HTTP recovery lacks a fenced outcome");
+      const previous = request.previous;
+      const restored = request.steps.find((step) => step.effect === "restore" && native.tasks.some((task) => task.desired === "running" && task.state === "running" && task.action === serviceEffectAction(request.action, "restore", step.attempt) && task.effect === "restore"));
+      const expected: ServiceAction | undefined = previous === null ? undefined : { app: current.tickets.app, incarnation: current.tickets.incarnation, service: request.service,
+        action: kind === "compensated" && restored !== undefined ? serviceEffectAction(request.action, "restore", restored.attempt) : previous.action,
+        effect: kind === "compensated" ? "restore" : previous.effect, plan: previous.plan, deadline: request.recoveryDeadline };
+      if (kind === "removed-unverified" ? previous !== null || !clearedHttp(native) : expected === undefined || routed === null || !convergedHttp(expected, native) || !routedHttp(expected, routed, now) ||
+        (kind === "automatic-rollback" && native.update !== "rollback_completed") || (kind === "compensated" && restored === undefined)) throw new Error("HTTP recovery has no verified previous or absent state");
+      const verified = expected === undefined || previous === null ? null : Object.freeze({ plan: previous.plan, ...(previous.deployment === undefined ? {} : { deployment: previous.deployment }), commit: previous.commit, action: expected.action, effect: kind === "compensated" ? "restore" as const : previous.effect,
+        service: request.service, native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
+      const recovery: HttpRecovery = { kind, verified, cleared: kind === "removed-unverified" ? { id: native.id, version: native.version } : null };
+      const cancelled = request.cancelRequestedAt !== null;
+      const fence = settleLifecycleWork(ownership, request.action); const tickets = completeTicket(current.tickets, ticket, cancelled ? "cancelled" : "failure");
+      if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP recovery settlement");
+      await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((item) => item.ticket !== ticket), http: { ...http,
+        desired: previous === null ? null : httpReleasePlan(previous), active: verified, lastKnownGood: verified ?? http.lastKnownGood,
+        requests: http.requests.map((item) => item === request ? { ...request, phase: cancelled ? "cancelled" : "failed", recovery } : item),
+      } });
+      return recovery;
+    }),
+    markHttpDispatched: (ticket: string) => serial(async () => {
+      const current = await required();
+      const request = current.http?.requests.find((item) => item.ticket === ticket);
+      if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+      if (request.phase === "verifying") return;
+      if (request.phase !== "applying") throw new Error("HTTP action has no dispatch intent");
+      await persist({ ...current, http: { ...current.http, requests: current.http.requests.map((item) => item === request ? { ...request, phase: "verifying" } : item) } });
+    }),
+    /** Native acknowledgement is not promotion: require observed convergence and routed readiness. */
+    promoteHttp: (ticket: string, native: ServiceObservation, routed: RoutedReadiness, now: number) => serial(async () => {
+      const current = await required();
+      const request = current.http?.requests.find((item) => item.ticket === ticket);
+      if (request === undefined || current.http === undefined || current.fence?.lifecycle.phase !== "registered" || current.fence.lifecycle.active === null || lifecycleActionId(current.fence, current.fence.lifecycle.active.sequence) !== request.action) throw new Error("HTTP action no longer owns lifecycle");
+      const intent = request.steps[0];
+      const action: ServiceAction = { app: current.tickets.app, incarnation: current.tickets.incarnation, service: request.service,
+        action: request.action, plan: request.plan, deadline: request.deadline, effect: "apply" };
+      if ((request.phase !== "applying" && request.phase !== "verifying") || intent?.effect !== "apply" || now > request.deadline ||
+        !convergedHttp(action, native) || !routedHttp(action, routed, now) || native.status !== "owned" ||
+        (intent.expected !== null && (intent.expected.id !== native.id || native.version <= intent.expected.version))) throw new Error("HTTP release lacks current convergence proof");
+      const fence = settleLifecycleWork(current.fence, request.action);
+      const tickets = completeTicket(current.tickets, ticket, "success");
+      if (!fence.ok || !tickets.ok) throw new Error("invalid HTTP promotion settlement");
+      const verified = Object.freeze({ plan: request.plan, ...(request.deployment === undefined ? {} : { deployment: request.deployment }), commit: request.commit, action: request.action, effect: "apply" as const, service: request.service,
+        native: Object.freeze({ id: native.id, version: native.version }), verifiedAt: now });
+      await persist({ ...current, fence: fence.value, tickets: tickets.value, operations: current.operations.filter((operation) => operation.ticket !== ticket),
+        http: { ...current.http, desired: httpReleasePlan(request), active: verified, lastKnownGood: verified,
+          requests: current.http.requests.map((item) => item === request ? { ...item, phase: "succeeded", verified } : item) },
+      });
+      return verified;
+    }),
+    /** Only the injected trusted observer may establish an applied outcome. */
+    reconcileRegistration: (ticket: string, registrationGeneration: string) => {
+      if (typeof ticket !== "string" || typeof registrationGeneration !== "string") return Promise.reject(new Error("invalid registration request"));
+      const descriptor = Object.freeze({ kind: "register" as const, registrationGeneration });
+      return serial(async () => {
+        const current = await required();
+        if (current.registrationReceipt?.ticket === ticket && current.registrationReceipt.metadata.registrationGeneration === registrationGeneration) return Object.freeze({ status: "terminal" as const, outcome: "success" as const });
+        const admitted = admitTicket(current.tickets, ticket, descriptor);
+        if (!admitted.ok) throw new Error(admitted.error);
+        if (admitted.value.status === "terminal") return Object.freeze({ status: "terminal" as const, outcome: admitted.value.outcome });
+        if (admitted.value.status !== "accepted") throw new Error("ticket has no accepted initial registration");
+        const fence = current.fence;
+        if (fence?.lifecycle.phase !== "registering" || fence.lifecycle.active.sequence !== 1) throw new Error("ticket is not an initial registration intent");
+        const operation = current.operations.find((item) => item.ticket === ticket);
+        const actionId = lifecycleActionId(fence, 1);
+        if (operation?.action !== actionId) throw new Error("accepted ticket lacks initial registration intent");
+        if (observeRegistration === undefined) return Object.freeze({ status: "pending" as const });
+        const expected = Object.freeze({ app: fence.app, incarnation: fence.generation, actionId, registrationGeneration });
+        const observation = await observeWithDeadline(observeRegistration, expected, observationTimeoutMs);
+        if (observation === undefined || !observation.ok || observation.value.status !== "applied" || observation.value.app !== expected.app || observation.value.incarnation !== expected.incarnation || observation.value.actionId !== expected.actionId || observation.value.registrationGeneration !== expected.registrationGeneration) return Object.freeze({ status: "pending" as const });
+        const settled = settleLifecycleWork(fence, actionId);
+        const completed = completeTicket(current.tickets, ticket, "success");
+        if (!settled.ok || !completed.ok) throw new Error("invalid registration settlement");
+        await persist({ ...current, fence: settled.value, tickets: completed.value, operations: current.operations.filter((item) => item.ticket !== ticket),
+          ...(current.registrationAllocation === undefined ? {} : { registrationReceipt: {
+            ticket, runtime: current.registrationAllocation.runtime, metadata: { version: 1, ...expected },
+          } }),
+        });
+        return Object.freeze({ status: "verified" as const });
+      });
+    },
+  };
+};

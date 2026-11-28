@@ -1,0 +1,38 @@
+services:
+  db:
+    image: ${WEB_IMAGE:?}
+    command: [node, /fixture.mjs, database]
+    volumes:
+      - type: volume
+        source: ledger
+        target: /data
+        volume: {nocopy: true}
+    deploy:
+      resources:
+        limits: {memory: 96m, cpus: "0.15"}
+        reservations: {memory: 48m, cpus: "0.075"}
+    healthcheck:
+      test: [CMD, node, /fixture.mjs, health]
+      interval: 2s
+      timeout: 1s
+      start_period: 2s
+      retries: 3
+    stop_grace_period: 30s
+  web:
+    image: ${WEB_IMAGE:?}
+    depends_on:
+      db: {condition: service_healthy}
+    environment: {RELEASE: A, SCHEMA: "1", CHECK_FAIL: "false"}
+    deploy:
+      resources:
+        limits: {memory: 96m, cpus: "0.15"}
+        reservations: {memory: 48m, cpus: "0.075"}
+    healthcheck:
+      test: [CMD, node, /fixture.mjs, health]
+      interval: 2s
+      timeout: 1s
+      start_period: 2s
+      retries: 3
+    stop_grace_period: 30s
+volumes:
+  ledger: {}

@@ -1,0 +1,56 @@
+{
+  "recorded_at_utc": "2026-11-02T22:54:30.473644+00:00",
+  "source_commit": "e64e3c917d4100823f044d1fd54b1a128bdf2e57",
+  "adapter_was_uncommitted": true,
+  "source_sha256": {
+    "scripts/server-lib/registration_generation.py": "017540a0f27165673ef07170abed701b667f09e6c581478aa7899e44ba225a43",
+    "ci/tests/registration-generation/test_generation.py": "8883357d6db51f6be45325d6c767c844ff446f71bc9e0bdbea45c4029bf530bc",
+    "ci/tests/registration-generation/fixture.json": "bae7e54cd6fff1782bc64f4ade1b9c04c66318367de098e798483a60a15ecfeb"
+  },
+  "vm": "kayra-registration-adapter-20261102225255",
+  "image_hash": "50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e",
+  "cpu_count": "2",
+  "memory_bytes": 997953536,
+  "disk_bytes": "8238844928",
+  "multipass": [
+    "multipass   1.16.1+mac",
+    "multipassd  1.16.1+mac"
+  ],
+  "environment": {
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "kernel": "6.8.0-147-generic",
+    "machine": "aarch64",
+    "os": {
+      "NAME": "Ubuntu",
+      "ID": "ubuntu",
+      "PRETTY_NAME": "Ubuntu 24.04.5 LTS",
+      "VERSION_ID": "24.04",
+      "VERSION": "24.04.5 LTS (Noble Numbat)",
+      "VERSION_CODENAME": "noble",
+      "ID_LIKE": "debian",
+      "HOME_URL": "https://www.ubuntu.com/",
+      "SUPPORT_URL": "https://help.ubuntu.com/",
+      "BUG_REPORT_URL": "https://bugs.launchpad.net/ubuntu/",
+      "PRIVACY_POLICY_URL": "https://www.ubuntu.com/legal/terms-and-policies/privacy-policy",
+      "UBUNTU_CODENAME": "noble",
+      "LOGO": "ubuntu-logo"
+    }
+  },
+  "tests": {
+    "count": 14,
+    "exit_code": 0
+  },
+  "cleanup": "successful_vm_deleted_and_purged",
+  "preserved_prior_vm": {
+    "name": "kayra-registration-adapter-20261102224446",
+    "reason": "test harness used unavailable pathlib.Path.chown; corrected to os.chown",
+    "cleanup_command": "multipass delete --purge kayra-registration-adapter-20261102224446"
+  },
+  "limits": [
+    "not installed or connected to live lifecycle paths",
+    "caller must hold durable app fence and authoritative app index",
+    "trusted root fd and ancestors",
+    "no authenticated frontend or scheduling deadline",
+    "no power-loss or production mount acceptance guarantee"
+  ]
+}

@@ -1,4 +1,9 @@
 import { z } from "zod";
+import { deploymentCancellationSchema, deploymentRequestSchema, deploymentRestoreSchema } from "../../contracts/deployment-request.ts";
+import { migrationCleanupRequestSchema } from "../../contracts/migration-cleanup.ts";
+import { migrationResolutionRequestSchema } from "../../contracts/migration-resolution.ts";
+import { managedRecreationRequestFields } from "../../contracts/managed-recreation.ts";
+import { managedForwardSelectionRequestSchema } from "../../contracts/managed-forward-selection.ts";
 import { valueKeySchema } from "../app-values/model.ts";
 
 /**
@@ -152,6 +157,68 @@ export const operations = {
     scope: "app", effect: "changes", kind: "plan", input: appInput,
   },
   "app.purge": { summary: "Delete a removed app's volumes: its data, irreversibly.", scope: "app", effect: "destroys", kind: "plan", input: appInput },
+  "app.build": {
+    summary: "Build and retain an exact commit through the experimental indexed builder.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: appInput.extend({ commit: z.string().regex(/^[0-9a-f]{40}$/) }).strict().readonly(),
+  },
+  "app.deployment.prepare": {
+    summary: "Request an experimental rollout of a retained build under a stable request identity.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: deploymentRequestSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.deployment.restore": {
+    summary: "Restore a verified managed release from the current data compatibility epoch under a stable request identity.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: deploymentRestoreSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.deployment.forward": {
+    summary: "Build and reconcile an exact forward recovery for a blocked managed maintenance deployment.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: managedForwardSelectionRequestSchema.unwrap().extend({ server }).strict().readonly().refine((value) => value.blockedRun !== value.request),
+  },
+  "app.deployment.recreate": {
+    summary: "Recreate a removed Swarm app from its verified release and retained data.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: appInput.extend(managedRecreationRequestFields.omit({ generation: true }).shape).readonly().refine((value) => value.request !== value.removal),
+  },
+  "app.deployment.health": {
+    summary: "Observe current runtime service health separately from release certification and historical task failures.",
+    scope: "app", effect: "reads", kind: "query", bare: true, input: appInput,
+  },
+  "app.deployment.pins": {
+    summary: "Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.",
+    scope: "app", effect: "reads", kind: "query", bare: true, input: appInput,
+  },
+  "app.deployment.status": {
+    summary: "Read deployment phase, verified active release and required recovery action.",
+    scope: "app", effect: "reads", kind: "query", bare: true, input: appInput,
+  },
+  "app.deployment.cancel": {
+    summary: "Cancel a deployment; ambiguous migration outcomes stay blocked for recovery.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: deploymentCancellationSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.migration.cleanup": {
+    summary: "Request an audited, bounded fence for a held migration attempt; never rerun its command.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: migrationCleanupRequestSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.migration.cleanup.audit": {
+    summary: "Read the audit and fencing evidence for migration cleanup actions.",
+    scope: "app", effect: "reads", kind: "plan", bare: true,
+    input: migrationResolutionRequestSchema.unwrap().pick({ app: true, run: true, step: true }).extend({ server }).strict().readonly(),
+  },
+  "app.migration.resolve": {
+    summary: "Record an audited operator decision for a held migration; never rerun an unsafe step.",
+    scope: "app", effect: "changes", kind: "plan", bare: true,
+    input: migrationResolutionRequestSchema.unwrap().extend({ server }).strict().readonly(),
+  },
+  "app.migration.audit": {
+    summary: "Read the recorded operator decision for a migration step.",
+    scope: "app", effect: "reads", kind: "plan", bare: true,
+    input: migrationResolutionRequestSchema.unwrap().pick({ app: true, run: true, step: true }).extend({ server }).strict().readonly(),
+  },
   "app.runs": {
     summary: "What runs now, and the app's latest runs: state, commit, why, when, how long.",
     scope: "app",

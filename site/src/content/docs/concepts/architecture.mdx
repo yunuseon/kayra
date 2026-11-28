@@ -65,3 +65,32 @@ the images of the commit it deploys.
 
 Read on: [CI isolation](../ci-isolation/) for what each piece may reach, and
 [the app contract](../app-contract/) for what an app provides.
+
+## Experimental rollout boundaries
+
+These views show how the [experimental rollout implementation](../recoverable-rollouts-rfc/)
+handles opted-in Swarm applications. The coordinator, platform integration and
+runtime adapters share the existing privileged process. The builder remains a
+separate process. Existing Compose applications use the compatibility path.
+
+<LikeC4View viewId="deliveryBoundaries" client:only="react" />
+
+A deployment persists an admitted plan and intent before workload effects and
+promotes only after verification.
+
+<LikeC4View viewId="proposedDeployment" client:only="react" />
+
+After interruption, recovery observes existing effects and retains the original
+deadlines. An ambiguous migration can require an audited operator decision.
+
+<LikeC4View viewId="proposedRecovery" client:only="react" />
+
+A maintenance rollout has explicit fleet permission and reports expected
+downtime while dependencies remain available.
+
+<LikeC4View viewId="proposedMaintenance" client:only="react" />
+
+Removal fences new requests and retains volumes; purge is a separate guarded
+operation.
+
+<LikeC4View viewId="proposedRemoval" client:only="react" />

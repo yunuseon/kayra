@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok as assert, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { parseApp } from "../../src/deployer/app.ts";
-import { parseBundle, imagesEnv } from "../../src/deployer/build/bundle.ts";
+import { parseBundle, bundleWire, imagesEnv } from "../../src/deployer/build/bundle.ts";
 import { config, policy, up } from "../../src/deployer/build/compose.ts";
 import { matches, parseCron } from "../../src/deployer/cron.ts";
 import { expired, moved, releaseName, releases } from "../../src/deployer/runs/records.ts";
@@ -36,7 +36,13 @@ test("webhooks: the ref a push moved, nothing for a ping", () => {
 });
 
 test("registrations are checked, not trusted", () => {
+  const legacy = Object.fromEntries(Object.entries(shop).filter(([key]) => key !== "runtime"));
+  deepStrictEqual(parseApp("shop", legacy), { ok: true, value: shop });
   deepStrictEqual(parseApp("shop", { ...shop }), { ok: true, value: shop });
+  deepStrictEqual(parseApp("shop", { ...shop, runtime: "compose" }), { ok: true, value: shop });
+  for (const runtime of ["swarm", "other", "", null, false, 1, []]) {
+    deepStrictEqual(parseApp("shop", { ...shop, runtime }), { ok: false, error: "shop: unsupported runtime; only Compose is available" });
+  }
   deepStrictEqual(parseApp("shop", { ...shop, name: "other" }).ok, false);
   deepStrictEqual(parseApp("shop", { ...shop, path: "../x" }).ok, false);
   deepStrictEqual(parseApp("shop", { ...shop, secrets: ["lower"] }).ok, false);
@@ -49,6 +55,30 @@ test("a bundle may only name the app's own images and relative compose files", (
     compose: [{ path: "deploy/compose.yml", content: "services: {}\n" }],
     routes: [{ host: "www", service: "web", port: 3000 }],
   };
+  for (const rollout of [null, false, { strategy: "rolling" }]) {
+    deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, rollout }), { ok: false, error: "bundle: rollout metadata is not yet supported" });
+  }
+  const incarnation = "11111111-1111-4111-8111-111111111111";
+  const registration = { version: 1 as const, app: "shop", incarnation, actionId: incarnation + ":1", registrationGeneration: "22222222-2222-4222-8222-222222222222" };
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), good, registration).ok, false);
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, registration }).ok, false);
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, registration }, registration).ok, false);
+  const immutable = { ...good, images: [{ variable: "WEB_IMAGE", ref: "localhost:5000/shop/web@sha256:" + "a".repeat(64) }] };
+  const pinned = must(parseBundle(name("shop"), commit("a"), { ...immutable, registration, ignored: "must not be retained" }, registration));
+  deepStrictEqual(must(parseBundle(name("shop"), commit("a"), bundleWire(pinned), registration)), pinned);
+  deepStrictEqual(Object.hasOwn(bundleWire(pinned), "ignored"), false);
+  deepStrictEqual(pinned.registration, registration);
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...immutable, registration: { ...registration, actionId: incarnation + ":2" } }, registration).ok, false);
+  const rollout = { strategy: "rolling", mixed_version_compatible: true, rollback_compatible: true, services: { web: { role: "http", overlap: "allowed" } } };
+  const proposed = { ...immutable, registration, rollout };
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), proposed, registration).ok, false);
+  const artifact = must(parseBundle(name("shop"), commit("a"), proposed, registration, "artifact"));
+  deepStrictEqual(artifact.rollout, { ...rollout, migrations: [], checks: [] });
+  deepStrictEqual(must(parseBundle(name("shop"), commit("a"), bundleWire(artifact), registration, "artifact")), artifact);
+  for (const invalid of [null, false, {}, { ...rollout, rollback_compatible: false }]) {
+    deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...proposed, rollout: invalid }, registration, "artifact").ok, false);
+  }
+  deepStrictEqual(parseBundle(name("shop"), commit("a"), { ...good, rollout }, undefined, "artifact").ok, false);
   const bundle = must(parseBundle(name("shop"), commit("a"), good));
   strictEqual(imagesEnv(bundle), "WEB_IMAGE=localhost:5000/shop/web:0123456789ab\n");
   deepStrictEqual(parseBundle(name("shop"), commit("b"), good).ok, false);

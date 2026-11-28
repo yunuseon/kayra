@@ -2,7 +2,8 @@
 own WSGI server, so the VM can clone the fixture app shallowly (kayra clones
 with --depth 1, which a static file server cannot answer).
 
-    python3 git-http.py <address> <port> <directory of bare repositories>
+    python3 git-http.py <address> <port> <directory of bare repositories> [port-file]
+    Use port 0 with a port-file to report the port selected by the OS.
 """
 import subprocess
 import sys
@@ -43,4 +44,8 @@ class Quiet(WSGIRequestHandler):
         pass
 
 
-make_server(address, port, app, handler_class=Quiet).serve_forever()
+server = make_server(address, port, app, handler_class=Quiet)
+if len(sys.argv) > 4:
+    with open(sys.argv[4], "w", encoding="utf-8") as port_file:
+        port_file.write(str(server.server_port))
+server.serve_forever()

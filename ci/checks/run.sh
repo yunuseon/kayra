@@ -113,6 +113,15 @@ compose_policy() { COMPOSE=docker-compose bash "$E/ci/tests/compose-policy/run.s
 verify_cases() { bash "$E/ci/tests/verify/run.sh"; }
 monitor_cases() { bash "$E/ci/tests/monitor/run.sh"; }
 app_restore_cases() { bash "$E/ci/tests/app-restore/run.sh"; }
+registry_gc_safety() { bash "$E/ci/tests/registry-gc-safety/run.sh"; }
+app_lifecycle_cases() { bash "$E/ci/tests/app-lifecycle/run.sh"; }
+upgrade_lab_safety() { python3 "$E/test/lab/upgrade-test.py"; }
+registration_generation_cases() { (cd "$E/test/lab/registration-generation" && python3 -B test_publisher.py); }
+swarm_http_lab_cases() { node --test "$E/test/lab/swarm-platform/"*.test.mjs; }
+swarm_feasibility_lab_cases() { node --test "$E/test/lab/swarm/"*.test.mjs "$E/test/lab/swarm/"*/*.test.mjs; }
+swarm_host_cases() { python3 -B "$E/ci/tests/swarm-host/test_host.py"; }
+platform_registration_cases() { python3 -B "$E/ci/tests/registration-generation/test_generation.py"; }
+indexed_registration_cases() { node --test "$E/test/lab/registration-generation/indexed_flow.mjs"; }
 ansible_output() { bash "$E/ci/tests/ansible-output/run.sh"; }
 
 # The kayra CLI: strictest types, its lint rules, its tests.
@@ -144,6 +153,23 @@ rule_builder_has_no_socket() {
             | grep docker.sock | awk '$1 != "deployer" && $1 != "socket-proxy" { print $1 " mounts the docker socket" }' \
             | sed "s#^#${file}: #"
     done | none
+}
+
+# Infrastructure ownership records are private to the existing deployer.
+rule_platform_state_is_private() {
+    local files file
+    mapfile -t files < <(engine_compose_files)
+    {
+        for file in "${files[@]}"; do
+            yq '.services // {} | to_entries | .[] | .key + " " + ((.value.volumes // []) | @json)' "$file" \
+                | grep platform-state | awk '$1 != "deployer" { print $1 " mounts private platform state" }' \
+                | sed "s#^#${file}: #"
+        done
+        if ! yq '.services.deployer.volumes // [] | .[]' "$E/compose/docker-compose.ci.yml" \
+            | grep -Fqx './platform-state:/opt/platform/platform-state'; then
+            echo "deployer lacks its writable private platform-state bind"
+        fi
+    } | none
 }
 
 # "The builder has no docker CLI."
@@ -300,6 +326,15 @@ if [ "$platform" = true ]; then
     check platform:verify verify_cases
     check platform:monitor monitor_cases
     check platform:app-restore app_restore_cases
+    check platform:app-lifecycle app_lifecycle_cases
+    check platform:registry-gc-safety registry_gc_safety
+    check platform:upgrade-lab-safety upgrade_lab_safety
+    check platform:registration-generation registration_generation_cases
+    check platform:registration-storage platform_registration_cases
+    check platform:indexed-registration indexed_registration_cases
+    check platform:swarm-host swarm_host_cases
+    check platform:swarm-http-lab swarm_http_lab_cases
+    check platform:swarm-feasibility-lab swarm_feasibility_lab_cases
     check platform:ansible-output ansible_output
     check platform:cli-typecheck cli_typecheck
     check platform:cli-lint cli_lint
@@ -310,6 +345,7 @@ if [ "$platform" = true ]; then
     check platform:web-build web_build
     check platform:rule:no-tls-true rule_platform_no_tls_true
     check platform:rule:builder-has-no-socket rule_builder_has_no_socket
+    check platform:rule:platform-state-is-private rule_platform_state_is_private
     check platform:rule:builder-has-no-docker-cli rule_builder_has_no_docker_cli
     check platform:rule:traefik-has-no-socket rule_traefik_has_no_socket
     check platform:rule:deployer-has-no-project-name rule_deployer_has_no_project_name

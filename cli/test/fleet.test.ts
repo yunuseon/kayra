@@ -18,6 +18,18 @@ test("a server's kind defaults to platform", () => {
   strictEqual(server("shop", "target: multipass\ndomain: shop.test\n").kind, "platform");
 });
 
+test("the fleet selects Compose or explicitly granted Swarm for an app", () => {
+  const app = (runtime: string, grants = "") => `target: multipass\ndomain: a.test\napps: [{name: shop, repo: https://x.test/s.git, runtime: ${runtime}${grants}}]`;
+  strictEqual(server("a", app("compose")).apps[0]?.entry["runtime"], "compose");
+  strictEqual(refused(app("swarm")) === "accepted", false);
+  const grants = { memory_bytes: 268435456, cpu_millicores: 500, maintenance: false };
+  const managed = server("a", app("swarm", ", grants: " + JSON.stringify(grants)));
+  strictEqual(managed.apps[0]?.entry["runtime"], "swarm");
+  deepStrictEqual(managed.apps[0].entry["grants"], grants);
+  strictEqual(refused(app("compose", ", grants: " + JSON.stringify(grants))) === "accepted", false);
+  strictEqual(refused(app("unknown")) === "accepted", false);
+});
+
 test("a server is refused for what would break a command later", () => {
   strictEqual(refused("kind: castle\ntarget: home\ndomain: a.test"), "kind must be platform, edge, nas, not 'castle'");
   strictEqual(refused("target: moon\ndomain: a.test"), "target must be multipass, hetzner, home, not 'moon'");
@@ -146,4 +158,20 @@ test("server.yml holds topology only", () => {
     refused("target: multipass\ndomain: a.test\nplatform_ci: true", { secrets: "admin: admin\n" }),
     "server.yml: 'platform_ci' is not a key it knows",
   );
+});
+
+test("experimental Swarm host setup requires explicit capacity and platform overhead", () => {
+  const descriptor = "target: multipass\ndomain: a.test\n";
+  const profile = { enabled: true, advertise_address: "192.0.2.1", memory_bytes: 3 * 1024**3, cpu_millicores: 2000, platform_memory_bytes: 1024**3, platform_cpu_millicores: 500 };
+  strictEqual(refused(descriptor, { vars: JSON.stringify({ experimental_swarm: profile }) }), "accepted");
+  for (const invalid of [{}, { ...profile, enabled: false }, { ...profile, advertise_address: "invalid" }, { ...profile, platform_memory_bytes: profile.memory_bytes }, { ...profile, platform_cpu_millicores: 2000 }, { ...profile, extra: true }]) {
+    strictEqual(refused(descriptor, { vars: JSON.stringify({ experimental_swarm: invalid }) }) === "accepted", false);
+  }
+});
+
+test("host migration ceiling is a platform setting with bounded seconds", () => {
+  const descriptor = "target: multipass\ndomain: a.test\n";
+  for (const value of [1, 90, 86400]) strictEqual(refused(descriptor, { vars: JSON.stringify({ swarm_migration_timeout_seconds: value }) }), "accepted");
+  for (const value of [0, -1, 1.5, 86401, "90", true]) strictEqual(refused(descriptor, { vars: JSON.stringify({ swarm_migration_timeout_seconds: value }) }) === "accepted", false);
+  strictEqual(refused("kind: edge\ntarget: multipass\ndomain: a.test", { vars: "swarm_migration_timeout_seconds: 90\n" }) === "accepted", false);
 });

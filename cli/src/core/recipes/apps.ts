@@ -6,8 +6,25 @@ import { ansibleEnv, ansiblePath, collections, fromMain, inventory, withSecrets,
 import { sshTo } from "./ssh.ts";
 import { typed } from "../../lib/typed.ts";
 
+type Recreation = { readonly removal: string; readonly request: string; readonly reason: string };
+const registerApp = (engine: Engine, server: Server, app: Server["apps"][number], recreation?: Recreation) =>
+  withSecrets(run(`App ${app.name}`, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", "app.yml"),
+    "-e", `server=${server.name}`, "-e", `server_dir=${server.dir}`, "-e", `domain=${server.domain}`,
+    "-e", recreation === undefined ? `{"app": ${JSON.stringify(app.entry)}}` : JSON.stringify({ app: app.entry, app_recreation: recreation }),
+  ], ansibleEnv(engine, {})), server);
+
+const managedSwarmEnabled = (server: Server) => {
+  const profile = server.vars["experimental_swarm"];
+  return server.vars["managed_swarm_rollouts"] === true &&
+    typeof profile === "object" && profile !== null && "enabled" in profile && profile.enabled === true;
+};
+
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server) => {
+  const managed = server.apps.find((app) => app.entry["runtime"] === "swarm");
+  if (managed !== undefined && !managedSwarmEnabled(server)) {
+    return err(`${managed.name} requires explicitly enabled experimental Swarm and managed_swarm_rollouts`);
+  }
   const playbook = (title: string, name: string, ...extra: readonly string[]) =>
     run(title, ["ansible-playbook", "-i", inventory(server), ansiblePath(engine, "playbooks", name), ...extra], ansibleEnv(engine, {}));
   return ok<Plan>(
@@ -17,30 +34,29 @@ export const apps = (engine: Engine, server: Server) => {
         ? [
             ...server.apps.flatMap((app) => Object.freeze([
               collections(engine, {}),
-              withSecrets(playbook(
-                `App ${app.name}`,
-                "app.yml",
-                "-e",
-                `server=${server.name}`,
-                "-e",
-                `server_dir=${server.dir}`,
-                "-e",
-                `domain=${server.domain}`,
-                "-e",
-                `{"app": ${JSON.stringify(app.entry)}}`,
-              ), server),
+              registerApp(engine, server, app),
             ])),
             collections(engine, {}),
             playbook(
               "Remove apps not in server.yml",
               "apps-prune.yml",
               "-e",
-              `{"keep": ${JSON.stringify(server.apps.map((app) => app.name))}}`,
+              server.vars["managed_swarm_rollouts"] === true
+                ? JSON.stringify({ keep: server.apps.map((app) => app.name), prune_managed: true })
+                : `{"keep": ${JSON.stringify(server.apps.map((app) => app.name))}}`,
             ),
           ]
         : []),
     ]),
   );
+};
+
+export const appRecreate = (engine: Engine, server: Server, app: AppName, recreation: Recreation) => {
+  const entry = server.apps.find((candidate) => candidate.name === app);
+  if (server.kind !== "platform" || entry?.entry["runtime"] !== "swarm" || !managedSwarmEnabled(server)) {
+    return err("Managed recreation requires an opted-in Swarm application declared in server.yml");
+  }
+  return ok<Plan>(Object.freeze([fromMain(engine, server), collections(engine, {}), registerApp(engine, server, entry, recreation)]));
 };
 
 /** A removed app's volumes: its data, irreversibly. */
@@ -66,7 +82,13 @@ export const appPurge = (engine: Engine, server: Server, app: AppName) =>
 
 /** What `kayra app …` and `kayra job …` ask of a server: its deployer's ctl, over SSH. */
 export type DeployerCommand =
+  | { readonly kind: "build"; readonly app: AppName; readonly commit: string }
+  | { readonly kind: "lifecycle-prepare"; readonly app: AppName; readonly commit: string; readonly request: string }
+  | { readonly kind: "lifecycle-restore"; readonly app: AppName; readonly record: string; readonly request: string }
+  | { readonly kind: "lifecycle-forward"; readonly app: AppName; readonly payload: Readonly<Record<string, string>> }
   | { readonly kind: "runs" | "logs" | "deploy" | "rollback"; readonly app: AppName; readonly more: string | undefined }
+  | { readonly kind: "lifecycle"; readonly app: AppName; readonly operation: "health" | "pins" | "status" | "cancel"; readonly request: string | undefined }
+  | { readonly kind: "migration"; readonly app: AppName; readonly operation: "resolve" | "audit" | "cleanup" | "cleanup-audit"; readonly payload: Readonly<Record<string, string | number>> }
   | { readonly kind: "job"; readonly job: "gc" | "renovate"; readonly noPrs: boolean };
 
 /** What the deployer's ctl is asked, its title, and how its answer is shown: the lists as data kayra draws. */
@@ -74,6 +96,19 @@ type CtlCall = { readonly title: string; readonly args: readonly string[]; reado
 
 const ctlCall = (server: Server, command: DeployerCommand) => {
   switch (command.kind) {
+    case "build":
+      return typed<CtlCall>({ title: `Retain build of ${command.app}`, args: ["build", command.app, command.commit], stdout: "show" });
+    case "lifecycle-prepare":
+      return typed<CtlCall>({ title: `Request rollout of ${command.app}`, args: ["lifecycle", "prepare", command.app, command.commit, command.request], stdout: "show" });
+    case "lifecycle-restore":
+      return typed<CtlCall>({ title: `Restore a verified release of ${command.app}`, args: ["lifecycle", "restore", command.app, command.record, command.request], stdout: "show" });
+    case "lifecycle-forward":
+      return typed<CtlCall>({ title: `Request forward recovery of ${command.app}`, args: ["lifecycle", "forward", Buffer.from(JSON.stringify(command.payload)).toString("base64url")], stdout: "show" });
+    case "lifecycle":
+      return typed<CtlCall>({ title: `Deployment ${command.operation} for ${command.app}`, args: ["lifecycle", command.operation, command.app, ...(command.request === undefined ? [] : [command.request])], stdout: "show" });
+    case "migration":
+      // SSH joins remote argv through a shell; an encoded JSON word cannot execute audit prose.
+      return typed<CtlCall>({ title: `Migration ${command.operation} for ${command.app}`, args: ["migration", command.operation, Buffer.from(JSON.stringify(command.payload)).toString("base64url")], stdout: "show" });
     case "job":
       return typed<CtlCall>({ title: `Job ${command.job}`, args: ["job", command.job, ...(command.noPrs ? ["--dry-run"] : [])], stdout: "show" });
     case "logs":

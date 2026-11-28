@@ -49,6 +49,32 @@ export const fromCommand = (command: Exclude<Command, { readonly name: "serve" |
       return plainly({ name: "app.secret.generate", input: { server: command.server, app: command.app, ...(command.dir === undefined ? {} : { dir: command.dir }), key: command.key } });
     case "app purge":
       return plainly({ name: "app.purge", input: { server: command.server, app: command.app } });
+    case "app build":
+      return plainly({ name: "app.build", input: { server: command.server, app: command.app, commit: command.commit } });
+    case "app deployment prepare":
+      return plainly({ name: "app.deployment.prepare", input: { server: command.server, app: command.app, commit: command.commit, request: command.request } });
+    case "app deployment restore":
+      return plainly({ name: "app.deployment.restore", input: { server: command.server, app: command.app, record: command.record, request: command.request } });
+    case "app deployment forward":
+      return plainly({ name: "app.deployment.forward", input: { server: command.server, app: command.app, blockedRun: command.blockedRun, commit: command.commit, request: command.request, reason: command.reason } });
+    case "app deployment recreate":
+      return plainly({ name: "app.deployment.recreate", input: { server: command.server, app: command.app, removal: command.removal, request: command.request, reason: command.reason } });
+    case "app deployment health":
+      return plainly({ name: "app.deployment.health", input: { server: command.server, app: command.app } });
+    case "app deployment pins":
+      return plainly({ name: "app.deployment.pins", input: { server: command.server, app: command.app } });
+    case "app deployment status":
+      return plainly({ name: "app.deployment.status", input: { server: command.server, app: command.app } });
+    case "app deployment cancel":
+      return plainly({ name: "app.deployment.cancel", input: { server: command.server, app: command.app, request: command.request } });
+    case "app migration cleanup":
+      return plainly({ name: "app.migration.cleanup", input: { server: command.server, app: command.app, run: command.run, step: command.step, purpose: command.purpose, attempt: command.attempt, action: command.action, reason: command.reason } });
+    case "app migration cleanup-audit":
+      return plainly({ name: "app.migration.cleanup.audit", input: { server: command.server, app: command.app, run: command.run, step: command.step } });
+    case "app migration audit":
+      return plainly({ name: "app.migration.audit", input: { server: command.server, app: command.app, run: command.run, step: command.step } });
+    case "app migration resolve":
+      return plainly({ name: "app.migration.resolve", input: { server: command.server, app: command.app, run: command.run, step: command.step, outcome: command.outcome, reason: command.reason } });
     case "app runs":
       return plainly({ name: "app.runs", input: { server: command.server, app: command.app } });
     case "app logs":
@@ -103,6 +129,19 @@ export const reaches = {
   "app.secret.import": ["app", "secret", "import", "SERVER", "APP", "API_KEY", "/tmp/credential"],
   "app.secret.generate": ["app", "secret", "generate", "SERVER", "APP", "DATABASE_PASSWORD"],
   "app.purge": ["app", "purge", "SERVER", "APP"],
+  "app.build": ["app", "build", "SERVER", "APP", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+  "app.deployment.prepare": ["app", "deployment", "prepare", "SERVER", "APP", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "12345678-1234-4234-8234-123456789abc"],
+  "app.deployment.restore": ["app", "deployment", "restore", "SERVER", "APP", "a".repeat(64), "12345678-1234-4234-8234-123456789abc"],
+  "app.deployment.forward": ["app", "deployment", "forward", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "a".repeat(40), "23456789-1234-4234-8234-123456789abc", "--reason", "Deploy the reviewed forward fix"],
+  "app.deployment.recreate": ["app", "deployment", "recreate", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "23456789-1234-4234-8234-123456789abc", "--reason", "Restore the retained app data"],
+  "app.deployment.health": ["app", "deployment", "health", "SERVER", "APP"],
+  "app.deployment.pins": ["app", "deployment", "pins", "SERVER", "APP"],
+  "app.deployment.status": ["app", "deployment", "status", "SERVER", "APP"],
+  "app.deployment.cancel": ["app", "deployment", "cancel", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc"],
+  "app.migration.cleanup": ["app", "migration", "cleanup", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema", "migration", "1", "23456789-1234-4234-8234-123456789abc", "--reason", "Fence failed migration before inspecting ledger"],
+  "app.migration.cleanup.audit": ["app", "migration", "cleanup-audit", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema"],
+  "app.migration.audit": ["app", "migration", "audit", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema"],
+  "app.migration.resolve": ["app", "migration", "resolve", "SERVER", "APP", "12345678-1234-4234-8234-123456789abc", "schema", "applied", "--reason", "Verified database schema"],
   "app.runs": ["app", "runs", "SERVER", "APP"],
   "app.log": ["app", "logs", "SERVER", "APP"],
   "app.deploy": ["app", "deploy", "SERVER", "APP", "v1.2.0"],

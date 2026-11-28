@@ -1,3 +1,5 @@
+import { parseRollout, type Rollout } from "../../contracts/rollout.ts";
+import { matchRegistrationGeneration, type RegistrationGeneration } from "../../contracts/registration-generation.ts";
 import { err, ok } from "../../lib/result.ts";
 import { field } from "../app.ts";
 import { sha, type AppName, type Sha } from "../brand.ts";
@@ -16,6 +18,8 @@ export type ComposeFile = { readonly path: string; readonly content: string };
  * through admission.
  */
 export type Bundle = {
+  readonly registration?: RegistrationGeneration;
+  readonly rollout?: Rollout;
   readonly sha: Sha;
   readonly images: readonly Image[];
   readonly compose: readonly ComposeFile[];
@@ -25,15 +29,24 @@ export type Bundle = {
 const relative = (path: string) =>
   path !== "" && !path.startsWith("/") && !path.split("/").some((segment) => segment === ".." || segment === "");
 
-export const parseBundle = (app: AppName, expected: Sha, json: unknown) => {
+export const parseBundle = (app: AppName, expected: Sha, json: unknown, registration?: RegistrationGeneration, mode: "legacy" | "artifact" = "legacy") => {
   if (typeof json !== "object" || json === null) return err("bundle: not an object");
+  const hasRollout = Object.hasOwn(json, "rollout");
+  if (hasRollout && (mode !== "artifact" || registration === undefined)) return err("bundle: rollout metadata is not yet supported");
+  const rollout = hasRollout ? parseRollout(field(json, "rollout")) : ok<Rollout | undefined>(undefined);
+  if (!rollout.ok) return err("bundle: invalid rollout metadata");
+  const snapshot = field(json, "registration");
+  if (registration === undefined && snapshot !== undefined) return err("bundle: unexpected registration snapshot");
+  if (registration !== undefined && (!matchRegistrationGeneration(snapshot, registration, registration).ok || registration.app !== app)) return err("bundle: registration snapshot mismatch");
   const commit = field(json, "sha");
   const images = field(json, "images");
   const compose = field(json, "compose");
   const minted = sha(typeof commit === "string" ? commit : "");
   if (!minted.ok || minted.value !== expected) return err(`bundle: for ${String(commit)}, not ${expected}`);
   if (!Array.isArray(images) || !Array.isArray(compose) || compose.length === 0) return err("bundle: images or compose missing");
-  const own = new RegExp(`^localhost:5000/${app}/[a-z0-9._/-]+:[0-9a-f]{12}$`);
+  const own = new RegExp(registration === undefined
+    ? `^localhost:5000/${app}/[a-z0-9._/-]+:[0-9a-f]{12}$`
+    : `^localhost:5000/${app}/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$`);
   const parsedImages = images.map((image: unknown) => {
     if (typeof image !== "object" || image === null) return typed<Image | string>("an image is not an object");
     const variable = field(image, "variable");
@@ -56,6 +69,8 @@ export const parseBundle = (app: AppName, expected: Sha, json: unknown) => {
   if (!routes.ok) return err(`bundle: ${routes.error}`);
   return ok<Bundle>({
     sha: minted.value,
+    ...(rollout.value === undefined ? {} : { rollout: rollout.value }),
+    ...(registration === undefined ? {} : { registration: Object.freeze({ ...registration }) }),
     images: parsedImages.filter((item) => typeof item !== "string"),
     compose: parsedCompose.filter((item) => typeof item !== "string"),
     routes: routes.value,
@@ -64,3 +79,16 @@ export const parseBundle = (app: AppName, expected: Sha, json: unknown) => {
 
 /** images.env, as compose reads it next to the app's own .env. */
 export const imagesEnv = (bundle: Bundle) => bundle.images.map((image) => `${image.variable}=${image.ref}\n`).join("");
+
+/** Only validated fields are retained; platform secrets never enter the builder bundle. */
+export const bundleWire = (bundle: Bundle) => Object.freeze({
+  ...(bundle.rollout === undefined ? {} : { rollout: bundle.rollout }),
+  ...(bundle.registration === undefined ? {} : { registration: bundle.registration }),
+  sha: bundle.sha, images: bundle.images, compose: bundle.compose,
+  routes: Object.freeze(bundle.routes.map((route) => Object.freeze({
+    host: route.host, service: route.service, port: route.port,
+    ...(route.path === undefined ? {} : { path: route.path }),
+    ...(route.check === undefined ? {} : { check: route.check }),
+    ...(route.rateLimit === undefined ? {} : { rate_limit: route.rateLimit }),
+  }))),
+});

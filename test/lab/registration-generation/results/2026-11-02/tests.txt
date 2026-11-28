@@ -1,0 +1,12 @@
+test_failed_file_write_cleans_only_its_own_staging (__main__.PublisherTest.test_failed_file_write_cleans_only_its_own_staging) ... ok
+test_failures_before_and_after_pointer_preserve_consistent_references (__main__.PublisherTest.test_failures_before_and_after_pointer_preserve_consistent_references) ... ok
+test_generation_and_pointer_staging_collisions_do_not_overwrite (__main__.PublisherTest.test_generation_and_pointer_staging_collisions_do_not_overwrite) ... ok
+test_lost_rename_acknowledgement_keeps_possibly_published_generation (__main__.PublisherTest.test_lost_rename_acknowledgement_keeps_possibly_published_generation) ... ok
+test_sigkill_before_and_after_pointer_preserves_referenced_generations (__main__.PublisherTest.test_sigkill_before_and_after_pointer_preserves_referenced_generations) ... ok
+test_symlinks_are_not_followed_in_parent_or_final_generation (__main__.PublisherTest.test_symlinks_are_not_followed_in_parent_or_final_generation) ... ok
+test_visibility_permissions_and_independent_generations (__main__.PublisherTest.test_visibility_permissions_and_independent_generations) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.107s
+
+OK

@@ -6,7 +6,7 @@ import type { ManagedPurge } from "./managed-purge-state.ts";
 import { managedRecreationBaseline } from "./managed-recreation-baseline.ts";
 import { managedRecreationIntentSchema, managedRecreationRequestSchema, managedRecreationVolumeCatalog } from "./managed-recreation-intent.ts";
 import type { ManagedRecreationIntent } from "./managed-recreation-intent.ts";
-import { parseRegistrationWithdrawal } from "../../contracts/registration-withdrawal.ts";
+import { parseRegistrationWithdrawal, parseRegistrationWithdrawalIdentity } from "../../contracts/registration-withdrawal.ts";
 import { managedRemovalAccounting } from "./managed-removal-accounting.ts";
 import { managedRemovalEffects, managedRemovalInventoryDigest, readManagedRemovalProgress } from "./managed-removal-effects.ts";
 import type { ManagedRemovalEffectsPorts, ManagedRemovalInventory } from "./managed-removal-effects.ts";
@@ -421,6 +421,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       reservation === undefined ? undefined : { reservation, cleanupHeld: await forwardCleanupHeld(indexed, reservation) }));
 
   const useManaged = <T>(app: string, ports: IndexedManagedRuntime, use: (controller: ReturnType<typeof indexedManagedLifecycle>) => Promise<T>) => useIndexed(app, async (store, indexed) => {
+    if (indexed.lineage !== undefined) throw new Error("managed recreation requires its verified release rebind");
     const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner });
     if (indexed.protocol !== "managed-v3" || !ownership.ok || indexed.managedRoot === undefined) throw new Error("application does not own the managed-v3 protocol");
     const path = join(appDirectory(indexed), "managed"); await requireDirectory(path); const rootJournal = await journals(path, indexed.managedRoot === "ready" ? "existing" : "initialize");
@@ -601,6 +602,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
   /** Managed builders wait outside the application writer. Only intent and authenticated receipt publication hold that writer. */
   const prepareManagedBuild = async (app: string, commit: string, ports: BuildPorts, forward?: ForwardBuildContext) => {
     const prepared = await useIndexed(app, async (store, indexed) => {
+      if (indexed.lineage !== undefined) throw new Error("managed recreation requires its verified release rebind");
       if (indexed.protocol !== "managed-v3" || !/^[0-9a-f]{40}$/.test(commit)) throw new Error("managed build scope unavailable");
       const envelope = await store.read(); const registration = verifiedRegistration(app, envelope);
       if (envelope?.registrationAllocation?.runtime !== "swarm") throw new Error("managed build requires its registered Swarm runtime");
@@ -956,6 +958,7 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       return managedRestorePlan(readManagedHistoryRelease(bytes, state.owner, selected));
     }),
     proposeManagedDeployment: (app: string, candidateInput: ManagedApplicationPlan, run: string, ports: ManagedDeploymentReadPort & RetainedInputsPort, restore: string | null = null) => useIndexed(app, async (store, indexed) => {
+      if (indexed.lineage !== undefined) throw new Error("managed recreation requires its verified release rebind");
       const checked = parseManagedApplicationPlan(candidateInput); const ownership = parseDataOwnership({ version: 1, app, incarnation: indexed.incarnation, dataOwner: indexed.dataOwner }); const envelope = await store.read();
       if (!checked.ok || !ownership.ok || !z.uuid().safeParse(run).success || indexed.protocol !== "managed-v3" || indexed.managedVolumes !== 1 || indexed.managedRoot === undefined || envelope === undefined) throw new Error("managed proposal scope unavailable");
       const candidate = checked.value; if (JSON.stringify(candidate.infrastructure.ownership) !== JSON.stringify(ownership.value)) throw new Error("managed proposal candidate lacks indexed ownership"); const existing = envelope.managed?.find((item) => item.run === run);
@@ -1912,6 +1915,32 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
       if (owner.protocol === "managed-v3" && runtime !== "swarm") throw new Error("managed-v3 registration requires Swarm");
       if (owner.lineage !== undefined) throw new Error("managed recreation owns the successor registration");
       return store.reserveRegistration(generation, runtime);
+    }),
+    reserveRecreatedRegistration: (app: string, request: string, generation: string, ports: ManagedDeploymentReadPort & {
+      readonly authorize: (intent: ManagedRecreationIntent) => Promise<boolean>;
+    }) => useIndexed(app, async (store, owner) => {
+      const lineage = owner.lineage;
+      const intent = lineage?.reservation;
+      if (lineage === undefined || intent?.request !== request || intent.targetGeneration !== generation) {
+        throw new Error("managed recreation registration scope disagrees");
+      }
+      const allocated = (await store.read())?.registrationAllocation;
+      const deadline = allocated === undefined ? intent.deadline : ports.now() + 10_000;
+      const bytes = await boundedManagedRead(deadline, ports.now, () => ports.read(lineage.archive));
+      if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== lineage.archive) {
+        throw new Error("managed recreation registration archive unavailable");
+      }
+      const archived = z.object({ version: z.literal(1), withdrawal: z.unknown() }).parse(JSON.parse(bytes));
+      const withdrawal = parseRegistrationWithdrawalIdentity(archived.withdrawal);
+      if (!withdrawal.ok || withdrawal.value.request !== intent.removal || withdrawal.value.registration.app !== app ||
+        withdrawal.value.registration.incarnation !== intent.predecessor.incarnation) {
+        throw new Error("managed recreation archived withdrawal disagrees");
+      }
+      if (allocated === undefined && (await boundedManagedRead(deadline, ports.now, () => ports.authorize(intent)) !== true || ports.now() >= deadline)) {
+        throw new Error("managed recreation registration authorization or deadline expired");
+      }
+      const ticket = await store.reserveRegistration(generation, "swarm");
+      return Object.freeze({ incarnation: owner.incarnation, ticket, withdrawal: withdrawal.value, deadline: intent.deadline });
     }),
     submitRegistration: (app: string, ticket: string, generation: string) =>
       useIndexed(app, (store) => store.submitRegistration(ticket, generation)),

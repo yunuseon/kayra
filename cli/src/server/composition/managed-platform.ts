@@ -4,6 +4,7 @@ import type { ManagedExecutionContext } from "../../contracts/managed-execution-
 import type { ManagedHealthReadPort } from "../../contracts/managed-deployment-read.ts";
 import type { ImageResolutionPort } from "../../contracts/image-admission.ts";
 import type { MigrationResolutionActor } from "../../contracts/migration-resolution.ts";
+import { managedRecreationRegistrationRequest } from "../../contracts/managed-recreation.ts";
 import type { openLifecycleAppIndex } from "../deployment/lifecycle-app-index.ts";
 import type { dockerApi } from "../runtime/docker-api.ts";
 import { managedPreparation } from "../deployment/managed-preparation.ts";
@@ -36,7 +37,8 @@ import { typed } from "../../lib/typed.ts";
 
 type Index = Parameters<typeof managedPreparation>[0] & Parameters<typeof managedOperationControl>[0] & Parameters<typeof managedForwardOperation>[0] & Parameters<typeof reconcileManagedForwardWork>[0] & Readonly<Pick<Awaited<ReturnType<typeof openLifecycleAppIndex>>, "recordedManagedVolumes" | "managedHealthContexts" |
   "requestManagedRemoval" | "inspectManagedRemoval" | "prepareManagedRemovalEffects" | "tickManagedRemovalEffects" | "retireManagedRemovalAccounting" | "completeManagedRemoval" |
-  "managedRemovalIntent" | "managedRemovalTombstone" | "managedPurgeIntent" | "requestManagedPurge" | "tickManagedPurge">>;
+  "managedRemovalIntent" | "managedRemovalTombstone" | "managedPurgeIntent" | "requestManagedPurge" | "tickManagedPurge" |
+  "reserveManagedRecreation" | "prepareManagedRecreationWorkspace" | "switchManagedRecreationOwnership" | "reserveRecreatedRegistration">>;
 type Paths = Parameters<typeof platformManagedPlans>[0];
 type Ports = { readonly builds: BuildPorts; readonly api: Pick<ReturnType<typeof dockerApi>, "request">; readonly canAccess: (app: string) => Promise<boolean>; readonly images?: ImageResolutionPort | undefined; readonly actor?: MigrationResolutionActor | undefined };
 
@@ -132,8 +134,25 @@ export const managedPlatform = (index: Index, paths: Paths, ports: Ports) => {
     if (state.phase === "held") return Object.freeze({ status: "held" as const, request: state.request, reason: state.reason });
     return Object.freeze({ status: "purging" as const, request: state.request, deadline: state.deadline });
   };
+  const recreateRegistration = async (input: unknown) => {
+    const parsed = managedRecreationRegistrationRequest.safeParse(input);
+    const actor = ports.actor;
+    if (!parsed.success || actor === undefined || !await ports.canAccess(parsed.data.app)) throw new Error("app is outside managed recreation scope");
+    const { app, ...request } = parsed.data;
+    const scoped = Object.freeze({
+      read, retain, now, observeWithdrawal,
+      authorize: (intent: ManagedRemovalIntent) => ports.canAccess(intent.owner.app),
+      native: { observe: volumes.observe, attachments: volumes.attachments },
+    });
+    await index.reserveManagedRecreation(app, request, actor, scoped);
+    await index.prepareManagedRecreationWorkspace(app, request.request, scoped);
+    await index.switchManagedRecreationOwnership(app, request.request, scoped);
+    return index.reserveRecreatedRegistration(app, request.request, request.generation, {
+      read, now, authorize: (intent) => ports.canAccess(intent.predecessor.app),
+    });
+  };
   return Object.freeze({
-    prepare, preview: preparation.preview, forward, removal, purge,
+    prepare, preview: preparation.preview, forward, removal, purge, recreateRegistration,
     commands: managedOperationControl(index, { read, now, canAccess: ports.canAccess, prepare, restore: preparation.restore, forRun, actor: ports.actor }),
     work: Object.freeze({ read, now, forRun, reconcileForward }),
     health,

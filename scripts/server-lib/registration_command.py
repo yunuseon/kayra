@@ -4,6 +4,7 @@ The host supplies a root-controlled storage path. Publish and verify take the
 identity returned by the lifecycle owner while its registration fence is held.
 """
 import argparse
+import base64
 import contextlib
 import fcntl
 import json
@@ -172,16 +173,34 @@ def purge_managed(app, ctl):
     raise storage.RegistrationError("managed purge did not converge; reconcile the same request")
 
 
-def register(root, gid, request, ctl, platform_ctl=None):
-    generation = execute(root, "stage", gid, request)["generation"]
+def register(root, gid, request, ctl, platform_ctl=None, recreation=None, recreation_ctl=None):
     app = request["app"]
-    reservation = ctl("reserve", app, generation, request["registration"]["runtime"])
-    storage._require(type(reservation) is dict and set(reservation) == {"incarnation", "ticket"},
+    if recreation is None:
+        generation = execute(root, "stage", gid, request)["generation"]
+        reservation = ctl("reserve", app, generation, request["registration"]["runtime"])
+        fields = {"incarnation", "ticket"}
+    else:
+        storage._require(recreation_ctl is not None and request["registration"]["runtime"] == "swarm",
+                         "recreation requires the managed Swarm registration owner")
+        generation = storage.stage_initial_registration(root, **request, recreation=recreation["request"])
+        encoded = base64.urlsafe_b64encode(storage._encoded({"app": app, "generation": generation, **recreation})).rstrip(b"=").decode("ascii")
+        reservation = recreation_ctl("recreate-registration", encoded)
+        fields = {"incarnation", "ticket", "withdrawal", "deadline"}
+    storage._require(type(reservation) is dict and set(reservation) == fields,
                      "invalid registration reservation")
     incarnation, ticket = reservation["incarnation"], reservation["ticket"]
     storage._require(type(incarnation) is str and bool(storage._UUID.fullmatch(incarnation))
                      and type(ticket) is str and ticket.startswith(incarnation + ":"),
                      "invalid registration ticket")
+    if recreation is not None:
+        withdrawal = storage._withdrawal_identity(reservation["withdrawal"])
+        deadline = reservation["deadline"]
+        storage._require(withdrawal["request"] == recreation["removal"] and withdrawal["registration"]["app"] == app
+                         and type(deadline) is int and 0 < deadline < 2**53, "invalid recreation registration authorization")
+        if time.time_ns() // 1_000_000 >= deadline:
+            expected = {"version": 1, "app": app, "incarnation": incarnation,
+                        "registrationGeneration": generation, "actionId": incarnation + ":1"}
+            storage._require(storage.observe(root, expected, gid)["status"] == "applied", "recreation registration deadline expired")
 
     intent = ctl("submit", app, generation, ticket)
     if intent == {"status": "terminal", "outcome": "success"}:
@@ -199,7 +218,11 @@ def register(root, gid, request, ctl, platform_ctl=None):
         storage._require(platform_ctl is not None, "Swarm registration requires platform infrastructure control")
         overlay = platform_ctl("app-overlay", app, generation, ticket)
         infrastructure = storage._infrastructure({**ownership, "overlay": overlay}, metadata, ownership)
-    evidence = execute(root, "publish", gid, metadata, ownership=ownership, infrastructure=infrastructure)
+    if recreation is None:
+        evidence = execute(root, "publish", gid, metadata, ownership=ownership, infrastructure=infrastructure)
+    else:
+        storage.publish_staged_recreated_registration(root, metadata, recreation["request"], gid, ownership, infrastructure, withdrawal, deadline)
+        evidence = storage.record_publication_evidence(root, metadata, gid, ownership, infrastructure)
     storage._require(evidence["status"] == "applied", "registration publication remains unresolved")
     receipt = ctl("reconcile", app, generation, ticket)
     storage._require(receipt in ({"status": "verified"}, {"status": "terminal", "outcome": "success"}),
@@ -273,7 +296,7 @@ def admit_runtime(registration, authority_directory="/var/lib/kayra/swarm", obse
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("stage", "publish", "verify", "register", "remove", "purge"))
+    parser.add_argument("mode", choices=("stage", "publish", "verify", "register", "recreate", "remove", "purge"))
     parser.add_argument("--root", required=True)
     parser.add_argument("--private-gid", type=int, required=True)
     parser.add_argument("--platform-dir")
@@ -299,16 +322,28 @@ def main():
                     def ctl(*values):
                         return _docker_control(args.platform_dir, "lifecycle", 20, *values)
                     result = remove_managed(root, args.private_gid, app, ctl) if args.mode == "remove" else purge_managed(app, ctl)
-            elif args.mode == "register":
+            elif args.mode in ("register", "recreate"):
                 storage._require(args.platform_dir is not None and os.path.isabs(args.platform_dir),
                                  "register requires an absolute platform directory")
+                recreation = None
+                if args.mode == "recreate":
+                    storage._require(type(request) is dict and "recreation" in request, "invalid recreation request")
+                    recreation = request.pop("recreation")
+                    storage._require(type(recreation) is dict and set(recreation) == {"request", "removal", "reason"}
+                                     and all(type(recreation[key]) is str and storage._UUID.fullmatch(recreation[key])
+                                             for key in ("request", "removal"))
+                                     and recreation["request"] != recreation["removal"]
+                                     and type(recreation["reason"]) is str and 0 < len(recreation["reason"]) <= 512,
+                                     "invalid recreation request")
                 app = registration_request(request)
                 storage._payload(app, request["registration"], request["configuration"], request["secrets"])
                 admit_runtime(request["registration"])
                 with claim_experimental_app(args.platform_dir, app, inspect_native=swarm_objects if request["registration"]["runtime"] == "swarm" else None):
                     result = register(root, args.private_gid, request,
                                       lambda *values: docker_control(args.platform_dir, *values),
-                                      lambda *values: docker_platform_control(args.platform_dir, *values))
+                                      lambda *values: docker_platform_control(args.platform_dir, *values),
+                                      recreation=recreation,
+                                      recreation_ctl=lambda *values: _docker_control(args.platform_dir, "lifecycle", 95, *values))
             else:
                 result = execute(root, args.mode, args.private_gid, request)
         print(json.dumps(result))

@@ -184,6 +184,21 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     return 0;
   },
   lifecycle: async ([operation, app, commit, request, extra]) => {
+    if (operation === "recreate-registration") {
+      if (app === undefined || commit !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(app)) return fail("usage: ctl lifecycle recreate-registration <base64url-request>");
+      const parsed = await import("../../contracts/managed-recreation.ts").then(({ managedRecreationRegistrationRequest }) => {
+        const input: unknown = JSON.parse(Buffer.from(app, "base64url").toString("utf8"));
+        const checked = managedRecreationRegistrationRequest.safeParse(input);
+        return checked.success ? checked.data : undefined;
+      }).catch(() => undefined);
+      if (parsed === undefined) return fail("managed recreation request is invalid");
+      const response = await fetch("http://127.0.0.1:8091/registration/recreate", {
+        method: "POST", body: JSON.stringify(parsed), signal: AbortSignal.timeout(90_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed recreation registration unavailable; inspect and retry the same request");
+      console.log(await response.text());
+      return 0;
+    }
     if (operation === "forward") {
       if (app === undefined || commit !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(app)) return fail("usage: ctl lifecycle forward <base64url-request>");
       const parsed = await import("../../contracts/managed-forward-selection.ts").then(({ parseManagedForwardSelectionRequest }) => {

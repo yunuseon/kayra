@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
+import { managedRecreationRequestFields } from "../../contracts/managed-recreation.ts";
 import { migrationReasonSchema, parseMigrationResolutionActor } from "../../contracts/migration-resolution.ts";
 import { ownedVolumeSchema, parseDataOwnership, volumeReceiptSchema } from "../../contracts/owned-volume.ts";
 import type { OwnedVolume } from "../../contracts/owned-volume.ts";
@@ -43,12 +44,7 @@ export const managedRecreationLineageSchema = z.object({
   reservation: managedRecreationIntentSchema,
 }).strict().readonly().refine((value) => value.reservation.workspace === "ready");
 
-export const managedRecreationRequestSchema = z.object({
-  request: z.uuid(),
-  removal: z.uuid(),
-  generation: z.uuid(),
-  reason: migrationReasonSchema,
-}).strict().readonly().refine((value) => value.request !== value.removal);
+export const managedRecreationRequestSchema = managedRecreationRequestFields.readonly().refine((value) => value.request !== value.removal);
 
 const inventory = z.array(z.object({
   volume: ownedVolumeSchema,

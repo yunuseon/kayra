@@ -13,6 +13,7 @@ import os
 import re
 import stat
 import sys
+import time
 import uuid
 from urllib.parse import urlsplit
 
@@ -221,10 +222,13 @@ def _payload(app, registration, configuration, secrets):
 
 
 @contextlib.contextmanager
-def _staging(root, app, create=False):
+def _staging(root, app, create=False, recreation=None):
     _check_root(root)
-    key = hashlib.sha256(app.encode("utf8")).hexdigest()
-    with _dir(root, "initial-requests", 0o700, create=create) as requests:
+    _require(recreation is None or type(recreation) is str and bool(_UUID.fullmatch(recreation)), "invalid recreation request")
+    scope = app if recreation is None else app + ":" + recreation
+    key = hashlib.sha256(scope.encode("utf8")).hexdigest()
+    category = "initial-requests" if recreation is None else "recreation-requests"
+    with _dir(root, category, 0o700, create=create) as requests:
         with _dir(requests, key, 0o700, create=create) as staged:
             yield staged
 
@@ -238,12 +242,12 @@ def _read_staged(staged, app):
     return generation, payload
 
 
-def stage_initial_registration(root, app, registration, configuration, secrets):
+def stage_initial_registration(root, app, registration, configuration, secrets, recreation=None):
     """Durably bind one root-only request to a generation before allocation."""
     _require(type(app) is str and bool(_APP.fullmatch(app)), "invalid staged app name")
     payload = _payload(app, registration, configuration, secrets)
     try:
-        with _staging(root, app, create=True) as staged:
+        with _staging(root, app, create=True, recreation=recreation) as staged:
             lock = os.open(".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=staged)
             try:
                 _check(lock, 0o600, 0, False)
@@ -273,6 +277,16 @@ def publish_staged_initial_registration(root, metadata, private_gid, ownership=N
         _require(generation == expected["registrationGeneration"], "staged registration generation conflict")
         os.fsync(staged)
     return publish(root, expected, **payload, private_gid=private_gid, ownership=ownership, infrastructure=infrastructure)
+
+
+def publish_staged_recreated_registration(root, metadata, request, private_gid, ownership, infrastructure, withdrawal, deadline):
+    expected = _metadata(metadata)
+    with _staging(root, expected["app"], recreation=request) as staged:
+        generation, payload = _read_staged(staged, expected["app"])
+        _require(generation == expected["registrationGeneration"], "recreated staged registration generation conflicts")
+        os.fsync(staged)
+    return publish_recreated(root, expected, **payload, private_gid=private_gid, ownership=ownership,
+                             infrastructure=infrastructure, withdrawal=withdrawal, deadline=deadline)
 
 
 @contextlib.contextmanager
@@ -432,6 +446,107 @@ def publish(root, metadata, registration, configuration, secrets, private_gid, p
             os.fsync(public)
     except (OSError, UnicodeError):
         raise RegistrationError("registration publication uncertain; reconcile") from None
+    return dict(expected)
+
+
+def _install_recreated_generation(parent, generation, mode, gid, write, verify):
+    try:
+        os.stat(generation, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        temporary = ".recreation-" + uuid.uuid4().hex
+        with _dir(parent, temporary, 0o700, create=True) as staged:
+            write(staged)
+            os.fchown(staged, 0, gid)
+            os.fchmod(staged, mode)
+            os.fsync(staged)
+        # The caller holds the app publisher lock, so the final name cannot race
+        # another allocation. An interrupted staging directory is never visible.
+        os.rename(temporary, generation, src_dir_fd=parent, dst_dir_fd=parent)
+        os.fsync(parent)
+    with _dir(parent, generation, mode, gid) as existing:
+        verify(existing)
+
+
+def publish_recreated(root, metadata, registration, configuration, secrets, private_gid, ownership, infrastructure, withdrawal, deadline):
+    """Publish only the successor independently reserved by the lifecycle owner."""
+    expected = _metadata(metadata)
+    previous = _withdrawal_identity(withdrawal)
+    old = previous["registration"]
+    current_owner = _ownership(ownership, expected)
+    current_infra = _infrastructure(infrastructure, expected, current_owner)
+    payload = _payload(expected["app"], registration, configuration, secrets)
+    _require(old["app"] == expected["app"] and old["incarnation"] != expected["incarnation"]
+             and old["registrationGeneration"] != expected["registrationGeneration"]
+             and expected["actionId"] == expected["incarnation"] + ":1"
+             and payload["registration"]["runtime"] == "swarm", "recreation registration scope disagrees")
+    _require(type(deadline) is int and 0 < deadline < 2**53, "invalid recreation registration deadline")
+
+    private_files = {"manifest.json": _encoded(expected), "configuration.json": _encoded(payload["configuration"])}
+    public_files = {"manifest.json": private_files["manifest.json"], "registration.json": _encoded(payload["registration"]),
+                    "ownership.json": _encoded(current_owner), "infrastructure.json": _encoded(current_infra)}
+    secret_files = {key: value.encode("utf8") for key, value in payload["secrets"].items()}
+
+    def write_private(parent):
+        for name, value in private_files.items():
+            _new_file(parent, name, value, 0o440, private_gid)
+        with _dir(parent, "secrets", 0o550, private_gid, create=True) as directory:
+            for name, value in secret_files.items():
+                _new_file(directory, name, value, 0o440, private_gid)
+            os.fsync(directory)
+
+    def verify_private(parent):
+        _require(set(os.listdir(parent)) == set(private_files) | {"secrets"}, "recreation generation disagrees")
+        for name, value in private_files.items():
+            _require(_read_file(parent, name, 0o440, private_gid) == value, "recreation generation disagrees")
+        with _dir(parent, "secrets", 0o550, private_gid) as directory:
+            _require(set(os.listdir(directory)) == set(secret_files), "recreation generation disagrees")
+            for name, value in secret_files.items():
+                _require(_read_file(directory, name, 0o440, private_gid) == value, "recreation generation disagrees")
+
+    def write_public(parent):
+        for name, value in public_files.items():
+            _new_file(parent, name, value, 0o444)
+
+    def verify_public(parent):
+        _require(set(os.listdir(parent)) == set(public_files), "recreation generation disagrees")
+        for name, value in public_files.items():
+            _require(_read_file(parent, name, 0o444) == value, "recreation generation disagrees")
+
+    archive = "withdrawal-" + old["incarnation"] + ".json"
+    try:
+        with _app(root, expected, private_gid) as (public, public_generations, private_generations):
+            current = _pointer(public, expected["app"])
+            recorded = _withdrawal(public)
+            completed = _withdrawal(public, "withdrawn.json")
+            archived = _withdrawal(public, archive)
+            if current is None:
+                _require(recorded == completed == previous and archived in (None, previous), "recreation withdrawal disagrees")
+                _require(time.time_ns() // 1_000_000 < deadline, "recreation registration deadline expired")
+            else:
+                _require(current == expected and archived == previous and recorded in (None, previous)
+                         and completed in (None, previous), "recreation publication conflicts")
+            with _dir(public_generations, old["registrationGeneration"], 0o555) as directory:
+                _require(_metadata(_decode(_read_file(directory, "manifest.json", 0o444))) == old, "recreation predecessor changed")
+                predecessor = _ownership(_decode(_read_file(directory, "ownership.json", 0o444)), old)
+                _require(predecessor["ownership"]["dataOwner"] == current_owner["ownership"]["dataOwner"], "recreation data owner changed")
+            if archived is None:
+                _write_withdrawal(public, archive, previous)
+            generation = expected["registrationGeneration"]
+            _install_recreated_generation(private_generations, generation, 0o550, private_gid, write_private, verify_private)
+            _install_recreated_generation(public_generations, generation, 0o555, 0, write_public, verify_public)
+            if current is None:
+                _require(time.time_ns() // 1_000_000 < deadline, "recreation registration deadline expired")
+                temporary = ".current-" + uuid.uuid4().hex + ".tmp"
+                _new_file(public, temporary, public_files["manifest.json"], 0o444)
+                os.replace(temporary, "current.json", src_dir_fd=public, dst_dir_fd=public)
+            # The old fence stays authoritative until the new pointer is durable.
+            os.fsync(public)
+            for name, marker in (("withdrawal.json", recorded), ("withdrawn.json", completed)):
+                if marker is not None:
+                    os.unlink(name, dir_fd=public)
+            os.fsync(public)
+    except (OSError, UnicodeError):
+        raise RegistrationError("recreation publication uncertain; retry the same generation") from None
     return dict(expected)
 
 

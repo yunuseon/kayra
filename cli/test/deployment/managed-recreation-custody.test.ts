@@ -164,7 +164,7 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   volumeState = previous;
   fail = true;
   await assert.rejects(handoff(), /lost recreation acknowledgement/);
-  await lab.reopen(); lab.clock(100_000);
+  await lab.reopen(); lab.clock(5_000);
   const installed = await lab.index().switchManagedRecreationOwnership("shop", request.request, {
     ...ports, authorize: () => Promise.resolve(false), observeWithdrawal: unreachable,
   });
@@ -185,4 +185,25 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   assert.deepEqual((await lab.index().resourceSnapshot())?.charges, []);
   assert.deepEqual(await lab.index().pendingManagedDeployments(), []);
   await assert.rejects(lab.index().reserveRegistration("shop", request.generation, "swarm"), /owns the successor registration/);
+  const registration = () => lab.index().reserveRecreatedRegistration("shop", request.request, request.generation, ports);
+  await assert.rejects(lab.index().reserveRecreatedRegistration("shop", request.request, randomUUID(), ports), /scope disagrees/);
+  await assert.rejects(lab.index().reserveRecreatedRegistration("shop", request.request, request.generation, {
+    ...ports, authorize: () => Promise.resolve(false),
+  }), /authorization or deadline expired/);
+  const ticket = await registration();
+  assert.equal(ticket.incarnation, workspace.targetIncarnation);
+  assert.equal(ticket.deadline, workspace.deadline);
+  assert.deepEqual(ticket.withdrawal.registration, removal.registration);
+  await lab.index().submitRegistration("shop", ticket.ticket, request.generation);
+  await lab.index().reconcileRegistration("shop", ticket.ticket, request.generation);
+  const verified = await lab.index().verifiedRegistration("shop");
+  assert.equal(verified.incarnation, workspace.targetIncarnation);
+  await assert.rejects(lab.index().proposeManagedDeployment("shop", plan.value, randomUUID(), {
+    ...ports, compare: () => Promise.resolve("unchanged"),
+  }), /requires its verified release rebind/);
+  await assert.rejects(lab.index().requestManagedDeployment("shop", source, runtime), /requires its verified release rebind/);
+  await lab.reopen(); lab.clock(100_000);
+  assert.deepEqual(await lab.index().reserveRecreatedRegistration("shop", request.request, request.generation, {
+    ...ports, authorize: () => Promise.resolve(false),
+  }), ticket);
 });

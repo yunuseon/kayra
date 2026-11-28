@@ -198,6 +198,10 @@ export const startRegistrationControl = async ({ platformDirectory: platform, re
         return Object.freeze({ status: "ready" });
       }
       if (opening === undefined) throw new Error("registration index is not initialized");
+      if (route === "/registration/recreate") {
+        if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
+        return managed.recreateRegistration(input);
+      }
       if (route === "/deployment/forward") {
         if (!managedSwarm || managed === undefined || swarmAuthority === undefined || !(await readSwarmAuthority(swarmAuthority)).ok) return undefined;
         return managed.forward(input);

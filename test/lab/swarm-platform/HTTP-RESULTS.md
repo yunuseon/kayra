@@ -45,7 +45,7 @@ bash test/lab/upgrade.sh --from 0.26.1 --managed-rollouts \
 
 See [MANAGED-RESULTS.json](./MANAGED-RESULTS.json) for case identities,
 availability measurements and raw evidence checksums. The managed matrix
-uses VIP discovery. The [standalone comparison](https://github.com/yunuseon/kayra/blob/codex/swarm-rollout-lab/test/lab/swarm/RESULTS.md)
+uses VIP discovery. The [standalone comparison](../swarm/RESULTS.md)
 contains the task-address measurements.
 
 ## Indexed deployer rehearsal on November 12

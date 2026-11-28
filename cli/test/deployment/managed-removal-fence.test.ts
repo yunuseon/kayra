@@ -9,6 +9,8 @@ import type { ManagedServiceAction } from "../../src/contracts/managed-swarm-ser
 import type { ServiceVersion } from "../../src/contracts/swarm-service.ts";
 import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { test } from "node:test";
 import { managedIndexFixture } from "./managed-index-fixture.ts";
 import { indexedForwardFixture } from "./indexed-forward-fixture.ts";
@@ -229,7 +231,7 @@ test("removal effects stop consumers before retained services and reopen their d
   await assert.rejects(lab.index().verifiedRegistration("shop"), /registration has not been verified/);
 });
 
-test("removal of a registered app with no deployment retains its data identities without creating a resource charge", async (t) => {
+test("SIGKILL around removal publication preserves the tombstone, data identities and accounting", { timeout: 15_000 }, async (t) => {
   const lab = await managedIndexFixture(t);
   const request = randomUUID();
   const authorize = () => Promise.resolve(true);
@@ -251,10 +253,51 @@ test("removal of a registered app with no deployment retains its data identities
   const retirement = await lab.index().retireManagedRemovalAccounting("shop", request, ports);
   assert.equal(retirement.before, retirement.after);
   assert.equal(await lab.index().resourceSnapshot(), null);
+  const code = `
+    import { dirname, join } from "node:path";
+    import { openJournal } from ${JSON.stringify(new URL("../../src/server/deployment/journal.ts", import.meta.url).href)};
+    import { openArtifactStore } from ${JSON.stringify(new URL("../../src/server/deployment/artifact-store.ts", import.meta.url).href)};
+    import { openLifecycleAppIndex } from ${JSON.stringify(new URL("../../src/server/deployment/lifecycle-app-index.ts", import.meta.url).href)};
+    import { managedRemovalRuntime } from ${JSON.stringify(new URL("../../src/server/composition/managed-removal-runtime.ts", import.meta.url).href)};
+    const [directory, request, cut] = process.argv.slice(1);
+    const kill = () => process.kill(process.pid, "SIGKILL");
+    const journals = async (...args) => {
+      const journal = await openJournal(...args);
+      return { ...journal, write: async (state) => {
+        if (state.removalTombstone !== undefined && cut === "before") kill();
+        await journal.write(state);
+        if (state.removalTombstone !== undefined && cut === "after") kill();
+      } };
+    };
+    const index = await openLifecycleAppIndex(directory, undefined, journals);
+    const artifacts = await openArtifactStore(join(dirname(directory), "artifacts"));
+    const now = () => 1000;
+    const inventory = await index.inspectManagedRemoval("shop", request, { ...artifacts, now });
+    const unreachable = () => Promise.reject(new Error("finalization cannot dispatch native effects"));
+    const runtime = managedRemovalRuntime(inventory, { ...artifacts, now, authorize: async () => true, native: {
+      services: { observe: unreachable, tombstone: unreachable },
+      jobs: { observe: unreachable, fence: unreachable },
+      containers: { observe: unreachable },
+    } });
+    await index.completeManagedRemoval("shop", request, { ...runtime, observeWithdrawal: async (intent) => ({
+      version: 1, status: "withdrawn", request, action: intent.action, registration: intent.registration, observedAt: now(),
+    }) });
+    throw new Error("removal did not reach the requested process cut");
+  `;
+  for (const cut of ["before", "after"] as const) {
+    await lab.index().close();
+    const child = spawn(process.execPath, ["--input-type=module", "-e", code, lab.directory, request, cut], { stdio: ["ignore", "ignore", "inherit"] });
+    t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+    assert.deepEqual(await once(child, "exit"), [null, "SIGKILL"]);
+    await lab.reopen();
+    const published = await lab.index().publishedDeploymentStatus("shop");
+    assert.ok(published?.version === 1);
+    assert.equal(published.retirement?.deadline, intent.createdAt + 90_000);
+    assert.equal(published.lifecycle, cut === "before" ? "removal-requested" : "removed");
+    assert.equal(await lab.index().resourceSnapshot(), null);
+  }
   const tombstone = await lab.index().completeManagedRemoval("shop", request, {
-    ...ports, observeWithdrawal: () => Promise.resolve({
-      version: 1, status: "withdrawn", request, action: intent.action, registration: intent.registration, observedAt: lab.runtime.now(),
-    }),
+    ...ports, observeWithdrawal: unreachable,
   });
   assert.equal(tombstone.checkpoint, null);
   const purge = randomUUID();

@@ -1,6 +1,8 @@
 /* eslint-disable functional/no-let, functional/prefer-immutable-types, functional/immutable-data -- models CAS races and interrupted runtime acknowledgements */
 import { strict as assert } from "node:assert";
-import { mkdtemp, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -58,7 +60,7 @@ const fixture = async (t: TestContext, cleanup: boolean | "new-only" = false, qu
   let owner = managedServiceCompensation(view(), ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
   const drive = async () => { for (let i = 0; i < 80; i++) { const state = await owner.tick(); if (state.phase !== "recovering") return state; } throw new Error("compensation did not settle"); };
-  return { candidate, previous: old, action, native, oldSpec, writes, ports, owner: () => owner, journal: () => journal, drive,
+  return { candidate, previous: old, action, native, oldSpec, writes, ports, path, observedFor, owner: () => owner, journal: () => journal, drive,
     prepare: () => owner.prepare(candidate, old, action, cleanup ? null : { ...native, version: 1 }, [native]), lost: () => { lost = true; }, conflict: () => { conflict = true; }, updating: () => { updating = true; }, deny: () => { admitted = false; }, now: (value: number) => { clock = value; },
     uncertainFenceWrite: () => { uncertainFenceWrite = true; },
     observe: (value: ServiceObservation) => { observed = value; }, observed: () => observed,
@@ -72,6 +74,67 @@ test("HTTP compensation restores the immutable previous context without a zero-r
   assert.equal(lab.writes.length, 1); await lab.reopen(); const done = await lab.drive(); assert.equal(done.phase, "complete");
   assert.deepEqual(lab.writes.map((action) => action.effect), ["restore"]); assert.ok((done.proof?.native.version ?? 0) > lab.native.version);
   lab.now(999999); assert.deepEqual(await lab.owner().tick(), done);
+});
+
+for (const cut of ["before", "after"] as const) test(`SIGKILL ${cut} the restore effect honors recorded native state and deadline`, { timeout: 15_000 }, async (t) => {
+  const lab = await fixture(t);
+  await lab.prepare();
+  const observed = lab.observed();
+  assert.ok(observed.status === "owned");
+  await lab.journal().close();
+  const code = `
+    import { strict as assert } from "node:assert";
+    import { open } from "node:fs/promises";
+    import { join } from "node:path";
+    import { openJournal } from ${JSON.stringify(new URL("../../src/server/deployment/journal.ts", import.meta.url).href)};
+    import { openArtifactStore } from ${JSON.stringify(new URL("../../src/server/deployment/artifact-store.ts", import.meta.url).href)};
+    import { managedServiceCompensation } from ${JSON.stringify(new URL("../../src/server/deployment/managed-service-compensation.ts", import.meta.url).href)};
+    const [path, cut, native] = process.argv.slice(1);
+    const observed = JSON.parse(native);
+    const journal = await openJournal(path, "existing");
+    const artifacts = await openArtifactStore(join(path, "artifacts"));
+    const kill = () => process.kill(process.pid, "SIGKILL");
+    const unreachable = () => Promise.reject(new Error("unexpected restore runtime effect"));
+    const owner = managedServiceCompensation(journal, { ...artifacts, now: () => 1000, authorize: async () => true, services: {
+      observe: async () => observed,
+      observeDesired: async (request) => ({ ...observed, specMatches: observed.plan === request.plan }),
+      fence: unreachable,
+      tombstone: unreachable,
+      apply: async (request, expected) => {
+        assert.deepEqual(expected, { id: observed.id, version: observed.version });
+        assert.equal(request.effect, "restore");
+        if (cut === "before") kill();
+        const result = { ...observed, version: observed.version + 1,
+          action: request.action, effect: request.effect, taskEffect: request.effect, plan: request.plan, taskPlan: request.plan,
+          tasks: observed.tasks.map((task) => ({ ...task, action: request.action, plan: request.plan, effect: request.effect })),
+        };
+        const file = await open(join(path, "observed-restore.json"), "wx", 0o600);
+        try { await file.writeFile(JSON.stringify(result)); await file.sync(); } finally { await file.close(); }
+        kill();
+      },
+    } });
+    for (let i = 0; i < 6; i++) await owner.tick();
+    throw new Error("rollback failed to reach the process cut");
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", code, lab.path, cut, JSON.stringify(observed)], { stdio: ["ignore", "ignore", "inherit"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  assert.deepEqual(await once(child, "exit"), [null, "SIGKILL"]);
+  const nativePath = join(lab.path, "observed-restore.json");
+  if (cut === "after") {
+    const restored = lab.observedFor({ ...lab.action, action: lab.action.action + ":restore:1" }, observed.version + 1);
+    assert.deepEqual(JSON.parse(await readFile(nativePath, "utf8")), restored);
+    lab.observe(restored);
+  } else {
+    await assert.rejects(readFile(nativePath), { code: "ENOENT" });
+  }
+  await lab.reopen();
+  const pending = await lab.owner().read();
+  assert.equal(pending?.action.deadline, lab.action.deadline);
+  assert.equal(pending.attempts[0]?.phase, "observing");
+  const done = await lab.drive();
+  assert.equal(done.phase, "complete");
+  assert.equal(done.action.deadline, lab.action.deadline);
+  assert.deepEqual(lab.writes.map((write) => write.effect), cut === "before" ? ["fence", "restore"] : []);
 });
 
 test("a fresh restore CAS attempt follows a recorded version conflict without replaying its identity", async (t) => {

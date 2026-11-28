@@ -1,6 +1,8 @@
 /* eslint-disable functional/no-let, functional/prefer-immutable-types -- models journal cuts, clock and run handles */
 import { strict as assert } from "node:assert";
 import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,7 +40,7 @@ const fixture = async (t: TestContext) => {
   const ports = { ...artifacts, now: () => clock }; let store = managedLifecycleStore(view(), owner, ports);
   t.after(async () => { await journal.close(); await rm(path, { recursive: true, force: true }); });
   const converge = async () => { await store.begin(source); await store.admit(); await store.child("preparation", source.run).write(prefix); await store.enter("preparing", "updating", 1000); await store.child("consumers", source.run).write(consumers); await store.enter("updating", "verifying", 1000); };
-  return { source, prefix, consumers, verification, artifacts, store: () => store, converge, cut: (value: "before" | "after") => { cut = value; }, clock: (value: number) => { clock = value; },
+  return { source, prefix, consumers, verification, artifacts, path, close: () => journal.close(), store: () => store, converge, cut: (value: "before" | "after") => { cut = value; }, clock: (value: number) => { clock = value; },
     reopen: async () => { await journal.close(); journal = await openJournal(path, "existing"); cut = null; store = managedLifecycleStore(view(), owner, ports); },
   };
 };
@@ -55,6 +57,51 @@ for (const cut of ["before", "after"] as const) test(`reopen after ${cut} promot
   const lab = await fixture(t); await lab.converge(); lab.cut(cut); await assert.rejects(lab.store().child("verification", lab.source.run).write(lab.verification), /uncertain/); await assert.rejects(lab.store().read(), /reopen/);
   await lab.reopen(); const state = await lab.store().read(); assert.ok(state);
   assert.equal(state.active !== null, cut === "after"); assert.equal(state.operation.verification !== null, cut === "after"); assert.equal(state.operation.phase, cut === "after" ? "settling" : "verifying");
+});
+
+for (const cut of ["before", "after"] as const) test(`SIGKILL ${cut} promotion preserves the original deadline and complete proof`, { timeout: 15_000 }, async (t) => {
+  const lab = await fixture(t);
+  await lab.converge();
+  const before = await lab.store().read();
+  assert.ok(before);
+  await lab.close();
+  const code = `
+    import { join } from "node:path";
+    import { openJournal } from ${JSON.stringify(new URL("../../src/server/deployment/journal.ts", import.meta.url).href)};
+    import { openArtifactStore } from ${JSON.stringify(new URL("../../src/server/deployment/artifact-store.ts", import.meta.url).href)};
+    import { managedLifecycleStore, parseManagedLifecycleStore } from ${JSON.stringify(new URL("../../src/server/deployment/managed-lifecycle-store.ts", import.meta.url).href)};
+    const [path, cut, proof] = process.argv.slice(1);
+    const journal = await openJournal(path, "existing");
+    const state = parseManagedLifecycleStore(await journal.read());
+    const artifacts = await openArtifactStore(join(path, "artifacts"));
+    const kill = () => process.kill(process.pid, "SIGKILL");
+    const store = managedLifecycleStore({ read: journal.read, write: async (input) => {
+      const promoting = parseManagedLifecycleStore(input).operation.phase === "settling";
+      if (promoting && cut === "before") kill();
+      await journal.write(input);
+      if (promoting && cut === "after") kill();
+    } }, state.owner, { ...artifacts, now: () => 1000 });
+    await store.child("verification", state.operation.run).write(JSON.parse(proof));
+    throw new Error("promotion did not reach the requested process cut");
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", code, lab.path, cut, JSON.stringify(lab.verification)], { stdio: ["ignore", "ignore", "inherit"] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  assert.deepEqual(await once(child, "exit"), [null, "SIGKILL"]);
+  await lab.reopen();
+  const reopened = await lab.store().read();
+  assert.ok(reopened);
+  assert.equal(reopened.operation.deadline, before.operation.deadline);
+  if (cut === "before") {
+    assert.deepEqual(reopened, before);
+    await lab.store().child("verification", lab.source.run).write(lab.verification);
+  } else {
+    assert.equal(reopened.operation.phase, "settling");
+  }
+  const promoted = await lab.store().read();
+  assert.ok(promoted?.active);
+  assert.equal(promoted.active.run, lab.source.run);
+  assert.equal(promoted.operation.verification?.phase, "verified");
+  assert.equal((await lab.store().settle()).operation.phase, "complete");
 });
 
 test("cancellation can be persisted between child effects and prevents a late verification from promoting", async (t) => {

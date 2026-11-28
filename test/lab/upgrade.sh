@@ -771,8 +771,10 @@ if [ "$managed_workers" = true ]; then
     yq -i '.services.worker.environment.RELEASE = "C" | .services.worker.environment.IDEMPOTENT = "true"' "$worker_repo/deploy/compose.yml"
     worker_c="$(worker_commit "Worker C deduplicates repeat effects in the application")"
     git clone -q --bare "$worker_repo" "${served}/lab/managed-workers.git"
+    # Budget the retained 192 MiB database and three 128 MiB worker slots
+    # conservatively for recovery, even though ordinary replacement is stop-first.
     FLEET_REPO="http://${host_ip}:${port}/lab/managed-workers.git" yq -i '.apps += [{"name": "managed-workers", "ref": "main", "path": ".", "repo": strenv(FLEET_REPO),
-        "runtime": "swarm", "grants": {"memory_bytes": 536870912, "cpu_millicores": 1000, "maintenance": false}}]' "${fleet}/servers/${server}/server.yml"
+        "runtime": "swarm", "grants": {"memory_bytes": 671088640, "cpu_millicores": 1000, "maintenance": false}}]' "${fleet}/servers/${server}/server.yml"
     SOPS_AGE_KEY_FILE="${work}/age-key.txt" sops set "servers/${server}/secrets.yml" '["app_secrets"]["managed-workers"]'         '{"POSTGRES_PASSWORD":"lab-only-worker","DATABASE_URL":"postgres://lab:lab-only-worker@db:5432/lab"}' >> "$log" 2>&1 ||
         die "writing disposable worker fixture secrets"
     kayra_cmd apps "$server" >> "$log" 2>&1 || die "registering the managed worker fixture"
@@ -819,6 +821,7 @@ PYTHON
         die "$description"
     }
     worker_run_a="$(new_uuid)"
+    printf '%s\n' "$worker_run_a" > "${work}/worker-request-a.txt"
     worker_deploy "$worker_a" "$worker_run_a"
     worker_status "$worker_a" "$worker_run_a" "${work}/worker-baseline.json"
     worker_db="$(worker_container db)"
@@ -828,6 +831,7 @@ PYTHON
     worker_sql "INSERT INTO jobs(id,duration_ms) VALUES (0,18000)" >/dev/null
     wait_worker_sql "SELECT EXISTS (SELECT 1 FROM history WHERE job_id=0 AND kind='claimed' AND release='A')" "worker A never claimed the drain fixture"
     worker_run_b="$(new_uuid)"
+    printf '%s\n' "$worker_run_b" > "${work}/worker-request-b.txt"
     worker_deploy "$worker_b" "$worker_run_b"
     worker_status "$worker_b" "$worker_run_b" "${work}/worker-stop-first.json"
     [ "$(multipass exec "$vm_name" -- sudo docker service inspect "$worker_service" --format '{{.Spec.UpdateConfig.Order}}')" = stop-first ] || die "worker update order is not stop-first"
@@ -862,6 +866,7 @@ PYTHON
     }
     redeliver_worker_job 1 raw_effects 2
     worker_run_c="$(new_uuid)"
+    printf '%s\n' "$worker_run_c" > "${work}/worker-request-c.txt"
     worker_deploy "$worker_c" "$worker_run_c"
     worker_status "$worker_c" "$worker_run_c" "${work}/worker-idempotent.json"
     redeliver_worker_job 2 effects 1

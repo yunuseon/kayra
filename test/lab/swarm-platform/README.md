@@ -2415,6 +2415,17 @@ The reporting regression was corrected separately, with the old release
 still available as last known good. The updated fixture also checks an
 audited resolution of an ambiguous migration.
 
+The corrected build `2f3feb4` passed that case on the preserved VM with a
+new fixture identity. While the probe outcome was unknown, status showed
+no verified active release and the old release as last known good. The
+public CLI recorded the operator's applied decision against the exact run
+and step. The forward repair verified after a deployer process kill,
+with the original database task and one ledger entry. The separate HTTPS
+observer recorded 44 failed samples over 43.243 s before B answered and
+20 over 25.265 s during the repair. The record includes successful
+responses from B between the two spans. See `MANAGED-RESULTS.json` and
+the private lifecycle evidence archive.
+
 Run `test/lab/upgrade.sh --from 0.26.1 --managed-workers --vm-name <unique-lab-name>`
 to exercise app-owned delivery under the real coordinator. The PostgreSQL
 fixture records claims, shutdown, acknowledgements and effects. An in-flight

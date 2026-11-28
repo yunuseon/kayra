@@ -76,6 +76,27 @@
     "forwardRepairAfterCandidate": {"failedSamples": 17, "failureSampleSpanMs": 19225},
     "scope": "Resumed native repair after the combined lab stopped on the stale active projection. Failure spans are sampled; they exclude the interval returning B."
   },
+  "auditedMigrationAndForwardRecovery": {
+    "date": "2026-11-28",
+    "source": "2f3feb4a9e94cfd7ba6196335882c8015732d886",
+    "vm": "kayra-lifecycle-acceptance-20261128025250",
+    "passed": true,
+    "probeOutcome": "unknown",
+    "verifiedActiveWhileHeld": false,
+    "lastKnownGoodRetained": true,
+    "rollback": "data-fenced",
+    "auditedOutcome": "applied",
+    "migrationAttempts": 1,
+    "deployerRestartAfterForwardAcceptance": true,
+    "repairEpoch": 1,
+    "retainedDatabaseTaskUnchanged": true,
+    "sameRequestReplay": true,
+    "maintenanceSamplesSinceBaseline": 98,
+    "failedSamples": 64,
+    "maintenanceBeforeCandidate": {"failedSamples": 44, "failureSampleSpanMs": 43243},
+    "forwardRepairAfterCandidate": {"failedSamples": 20, "failureSampleSpanMs": 25265},
+    "scope": "New app identity on the preserved VM using the corrected checkout. Successful B responses separate the two sampled failure spans."
+  },
   "workerDelivery": {
     "date": "2026-11-28",
     "source": "2f3feb4a9e94cfd7ba6196335882c8015732d886",

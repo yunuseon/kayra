@@ -580,6 +580,15 @@ const openIndex = async (directory: string, mode: "initialize" | "existing", obs
         const bytes = await boundedManagedRead(ports.now() + 10_000, ports.now, () => ports.read(accepted.source)); if (bytes === undefined || createHash("sha256").update(bytes).digest("hex") !== accepted.source) throw new Error("managed forward selection source unavailable");
         const source = parseManagedLifecycleSource(JSON.parse(bytes)); const gate = managedIndexGate({ owner: indexed, envelope, source }); if (!gate.ok || !gate.value.activeGate || bytes !== JSON.stringify(source)) throw new Error("managed forward selection source binding disagrees");
         const registration = verifiedRegistration(app, envelope); const input = managedForwardSelectionInput({ state, source, registration, request: statement, actor }); const createdAt = ports.now(); const planned = managedForwardSelectionIntent(input, createdAt);
+        const historyDeadline = createdAt + 10_000;
+        await validateRecreatedHistory(indexed, statement.commit, state.compatibilityEpoch, {
+          read: async (digest) => {
+            const bytes = await boundedManagedRead(historyDeadline, ports.now, () => ports.read(digest));
+            if (bytes === undefined) throw new Error("managed forward recreation history unavailable");
+            return bytes;
+          },
+          expired: () => ports.now() >= historyDeadline,
+        });
         if (await boundedManagedRead(planned.source.preparationDeadline, ports.now, () => verifyManagedForwardSelectionBaseline(planned.source, ports)) !== true || await boundedManagedRead(planned.source.preparationDeadline, ports.now, () => ports.authorize(planned.audit)) !== true || ports.now() >= planned.source.preparationDeadline) throw new Error("managed forward selection baseline or operator authority unavailable");
         const catalog = lifecycleIndexForwardSelection.parse({ request: statement.request, identity, blockedRun: statement.blockedRun, checkpoint: createHash("sha256").update(JSON.stringify(state)).digest("hex"), blockedSource: state.operation.source, compatibilityEpoch: state.compatibilityEpoch, registration, createdAt, phase: "initializing", source: null, decision: null });
         await serialIndex(async () => { const snapshot = await readIndex(); const owner = snapshot.apps.find((item) => item.app === app); if (owner?.incarnation !== indexed.incarnation || (owner.forwardSelections?.length ?? 0) >= 128 || owner.forwardSelections?.some((item) => item.request === statement.request)) throw new Error("managed forward selection catalog changed or is full"); await journal.write({ ...snapshot, apps: snapshot.apps.map((item) => item.app === app ? { ...item, forwardSelections: [...(item.forwardSelections ?? []), catalog] } : item) }); });

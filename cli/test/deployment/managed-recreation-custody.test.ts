@@ -11,6 +11,7 @@ import type { IndexedManagedRuntime } from "../../src/server/deployment/indexed-
 import { openJournal } from "../../src/server/deployment/journal.ts";
 import { parseLifecycleAppIndex } from "../../src/server/deployment/lifecycle-app-index-state.ts";
 import { parseVolumeCreationCatalog } from "../../src/server/deployment/volume-creation-catalog-state.ts";
+import { validateRecreatedHistory } from "../../src/server/deployment/managed-recreation-history.ts";
 import { recreatedManagedPlan } from "../../src/server/deployment/managed-recreation-plan.ts";
 import { reconcileManagedWork } from "../../src/server/deployment/managed-work.ts";
 import { managedRemovalRuntime } from "../../src/server/composition/managed-removal-runtime.ts";
@@ -272,5 +273,12 @@ test("a retired verified app reserves its exact data custody and fences purge ac
   assert.equal(restored.verifiedActive?.commit, plan.value.commit);
   assert.equal(restored.compatibilityEpoch, ready.compatibilityEpoch);
   assert.deepEqual(await lab.index().recordedManagedVolumes("shop", lab.volumes), births);
+  const persistedIndex = parseLifecycleAppIndex(JSON.parse(await readFile(join(lab.directory, "state.json"), "utf8")));
+  const successor = persistedIndex.apps.find((entry) => entry.app === "shop");
+  assert.ok(successor?.lineage);
+  const history = { read: lab.artifacts.read, expired: () => false };
+  await validateRecreatedHistory(successor, plan.value.commit, ready.compatibilityEpoch, history);
+  await assert.rejects(validateRecreatedHistory(successor, plan.value.commit, ready.compatibilityEpoch + 1, history), /retired data compatibility fence/);
+  await validateRecreatedHistory(successor, "f".repeat(40), ready.compatibilityEpoch + 1, history);
   assert.equal(lab.jobs.size, 0);
 });

@@ -94,6 +94,7 @@ retain_lab_log() {
 }
 cleanup() {
     [ -z "${server_pid:-}" ] || kill "$server_pid" 2>/dev/null || true
+    [ -z "${maintenance_pid:-}" ] || kill "$maintenance_pid" 2>/dev/null || true
     if [ "$passed" = false ]; then
         retain_lab_log
         echo "kept for a look: the VM (${vm_name}), the fleet ${fleet}, the log ${log}"
@@ -631,7 +632,7 @@ if [ "$managed_fleet" = true ]; then
     for stage in status successor restored removed recreated purged; do
         install -m 600 "${work}/fleet-${stage}.json" "/tmp/kayra-swarm-platform-${vm_name}.fleet-${stage}.json"
     done
-    echo "✓ an explicitly enabled fleet registered, deployed, restored removed, recreated and purged Swarm alongside its Compose app"
+    echo "✓ an explicitly enabled fleet registered, deployed, restored, removed, recreated and purged Swarm alongside its Compose app"
 fi
 
 if [ "$managed_forward" = true ]; then
@@ -660,6 +661,15 @@ if [ "$managed_forward" = true ]; then
     forward_prepare "$forward_base" "$forward_run_a"
     await_managed_phase managed-forward "$forward_run_a" complete "${work}/forward-baseline.json"
     forward_response | jq -e '.release == "A" and .schema == 1' >/dev/null || die "forward fixture baseline"
+    maintenance_requests="${work}/forward-maintenance.jsonl"
+    python3 -B "${KAYRA_ROOT}/test/lab/swarm-platform/maintenance-http.py" "$address" "forward.${domain}" "$maintenance_requests" >> "$log" 2>&1 &
+    maintenance_pid=$!
+    for _ in $(seq 1 50); do
+        [ ! -s "$maintenance_requests" ] || break
+        kill -0 "$maintenance_pid" 2>/dev/null || die "the maintenance observer exited before sampling"
+        sleep 0.1
+    done
+    [ -s "$maintenance_requests" ] || die "the maintenance observer did not sample the baseline"
     database_id() {
         multipass exec "$vm_name" -- sudo docker ps --filter 'label=com.kayra.app=managed-forward' --filter 'label=com.kayra.service=db' --format '{{.ID}}'
     }
@@ -735,6 +745,13 @@ if [ "$managed_forward" = true ]; then
     await_managed_phase managed-forward "$forward_run_c" complete "${work}/forward-recovered.json"
     expect_serves v4
     kayra_cmd verify "$server" >> "$log" 2>&1 || die "fleet verification after forward recovery"
+    maintenance_result=0
+    wait "$maintenance_pid" || maintenance_result=$?
+    maintenance_pid=
+    for suffix in jsonl summary.json; do
+        install -m 600 "${work}/forward-maintenance.${suffix}" "/tmp/kayra-swarm-platform-${vm_name}.forward-maintenance.${suffix}"
+    done
+    [ "$maintenance_result" -eq 0 ] || die "maintenance did not show the expected HTTP interruption and stable repair"
     echo "✓ audited forward recovery repaired a fenced deployment after a deployer restart using the original retained data"
 fi
 

@@ -2396,8 +2396,11 @@ candidate then fails its completion check. Kayra holds the new data epoch, and
 the fixture requests an exact fix through `kayra app deployment forward`,
 kills and restarts the deployer, and verifies the repaired release through HTTPS
 with the original database task and one recorded migration attempt. It also
-replays the same request. The successful VM is cleaned up and the reports for
-the baseline, held and recovered releases and ledger are retained.
+replays the same request. A separate HTTPS observer records the intentional
+maintenance interruption and stable repair at one request per second. Its
+sampled failure interval is reported separately from rolling continuity.
+The successful VM is cleaned up and the lifecycle reports, ledger, and raw
+maintenance requests are retained.
 
 Run `test/lab/upgrade.sh --from 0.26.1 --managed-workers --vm-name <unique-lab-name>`
 to exercise app-owned delivery under the real coordinator. The PostgreSQL

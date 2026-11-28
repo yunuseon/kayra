@@ -85,6 +85,23 @@ class RecreatedPublisher(unittest.TestCase):
         self.assertEqual(self.publish(), self.target)
         self.assert_published()
 
+    def test_refuses_changed_fleet_inputs_before_custody(self):
+        changed = {"request": str(uuid.uuid4()), "removal": self.withdrawal["request"],
+                   "reason": "Reopen with conflicting fixture inputs"}
+        publication = {"app": "shop", "registration": self.registration, "configuration": self.configuration, "secrets": self.secrets}
+        unexpected = mock.Mock(side_effect=AssertionError("recreation must validate inputs before calling custody"))
+        for key, value, message in (
+            ("registration", {**self.registration, "hosts": ["elsewhere.example.test"]}, "previous fleet registration"),
+            ("configuration", {"MODE": "different"}, "previous application configuration"),
+            ("secrets", {"TOKEN": "different"}, "previous secret values"),
+        ):
+            with self.subTest(changed=key), self.assertRaisesRegex(storage.RegistrationError, message):
+                register(self.fd, 1000, {**publication, key: value}, unexpected,
+                         recreation=changed, recreation_ctl=unexpected)
+        unexpected.assert_not_called()
+        self.assertFalse(self.current.exists())
+        self.assertFalse(self.old_marker.exists())
+
     def test_restarts_after_private_generation_is_installed(self):
         install = storage._install_recreated_generation
 

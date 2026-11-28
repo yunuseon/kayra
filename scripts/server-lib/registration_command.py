@@ -182,7 +182,7 @@ def register(root, gid, request, ctl, platform_ctl=None, recreation=None, recrea
     else:
         storage._require(recreation_ctl is not None and request["registration"]["runtime"] == "swarm",
                          "recreation requires the managed Swarm registration owner")
-        storage.verify_recreation_inputs(root, app, recreation["removal"], request["configuration"], request["secrets"], gid)
+        storage.verify_recreation_inputs(root, **request, removal=recreation["removal"], private_gid=gid)
         generation = storage.stage_initial_registration(root, **request, recreation=recreation["request"])
         encoded = base64.urlsafe_b64encode(storage._encoded({"app": app, "generation": generation, **recreation})).rstrip(b"=").decode("ascii")
         reservation = recreation_ctl("recreate-registration", encoded)

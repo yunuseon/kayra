@@ -312,11 +312,30 @@ def publish_staged_recreated_registration(root, metadata, request, private_gid, 
     return result
 
 
-def verify_recreation_inputs(root, app, removal, configuration, secrets, private_gid):
-    """Check the retained operator inputs before accepting new custody."""
-    configuration = _values(configuration)
-    secrets = _values(secrets)
-    with _app(root, {"app": app}, private_gid) as (public, _, private_generations):
+def _verify_recreation_inputs(public_generations, private_generations, old, payload, private_gid):
+    generation = old["registrationGeneration"]
+    with _dir(public_generations, generation, 0o555) as directory:
+        _require(_metadata(_decode(_read_file(directory, "manifest.json", 0o444))) == old,
+                 "recreation predecessor changed")
+        public = _registration(_decode(_read_file(directory, "registration.json", 0o444)), old)
+        _require(public == payload["registration"], "recreation requires the previous fleet registration")
+    with _dir(private_generations, generation, 0o550, private_gid) as directory:
+        _require(_metadata(_decode(_read_file(directory, "manifest.json", 0o440, private_gid))) == old,
+                 "recreation predecessor changed")
+        config = _values(_decode(_read_file(directory, "configuration.json", 0o440, private_gid)))
+        _require(config == payload["configuration"], "recreation requires the previous application configuration")
+        with _dir(directory, "secrets", 0o550, private_gid) as values:
+            secrets = payload["secrets"]
+            _require(set(os.listdir(values)) == set(secrets), "recreation requires the previous secret keys")
+            for name, value in secrets.items():
+                _require(_read_file(values, name, 0o440, private_gid) == value.encode("utf8"),
+                         "recreation requires the previous secret values")
+
+
+def verify_recreation_inputs(root, app, removal, registration, configuration, secrets, private_gid):
+    """Check the exact previous fleet inputs before accepting new custody."""
+    payload = _payload(app, registration, configuration, secrets)
+    with _app(root, {"app": app}, private_gid) as (public, public_generations, private_generations):
         if _pointer(public, app) is not None:
             # Replays bind the current publication to the exact staged request.
             return
@@ -324,17 +343,7 @@ def verify_recreation_inputs(root, app, removal, configuration, secrets, private
         completed = _withdrawal(public, "withdrawn.json")
         _require(recorded is not None and recorded == completed and recorded["request"] == removal
                  and recorded["registration"]["app"] == app, "recreation requires a completed withdrawal")
-        old = recorded["registration"]
-        with _dir(private_generations, old["registrationGeneration"], 0o550, private_gid) as directory:
-            _require(_metadata(_decode(_read_file(directory, "manifest.json", 0o440, private_gid))) == old,
-                     "recreation predecessor changed")
-            config = _values(_decode(_read_file(directory, "configuration.json", 0o440, private_gid)))
-            _require(config == configuration, "recreation requires the previous application configuration")
-            with _dir(directory, "secrets", 0o550, private_gid) as values:
-                _require(set(os.listdir(values)) == set(secrets), "recreation requires the previous secret keys")
-                for name, value in secrets.items():
-                    _require(_read_file(values, name, 0o440, private_gid) == value.encode("utf8"),
-                             "recreation requires the previous secret values")
+        _verify_recreation_inputs(public_generations, private_generations, recorded["registration"], payload, private_gid)
 
 
 @contextlib.contextmanager
@@ -573,8 +582,8 @@ def publish_recreated(root, metadata, registration, configuration, secrets, priv
             else:
                 _require(current == expected and archived == previous and recorded in (None, previous)
                          and completed in (None, previous), "recreation publication conflicts")
+            _verify_recreation_inputs(public_generations, private_generations, old, payload, private_gid)
             with _dir(public_generations, old["registrationGeneration"], 0o555) as directory:
-                _require(_metadata(_decode(_read_file(directory, "manifest.json", 0o444))) == old, "recreation predecessor changed")
                 predecessor = _ownership(_decode(_read_file(directory, "ownership.json", 0o444)), old)
                 _require(predecessor["ownership"]["dataOwner"] == current_owner["ownership"]["dataOwner"], "recreation data owner changed")
             if archived is None:

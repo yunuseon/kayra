@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Selected managed coordinator observations across resumed sessions. Full fresh integrated acceptance pending.",
+  "scope": "Managed coordinator observations across native lab sessions. See currentIntegratedMatrix for the current platform pins.",
   "date": "2026-11-26",
   "vm": "kayra-managed-upgrade-20261126102726",
   "baseSource": "a8fda8bec457b8e9c517a6cfbf20c0162c2dca61",
@@ -120,5 +120,152 @@
     "failed": 94,
     "maxStartGapMs": 261.809,
     "maxAllowedStartGapMs": 250
+  },
+  "currentIntegratedMatrix": {
+    "date": "2026-11-28",
+    "vm": "kayra-timed-matrix-20261128145315",
+    "productSource": "f09c0c3792c23c4428e2b90d4278f9cd0c7a82d0",
+    "resumedObserverSource": "466686c5a2c9997ea90c11fb584c09411691dc22",
+    "upgradeFrom": "0.26.1",
+    "evidenceDirectory": ".cache/lab-evidence/kayra-timed-matrix-20261128145315",
+    "run": {
+      "freshUpgradeAndManagedHttpPassed": true,
+      "managedStorageAndAdmissionResumedOnSameVm": true,
+      "initialHarnessExit": 1,
+      "finalFleetVerificationPassed": true,
+      "initialHarnessFailure": "Stage 8a refused to mount over the live stage 7 lifecycle filesystem before admitting the request."
+    },
+    "versions": {
+      "multipass": "1.17.2+mac",
+      "os": "Ubuntu 24.04.5 LTS",
+      "architecture": "arm64",
+      "kernel": "6.8.0-147-generic",
+      "engine": "29.10.1",
+      "cli": "29.10.1",
+      "api": "1.57",
+      "compose": "5.8.1",
+      "node": "v24.22.1",
+      "traefik": "traefik:v3.7.16@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65",
+      "socketProxy": "tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459",
+      "fixtureLedgerImage": "sha256:dc033e41fa8404d501b408c5db762b8ddb56744fc87a1d8f60edef9509816f22"
+    },
+    "managedHttp": {
+      "requests": 14203,
+      "failed": 181,
+      "maxStartGapMs": 194.545,
+      "prematureExposure": 0,
+      "migrationAndDeployerInterruption": {
+        "requests": 3232,
+        "failed": 0,
+        "maxStartGapMs": 190.407,
+        "migrationContinuedWithoutDeployer": true,
+        "applicationStatusProbeUsed": true
+      },
+      "replacementCases": {
+        "slow-readiness": {
+          "requests": 1885,
+          "failed": 0,
+          "maxStartGapMs": 184.134,
+          "prematureExposure": 0,
+          "settledFromSubmissionMs": 61206,
+          "outcome": "deployed"
+        },
+        "never-ready": {
+          "requests": 2653,
+          "failed": 0,
+          "maxStartGapMs": 189.308,
+          "prematureExposure": 0,
+          "settledFromSubmissionMs": 99585,
+          "outcome": "rolled-back",
+          "firstFailureFromSubmissionMs": 35575
+        },
+        "failure-after-readiness": {
+          "requests": 2473,
+          "failed": 93,
+          "maxStartGapMs": 189.608,
+          "prematureExposure": 0,
+          "settledFromSubmissionMs": 90593,
+          "outcome": "rolled-back",
+          "verifiedRecoveryAfterNativeFailureMs": 65983.431,
+          "longestSampledFailureIntervalMs": 4500,
+          "failureSampleSpanMs": 14506
+        },
+        "long-request": {
+          "requests": 1729,
+          "failed": 0,
+          "maxStartGapMs": 188.247,
+          "prematureExposure": 0,
+          "settledFromSubmissionMs": 53365,
+          "outcome": "deployed",
+          "originalStatus": 200,
+          "originalLatencyMs": 20018.145
+        },
+        "candidate-memory-exhaustion": {
+          "requests": 2231,
+          "failed": 88,
+          "maxStartGapMs": 194.545,
+          "prematureExposure": 0,
+          "settledFromSubmissionMs": 78508,
+          "outcome": "rolled-back",
+          "verifiedRecoveryAfterNativeFailureMs": 49000.034,
+          "longestSampledFailureIntervalMs": 4322,
+          "failureSampleSpanMs": 6323
+        }
+      }
+    },
+    "indexedControl": {
+      "requests": 2960,
+      "failed": 0,
+      "maxStartGapMs": 201.156
+    },
+    "indexedCandidateOom": {
+      "requests": 2452,
+      "failed": 86,
+      "maxStartGapMs": 222.147,
+      "verifiedRecoveryMs": 37360.047,
+      "failureSampleSpanMs": 6266
+    },
+    "indexedAdmission": {
+      "requests": 3028,
+      "failed": 0,
+      "maxStartGapMs": 195.22,
+      "winnerStarts": 1,
+      "loserWorkloadObjects": 0
+    },
+    "indexedEnospc": {
+      "requests": 2348,
+      "failed": 0,
+      "maxStartGapMs": 188.309
+    },
+    "managedEnospc": {
+      "requests": 2430,
+      "failed": 0,
+      "maxStartGapMs": 198.591,
+      "candidateStarts": 1,
+      "nativeFilesystemWriteErrno": "ENOSPC",
+      "sameAcceptedRequestAndDeadline": true,
+      "reusedVerifiedFilesystem": true
+    },
+    "managedAdmission": {
+      "requests": 1629,
+      "failed": 0,
+      "maxStartGapMs": 179.273,
+      "winnerStarts": 1,
+      "loserWorkloadObjects": 0,
+      "originalAdmissionDeadline": true
+    },
+    "health": {
+      "ignoredFailedHistoricalTasks": 1,
+      "releasePromotedByHealthCheck": false
+    },
+    "archiveSha256": {
+      "kayra-swarm-platform-kayra-timed-matrix-20261128145315.complete.tar": "f589aae1826d5c8e53eb7ff0bb816c4b4b0c15276c46e5997bc718a1e8e14e61",
+      "kayra-swarm-platform-kayra-timed-matrix-20261128145315.candidate-oom.tar": "f07744dc687fbecddefe16aadf8cf4b7c50db0f01e9ea14399f3ba89b4f31f8e",
+      "kayra-swarm-platform-kayra-timed-matrix-20261128145315.admission-race.tar": "9bf405f6f13f174eb5da0c57e68b5d6bcd24730584ac5adbfdfd467e95c00737",
+      "kayra-swarm-platform-kayra-timed-matrix-20261128145315.lifecycle-enospc.tar": "5e767d83b4cc6ebd758b10928dcbf21fb83dce66a8cdf5a44cec2fe8eaf74dba",
+      "kayra-swarm-platform-kayra-timed-matrix-20261128145315.managed-control.json.tar": "0357135f851a0a95c6b6d4a05ab2ee33ede22ff703fc77f7f58ec48a5ccd411e",
+      "managed-continuation/managed-enospc.json.tar": "8847aa6f795c38e80832b6b8ecf14bcee867e496dfaae8f6fade74a13895a1e2",
+      "managed-continuation/managed-admission.json.tar": "d64001900e2e7f600f226f9442e82cd81c1ec417b33ea5b28a58e448463acaa7"
+    }
   }
 }

@@ -1,8 +1,58 @@
-# Real-deployer HTTP continuity — 2026-11-12
+# Real-deployer HTTP continuity
+
+## Managed rollouts on the November 28 pins
+
+The managed coordinator ran against the frozen product source
+`f09c0c3792c23c4428e2b90d4278f9cd0c7a82d0` in a fresh upgrade from Kayra
+0.26.1. The environment was Multipass 1.17.2, Ubuntu 24.04.5 ARM64,
+kernel 6.8.0-147-generic, Docker Engine and CLI 29.10.1 (API 1.57),
+Compose 5.8.1 and Traefik 3.7.16
+(`sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65`).
+The platform served Compose and Swarm together over HTTPS. The Swarm socket
+proxy denied the attempted writes. Traefik selected service VIPs.
+
+| Managed case | Short requests | Failed requests | Verified outcome |
+|---|---:|---:|---|
+| Healthy replacement with migration and deployer interruption | 3,232 | 0 | The migration continued and the restarted deployer verified the release |
+| Readiness delayed 15 seconds | 1,885 | 0 | Replacement verified |
+| Candidate never ready | 2,653 | 0 | Failure reported after 35.6 s, rollback settled after 99.6 s from submission |
+| Exit after readiness | 2,473 | 93 | Previous release verified 66.0 s after exit |
+| Original 20-second request | 1,729 | 0 | Original release returned HTTP 200 in 20.018 s |
+| Candidate OOM after readiness | 2,231 | 88 | Previous release verified 49.0 s after OOM |
+
+No candidate served before readiness. The maximum observed start gap was
+194.6 ms across those cases at 20 requests/s with fresh and persistent HTTPS
+connections. The post-readiness exit produced a 4.500 s longest sampled
+failed-start interval and a 14.506 s span from first failed start to last
+failed completion. The OOM produced 4.322 s and 6.323 s respectively.
+These are sampled intervals. Recovery time includes native monitoring and
+coordinator verification.
+
+The fresh run passed its Compose upgrade, TLS, Authelia and managed HTTP
+checks. It then stopped before the managed disk-full fault because the
+earlier fault's ext4 mount still held the live journals. The fixed observer
+verified and reused that mount. Managed ENOSPC passed with zero failures
+across 2,430 requests, the same request and deadline, and one candidate start.
+The resumed admission race passed with zero failures across 1,629 requests,
+one winner start and no workload created for the other contender. Final
+mixed-fleet verification passed on the same VM, which was stopped and kept
+with the original failure evidence.
+
+```bash
+bash test/lab/upgrade.sh --from 0.26.1 --managed-rollouts \
+  --egress-mtu 1280 --vm-name kayra-timed-matrix-unique
+```
+
+See [MANAGED-RESULTS.json](./MANAGED-RESULTS.json) for case identities,
+availability measurements and raw evidence checksums. The managed matrix
+uses VIP discovery. The [standalone comparison](https://github.com/yunuseon/kayra/blob/codex/swarm-rollout-lab/test/lab/swarm/RESULTS.md)
+contains the task-address measurements.
+
+## Indexed deployer rehearsal on November 12
 
 **VIP routing passed 18/18 cases through the real indexed deployer.** This
-advances the experimental integration; migrations, workers, singletons,
-maintenance, removal/purge and remaining operator acceptance are not complete.
+rehearsal preceded the managed migration, worker, singleton, maintenance and
+removal tests.
 
 The runtime server used `a3b4c0ecbbe564187909e1f95bff133e071c18bd` (#243).
 The observer ran from a frozen snapshot whose file hashes are retained beside

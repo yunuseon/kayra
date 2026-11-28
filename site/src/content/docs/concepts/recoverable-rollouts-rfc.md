@@ -1,13 +1,13 @@
 ---
 title: 'RFC: boundaries and recoverable application rollouts'
-description: Proposed server boundaries and an experimental, app-declared rollout contract.
+description: Server component ownership and the experimental, app-declared rollout contract.
 ---
 
-**Status: proposed.** This RFC is the specification for a sequence of changes,
-not a description of functionality available today. In particular, the current
-Compose deployer does not provide the journal, recovery, admission or Swarm
-semantics described here. Existing apps keep their current behavior while those
-changes are delivered. No production host is automatically converted.
+**Status: implemented on the experimental rollout branch.** Swarm requires
+explicit fleet and registration opt-in. Existing Compose registrations keep
+their compatibility path and its original guarantees. The acceptance results
+cover a single-node test fleet. Implementation notes below describe successive
+stages and preserve the limitations of the intermediate versions.
 
 ## Decision and scope
 

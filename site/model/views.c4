@@ -44,8 +44,8 @@ views {
     platform.traefik -> platform.appContainers 'routes to the new release'
   }
   view deliveryBoundaries of plannedDelivery {
-    title 'Proposed application delivery boundaries'
-    description 'Target code boundaries inside the existing privileged process, alongside the isolated builder. These components are not all implemented yet.'
+    title 'Application delivery boundaries'
+    description 'Typed interfaces inside the existing privileged process, alongside the isolated builder.'
     include *
     include kayra.core ->
     style element.tag = #untrusted {
@@ -54,7 +54,7 @@ views {
   }
 
   dynamic view proposedDeployment {
-    title 'Proposed deployment and promotion'
+    title 'Deployment and promotion'
     description 'Validate untrusted inputs, reserve capacity and persist intent before touching owned workloads. Promotion follows verified readiness.'
     autoLayout TopBottom
     kayra.core -> plannedDelivery.trusted.platform 'registration, grants and deploy request'
@@ -72,7 +72,7 @@ views {
   }
 
   dynamic view proposedRecovery {
-    title 'Proposed restart recovery'
+    title 'Restart recovery'
     description 'A new exclusive writer uses persisted intent and runtime observations; ambiguity blocks for an audited decision.'
     autoLayout TopBottom
     plannedDelivery.trusted.coordinator -> plannedDelivery.trusted.journal 'load intent, action identity and original deadline'
@@ -127,7 +127,7 @@ views {
   }
 
   dynamic view proposedMaintenance {
-    title 'Proposed maintenance deployment'
+    title 'Maintenance deployment'
     description 'App declaration and fleet grant permit expected downtime; retained dependencies stay available for migrations.'
     autoLayout TopBottom
     kayra.core -> plannedDelivery.trusted.platform 'maintenance grant and request'
@@ -140,7 +140,7 @@ views {
   }
 
   dynamic view proposedRemoval {
-    title 'Proposed application removal'
+    title 'Application removal'
     description 'Removal fences deployments and retains volumes; purge is a separate guarded operation.'
     autoLayout TopBottom
     kayra.core -> plannedDelivery.trusted.platform 'request removal'

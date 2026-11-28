@@ -101,9 +101,9 @@ model {
     }
   }
 
-  // Proposed code boundaries, not additional runtime services.
-  plannedDelivery = server 'Proposed application delivery' {
-    description 'Target architecture for the rollout RFC; not yet implemented'
+  // Components of the experimental single-node rollout implementation.
+  plannedDelivery = server 'Experimental application delivery' {
+    description 'Recoverable rollouts for explicitly registered Swarm applications'
     builder = service 'Builder process' {
       #untrusted
       description 'Untrusted immutable bundle; no Docker socket or app secrets'

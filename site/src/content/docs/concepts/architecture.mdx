@@ -66,13 +66,12 @@ the images of the commit it deploys.
 Read on: [CI isolation](../ci-isolation/) for what each piece may reach, and
 [the app contract](../app-contract/) for what an app provides.
 
-## Proposed rollout boundaries
+## Experimental rollout boundaries
 
-The [recoverable rollouts RFC](../recoverable-rollouts-rfc/) defines a target
-architecture. These views describe proposed behavior, not capabilities of the
-current deployer. The coordinator, platform integration and runtime adapters are
-code boundaries inside the existing privileged process; the builder remains a
-separate process.
+These views show how the [experimental rollout implementation](../recoverable-rollouts-rfc/)
+handles opted-in Swarm applications. The coordinator, platform integration and
+runtime adapters share the existing privileged process. The builder remains a
+separate process. Existing Compose applications use the compatibility path.
 
 <LikeC4View viewId="deliveryBoundaries" client:only="react" />
 

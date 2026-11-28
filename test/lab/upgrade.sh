@@ -78,9 +78,6 @@ log="${work}/lab.log"
 step() { printf '\n── %s\n' "$*"; }
 die() { echo "✗ $*" >&2; echo "  the lab: ${work} (log: ${log})" >&2; exit 1; }
 
-# ── The Mac's address on Multipass's bridge, where the VM fetches the app ──
-host_ip="$(ifconfig bridge100 2>/dev/null | awk '/inet / {print $2; exit}')"
-[ -n "$host_ip" ] || die "no Multipass bridge (bridge100): is Multipass running?"
 passed=false
 retain_lab_log() {
     [ -f "$log" ] || return 0
@@ -116,45 +113,6 @@ trap cleanup EXIT
 
 kayra_cmd() { node "${fleet}/node_modules/@yunuseon/kayra/bin/kayra.js" "$@"; }
 
-# ── The app's repository, served over git's smart HTTP (kayra clones shallow) ─
-step "the fixture app's repository"
-mkdir -p "$served"
-mkdir -p "$repo"
-# The app as the release knew it: a contract change between it and this
-# checkout is the app's to make, in a commit of its own (step 3).
-if git -C "$KAYRA_ROOT" cat-file -e "v${from}:test/lab/app" 2>/dev/null; then
-    git -C "$KAYRA_ROOT" archive "v${from}" test/lab/app | tar -x -C "$work"
-    cp -R "${work}/test/lab/app/." "$repo/"
-else
-    cp -R "${KAYRA_ROOT}/test/lab/app/." "$repo/"
-fi
-# The app as this checkout knows it.
-adopt_checkout_app() {
-    find "$repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-    cp -R "${KAYRA_ROOT}/test/lab/app/." "$repo/"
-}
-git -C "$repo" init -q -b main
-commit() { git -C "$repo" add -A && git -C "$repo" -c user.email=lab@kayra.test -c user.name=lab commit -qm "$1"; publish; }
-publish() {
-    rm -rf "${served}/lab/sample.git"
-    git clone -q --bare "$repo" "${served}/lab/sample.git"
-}
-commit v1
-port_file="${work}/git-port"
-python3 "${KAYRA_ROOT}/test/lab/git-http.py" "$host_ip" 0 "$served" "$port_file" >> "$log" 2>&1 &
-server_pid=$!
-for _ in $(seq 1 50); do
-    [ ! -s "$port_file" ] || break
-    kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
-    sleep 0.1
-done
-[ -s "$port_file" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
-port="$(cat "$port_file")"
-git clone -q --depth 1 "http://${host_ip}:${port}/lab/sample.git" "${work}/probe" || die "the app's repository is not served at http://${host_ip}:${port}/lab/sample.git"
-[ "$(git -C "${work}/probe" rev-parse HEAD)" = "$(git -C "$repo" rev-parse HEAD)" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not return this lab's repository"
-rm -rf "${work}/probe"
-echo "http://${host_ip}:${port}/lab/sample.git"
-
 # ── A fleet pinned to the release ───────────────────────────────────────────
 step "a fleet at kayra ${from}"
 mkdir -p "${fleet}/servers/${server}/terraform" "${fleet}/servers/${server}/apps"
@@ -177,7 +135,7 @@ descriptor() {
     [ "$1" = without-app ] || # owner/name, as on a forge: the builder knows a repo's forge, and its webhooks, by that shape.
     printf 'apps:\n  - {name: sample, repo: "http://%s:%s/lab/sample.git", ref: main, path: .}\n' "$host_ip" "$port"
 }
-descriptor with-app > "${fleet}/servers/${server}/server.yml"
+descriptor without-app > "${fleet}/servers/${server}/server.yml"
 cat > "${fleet}/servers/${server}/vars.yml" <<'EOF'
 ---
 authelia_policy: one_factor
@@ -237,16 +195,6 @@ module "instance" {
 output "server_ip" { value = module.instance.ipv4_address }
 EOF
 cd "$fleet"
-# Releases before http:// on multipass refuse the served repository: then the
-# release sets up the platform only, and the app arrives with the upgrade.
-app_at_release=true
-if ! kayra_cmd validate "$server" >> "$log" 2>&1; then
-    app_at_release=false
-    descriptor without-app > "servers/${server}/server.yml"
-    kayra_cmd validate "$server" >> "$log" 2>&1 || die "kayra ${from} refuses the lab fleet (${log})"
-    echo "kayra ${from} cannot clone over http://: the app arrives with the upgrade"
-fi
-
 # ── Waiting on runs, and asking the app what it serves ──────────────────────
 # The deployer's ctl as text, which every kayra the lab runs has: what `kayra app …` draws from it may change.
 ctl() { kayra_cmd ssh "$server" -- cd /opt/platform '&&' docker compose exec -T deployer kayra-deployer ctl "$@"; }
@@ -289,6 +237,61 @@ if [ -n "$egress_mtu" ]; then
         ip link show dev "$device"
     ' sh "$egress_mtu" >> "$log" 2>&1 || die "setting the disposable VM egress MTU"
 fi
+# Multipass creates its private network on demand. Ask the provisioned VM
+# for the gateway and bind the Git fixture only to that host interface.
+host_ip="$(multipass exec "$vm_name" -- ip -4 route show default | awk 'NR == 1 && $1 == "default" && $2 == "via" { print $3 }')" ||
+    die "reading the disposable VM gateway"
+[ -n "$host_ip" ] || die "the disposable VM has no IPv4 gateway"
+# ── The app's repository, served over git's smart HTTP (kayra clones shallow) ─
+step "the fixture app's repository"
+mkdir -p "$served"
+mkdir -p "$repo"
+# The app as the release knew it: a contract change between it and this
+# checkout is the app's to make, in a commit of its own (step 3).
+if git -C "$KAYRA_ROOT" cat-file -e "v${from}:test/lab/app" 2>/dev/null; then
+    git -C "$KAYRA_ROOT" archive "v${from}" test/lab/app | tar -x -C "$work"
+    cp -R "${work}/test/lab/app/." "$repo/"
+else
+    cp -R "${KAYRA_ROOT}/test/lab/app/." "$repo/"
+fi
+# The app as this checkout knows it.
+adopt_checkout_app() {
+    find "$repo" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+    cp -R "${KAYRA_ROOT}/test/lab/app/." "$repo/"
+}
+git -C "$repo" init -q -b main
+commit() { git -C "$repo" add -A && git -C "$repo" -c user.email=lab@kayra.test -c user.name=lab commit -qm "$1"; publish; }
+publish() {
+    rm -rf "${served}/lab/sample.git"
+    git clone -q --bare "$repo" "${served}/lab/sample.git"
+}
+commit v1
+port_file="${work}/git-port"
+python3 "${KAYRA_ROOT}/test/lab/git-http.py" "$host_ip" 0 "$served" "$port_file" >> "$log" 2>&1 &
+server_pid=$!
+for _ in $(seq 1 50); do
+    [ ! -s "$port_file" ] || break
+    kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
+    sleep 0.1
+done
+[ -s "$port_file" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not start"
+port="$(cat "$port_file")"
+git clone -q --depth 1 "http://${host_ip}:${port}/lab/sample.git" "${work}/probe" || die "the app's repository is not served at http://${host_ip}:${port}/lab/sample.git"
+[ "$(git -C "${work}/probe" rev-parse HEAD)" = "$(git -C "$repo" rev-parse HEAD)" ] && kill -0 "$server_pid" 2>/dev/null || die "the fixture HTTP server did not return this lab's repository"
+rm -rf "${work}/probe"
+echo "http://${host_ip}:${port}/lab/sample.git"
+
+descriptor with-app > "servers/${server}/server.yml"
+# Releases before http:// on multipass refuse the served repository: then the
+# release sets up the platform only, and the app arrives with the upgrade.
+app_at_release=true
+if ! kayra_cmd validate "$server" >> "$log" 2>&1; then
+    app_at_release=false
+    descriptor without-app > "servers/${server}/server.yml"
+    kayra_cmd validate "$server" >> "$log" 2>&1 || die "kayra ${from} refuses the lab fleet (${log})"
+    echo "kayra ${from} cannot clone over http://: the app arrives with the upgrade"
+fi
+
 kayra_cmd deploy "$server" >> "$log" 2>&1 || die "kayra deploy (${from})"
 first_deploy() {
     local before run

@@ -2423,3 +2423,12 @@ killed worker tasks then demonstrate redelivery after effect-before-ack, once
 with two recorded effects and once with one because the app deduplicates.
 The fixture keeps its retained database task and exports the lifecycle reports
 and queue history.
+
+On November 28 the native fixture confirmed the drain ordering, two delivery
+attempts per killed task and one acknowledgement per job. It recorded two
+effects with deduplication disabled and one with it enabled. The retained
+PostgreSQL task remained the same. The first fleet verification immediately
+after redelivery saw temporarily unavailable native health. A later observation
+found one healthy current task and four historical tasks, then fleet
+verification passed. The harness now waits for that native health evidence
+before running the fleet check. See `MANAGED-RESULTS.json`.

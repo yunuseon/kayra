@@ -76,6 +76,21 @@
     "forwardRepairAfterCandidate": {"failedSamples": 17, "failureSampleSpanMs": 19225},
     "scope": "Resumed native repair after the combined lab stopped on the stale active projection. Failure spans are sampled; they exclude the interval returning B."
   },
+  "workerDelivery": {
+    "date": "2026-11-28",
+    "source": "2f3feb4a9e94cfd7ba6196335882c8015732d886",
+    "vm": "kayra-lifecycle-acceptance-20261128025250",
+    "stopFirst": true,
+    "inFlightAcknowledgedAfterSignalBeforeReplacement": true,
+    "retainedDatabaseTaskUnchanged": true,
+    "postEffectCrashes": [
+      {"job": 1, "attempts": 2, "effects": 2, "acknowledgements": 1, "applicationDeduplication": false},
+      {"job": 2, "attempts": 2, "effects": 1, "acknowledgements": 1, "applicationDeduplication": true}
+    ],
+    "postRedeliveryHealth": {"state": "available", "currentTasks": 1, "healthyTasks": 1, "ignoredHistoricalTasks": 4},
+    "initialVerificationTransient": "current Swarm services unavailable immediately after the second redelivery",
+    "fleetVerificationAfterHealthObserved": true
+  },
   "rejectedLaterTiming": {
     "vm": "kayra-managed-matrix-20261127000543",
     "case": "candidate-oom",

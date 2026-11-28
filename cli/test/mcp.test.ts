@@ -1,3 +1,4 @@
+import { managedIndexRuntimeFixture } from "./deployment/managed-index-runtime-fixture.ts";
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -198,4 +199,18 @@ test("kayra mcp speaks only the protocol on stdout, in the newest revision as in
     strictEqual(listed.isError, undefined, mode);
     strictEqual(JSON.stringify(listed.content).includes("ansible-playbook"), true, mode);
   }));
+});
+
+
+for (const era of ["2025", "2026"] as const) test(`MCP ${era} returns managed reports and explicit absence without effect authority`, async (t) => {
+  const lab = await managedIndexRuntimeFixture(t); await lab.index().requestManagedDeployment("shop", lab.source, lab.runtime);
+  // eslint-disable-next-line functional/no-let -- bounded fixture reconciliation before exercising MCP transport
+  for (let count = 0; count < 100; count++) { const state = await lab.index().tickManagedDeployment("shop", lab.source.run, lab.runtime); if (state?.operation.phase === "complete") break; }
+  const status = await lab.index().managedDeploymentStatus("shop", lab.runtime); const mcp = await fixture(undefined, era); t.after(mcp.cleanup);
+  const payload = join(mcp.dir, "managed-report.json"); writeFileSync(payload, JSON.stringify(status), { mode: 0o600 });
+  const quoted = "'" + payload.replaceAll("'", "'\\''") + "'";
+  writeFileSync(join(mcp.dir, "bin", "ssh"), "#!/bin/sh\ncat " + quoted + "\n", { mode: 0o700 });
+  const answer = await mcp.client.callTool({ name: "app_deployment_status", arguments: { server: "lab", app: "shop" } }); strictEqual(answer.isError, undefined); deepStrictEqual(schemas.DeploymentStatus.parse(answer.structuredContent), status);
+  const foreign = await mcp.client.callTool({ name: "app_deployment_status", arguments: { server: "lab", app: "other" } }); strictEqual(foreign.isError, true);
+  writeFileSync(payload, "null", { mode: 0o600 }); const empty = await mcp.client.callTool({ name: "app_deployment_status", arguments: { server: "lab", app: "shop" } }); strictEqual(empty.isError, undefined); strictEqual(mcp.text(empty), "null"); strictEqual(empty.structuredContent, undefined); strictEqual(mcp.asked.length, 0);
 });

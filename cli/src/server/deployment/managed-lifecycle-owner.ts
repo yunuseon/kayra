@@ -1,0 +1,209 @@
+import { managedForwardRecoveryProposal } from "./managed-forward-recovery-proposal.ts";
+import { managedDeploymentProposal } from "./managed-deployment-proposal.ts";
+import type { ManagedVolumePreparationPort } from "../../contracts/managed-volume-preparation.ts";
+import type { DataOwnership } from "../../contracts/owned-volume.ts";
+import type { ManagedAdmissionPort, ManagedAdmissionIdentity } from "../../contracts/managed-admission.ts";
+import { parseManagedAdmissionIdentity } from "../../contracts/managed-admission.ts";
+import type { ManagedWorkloadPort } from "../../contracts/managed-workloads.ts";
+import type { ManagedRoutedReadinessPort } from "../../contracts/routed-readiness.ts";
+import type { ManagedChecksPort } from "../../contracts/container-check.ts";
+import type { CheckContainerFencePort } from "../../contracts/check-container-fence.ts";
+import type { ManagedServicePlan } from "../../contracts/managed-service-plan.ts";
+import type { ServiceVersion } from "../../contracts/swarm-service.ts";
+import type { ManagedServiceAction } from "../../contracts/managed-swarm-service.ts";
+import type { JobExecution } from "./one-shot-execution.ts";
+import type { MigrationResolutionActor, MigrationResolutionRequest } from "../../contracts/migration-resolution.ts";
+import { parseMigrationResolutionRequest, parseMigrationResolutionActor } from "../../contracts/migration-resolution.ts";
+import { managedLifecycleStore } from "./managed-lifecycle-store.ts";
+import type { ManagedLifecycleStore } from "./managed-lifecycle-store.ts";
+import { parseManagedLifecycleSource, managedLifecycleDescription } from "./managed-lifecycle-source.ts";
+import type { ManagedLifecycleSource } from "./managed-lifecycle-source.ts";
+import { managedGroupPreparation } from "./managed-group-preparation.ts";
+import { managedMaintenanceQuiescence } from "./managed-maintenance-quiescence.ts";
+import { managedConsumerRollout } from "./managed-consumer-rollout.ts";
+import { managedVerificationSnapshot } from "./managed-verification-source.ts";
+import { managedGroupVerification } from "./managed-group-verification.ts";
+import type { OperationJournal } from "./operation.ts";
+import { createHash } from "node:crypto";
+import { managedGroupCompensation } from "./managed-group-compensation.ts";
+import { parseManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
+import type { ManagedLifecycleRequest } from "./managed-lifecycle-request.ts";
+import { managedLifecycleSourceDigest } from "./managed-lifecycle-source.ts";
+import { managedUnstartedSource } from "./managed-unstarted-source.ts";
+import { managedRecoverySource, verifyManagedRecoveryJobs } from "./managed-recovery-safety.ts";
+
+export type ManagedLifecycleEffect = { readonly kind: "accepted-recovery"; readonly request: ManagedLifecycleRequest } | { readonly kind: "admission" | "allocation" | "verify" | "recovery" } | { readonly kind: "service"; readonly purpose?: "deployment" | "cleanup"; readonly action: ManagedServiceAction } |
+  { readonly kind: "migration"; readonly job: JobExecution; readonly effect: "create" | "start" | "fence" } |
+  { readonly kind: "check"; readonly check: string; readonly effect: "create" | "start" } |
+  { readonly kind: "migration-resolution"; readonly request: MigrationResolutionRequest; readonly actor: MigrationResolutionActor };
+type Ports = { readonly now: () => number; readonly read: (digest: string) => Promise<string>; readonly retain: (bytes: string) => Promise<string>;
+  readonly admission: ManagedAdmissionPort; readonly services: ManagedWorkloadPort; readonly jobs: Parameters<typeof managedGroupPreparation>[1]["jobs"];
+  readonly allocations?: ManagedVolumePreparationPort | undefined;
+  readonly readiness: ManagedRoutedReadinessPort; readonly checks?: ManagedChecksPort | undefined; readonly checkFences?: CheckContainerFencePort | undefined;
+  /** Composition verifies registration/protocol, current operator grants and source identities without teaching the owner fleet or forge semantics. */
+  readonly authorize: (source: ManagedLifecycleSource, effect: ManagedLifecycleEffect) => Promise<boolean>;
+};
+
+/** Private lifecycle owner. Unresolved/unsafe work keeps its charge. Not an ordinary deployment entrypoint. */
+export const managedLifecycleOwner = (journal: OperationJournal, owner: DataOwnership, ports: Ports) => {
+  const store = managedLifecycleStore(journal, owner, ports);
+  // eslint-disable-next-line functional/no-let -- duplicate observer ticks share one flight; filesystem commands remain independently serialized
+  let flight: Promise<ManagedLifecycleStore | undefined> | undefined;
+  const bounded = async <T>(deadline: number, call: () => Promise<T>) => { const left = Math.min(10_000, deadline - ports.now()); if (left <= 0 || !Number.isFinite(left)) return undefined; const timeout = Promise.withResolvers<undefined>(); const timer = setTimeout(() => { timeout.resolve(undefined); }, left);
+    try { return await Promise.race([Promise.resolve().then(call).catch(() => undefined), timeout.promise]); } finally { clearTimeout(timer); }
+  };
+  const identity = (state: ManagedLifecycleStore) => { const checked = parseManagedAdmissionIdentity({ owner: state.owner, run: state.operation.run, action: state.operation.action, source: state.operation.source, plan: state.operation.plan, deadline: state.operation.admissionDeadline }); if (!checked.ok) throw new Error(checked.error); return checked.value; };
+  const hash = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
+  const recoverySource = async (state: ManagedLifecycleStore) => { const digest = state.operation.recoverySource; if (digest === null) throw new Error("managed recovery source missing"); const bytes = await bounded(state.operation.deadline, () => ports.read(digest)); if (bytes === undefined || hash(bytes) !== digest) throw new Error("managed recovery source unavailable"); const raw: unknown = JSON.parse(bytes); return raw; };
+  const allowed = async (run: string, phase: ManagedLifecycleStore["operation"]["phase"], effect: ManagedLifecycleEffect) => {
+    const current = await store.read(); if (current?.operation.run !== run || current.operation.phase !== phase || current.operation.cancelRequestedAt !== null || !current.operation.admitted || ports.now() >= current.operation.deadline) return false;
+    const source = await store.source(); const claim = managedLifecycleDescription(source).admission;
+    if (await bounded(current.operation.deadline, () => ports.admission.observe(identity(current), claim)) !== "reserved" || await bounded(current.operation.deadline, () => ports.authorize(source, effect.kind === "service" ? { ...effect, purpose: "deployment" } : effect)) !== true) return false;
+    const startsApplication = effect.kind === "service" && ["apply", "restore"].includes(effect.action.effect) || effect.kind === "migration" && effect.effect === "start" || effect.kind === "check" && effect.effect === "start";
+    if (startsApplication) return store.fenceCompatibility(run, phase);
+    const latest = await store.read(); return latest?.operation.run === run && latest.operation.phase === phase && latest.operation.cancelRequestedAt === null && latest.operation.admitted && ports.now() < latest.operation.deadline;
+  };
+  const allowedRecovery = async (run: string, phase: "recovering" | "recovery-verifying", effect: ManagedLifecycleEffect) => {
+    const current = await store.read(); if (current?.operation.run !== run || current.operation.phase !== phase || current.operation.preparation === null && current.operation.quiescence === null || !current.operation.admitted || (current.operation.previousPlan === null ? current.active !== null : current.active?.epoch !== current.compatibilityEpoch) || ports.now() >= current.operation.deadline) return false;
+    const source = await store.source(); const prefix = current.operation.preparation;
+    const pendingChecks = current.operation.verification?.steps.some((step) => step.execution !== null && step.execution.phase !== "complete" && step.execution.executionDeadline !== null) ?? false;
+    if (pendingChecks && current.operation.recovery?.cessation?.state?.phase !== "complete" && effect.kind !== "verify" && !(effect.kind === "service" && ["remove", "scrub"].includes(effect.action.effect) && effect.action.action.startsWith(current.operation.action + ":checks:"))) return false;
+    return await bounded(current.operation.deadline, () => ports.admission.observe(identity(current), managedLifecycleDescription(source).admission)) === "reserved" &&
+      await bounded(current.operation.deadline, async () => { if (prefix !== null) await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) === true && await bounded(current.operation.deadline, () => ports.authorize(source, effect.kind === "service" ? { ...effect, purpose: "cleanup" } : effect.kind === "verify" && current.operation.recovery?.phase === "fencing-checks" ? { kind: "recovery" } : effect)) === true;
+  };
+  const components = new Map<string, { readonly quiescence: ReturnType<typeof managedMaintenanceQuiescence>; readonly preparation: ReturnType<typeof managedGroupPreparation>; readonly consumers: ReturnType<typeof managedConsumerRollout>; readonly verification: ReturnType<typeof managedGroupVerification>; readonly recovery: ReturnType<typeof managedGroupCompensation>; readonly recoveryVerification: ReturnType<typeof managedGroupVerification> }>();
+  const forRun = (source: ManagedLifecycleSource) => {
+    const cached = components.get(source.run); if (cached !== undefined) return cached;
+    const preparation = managedGroupPreparation(store.child("preparation", source.run), { ...ports, services: {
+      observe: ports.services.observe,
+      ...(ports.services.reactivate === undefined ? {} : { reactivate: (action: ManagedServiceAction, expected: ServiceVersion, spec: ManagedServicePlan) => { const call = ports.services.reactivate; if (call === undefined) return Promise.resolve("refused" as const); return call(action, expected, spec, source.candidate); } }),
+      observeDesired: (action, spec) => ports.services.observeDesired(action, spec, source.candidate),
+      apply: (action, expected, spec) => ports.services.apply(action, expected, spec, source.candidate),
+    }, authorize: (_, effect) => allowed(source.run, "preparing", effect) });
+    const quiescence = managedMaintenanceQuiescence(store.child("quiescence", source.run), { ...ports, authorize: (_, action) => allowed(source.run, "quiescing", action === null ? { kind: "verify" } : { kind: "service", action }) });
+    const consumers = managedConsumerRollout(store.child("consumers", source.run), { ...ports, authorize: (_, effect) => allowed(source.run, "updating", effect) });
+    const verification = managedGroupVerification(store.child("verification", source.run), { ...ports, authorize: (_, effect) => allowed(source.run, "verifying", effect) });
+    const recovery = managedGroupCompensation(store.child("recovery", source.run), { ...ports, authorize: (_, effect) => allowedRecovery(source.run, "recovering", effect) });
+    const recoveryVerification = managedGroupVerification(store.child("recoveryVerification", source.run), { ...ports, authorize: (_, effect) => allowedRecovery(source.run, "recovery-verifying", effect) });
+    const value = Object.freeze({ preparation, quiescence, consumers, verification, recovery, recoveryVerification });
+    // eslint-disable-next-line functional/immutable-data -- one component set per operation, never reused with a different app context
+    components.set(source.run, value); return value;
+  };
+  const tick = async () => {
+    const current = await store.read(); if (current === undefined || current.operation.phase === "complete") return current;
+    const source = await store.source(); const description = managedLifecycleDescription(source); const lease: ManagedAdmissionIdentity = identity(current); const phase = current.operation.phase;
+    if (phase === "settling") {
+      const result = current.operation.settlement; if (result === null) throw new Error("managed lifecycle settlement outcome missing");
+      const observed = await bounded(ports.now() + 10_000, () => ports.admission.observe(lease, description.admission));
+      if (observed === `settled-${result}`) return store.settle();
+      if (current.operation.unstartedAt !== null) {
+        if (await bounded(ports.now() + 10_000, () => ports.admission.settleUnstarted(lease, description.admission)) === "settled") return store.settle();
+        return store.read();
+      }
+      if (observed !== "reserved") return current;
+      if (await bounded(ports.now() + 10_000, () => ports.admission.settle(lease, description.admission, result)) === "settled") return store.settle(); return store.read();
+    }
+    if (phase === "held") {
+      const unstarted = (() => { try { managedUnstartedSource(current, source); return true; } catch { return false; } })();
+      if (unstarted) return store.beginUnstarted(hash(JSON.stringify(current.operation)));
+      if (current.operation.recoverySource !== null || source.previous !== null && ports.services.fence === undefined) return current;
+      const at = ports.now(); const recovery = (() => { try { return managedRecoverySource(current, source, at); } catch { return undefined; } })();
+      if (recovery === undefined || recovery.source.checks !== undefined && ports.checkFences === undefined) return current;
+      const prefix = current.operation.preparation;
+      if (await bounded(current.operation.deadline, () => ports.admission.observe(lease, description.admission)) !== "reserved" || await bounded(current.operation.deadline, async () => { if (prefix !== null) await verifyManagedRecoveryJobs(source, prefix, { read: ports.read, native: ports.jobs }); return true; }) !== true || await bounded(current.operation.deadline, () => ports.authorize(source, { kind: "recovery" })) !== true) return current;
+      return store.beginRecovery(hash(JSON.stringify(current.operation)), at);
+    }
+    if (ports.now() >= (phase === "admitting" ? current.operation.admissionDeadline : current.operation.deadline)) return store.hold("deadline");
+    if (phase === "admitting") {
+      const observed = await bounded(current.operation.admissionDeadline, () => ports.admission.observe(lease, description.admission));
+      if (observed === "reserved") return store.admit();
+      if (observed === "foreign" || observed?.startsWith("settled-")) return store.hold("admission");
+      if (observed !== "absent") return current;
+      if (await bounded(current.operation.admissionDeadline, () => ports.authorize(source, { kind: "admission" })) !== true) return store.hold("authorization");
+      const result = await bounded(current.operation.admissionDeadline, () => ports.admission.reserve(lease, description.admission)); return result === "refused" ? store.hold("admission") : store.read();
+    }
+    if (phase === "allocating") {
+      const intent = current.operation.allocation; if (intent === undefined || ports.now() >= intent.deadline) return store.hold("deadline");
+      const allocation = ports.allocations; if (allocation === undefined) return store.hold("allocation");
+      const volumes = Object.freeze(Object.values(source.candidate.services).flatMap((service) => Object.freeze(service.mounts.map((mount) => mount.volume))).filter((volume, index, all) => all.findIndex((item) => item.allocation === volume.allocation) === index));
+      const result = await bounded(intent.deadline, () => allocation.reconcile({ owner, run: source.run, plan: current.operation.plan, createdAt: intent.createdAt, deadline: intent.deadline, volumes }, () => allowed(source.run, "allocating", { kind: "allocation" })));
+      return result === "ready" ? store.allocated() : result === "held" ? store.hold("allocation") : store.read();
+    }
+    const child = forRun(source);
+    if (phase === "recovering") {
+      if (current.operation.recovery === null) { if (current.operation.recoveryStartedAt === null || ports.now() >= (current.operation.recoveryDeadline ?? 0)) return store.hold("deadline"); await child.recovery.prepare(await recoverySource(current), current.operation.recoveryStartedAt); return store.read(); }
+      const result = await child.recovery.tick(); return result.phase === "verified" ? store.verifyRecovery() : result.phase === "held" ? store.hold("recovery") : store.read();
+    }
+    if (phase === "recovery-verifying") {
+      if (current.operation.recoveryVerification === null) { const snapshot = { kind: "recovery", application: source.previous?.source.application, certificate: current.operation.recovery, recoverySource: await recoverySource(current) }; if (ports.now() >= managedVerificationSnapshot(snapshot).deadline) return store.hold("deadline"); await child.recoveryVerification.prepare(snapshot); return store.read(); }
+      const result = await child.recoveryVerification.tick(); return result.phase === "held" ? store.hold("recovery-verification") : store.read();
+    }
+    if (phase === "quiescing") {
+      if (current.operation.quiescence === null && ports.now() >= current.operation.enteredAt + 90_000) return store.hold("deadline");
+      if (current.operation.quiescence === null) { await child.quiescence.prepare({ candidate: source.candidate, previous: description.admission.previous, baselines: description.baselines.map((value) => Object.freeze({ ...value, prior: Object.freeze([]) })), run: source.run, action: source.action, startedAt: current.operation.enteredAt }); return store.read(); }
+      const result = await child.quiescence.tick(); return result.phase === "complete" && result.verifiedAt !== null ? store.enter("quiescing", "preparing", result.verifiedAt) : result.phase === "held" ? store.hold("quiescence") : store.read();
+    }
+    if (phase === "preparing") {
+      if (current.operation.preparation === null) {
+        if (ports.now() >= current.operation.enteredAt + 90_000) return store.hold("deadline");
+        const bytes = current.operation.quiescence === null ? undefined : await bounded(ports.now() + 10_000, () => ports.read(current.operation.quiescence?.source ?? ""));
+        if (current.operation.quiescence !== null && bytes === undefined) return store.hold("quiescence");
+        const raw: unknown = bytes === undefined ? undefined : JSON.parse(bytes);
+        const proof = current.operation.quiescence === null ? undefined : { certificate: current.operation.quiescence, source: raw };
+        const baselines = Object.freeze(source.retained.map((reference) => Object.freeze({
+          ...reference, kind: reference.kind === "forward" ? "active" as const : reference.kind,
+        })));
+        await child.preparation.prepare(source.candidate, source.run, source.action, baselines, proof, current.operation.enteredAt); return store.read();
+      }
+      const result = await child.preparation.tick(); return result.phase === "ready" && result.consumerDeadline !== null ? store.enter("preparing", "updating", result.consumerDeadline - 90_000) : result.phase === "held" ? store.hold("preparation") : store.read();
+    }
+    if (phase === "updating") {
+      if (current.operation.consumers === null) { if (ports.now() >= (current.operation.preparation?.consumerDeadline ?? 0)) return store.hold("deadline"); if (current.operation.preparation === null) throw new Error("managed lifecycle preparation missing"); await child.consumers.prepare(source.candidate, current.operation.preparation, description.admission.previous, description.baselines); return store.read(); }
+      const result = await child.consumers.tick(); return result.phase === "ready" && result.verifiedAt !== null ? store.enter("updating", "verifying", result.verifiedAt) : result.phase === "held" ? store.hold("consumers") : store.read();
+    }
+    if (current.operation.verification === null) { if (current.operation.consumers === null) throw new Error("managed lifecycle consumers missing"); if (ports.now() >= managedVerificationSnapshot({ kind: "deployment", application: source.candidate, certificate: current.operation.consumers }).deadline) return store.hold("deadline"); await child.verification.prepare({ kind: "deployment", application: source.candidate, certificate: current.operation.consumers }); return store.read(); }
+    const result = await child.verification.tick(); return result.phase === "held" ? store.hold("verification") : store.read();
+  };
+  const capabilities = (source: ManagedLifecycleSource) => {
+    if (source.version !== 1 && ports.allocations === undefined) throw new Error("managed allocation capability unavailable");
+    if (source.previous !== null && source.candidate.rollout.rollback_compatible && ports.services.fence === undefined) throw new Error("managed recovery fencing capability unavailable");
+    if (source.retained.some((value) => value.kind === "barrier") && ports.services.reactivate === undefined || ports.checks === undefined && [source.candidate, ...(source.previous === null ? [] : [source.previous.source.application])].some((plan) => plan.rollout.checks.length > 0 || Object.values(plan.services).some((service) => service.overlap === "coordinated"))) throw new Error("managed lifecycle capabilities unavailable");
+  };
+  return Object.freeze({
+    read: store.read, source: store.source,
+    propose: async (candidate: Parameters<typeof managedDeploymentProposal>[0], request: Parameters<typeof managedDeploymentProposal>[2], inputs: Pick<Parameters<typeof managedDeploymentProposal>[4], "compare">) => {
+      const current = await store.read(); const baseline = current === undefined ? null : Object.freeze({ state: current, source: await store.source() });
+      const source = await managedDeploymentProposal(candidate, owner, request, baseline, { compare: inputs.compare, now: ports.now, read: ports.read }); await store.validate(source); return source;
+    },
+    proposeForward: async (candidate: Parameters<typeof managedForwardRecoveryProposal>[0], request: Parameters<typeof managedForwardRecoveryProposal>[1], inputs: Pick<Parameters<typeof managedForwardRecoveryProposal>[3], "compare">) => {
+      const state = await store.read(); if (state === undefined) throw new Error("forward recovery requires a held application");
+      const proposal = await managedForwardRecoveryProposal(candidate, request, { state, source: await store.source() }, { compare: inputs.compare, now: ports.now, read: ports.read });
+      if (hash(JSON.stringify(await store.read())) !== proposal.blocked.checkpoint) throw new Error("forward recovery baseline changed during preparation");
+      return proposal;
+    },
+    validate: (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input); capabilities(source); return store.validate(source); },
+    begin: async (input: ManagedLifecycleSource) => { const source = parseManagedLifecycleSource(input);
+      const existing = await store.read(); if (existing?.operation.run === source.run) return store.begin(source);
+      capabilities(source);
+      if (await bounded(source.createdAt + 90_000, () => ports.authorize(source, { kind: "admission" })) !== true) throw new Error("managed lifecycle source is not authorized"); return store.begin(source); },
+    /** Reconstructs only metadata for a durably accepted source that can no longer begin. The composition independently authenticates its shared lifecycle receipt; this grants no workload authority or renewed deadline. */
+    adoptAccepted: async (input: ManagedLifecycleSource, accepted: ManagedLifecycleRequest) => {
+      const source = parseManagedLifecycleSource(input); const request = parseManagedLifecycleRequest(accepted); const description = managedLifecycleDescription(source);
+      if (request.completion !== null || request.run !== source.run || request.action !== source.action || request.source !== managedLifecycleSourceDigest(source) || request.plan !== description.admission.planDigest || request.createdAt !== source.createdAt || request.admissionDeadline !== description.admissionDeadline || request.deadline !== description.deadline || JSON.stringify(request.owner) !== JSON.stringify(source.candidate.infrastructure.ownership)) throw new Error("accepted managed lifecycle source disagrees");
+      if (await bounded(ports.now() + 10_000, () => ports.authorize(source, { kind: "accepted-recovery", request })) !== true) throw new Error("accepted managed lifecycle receipt is not authorized");
+      return store.begin(source, ports.now() >= request.admissionDeadline ? "deadline" : "authorization");
+    },
+    cancel: store.cancel,
+    resolveMigration: async (request: MigrationResolutionRequest, actor: MigrationResolutionActor) => {
+      const statement = parseMigrationResolutionRequest(request); const operator = parseMigrationResolutionActor(actor); if (!statement.ok || !operator.ok) throw new Error("invalid managed migration resolution");
+      const current = await store.read(); if (current?.operation.run !== statement.value.run || current.owner.app !== statement.value.app || current.operation.cancelRequestedAt !== null) throw new Error("managed migration resolution lacks lifecycle ownership");
+      const source = await store.source(); const deadline = ports.now() + 10_000;
+      if (await bounded(deadline, () => ports.authorize(source, { kind: "migration-resolution", request: statement.value, actor: operator.value })) !== true) throw new Error("managed migration resolution is not authorized");
+      const observed = await bounded(deadline, () => ports.admission.observe(identity(current), managedLifecycleDescription(source).admission));
+      const recorded = current.operation.preparation?.sequence?.steps.some((step) => step.id === statement.value.step && step.resolution !== undefined) ?? false;
+      if (observed !== "reserved" && !(recorded && observed?.startsWith("settled-") === true)) throw new Error("managed migration resolution is not authorized");
+      return store.resolveMigration(statement.value, operator.value, ports.jobs);
+    },
+    tick: () => { if (flight !== undefined) return flight; const result = tick(); flight = result; void result.finally(() => { flight = undefined; }).catch(() => undefined); return result; },
+  });
+};

@@ -290,6 +290,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--acc); outli
 .banner code { padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
 
 .facts { margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 7px 12px; font-size: 12.5px; }
+.deployment-facts { grid-template-columns: minmax(125px, 180px) minmax(0, 1fr); margin-top: 16px; }
 .fact { display: contents; }
 .fact dt { color: var(--mut); }
 .fact dd { margin: 0; display: flex; gap: 6px; align-items: center; min-width: 0; overflow-wrap: anywhere; }

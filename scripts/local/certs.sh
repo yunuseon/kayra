@@ -15,8 +15,17 @@ DOMAIN="${1:?Usage: certs.sh <domain> <certs-dir> [subdomain…]}"
 CERTS_DIR="${2:?}"
 shift 2
 
+export_ca() {
+  if [ "${KAYRA_EXPORT_MKCERT_CA:-}" != true ]; then return 0; fi
+  command -v mkcert >/dev/null 2>&1 || return 1
+  local ca
+  ca="$(mkcert -CAROOT)/rootCA.pem"
+  [ -f "$ca" ] && openssl verify -CAfile "$ca" "${CERTS_DIR}/cert.pem" >/dev/null 2>&1 || return 1
+  install -m 0644 "$ca" "${CERTS_DIR}/ca.pem"
+}
+
 if [ -f "${CERTS_DIR}/key.pem" ] && [ -f "${CERTS_DIR}/cert.pem" ] \
-   && openssl x509 -in "${CERTS_DIR}/cert.pem" -noout -ext subjectAltName | grep -qE "DNS:${DOMAIN}(,|$)"; then
+   && openssl x509 -in "${CERTS_DIR}/cert.pem" -noout -ext subjectAltName | grep -qE "DNS:${DOMAIN}(,|$)" && export_ca; then
   exit 0
 fi
 
@@ -51,5 +60,6 @@ mkcert \
 
 chmod 644 "${CERTS_DIR}/cert.pem"
 chmod 600 "${CERTS_DIR}/key.pem"
+export_ca
 
 echo "Done — ${CERTS_DIR}/cert.pem + key.pem"

@@ -97,6 +97,193 @@
       "items": {
         "type": "string"
       }
+    },
+    "rollout": {
+      "description": "Application-owned rollout strategy and capabilities for an explicitly registered Swarm app.",
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "rolling",
+            "maintenance"
+          ]
+        },
+        "mixed_version_compatible": {
+          "type": "boolean"
+        },
+        "rollback_compatible": {
+          "type": "boolean"
+        },
+        "services": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "http",
+                  "worker",
+                  "singleton",
+                  "retained-dependency"
+                ]
+              },
+              "overlap": {
+                "type": "string",
+                "enum": [
+                  "allowed",
+                  "forbidden",
+                  "coordinated"
+                ]
+              },
+              "handoff_check": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+              }
+            },
+            "required": [
+              "role",
+              "overlap"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "migrations": {
+          "maxItems": 4096,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+              },
+              "service": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+              },
+              "command": {
+                "minItems": 1,
+                "maxItems": 4096,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740
+              },
+              "recovery": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "replay-safe"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "status-probe"
+                      },
+                      "command": {
+                        "minItems": 1,
+                        "maxItems": 4096,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "timeout_seconds": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "command",
+                      "timeout_seconds"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "service",
+              "command",
+              "timeout_seconds",
+              "recovery"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "checks": {
+          "maxItems": 4096,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+              },
+              "service": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+              },
+              "command": {
+                "minItems": 1,
+                "maxItems": 4096,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740
+              }
+            },
+            "required": [
+              "id",
+              "service",
+              "command",
+              "timeout_seconds"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "strategy",
+        "mixed_version_compatible",
+        "rollback_compatible",
+        "services"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

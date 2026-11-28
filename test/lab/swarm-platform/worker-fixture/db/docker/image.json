@@ -1,0 +1,1 @@
+{"image":"managed-workers/db","dockerfile":"db/Dockerfile","context":"db","inputs":["db"]}

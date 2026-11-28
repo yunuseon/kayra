@@ -609,6 +609,288 @@ Preview: `POST /api/operations/app.purge/preview`. Returns a JSON plan with stat
 | `403` | Real server not confirmed | — |
 | `409` | Server busy | — |
 
+### `app.build`
+
+Build and retain an exact commit through the experimental indexed builder.
+
+`POST /api/operations/app.build`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `commit` | `string` | yes | — | Pattern: `^[0-9a-f]{40}$`. |
+
+Preview: `POST /api/operations/app.build/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.deployment.prepare`
+
+Request an experimental rollout of a retained build under a stable request identity.
+
+`POST /api/operations/app.deployment.prepare`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]*$`. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `commit` | `string` | yes | — | Pattern: `^[0-9a-f]{40}$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.prepare/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.deployment.restore`
+
+Restore a verified managed release from the current data compatibility epoch under a stable request identity.
+
+`POST /api/operations/app.deployment.restore`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]*$`. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `record` | `string` | yes | — | Pattern: `^[0-9a-f]{64}$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.restore/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.deployment.forward`
+
+Build and reconcile an exact forward recovery for a blocked managed maintenance deployment.
+
+`POST /api/operations/app.deployment.forward`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`. |
+| `blockedRun` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `commit` | `string` | yes | — | Pattern: `^[a-f0-9]{40}$`. |
+| `reason` | `string` | yes | — | Minimum length: 8. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.forward/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.deployment.recreate`
+
+Recreate a removed Swarm app from its verified release and retained data.
+
+`POST /api/operations/app.deployment.recreate`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `removal` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `reason` | `string` | yes | — | Minimum length: 8. |
+
+Preview: `POST /api/operations/app.deployment.recreate/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.deployment.health`
+
+Observe current runtime service health separately from release certification and historical task failures.
+
+`POST /api/operations/app.deployment.health`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Observe current runtime service health separately from release certification and historical task failures. | `application/json` |
+
+### `app.deployment.pins`
+
+Read immutable images needed by deployment and recovery plans; this does not authorize registry GC.
+
+`POST /api/operations/app.deployment.pins`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Read immutable images needed by deployment and recovery plans; this does not authorize registry GC. | `application/json` |
+
+### `app.deployment.status`
+
+Read deployment phase, verified active release and required recovery action.
+
+`POST /api/operations/app.deployment.status`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+| `app` | `string` | yes | — | An app name, including a removed app whose records or data remain Minimum length: 1. |
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Read deployment phase, verified active release and required recovery action. | `application/json` |
+
+### `app.deployment.cancel`
+
+Cancel a deployment; ambiguous migration outcomes stay blocked for recovery.
+
+`POST /api/operations/app.deployment.cancel`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]*$`. |
+| `request` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.deployment.cancel/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.migration.cleanup`
+
+Request an audited, bounded fence for a held migration attempt; never rerun its command.
+
+`POST /api/operations/app.migration.cleanup`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]{0,47}$`. |
+| `run` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `step` | `string` | yes | — | Pattern: `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`. |
+| `reason` | `string` | yes | — | Minimum length: 8. |
+| `purpose` | `"migration" or "probe"` | yes | — | — |
+| `attempt` | `integer` | yes | — | Minimum: 1. Maximum: 8. |
+| `action` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.migration.cleanup/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.migration.cleanup.audit`
+
+Read the audit and fencing evidence for migration cleanup actions.
+
+`POST /api/operations/app.migration.cleanup.audit`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]{0,47}$`. |
+| `run` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `step` | `string` | yes | — | Pattern: `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.migration.cleanup.audit/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.migration.resolve`
+
+Record an audited operator decision for a held migration; never rerun an unsafe step.
+
+`POST /api/operations/app.migration.resolve`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]{0,47}$`. |
+| `run` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `step` | `string` | yes | — | Pattern: `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`. |
+| `outcome` | `"applied" or "not-applied"` | yes | — | — |
+| `reason` | `string` | yes | — | Minimum length: 8. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.migration.resolve/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
+### `app.migration.audit`
+
+Read the recorded operator decision for a migration step.
+
+`POST /api/operations/app.migration.audit`
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `app` | `string` | yes | — | Pattern: `^[a-z][a-z0-9-]{0,47}$`. |
+| `run` | `string` | yes | — | Pattern: `^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\|00000000-0000-0000-0000-000000000000\|ffffffff-ffff-ffff-ffff-ffffffffffff)$`. |
+| `step` | `string` | yes | — | Pattern: `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`. |
+| `server` | `string` | yes | — | A server of the fleet (servers/&lt;name&gt;/) Minimum length: 1. |
+
+Preview: `POST /api/operations/app.migration.audit/preview`. Returns a JSON plan with status 200.
+
+| Status | Response | Content type |
+| --- | --- | --- |
+| `200` | Dry run | `application/json` |
+| `202` | Started | `application/json` |
+| `400` | Invalid input | — |
+| `403` | Real server not confirmed | — |
+| `409` | Server busy | — |
+
 ### `app.runs`
 
 What runs now, and the app's latest runs: state, commit, why, when, how long.

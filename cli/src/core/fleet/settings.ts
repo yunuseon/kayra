@@ -1,3 +1,4 @@
+import { rolloutManifestSchema } from "../../contracts/rollout-schema.ts";
 import { z } from "zod";
 import { typed } from "../../lib/typed.ts";
 import { appNameSchema, domainSchema, periodSchema, repoPathSchema, repoUrlSchema, routePathSchema, serviceNameSchema, subdomainSchema } from "./brand.ts";
@@ -49,6 +50,17 @@ export const settings: readonly Setting[] = [
   setting("docker_version", ["platform", "edge"], text, "The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*)."),
 
   // platform: the platform role
+  setting("experimental_swarm", platform, z.object({
+    enabled: z.literal(true),
+    advertise_address: z.ipv4(),
+    memory_bytes: z.number().int().positive(),
+    cpu_millicores: z.number().int().positive(),
+    platform_memory_bytes: z.number().int().positive(),
+    platform_cpu_millicores: z.number().int().positive(),
+  }).strict().refine((profile) => profile.platform_memory_bytes < profile.memory_bytes && profile.platform_cpu_millicores < profile.cpu_millicores,
+    "platform overhead must leave workload capacity"), "Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications."),
+  setting("managed_swarm_rollouts", platform, z.boolean(), "Opt in to indexed application registration and recoverable rollouts on an explicitly provisioned experimental Swarm host. Off by default."),
+  setting("swarm_migration_timeout_seconds", platform, z.number().int().min(1).max(86400), "Host ceiling for experimental Swarm migration and status-probe execution (default 90 seconds). Captured in each admitted plan; changing it does not extend existing deadlines or enable migration admission."),
   setting("authelia_policy", platform, z.enum(["one_factor", "two_factor"]), "What Authelia asks of staff: two_factor (default) or one_factor."),
   setting("authelia_smtp_address", platform, text, "SMTP server for Authelia's mails (passkey enrolment); empty: mails go to a file."),
   setting("authelia_smtp_username", platform, text, "SMTP user for Authelia."),
@@ -233,6 +245,16 @@ export const appEntrySchema = z.strictObject({
   repo: repoUrlSchema.describe("The app's repository, https://."),
   ref: z.string().optional().describe("The branch to build and deploy (default main)."),
   path: repoPathSchema.prefault(".").describe("The app's root inside the repository (default .)."),
+  runtime: z.enum(["compose", "swarm"]).optional().describe("The fleet-selected deployment runtime. Compose is the default. Swarm requires explicit host opt-in and applies to new registrations."),
+  grants: z.strictObject({
+    memory_bytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    cpu_millicores: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    maintenance: z.boolean(),
+  }).optional().describe("Explicit Swarm resources and the operator grant to allow maintenance deployment."),
+}).superRefine((app, context) => {
+  if ((app.runtime === "swarm") !== (app.grants !== undefined)) context.addIssue({
+    code: "custom", path: ["grants"], message: "Swarm registrations require explicit grants",
+  });
 });
 
 export const serverSchema = z
@@ -290,5 +312,6 @@ export const appManifestSchema = z.strictObject({
   routes: z.array(routeSchema).optional().describe("How the app is reached: each route a host (and path) to a service's port. Read at the commit being deployed; a new host needs kayra apps."),
   secrets: z.array(z.string()).optional().describe("Secret keys; their values come from the fleet's secrets.yml, under app_secrets.<app>."),
   config: z.array(z.string()).optional().describe("Config keys; their values come from the fleet's apps/<app>.yml."),
+  rollout: rolloutManifestSchema.optional().describe("Application-owned rollout strategy and capabilities for an explicitly registered Swarm app."),
 });
 

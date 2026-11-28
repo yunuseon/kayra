@@ -19,6 +19,14 @@
 set -euo pipefail
 
 app="${1:?Usage: app-restore <app> [--changed]}"
+valid_app_name() {
+    local LC_ALL=C
+    [[ "$1" =~ ^[a-z][a-z0-9-]*$ ]]
+}
+if ! valid_app_name "$app"; then
+    echo 'ERROR: invalid app name' >&2
+    exit 1
+fi
 changed=false
 case "${2:-}" in
     "") ;;

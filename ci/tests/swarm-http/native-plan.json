@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "runtime": "swarm",
+  "app": "shop",
+  "registration": {
+    "version": 1,
+    "app": "shop",
+    "incarnation": "11111111-1111-4111-8111-111111111111",
+    "actionId": "11111111-1111-4111-8111-111111111111:1",
+    "registrationGeneration": "22222222-2222-4222-8222-222222222222"
+  },
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "artifact": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "host": {
+    "version": 1,
+    "profile": {
+      "enabled": true,
+      "advertise_address": "192.0.2.1",
+      "memory_bytes": 3221225472,
+      "cpu_millicores": 2000,
+      "platform_memory_bytes": 1073741824,
+      "platform_cpu_millicores": 500
+    },
+    "node": "nnnnnnnnnnnnnnnnnnnnnnnnn",
+    "cluster": "ccccccccccccccccccccccccc",
+    "network": {
+      "name": "platform-swarm",
+      "id": "ooooooooooooooooooooooooo"
+    }
+  },
+  "grants": {
+    "memory_bytes": 268435456,
+    "cpu_millicores": 500,
+    "maintenance": false
+  },
+  "configurationIdentity": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "rollout": {
+    "strategy": "rolling",
+    "mixed_version_compatible": true,
+    "rollback_compatible": true,
+    "services": {
+      "web": {
+        "role": "http",
+        "overlap": "allowed"
+      }
+    }
+  },
+  "policy": {
+    "version": 1,
+    "failureMonitorSeconds": 30,
+    "updateTimeoutSeconds": 90,
+    "rollbackTimeoutSeconds": 90
+  },
+  "services": {
+    "web": {
+      "image": "localhost:5000/shop/web@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "environment": {
+        "RELEASE": {
+          "kind": "literal",
+          "value": "A"
+        },
+        "TOKEN": {
+          "kind": "secret",
+          "key": "TOKEN"
+        }
+      },
+      "command": null,
+      "entrypoint": null,
+      "resources": {
+        "memoryBytes": 67108864,
+        "reserveMemoryBytes": 33554432,
+        "nanoCpus": 100000000,
+        "reserveNanoCpus": 50000000
+      },
+      "health": {
+        "command": [
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/"
+        ],
+        "intervalSeconds": 1,
+        "timeoutSeconds": 1,
+        "startPeriodSeconds": 1,
+        "retries": 3
+      },
+      "stopGraceSeconds": 30
+    }
+  },
+  "routes": [
+    {
+      "host": "native.lab.test",
+      "path": null,
+      "service": "web",
+      "port": 8080,
+      "check": "/",
+      "rateLimit": null
+    }
+  ]
+}

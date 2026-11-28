@@ -16,6 +16,7 @@ export const shop: App = {
   name: name("shop"),
   repo: "https://github.com/example/shop.git",
   ref: "main",
+  runtime: "compose",
   path: ".",
   hosts: ["www.shop.example.com"],
   secrets: ["DATABASE_PASSWORD"],

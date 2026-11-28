@@ -1,0 +1,1 @@
+{"image":"managed-workers/worker","dockerfile":"worker/Dockerfile","context":"worker","inputs":["worker"]}

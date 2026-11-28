@@ -23,6 +23,7 @@ The engine only: it knows no fleet and no app by name. A fleet is the directory 
 | Path | Concern |
 |---|---|
 | `ansible/`, `compose/`, `terraform/`, `cloud-init.yml.tpl`, `hosts.conf` | The platform: Traefik, Authelia, Registry, BuildKit, the builder and the deployer, Ansible roles, OpenTofu modules, cloud-init |
+| `cli/src/contracts/`, `cli/src/server/` | Shared validated contracts; platform, builder, deployment coordinator and runtime modules; trusted wiring in `server/composition/` |
 | `cli/src/deployer/` | The deployer: the builder and deployer daemons and their `ctl` — the one pipeline every app runs |
 | `ci/` | The compose-policy tests, the checks (`ci/checks/`) |
 | `cli/` | kayra, the CLI: every server's lifecycle — the only layer that touches both host setup and apps |

@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { err, ok, type Result } from "../lib/result.ts";
+import type { Result } from "../lib/result.ts";
 import { parseCron, type Cron } from "./cron.ts";
-import { parseNotify, silent, type Notifier, type NotifyConfig } from "./forges/notify.ts";
-import { ntfy } from "./forges/ntfy.ts";
+import { parseNotify, type Notifier } from "./forges/notify.ts";
+import { notifierFor } from "../server/platform/notify-settings.ts";
 import type { Env } from "./runs/run.ts";
 import { typed } from "../lib/typed.ts";
 
@@ -39,25 +39,6 @@ const must = <T>(result: Result<T, string>) => {
   return result.value;
 };
 
-/** The configured notifier; its open alerts are kept in <platformDir>/alerts/<key>, each holding its title. */
-const notifierFor = (config: NotifyConfig, platformDir: string) => {
-  if (config.kind === "none") return silent;
-  const alerts = join(platformDir, "alerts");
-  const tokenFile = join(mounts.deployer, "NOTIFIER_NTFY_TOKEN");
-  return ntfy(config.url, config.topic, {
-    fetch: async (url, init) => Object.freeze({ status: (await fetch(url, init)).status }),
-    token: () => (existsSync(tokenFile) ? ok(readFileSync(tokenFile, "utf8").trim()) : err(`${tokenFile} is missing: notifier_ntfy_token in secrets.yml`)),
-    openAlert: (key) => {
-      const path = join(alerts, key);
-      return existsSync(path) ? readFileSync(path, "utf8") : undefined;
-    },
-    remember: (key, title) => {
-      mkdirSync(alerts, { recursive: true });
-      if (title === undefined) rmSync(join(alerts, key), { force: true });
-      else writeFileSync(join(alerts, key), title);
-    },
-  });
-};
 
 export const settings = (env: NodeJS.ProcessEnv) => {
   const scripts = env["PLATFORM_SCRIPTS"] ?? "/opt/kayra/scripts/platform";
@@ -76,7 +57,7 @@ export const settings = (env: NodeJS.ProcessEnv) => {
     poll: must(parseCron(env["DEPLOY_POLL"] ?? "17 * * * *")),
     env: strings,
     server: env["SERVER"] ?? env["DOMAIN"] ?? "this server",
-    notifier: notifierFor(must(parseNotify(env["NOTIFIER"])), platformDir),
+    notifier: notifierFor(must(parseNotify(env["NOTIFIER"])), platformDir, mounts.deployer),
   });
 };
 

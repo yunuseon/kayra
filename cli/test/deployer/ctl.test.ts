@@ -172,3 +172,72 @@ test("ctl deploy: a failed run exits 1 with its reason; a superseded one says wh
     control.close();
   }
 });
+
+test("ctl lifecycle forwards an explicit stable request and reads status through the existing control listener", async () => {
+  const request = "11111111-1111-4111-8111-111111111111";
+  // eslint-disable-next-line functional/no-let -- owns the request trace
+  let calls = "";
+  const control = createServer((incoming, response) => {
+    // eslint-disable-next-line functional/no-let -- owns the HTTP body
+    let body = "";
+    incoming.setEncoding("utf8").on("data", (chunk: string) => { body += chunk; });
+    incoming.on("end", () => {
+      calls += JSON.stringify([incoming.url ?? "", body]) + "\n";
+      response.writeHead(200, { "content-type": "application/json" }).end('{"version":1}');
+    });
+  });
+  await new Promise<void>((resolve) => { control.listen(8091, "127.0.0.1", resolve); });
+  try {
+    strictEqual((await ctlLater("lifecycle", "prepare", "shop", "a".repeat(40), request)).code, 0);
+    strictEqual((await ctlLater("lifecycle", "status", "shop")).stdout, '{"version":1}\n');
+    strictEqual((await ctlLater("lifecycle", "pins", "shop")).stdout, '{"version":1}\n');
+    strictEqual((await ctlLater("lifecycle", "health", "shop")).stdout, '{"version":1}\n');
+    strictEqual((await ctlLater("lifecycle", "cancel", "shop", request)).code, 0);
+    strictEqual(calls, JSON.stringify(["/deployment/prepare", JSON.stringify({ app: "shop", commit: "a".repeat(40), request })]) + "\n" + JSON.stringify(["/deployment/status", '{"app":"shop"}']) + "\n" + JSON.stringify(["/deployment/pins", '{"app":"shop"}']) + "\n" + JSON.stringify(["/deployment/health", '{"app":"shop"}']) + "\n" + JSON.stringify(["/deployment/cancel", JSON.stringify({ app: "shop", request })]) + "\n");
+    strictEqual((await ctlLater("lifecycle", "prepare", "shop", "a".repeat(40))).code, 1);
+  } finally { control.close(); }
+});
+
+test("migration control refuses malformed and authority-bearing requests before contacting the daemon", () => {
+  for (const input of ["!!", Buffer.from("not json").toString("base64url"), Buffer.from(JSON.stringify({ app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", outcome: "applied", reason: "Verified ledger", actor: "forged" })).toString("base64url")]) {
+    const answer = ctl("migration", "resolve", input);
+    strictEqual(answer.code, 1); strictEqual(answer.stdout, ""); strictEqual(answer.stderr.includes("unavailable"), false);
+    strictEqual(answer.stderr.includes("SyntaxError"), false);
+  }
+});
+
+test("ctl registration ownership forwards the exact generation and admitted ticket to the existing listener", async () => {
+  const generation = "22222222-2222-4222-8222-222222222222"; const ticket = "11111111-1111-4111-8111-111111111111:1";
+  // eslint-disable-next-line functional/no-let -- records the control request
+  let call = "";
+  const control = createServer((incoming, response) => {
+    // eslint-disable-next-line functional/no-let -- receives the HTTP body
+    let body = "";
+    incoming.setEncoding("utf8").on("data", (chunk: string) => { body += chunk; });
+    incoming.on("end", () => { call = JSON.stringify([incoming.url, body]); response.writeHead(200, { "content-type": "application/json" }).end('{"version":1}'); });
+  });
+  await new Promise<void>((resolve) => { control.listen(8091, "127.0.0.1", resolve); });
+  try {
+    const result = await ctlLater("registration", "ownership", "shop", generation, ticket); strictEqual(result.code, 0); strictEqual(result.stdout, '{"version":1}\n');
+    strictEqual(call, JSON.stringify(["/registration/ownership", JSON.stringify({ app: "shop", generation, ticket })]));
+    strictEqual((await ctlLater("registration", "ownership", "shop", generation)).code, 1);
+  } finally { control.close(); }
+});
+
+test("ctl platform overlay forwards only a registration identity through the existing listener", async () => {
+  const generation = "22222222-2222-4222-8222-222222222222"; const ticket = "11111111-1111-4111-8111-111111111111:1";
+  // eslint-disable-next-line functional/no-let -- records the control request
+  let call = "";
+  const control = createServer((incoming, response) => {
+    // eslint-disable-next-line functional/no-let -- receives the HTTP body
+    let body = "";
+    incoming.setEncoding("utf8").on("data", (chunk: string) => { body += chunk; });
+    incoming.on("end", () => { call = JSON.stringify([incoming.url, body]); response.writeHead(200, { "content-type": "application/json" }).end('{"version":1}'); });
+  });
+  await new Promise<void>((resolve) => { control.listen(8091, "127.0.0.1", resolve); });
+  try {
+    const result = await ctlLater("platform", "app-overlay", "shop", generation, ticket); strictEqual(result.code, 0); strictEqual(result.stdout, '{"version":1}\n');
+    strictEqual(call, JSON.stringify(["/platform/app-overlay", JSON.stringify({ app: "shop", generation, ticket })]));
+    strictEqual((await ctlLater("platform", "app-overlay", "shop", generation)).code, 1);
+  } finally { control.close(); }
+});

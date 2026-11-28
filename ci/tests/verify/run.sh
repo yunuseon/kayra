@@ -138,4 +138,26 @@ run_case older-kayra "! set up by kayra 0.18.0; the fleet pins 0.19.0 (kayra dep
 healthy; sed -i.bak 's/^kayra .*$/kayra /' "${tmp}/answers/facts"
 run_case no-kayra-recorded "! set up by a kayra that recorded no version; the fleet pins 0.19.0 (kayra deploy shop)"
 
+# An opted-in Swarm app is listed and observed through the deployment owner.
+yq -i '.apps[0].runtime = "swarm"' "${fleet}/servers/shop/server.yml"
+managed() {
+    healthy
+    sed -i.bak 's/^registered shop$/registered /; /^container shop /d; /^run shop /d' "${tmp}/answers/facts"
+    cat >> "${tmp}/answers/facts" <<'EOF'
+managed-registration shop
+managed-status shop {"protocol":"managed-v3","app":"shop","incarnation":"current","operation":{"phase":"complete","outcome":"rolled-back"},"verifiedActive":{"commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"requiredAction":"none"}
+managed-health shop {"app":"shop","incarnation":"current","runtime":"swarm","state":"available","services":[{"ignoredHistoricalTasks":3}]}
+EOF
+}
+managed; run_case managed-recovered "! shop: last rollout outcome rolled-back"
+managed; sed -i.bak 's/"state":"available"/"state":"unhealthy"/' "${tmp}/answers/facts"
+run_case managed-current-unhealthy "shop: current Swarm services unhealthy"
+managed; sed -i.bak 's/"incarnation":"current","runtime"/"incarnation":"older","runtime"/' "${tmp}/answers/facts"
+run_case managed-old-observation "shop: current Swarm services unavailable"
+managed; sed -i.bak 's/"phase":"complete"/"phase":"held"/; s/"requiredAction":"none"/"requiredAction":"inspect-and-resolve"/' "${tmp}/answers/facts"
+run_case managed-held "shop: managed rollout held requires operator action"
+managed; sed -i.bak 's/^managed-status shop .*$/managed-status shop null/' "${tmp}/answers/facts"
+run_case managed-not-deployed nothing
+healthy; run_case backend-disagrees "managed Swarm registrations disagree with server.yml"
+
 exit "$failed"

@@ -67,9 +67,26 @@ and prints where. Look before you change anything:
     that was a gap in kayra, fixed there, with a case added.
 - Tear the kept VM down with the printed command before the next run.
 
+When a fixture locates a persistent Compose service by Docker labels, exclude
+`com.docker.compose.oneoff=True` containers and require exactly one ID. A
+concurrent `docker compose run --rm` control command has the same project and
+service labels and can otherwise turn a single-container inspect into an
+invalid multiline identifier. Preserve the failed source, fix the selector,
+and rerun against a fresh source snapshot.
+
 ## After a pass
 
-The VM and the temp fleet are destroyed unless `--keep`. Report the five
+The VM and the temp fleet are destroyed unless `--keep`. Cleanup prints a
+private retained raw log path under `/tmp/kayra-upgrade-<vm>.<unique>/lab.log`,
+including teardown output after success. Copy evidence needed beyond temporary
+storage to a private persistent directory. Report the five
 phases and the final `kayra verify`, and what the run covered. A bug found on
 a real server, which the lab did not catch, gets a step here: the lab is
 only as good as the history it encodes.
+
+For native experiments that wait for deadlines, stream Docker events from before
+workload creation. The daemon's finite historical event buffer can evict the
+original Start while unrelated health checks continue. A late `docker events
+--since ... --until ...` query returning zero is not proof that Start never
+happened. Bound and save the live event stream, match exact container identities,
+and preserve/rerun any case whose observer lost evidence.

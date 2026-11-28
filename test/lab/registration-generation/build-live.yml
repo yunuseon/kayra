@@ -1,0 +1,348 @@
+---
+- name: Update the isolated lab build context
+  hosts: servers
+  become: true
+  vars:
+    platform_dir: /opt/platform
+  tasks:
+    - name: Stage the checkout's server modules in one transfer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}/cli/src"
+        stage_source_destination: "{{ platform_dir }}/deployer/app"
+        stage_source_paths: [deployer, server, contracts, lib]
+        stage_source_manifest: "/tmp/kayra-build-source-{{ inventory_hostname }}-{{ fixture_app | default('indexed-build') }}.json"
+
+    - name: Copy the deployer build definition
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/compose/deployer/Dockerfile.deployer"
+        dest: "{{ platform_dir }}/deployer/Dockerfile.deployer"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Copy the image resolver and GC guard
+      ansible.builtin.copy:
+        src: "{{ kayra_root }}/scripts/platform/{{ item }}"
+        dest: "{{ platform_dir }}/deployer/app/scripts/platform/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop: [resolve-images.sh, registry-gc.sh]
+
+- name: Reapply the explicit registration lab configuration
+  ansible.builtin.import_playbook: live.yml
+
+- name: Prepare a real bundle from the registered fixture repository
+  hosts: servers
+  become: true
+  vars:
+    platform_dir: /opt/platform
+    registration_root: /var/lib/kayra/registration-lab
+    compose_env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml{{ ':docker-compose.swarm.yml' if kayra_lab_swarm | default(false) | bool else '' }}:registration-lab.yml
+    build_registration_base:
+      name: "{{ fixture_app | default('indexed-build') }}"
+      repo: "{{ fixture_repo }}"
+      ref: main
+      path: .
+      runtime: "{{ fixture_runtime | default('compose') }}"
+      hosts: "{{ fixture_hosts | default(['indexed.lab.test']) }}"
+      secrets: [GREETING]
+    build_registration: "{{ build_registration_base | combine({'grants': fixture_grants}) if fixture_runtime | default('compose') == 'swarm' else build_registration_base }}"
+    request:
+      app: "{{ build_registration.name }}"
+      registration: "{{ build_registration }}"
+      configuration: "{{ fixture_configuration | default({'MODE': 'lab'}) }}"
+      secrets:
+        GREETING: synthetic-build-fixture
+  tasks:
+    - name: Register the build fixture through the host command
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -B
+          - "{{ platform_dir }}/registration-lib/registration_command.py"
+          - register
+          - --root
+          - "{{ registration_root }}"
+          - --private-gid
+          - "1000"
+          - --platform-dir
+          - "{{ platform_dir }}"
+        stdin: "{{ request | to_json }}"
+      no_log: true
+      changed_when: true
+
+    - name: Read the build fixture's public pointer
+      ansible.builtin.slurp:
+        src: "{{ registration_root }}/public/{{ build_registration.name | hash('sha256') }}/current.json"
+      register: pointer
+
+    - name: Read the persisted registration policy
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, registration, policy, "{{ build_registration.name }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: selected_policy
+      changed_when: false
+
+    - name: Require the verified runtime selected by the platform caller
+      ansible.builtin.assert:
+        that:
+          - (selected_policy.stdout | from_json).runtime == build_registration.runtime
+          - (selected_policy.stdout | from_json).metadata == (pointer.content | b64decode | from_json)
+        quiet: true
+
+    - name: Inspect the deployer's explicit private platform-state mount
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, "{{ '{{json .Mounts}}' }}", platform-deployer-1]
+      register: platform_state_mounts
+      changed_when: false
+      when: build_registration.runtime == 'swarm'
+
+    - name: Inspect private platform state directory ownership
+      ansible.builtin.stat:
+        path: "{{ platform_dir }}/platform-state"
+      register: platform_state_directory
+      when: build_registration.runtime == 'swarm'
+
+    - name: Require host-backed private platform ownership records
+      ansible.builtin.assert:
+        that:
+          - platform_state_directory.stat.isdir
+          - platform_state_directory.stat.uid == 1000
+          - platform_state_directory.stat.gid == 1000
+          - platform_state_directory.stat.mode == '0700'
+          - platform_state_mounts.stdout | from_json | selectattr('Destination', 'equalto', '/opt/platform/platform-state') | selectattr('Source', 'equalto', platform_dir ~ '/platform-state') | selectattr('RW', 'equalto', true) | list | length == 1
+        quiet: true
+      when: build_registration.runtime == 'swarm'
+
+    - name: Read the published private-overlay grant through the platform reader
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - deployer
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import { text } from 'node:stream/consumers';
+            import { readRegistrationInfrastructure } from '/opt/kayra/server/platform/registration-infrastructure.ts';
+            import { readSwarmAuthority } from '/opt/kayra/server/platform/swarm-authority.ts';
+            const expected = JSON.parse(await text(process.stdin));
+            const host = await readSwarmAuthority(process.env.KAYRA_SWARM_AUTHORITY);
+            if (!host.ok) throw new Error('host authority unavailable');
+            const reference = await readRegistrationInfrastructure(process.env.KAYRA_PUBLIC_REGISTRATIONS_DIR, expected, host.value);
+            if (!reference.ok) throw new Error(reference.error);
+            console.log(JSON.stringify(reference.value));
+        stdin: "{{ pointer.content | b64decode }}"
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: published_infrastructure
+      changed_when: false
+      when: build_registration.runtime == 'swarm'
+
+    - name: Build and validate the bundle inside the deployer
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - deployer
+          - node
+          - --input-type=module
+          - -e
+          - |
+            import { text } from 'node:stream/consumers';
+            import { parseIndexedApp } from '/opt/kayra/contracts/app-registration.ts';
+            import { parseRegistrationGeneration } from '/opt/kayra/contracts/registration-generation.ts';
+            import { sha } from '/opt/kayra/deployer/brand.ts';
+            import { builderPrepare } from '/opt/kayra/deployer/build/client.ts';
+            import { parseBundle } from '/opt/kayra/deployer/build/bundle.ts';
+            const input = JSON.parse(await text(process.stdin));
+            const app = parseIndexedApp(input.app.name, input.app);
+            const registration = parseRegistrationGeneration(input.registration);
+            const commit = sha(input.commit);
+            if (!app.ok || !registration.ok || !commit.ok) throw new Error('invalid fixture inputs');
+            const built = await builderPrepare('http://builder:8081', app.value, commit.value, console.error, registration.value);
+            if (!built.ok) throw new Error(built.error);
+            const checked = parseBundle(app.value.name, commit.value, built.value, registration.value, "artifact");
+            if (!checked.ok) throw new Error(checked.error);
+            console.log(JSON.stringify({images: checked.value.images, registration: checked.value.registration, ...(checked.value.rollout === undefined ? {} : {rollout: checked.value.rollout})}));
+        stdin: "{{ {'app': build_registration, 'registration': (pointer.content | b64decode | from_json), 'commit': fixture_commit} | to_json }}"
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: bundle
+      changed_when: false
+
+    - name: Require immutable image references in the validated bundle
+      ansible.builtin.assert:
+        that:
+          - (bundle.stdout | from_json).images | length > 0
+          - (bundle.stdout | from_json).images | selectattr('ref', 'match', '^localhost:5000/' ~ build_registration.name ~ '/.+@sha256:[0-9a-f]{64}$') | list | length == (bundle.stdout | from_json).images | length
+          - (bundle.stdout | from_json).registration == (pointer.content | b64decode | from_json)
+        quiet: true
+
+    - name: Retain the build through the owning coordinator
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ build_registration.name }}", "{{ fixture_commit }}"]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: retained_build
+      changed_when: false
+
+    - name: Verify the retained artifact without builder access
+      block:
+        - name: Stop the isolated builder
+          ansible.builtin.command:
+            argv: [docker, compose, stop, builder]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+
+        - name: Restart the coordinator after retention
+          ansible.builtin.command:
+            argv: [docker, compose, restart, deployer]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+          when: build_registration.runtime != 'swarm'
+
+        - name: Recreate the Swarm coordinator to prove platform state survives container replacement
+          ansible.builtin.command:
+            argv: [docker, compose, up, -d, --force-recreate, --no-deps, deployer]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+          when: build_registration.runtime == 'swarm'
+
+        - name: Recover the same build receipt while the builder is stopped
+          ansible.builtin.command:
+            argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, build, "{{ build_registration.name }}", "{{ fixture_commit }}"]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          register: recovered_build
+          retries: 10
+          delay: 2
+          until: recovered_build.rc == 0
+          changed_when: false
+
+        - name: Require the exact retained receipt after restart
+          ansible.builtin.assert:
+            that:
+              - (retained_build.stdout | from_json) == (recovered_build.stdout | from_json)
+              - (recovered_build.stdout | from_json).commit == fixture_commit
+              - (recovered_build.stdout | from_json).artifact is match('^[0-9a-f]{64}$')
+              - (recovered_build.stdout | from_json).registration == (pointer.content | b64decode | from_json)
+            quiet: true
+        - name: Reconstruct the same platform grant after the real deployer restart
+          ansible.builtin.command:
+            argv:
+              - docker
+              - compose
+              - exec
+              - -T
+              - deployer
+              - kayra-deployer
+              - ctl
+              - platform
+              - app-overlay
+              - "{{ build_registration.name }}"
+              - "{{ (pointer.content | b64decode | from_json).registrationGeneration }}"
+              - "{{ (pointer.content | b64decode | from_json).actionId }}"
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          register: recovered_overlay
+          changed_when: false
+          when: build_registration.runtime == 'swarm'
+
+        - name: Require the original physical platform grant after restart
+          ansible.builtin.assert:
+            that: (recovered_overlay.stdout | from_json) == (published_infrastructure.stdout | from_json).overlay
+            quiet: true
+          when: build_registration.runtime == 'swarm'
+
+        - name: Prove Swarm planning does not materialize secrets
+          when: build_registration.runtime == 'swarm'
+          block:
+            - name: Temporarily hide the fixture's secret value
+              ansible.builtin.command:
+                argv:
+                  - mv
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING"
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING.planning-test"
+              changed_when: true
+
+            - name: Preview the verified artifact while the builder and secret value are unavailable
+              ansible.builtin.command:
+                argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, preview, "{{ build_registration.name }}", "{{ fixture_commit }}"]
+                chdir: "{{ platform_dir }}"
+              environment: "{{ compose_env }}"
+              register: preview
+              changed_when: false
+
+            - name: Select the validated HTTP projection of the proposal
+              ansible.builtin.set_fact:
+                preview_workload: "{{ (preview.stdout | from_json).plan.workload if (preview.stdout | from_json).plan.version == 2 else (preview.stdout | from_json).plan }}"
+
+            - name: Require a proposal with exact grants and unresolved input references
+              ansible.builtin.assert:
+                that:
+                  - not (preview.stdout | from_json).admitted
+                  - preview_workload.commit == fixture_commit
+                  - (preview_workload.infrastructure.registration if preview_workload.version == 3 else preview_workload.registration) == (pointer.content | b64decode | from_json)
+                  - preview_workload.grants == build_registration.grants
+                  - preview_environment.GREETING == {'kind':'secret','key':'GREETING'}
+                  - preview_environment.MODE == {'kind':'configuration','key':'MODE'}
+                  - request.secrets.GREETING not in preview.stdout
+                quiet: true
+              vars:
+                preview_environment: "{{ preview_workload.services.web.inputs.environment if preview_workload.version == 3 else preview_workload.services.web.environment }}"
+              no_log: true
+          always:
+            - name: Restore the fixture's hidden secret
+              ansible.builtin.command:
+                argv:
+                  - mv
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING.planning-test"
+                  - "{{ registration_root }}/private/{{ build_registration.name | hash('sha256') }}/generations/{{ (pointer.content | b64decode | from_json).registrationGeneration }}/secrets/GREETING"
+              changed_when: true
+
+      always:
+        - name: Restore the isolated builder
+          ansible.builtin.command:
+            argv: [docker, compose, up, -d, --no-deps, builder]
+            chdir: "{{ platform_dir }}"
+          environment: "{{ compose_env }}"
+          changed_when: true
+
+    - name: Read coordinator image pins
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, kayra-deployer, ctl, pins]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: pins
+      changed_when: false
+
+    - name: Require retained image pins without claiming GC readiness
+      ansible.builtin.assert:
+        that:
+          - not (pins.stdout | from_json).complete
+          - (pins.stdout | from_json).unresolved | length == 0
+          - (pins.stdout | from_json).artifacts | selectattr('artifact', 'equalto', (retained_build.stdout | from_json).artifact) | list | length == 1
+          - ((pins.stdout | from_json).artifacts | selectattr('artifact', 'equalto', (retained_build.stdout | from_json).artifact) | first).images | sort == (bundle.stdout | from_json).images | map(attribute='ref') | sort
+        quiet: true
+
+    - name: Require GC to preserve coordinator-managed images
+      ansible.builtin.command:
+        argv: [docker, compose, exec, -T, deployer, bash, /opt/kayra/scripts/platform/registry-gc.sh]
+        chdir: "{{ platform_dir }}"
+      environment: "{{ compose_env }}"
+      register: gc_refusal
+      failed_when: gc_refusal.rc == 0 or 'recovery image pins require pin-aware GC' not in gc_refusal.stderr
+      changed_when: false

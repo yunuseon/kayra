@@ -46,12 +46,13 @@
     file: "{{ app_root }}/app.yml"
     name: manifest
 
-# Either may be missing: an app without config or without secrets.
+# Load an empty mapping for an app without a config file. Each role iteration
+# replaces the previous app's values.
 - name: Read the operator's config for this app
-  ansible.builtin.include_vars:
-    file: "{{ server_dir }}/apps/{{ app.name }}.yml"
-    name: app_config
-  when: (server_dir ~ '/apps/' ~ app.name ~ '.yml') is file
+  ansible.builtin.set_fact:
+    app_config: "{{ (lookup('ansible.builtin.file', config_path) | from_yaml | default({}, true)) if config_path is file else {} }}"
+  vars:
+    config_path: "{{ server_dir }}/apps/{{ app.name }}.yml"
 
 - name: Take this app's secrets from secrets.yml
   ansible.builtin.set_fact:
@@ -69,12 +70,17 @@
     that:
       - manifest.name == app.name
       - manifest.subdomains is not defined
+      - app.runtime | default('compose') in ['compose', 'swarm']
+      - (app.runtime | default('compose') == 'swarm') == (manifest.rollout is defined)
+      - app.runtime | default('compose') != 'swarm' or (managed_swarm_rollouts | bool and experimental_swarm.enabled | default(false) | bool and app.grants is mapping and manifest.rollout is mapping)
       - missing_secrets | length == 0
       - missing_config | length == 0
       - reserved_subdomains | length == 0
     fail_msg: >-
       {{ app.name }}: app.yml name={{ manifest.name }};
       {{ 'subdomains is gone: declare routes instead (the app contract);' if manifest.subdomains is defined else '' }}
+      {{ 'rollout metadata is not yet supported for Compose;' if manifest.rollout is defined and app.runtime | default('compose') == 'compose' else '' }}
+      {{ 'only the Compose runtime is currently supported without an explicit managed Swarm opt-in, grants and app rollout;' if app.runtime | default('compose') != 'compose' else '' }}
       missing config {{ missing_config }} in servers/{{ server }}/apps/{{ app.name }}.yml,
       missing secrets {{ missing_secrets }} in servers/{{ server }}/secrets.yml under app_secrets.{{ app.name }};
       hosts reserved by the platform {{ reserved_subdomains }}
@@ -84,52 +90,53 @@
     missing_config: "{{ manifest.config | default([]) | difference(app_config | default({}) | list) }}"
     reserved_subdomains: "{{ app_subdomains | intersect(lookup('file', kayra_root ~ '/hosts.conf').splitlines() | reject('match', '^\\s*(#|$)') | list) }}"
 
-- name: Create app directory
-  ansible.builtin.file:
-    path: "{{ apps_dir }}/{{ app.name }}"
-    state: directory
-    owner: deploy
-    group: deploy
-    mode: "0755"
-  become: true
-
-- name: Render app .env
-  ansible.builtin.template:
-    src: app.env.j2
-    dest: "{{ apps_dir }}/{{ app.name }}/.env"
-    owner: deploy
-    group: deploy
-    mode: "0644"
-  register: app_env
-  become: true
-
-# Secrets before the registration: a push in between finds them in place.
-- name: Apply secrets
+- name: Register the managed Swarm app through the platform
   ansible.builtin.command:
-    cmd: "{{ platform_dir }}/bin/app-apply {{ app.name }}"
-    stdin: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secret_values[key] }}\n{% endfor %}"
+    argv: [python3, -B, "{{ platform_dir }}/registration-lib/registration_command.py", "{{ 'recreate' if app_recreation is defined else 'register' }}", --root,
+           /var/lib/kayra/registrations, --private-gid, "1000", --platform-dir, "{{ platform_dir }}"]
+    stdin: "{{ (request | combine({'recreation': app_recreation}) if app_recreation is defined else request) | to_json }}"
+  vars:
+    config_keys: "{{ manifest.config | default([]) }}"
+    secret_keys: "{{ manifest.secrets | default([]) }}"
+    request:
+      app: "{{ app.name }}"
+      registration:
+        name: "{{ app.name }}"
+        repo: "{{ app_repo }}"
+        ref: "{{ app_ref }}"
+        path: "{{ app.path | default('.') }}"
+        runtime: swarm
+        grants: "{{ app.grants }}"
+        hosts: "{{ app_subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
+        secrets: "{{ secret_keys }}"
+      configuration: "{{ dict(config_keys | zip(config_keys | map('extract', app_config | default({})))) }}"
+      secrets: "{{ dict(secret_keys | zip(secret_keys | map('extract', app_secret_values))) }}"
   no_log: true
   become: true
-  changed_when: true
+  when: app.runtime | default('compose') == 'swarm' and not ansible_check_mode
 
-# What may deploy where, approved here: hosts and secret keys come from this
-# file, never from the app's repository at the commit being deployed.
-- name: Register the app
-  ansible.builtin.copy:
-    content: "{{ registration | to_nice_json }}\n"
-    dest: "{{ platform_dir }}/apps/{{ app.name }}.json"
-    owner: root
-    group: root
-    mode: "0644"
+- name: Apply Compose app registration
+  kayra_compose_registration:
+    app: "{{ app.name }}"
+    platform_dir: "{{ platform_dir }}"
+    apps_dir: "{{ apps_dir }}"
+    dotenv: "{{ lookup('ansible.builtin.template', 'app.env.j2') }}"
+    registration: "{{ registration | to_nice_json }}\n"
+    secrets: "{% for key in manifest.secrets | default([]) %}{{ key }}={{ app_secret_values[key] }}\n{% endfor %}"
   vars:
     registration:
       name: "{{ app.name }}"
       repo: "{{ app_repo }}"
       ref: "{{ app_ref }}"
       path: "{{ app.path | default('.') }}"
+      runtime: "{{ app.runtime | default('compose') }}"
       hosts: "{{ app_subdomains | map('regex_replace', '$', '.' ~ domain) | list }}"
       secrets: "{{ manifest.secrets | default([]) }}"
-  register: app_registration
+  register: compose_registration
+  retries: 5
+  delay: 3
+  until: compose_registration is succeeded or not (compose_registration.retryable | default(false))
+  when: app.runtime | default('compose') == 'compose'
   become: true
 
 # A Docker update or a reboot stops every container, and one deployed before
@@ -141,10 +148,11 @@
 # The retries wait out a deployer the host layer has just restarted.
 - name: Restore the app if it was deployed but runs nothing, or redeploy it if its registration changed
   ansible.builtin.command:
-    cmd: "{{ platform_dir }}/bin/app-restore {{ app.name }}{{ ' --changed' if (app_env is changed or app_registration is changed) else '' }}"
+    argv: "{{ [platform_dir ~ '/bin/app-restore', app.name] + (['--changed'] if compose_registration.redeploy_required | default(false) else []) }}"
   register: app_restored
   retries: 5
   delay: 3
   until: app_restored.rc == 0
   changed_when: "'restored ' in app_restored.stdout or 'redeployed ' in app_restored.stdout"
+  when: app.runtime | default('compose') == 'compose'
   become: true

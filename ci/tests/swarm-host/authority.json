@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "profile": {
+    "enabled": true,
+    "advertise_address": "192.0.2.1",
+    "memory_bytes": 3221225472,
+    "cpu_millicores": 2000,
+    "platform_memory_bytes": 1073741824,
+    "platform_cpu_millicores": 500
+  },
+  "node": "nnnnnnnnnnnnnnnnnnnnnnnnn",
+  "cluster": "ccccccccccccccccccccccccc",
+  "network": {"name": "platform-swarm", "id": "ooooooooooooooooooooooooo"}
+}

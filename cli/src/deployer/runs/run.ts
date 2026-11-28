@@ -2,7 +2,7 @@ import { err, ok, type Result } from "../../lib/result.ts";
 import type { App } from "../app.ts";
 import type { Sha } from "../brand.ts";
 import { imagesEnv, parseBundle, type Bundle } from "../build/bundle.ts";
-import { config, policy, up, type Argv } from "../build/compose.ts";
+import type { ComposeRuntime } from "../../server/runtime/compose.ts";
 import { describeRoutes, readinessUrl, routesOverride, type Route } from "../build/routes.ts";
 import type { Check } from "./records.ts";
 import type { Context, State } from "../forges/forge.ts";
@@ -18,8 +18,8 @@ export type Effects = {
   readonly resolve: (app: App, ref: string) => Promise<Result<Sha, string>>;
   /** The builder's bundle for that commit, unchecked; its log lines go to `log`. */
   readonly prepare: (app: App, commit: Sha) => Promise<Result<unknown, string>>;
-  /** stdout captured only with `capture`; everything else reaches the log. */
-  readonly exec: (argv: Argv, options: { readonly cwd: string; readonly env: Env; readonly stdin?: string; readonly capture?: boolean }) => Promise<Exit>;
+  readonly runtime: ComposeRuntime;
+  readonly policy: (app: App, script: string, domain: string, bundle: Bundle, cwd: string, resolved: string) => Promise<Exit>;
   readonly secrets: (app: App) => Result<Env, string>;
   /** A fresh directory holding the bundle's compose files and images.env (compose.ts says where). */
   readonly workdir: (bundle: Bundle, images: string) => Promise<string>;
@@ -86,9 +86,9 @@ const notReady = (checks: readonly Check[]) =>
     .map((check) => `${check.url} ${check.status === 0 ? "did not answer" : `answered ${String(check.status)}`}`)
     .join("; ");
 
-const step = async (fx: Effects, label: string, argv: Argv, options: Parameters<Effects["exec"]>[1]) => {
+const step = async (fx: Effects, label: string, effect: () => Promise<Exit>) => {
   fx.log(`── ${label}`);
-  const exit = await fx.exec(argv, options);
+  const exit = await effect();
   return exit.code === 0 ? ok<string>(exit.stdout) : err(`${label} failed (exit ${String(exit.code)})`);
 };
 
@@ -102,15 +102,16 @@ const deployBundle = async (app: App, bundle: Bundle, site: Site, fx: Effects) =
   const secrets = fx.secrets(app);
   if (!secrets.ok) return secrets;
   const cwd = await fx.workdir(bundle, images);
-  const resolved = await step(fx, "Admission: compose config", config(app, site.appsDir, bundle), { cwd, env: secrets.value, capture: true });
+  const request = { app, appsDir: site.appsDir, bundle, cwd, env: secrets.value };
+  const resolved = await step(fx, "Admission: compose config", () => fx.runtime.config(request));
   if (!resolved.ok) return resolved;
-  const admitted = await step(fx, "Admission: policy", policy(app, site.policyScript, site.domain, bundle), { cwd, env: {}, stdin: resolved.value });
+  const admitted = await step(fx, "Admission: policy", () => fx.policy(app, site.policyScript, site.domain, bundle, cwd, resolved.value));
   if (!admitted.ok) return err("refused by the compose policy");
   const routes = routesOverride(app.name, site.domain, bundle.routes, resolved.value);
   if (!routes.ok) return routes;
   fx.log(`── Routes: ${describeRoutes(bundle.routes)}`);
   await fx.writeRoutes(cwd, routes.value);
-  const started = await step(fx, "Up", up(app, site.appsDir, bundle), { cwd, env: secrets.value });
+  const started = await step(fx, "Up", () => fx.runtime.up(request));
   if (!started.ok) return started;
   await fx.record(app, bundle.sha, images);
   return ok<string>(images);
@@ -163,14 +164,4 @@ export const deploy = async (app: App, ref: string, site: Site, fx: Effects) => 
 };
 
 /** Renovate's settings, as the platform's .env holds them; the optional ones only when set. */
-export const renovate = (env: Env, dryRun: boolean, image: string) => {
-  const optional = ["RENOVATE_ENDPOINT", "RENOVATE_GIT_URL", "RENOVATE_HOST_RULES", "RENOVATE_GITHUB_COM_TOKEN"]
-    .filter((key) => (env[key] ?? "") !== "")
-    .flatMap((key) => ["-e", key] as const);
-  return typed<Argv>([
-    "docker", "run", "--rm", "--network", "platform-internal",
-    "-e", "RENOVATE_TOKEN", "-e", "RENOVATE_PLATFORM", ...optional, "-e", "RENOVATE_REPOSITORIES",
-    "-e", `RENOVATE_DRY_RUN=${dryRun ? "full" : "null"}`, "-e", "LOG_LEVEL=info",
-    image,
-  ]);
-};
+export { renovate } from "../../server/platform/maintenance.ts";

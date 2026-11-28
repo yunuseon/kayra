@@ -1,0 +1,497 @@
+---
+- name: Check durable HTTP coordination with the real runtime and TLS router
+  hosts: servers
+  become: true
+  tasks:
+    - name: Check the experiment clock against the controller before effects
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: coordinator_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((coordinator_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Create an isolated component source directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/lib/kayra/swarm
+        prefix: coordinator-source-
+      register: coordinator_source
+
+    - name: Stage immutable component sources in one transfer
+      ansible.builtin.import_tasks: ../stage-source.yml
+      vars:
+        stage_source_root: "{{ kayra_root }}"
+        stage_source_destination: "{{ coordinator_source.path }}"
+        stage_source_paths: [cli/src, package.json, ci/tests/swarm-http, test/lab/swarm-platform]
+        stage_source_manifest: "{{ report_path }}.source.json"
+
+    - name: Find the existing deployer container
+      ansible.builtin.command:
+        argv: [docker, compose, ps, -q, deployer]
+        chdir: /opt/platform
+      register: coordinator_deployer
+      changed_when: false
+
+    - name: Copy the existing image's Node runtime and contract dependencies
+      ansible.builtin.command:
+        argv:
+          - docker
+          - cp
+          - "{{ coordinator_deployer.stdout | trim }}:{{ item.source }}"
+          - "{{ coordinator_source.path }}/{{ item.target }}"
+      loop:
+        - {source: /usr/local/bin/node, target: node}
+        - {source: /opt/kayra/node_modules, target: node_modules}
+      changed_when: true
+
+    - name: Recheck the experiment clock after staging and before runtime effects
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: coordinator_staged_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((coordinator_staged_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Reconcile and promote with a SIGKILL after native acknowledgement
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/http-coordinator.mjs"
+      register: coordinator_result
+      changed_when: true
+
+    - name: Retain the component result
+      ansible.builtin.copy:
+        content: "{{ coordinator_result.stdout }}\n"
+        dest: "{{ report_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Measure draining old, candidate and restored workload overlap
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/recovery-overlap.mjs"
+          - "{{ coordinator_source.path }}/recovery-overlap.json"
+      register: recovery_overlap
+      changed_when: true
+
+    - name: Retain the recovery-overlap result
+      ansible.builtin.copy:
+        content: "{{ recovery_overlap.stdout }}\n"
+        dest: "{{ report_path }}.overlap.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Preserve native recovery-overlap snapshots before source cleanup
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/recovery-overlap.json"
+        dest: "{{ report_path }}.overlap.native.json"
+        flat: true
+
+    - name: Interrupt isolated one-shot jobs at create, start and fence checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot.mjs"
+          - run
+          - "{{ coordinator_source.path }}/jobs"
+          - "{{ (coordinator_result.stdout | from_json).image }}"
+      changed_when: true
+
+    - name: Retain one-shot interruption summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/jobs/result.json"
+        dest: "{{ report_path }}.jobs.json"
+        flat: true
+
+    - name: Archive one-shot journals, traces and Docker events before cleanup
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/jobs.tar", -C, "{{ coordinator_source.path }}/jobs", .]
+      changed_when: true
+
+    - name: Preserve one-shot interruption evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/jobs.tar"
+        dest: "{{ report_path }}.jobs.tar"
+        flat: true
+
+    - name: Normalize application status-probe outcomes without persisting private stdout
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-probe.mjs"
+          - "{{ coordinator_source.path }}/probes"
+          - "{{ (coordinator_result.stdout | from_json).image }}"
+      changed_when: true
+
+    - name: Retain application status-probe summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/probes/result.json"
+        dest: "{{ report_path }}.probes.json"
+        flat: true
+
+    - name: Archive normalized probe evidence and journals
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/probes.tar", -C, "{{ coordinator_source.path }}/probes", .]
+      changed_when: true
+
+    - name: Preserve normalized application status-probe evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/probes.tar"
+        dest: "{{ report_path }}.probes.tar"
+        flat: true
+
+    - name: Prepare an uncached job image and fence a delayed duplicate creation
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot-cold.mjs"
+          - "{{ coordinator_source.path }}/cold"
+          - "{{ (coordinator_result.stdout | from_json).image }}"
+      changed_when: true
+
+    - name: Retain cold-image and delayed-create summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cold/result.json"
+        dest: "{{ report_path }}.cold.json"
+        flat: true
+
+    - name: Archive cold-image and delayed-create evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/cold.tar", -C, "{{ coordinator_source.path }}/cold", .]
+      changed_when: true
+
+    - name: Preserve cold-image and delayed-create evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cold.tar"
+        dest: "{{ report_path }}.cold.tar"
+        flat: true
+
+    - name: Recover separate scheduling and execution deadlines after SIGKILL
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot-deadlines.mjs"
+          - run
+          - "{{ coordinator_source.path }}/deadlines"
+          - "{{ (coordinator_result.stdout | from_json).image }}"
+      changed_when: true
+
+    - name: Retain separate job-deadline summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/deadlines/result.json"
+        dest: "{{ report_path }}.deadlines.json"
+        flat: true
+
+    - name: Archive separate job-deadline evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/deadlines.tar", -C, "{{ coordinator_source.path }}/deadlines", .]
+      changed_when: true
+
+    - name: Preserve separate job-deadline evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/deadlines.tar"
+        dest: "{{ report_path }}.deadlines.tar"
+        flat: true
+
+    - name: Reconcile ordered migrations against application-owned state after interruption
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - run
+          - "{{ coordinator_source.path }}/sequence"
+      changed_when: true
+
+    - name: Retain ordered migration sequence summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/sequence/result.json"
+        dest: "{{ report_path }}.sequence.json"
+        flat: true
+
+    - name: Archive migration sequence journals and application evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/sequence.tar", -C, "{{ coordinator_source.path }}/sequence", .]
+      changed_when: true
+
+    - name: Preserve migration sequence journals and application evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/sequence.tar"
+        dest: "{{ report_path }}.sequence.tar"
+        flat: true
+
+    - name: Reconcile migrations through indexed lifecycle ownership and durable admission
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - indexed-run
+          - "{{ coordinator_source.path }}/indexed-sequence"
+      changed_when: true
+
+    - name: Retain indexed migration preparation summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/indexed-sequence/result.json"
+        dest: "{{ report_path }}.indexed-sequence.json"
+        flat: true
+
+    - name: Archive indexed migration preparation evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/indexed-sequence.tar", -C, "{{ coordinator_source.path }}/indexed-sequence", .]
+      changed_when: true
+
+    - name: Preserve indexed migration preparation evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/indexed-sequence.tar"
+        dest: "{{ report_path }}.indexed-sequence.tar"
+        flat: true
+
+    - name: Reconcile complete rollouts through migrations and native routed HTTP replacement
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/rollout-coordinator.mjs"
+          - run
+          - "{{ coordinator_source.path }}/rollout"
+      changed_when: true
+
+    - name: Retain complete rollout component summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/rollout/result.json"
+        dest: "{{ report_path }}.rollout.json"
+        flat: true
+
+    - name: Archive complete rollout component evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/rollout.tar", -C, "{{ coordinator_source.path }}/rollout", .]
+      changed_when: true
+
+    - name: Preserve complete rollout component evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/rollout.tar"
+        dest: "{{ report_path }}.rollout.tar"
+        flat: true
+
+    - name: Reconcile unstarted rollout outcomes across journal SIGKILL checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/rollout-unstarted.mjs"
+          - run
+          - "{{ coordinator_source.path }}/unstarted"
+      changed_when: true
+
+    - name: Retain unstarted rollout summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/unstarted/result.json"
+        dest: "{{ report_path }}.unstarted.json"
+        flat: true
+
+    - name: Archive unstarted rollout evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/unstarted.tar", -C, "{{ coordinator_source.path }}/unstarted", .]
+      changed_when: true
+
+    - name: Preserve unstarted rollout evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/unstarted.tar"
+        dest: "{{ report_path }}.unstarted.tar"
+        flat: true
+
+    - name: Enforce current host authority before migration effects and HTTP handoff
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - host-run
+          - "{{ coordinator_source.path }}/host"
+      changed_when: true
+
+    - name: Retain host authority summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/host/result.json"
+        dest: "{{ report_path }}.host.json"
+        flat: true
+
+    - name: Archive host authority evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/host.tar", -C, "{{ coordinator_source.path }}/host", .]
+      changed_when: true
+
+    - name: Preserve host authority evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/host.tar"
+        dest: "{{ report_path }}.host.tar"
+        flat: true
+
+    - name: Resolve held migrations across audited journal SIGKILL checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - resolution-run
+          - "{{ coordinator_source.path }}/resolution"
+      changed_when: true
+
+    - name: Retain migration resolution summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/resolution/result.json"
+        dest: "{{ report_path }}.resolution.json"
+        flat: true
+
+    - name: Archive migration resolution evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/resolution.tar", -C, "{{ coordinator_source.path }}/resolution", .]
+      changed_when: true
+
+    - name: Preserve migration resolution evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/resolution.tar"
+        dest: "{{ report_path }}.resolution.tar"
+        flat: true
+
+    - name: Disable inherited image health checks in one-shot jobs
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot-health.mjs"
+          - "{{ coordinator_source.path }}/job-health"
+      changed_when: true
+
+    - name: Retain one-shot health isolation summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-health/result.json"
+        dest: "{{ report_path }}.job-health.json"
+        flat: true
+
+    - name: Archive one-shot health isolation evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/job-health.tar", -C, "{{ coordinator_source.path }}/job-health", .]
+      changed_when: true
+
+    - name: Preserve one-shot health isolation evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-health.tar"
+        dest: "{{ report_path }}.job-health.tar"
+        flat: true
+
+    - name: Recover expired job cleanup across synchronized SIGKILL checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/one-shot-cleanup.mjs"
+          - run
+          - "{{ coordinator_source.path }}/job-cleanup"
+      changed_when: true
+
+    - name: Retain bounded job cleanup recovery summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-cleanup/result.json"
+        dest: "{{ report_path }}.job-cleanup.json"
+        flat: true
+
+    - name: Archive bounded job cleanup recovery evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/job-cleanup.tar", -C, "{{ coordinator_source.path }}/job-cleanup", .]
+      changed_when: true
+
+    - name: Preserve bounded job cleanup recovery evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/job-cleanup.tar"
+        dest: "{{ report_path }}.job-cleanup.tar"
+        flat: true
+
+    - name: Recover held migrations through audited cleanup and outcome resolution
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/migration-sequence.mjs"
+          - cleanup-run
+          - "{{ coordinator_source.path }}/migration-cleanup"
+      changed_when: true
+
+    - name: Retain indexed migration cleanup summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/migration-cleanup/result.json"
+        dest: "{{ report_path }}.migration-cleanup.json"
+        flat: true
+
+    - name: Archive indexed migration cleanup evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/migration-cleanup.tar", -C, "{{ coordinator_source.path }}/migration-cleanup", .]
+      changed_when: true
+
+    - name: Preserve indexed migration cleanup evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/migration-cleanup.tar"
+        dest: "{{ report_path }}.migration-cleanup.tar"
+        flat: true
+
+    - name: Cancel indexed preparations across native migration and journal checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/rollout-cancellation.mjs"
+          - run
+          - "{{ coordinator_source.path }}/cancellation"
+      changed_when: true
+
+    - name: Retain preparation cancellation summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cancellation/result.json"
+        dest: "{{ report_path }}.cancellation.json"
+        flat: true
+
+    - name: Archive preparation cancellation evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/cancellation.tar", -C, "{{ coordinator_source.path }}/cancellation", .]
+      changed_when: true
+
+    - name: Preserve preparation cancellation evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/cancellation.tar"
+        dest: "{{ report_path }}.cancellation.tar"
+        flat: true
+
+    - name: Expire ready handoffs across synchronized journal checkpoints
+      ansible.builtin.command:
+        argv:
+          - "{{ coordinator_source.path }}/node"
+          - "{{ coordinator_source.path }}/test/lab/swarm-platform/rollout-handoff-expiry.mjs"
+          - run
+          - "{{ coordinator_source.path }}/handoff-expiry"
+      changed_when: true
+
+    - name: Retain handoff expiry summary
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/handoff-expiry/result.json"
+        dest: "{{ report_path }}.handoff-expiry.json"
+        flat: true
+
+    - name: Archive handoff expiry evidence
+      ansible.builtin.command:
+        argv: [tar, -cf, "{{ coordinator_source.path }}/handoff-expiry.tar", -C, "{{ coordinator_source.path }}/handoff-expiry", .]
+      changed_when: true
+
+    - name: Preserve handoff expiry evidence
+      ansible.builtin.fetch:
+        src: "{{ coordinator_source.path }}/handoff-expiry.tar"
+        dest: "{{ report_path }}.handoff-expiry.tar"
+        flat: true
+
+    - name: Require synchronized clocks after the native experiments
+      ansible.builtin.command:
+        argv: [date, "+%s"]
+      register: coordinator_completed_clock
+      changed_when: false
+      check_mode: false
+      failed_when: ((coordinator_completed_clock.stdout | int) - (lookup('pipe', 'date +%s') | int)) | abs > 5
+
+    - name: Remove successful component source files
+      ansible.builtin.file:
+        path: "{{ coordinator_source.path }}"
+        state: absent

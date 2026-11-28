@@ -1,0 +1,23 @@
+# Enabled only for explicitly opted-in single-node Swarm hosts.
+services:
+  builder:
+    environment:
+      - KAYRA_PUBLIC_REGISTRATIONS_DIR=/run/kayra-registration/public
+    volumes:
+      - /var/lib/kayra/registrations/public:/run/kayra-registration/public:ro
+  deployer:
+    build:
+      args:
+        KAYRA_INDEXED_REGISTRATION: "true"
+    environment:
+      - KAYRA_MANAGED_ROLLOUTS=true
+      - NODE_EXTRA_CA_CERTS=${KAYRA_MANAGED_TLS_CA:-}
+      - KAYRA_REGISTRATION_EVIDENCE_DIR=/run/kayra-registration/observations
+      - KAYRA_PUBLIC_REGISTRATIONS_DIR=/run/kayra-registration/public
+      - KAYRA_PRIVATE_REGISTRATIONS_DIR=/run/kayra-registration/private
+    volumes:
+      - /var/lib/kayra/registrations/public:/run/kayra-registration/public:ro
+      - /var/lib/kayra/registrations/private:/run/kayra-registration/private:ro
+      - /var/lib/kayra/registrations/observations:/run/kayra-registration/observations:ro
+      - /var/lib/kayra/registrations/trust:/run/kayra-registration/trust:ro
+      - ./managed-apps:/opt/platform/managed-apps:ro

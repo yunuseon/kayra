@@ -10,6 +10,60 @@
       "type": "string",
       "description": "The Docker CE major the docker role pins and holds, as an apt version glob (default 5:29*)."
     },
+    "experimental_swarm": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "const": true
+        },
+        "advertise_address": {
+          "type": "string",
+          "format": "ipv4",
+          "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cpu_millicores": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform_memory_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform_cpu_millicores": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "enabled",
+        "advertise_address",
+        "memory_bytes",
+        "cpu_millicores",
+        "platform_memory_bytes",
+        "platform_cpu_millicores"
+      ],
+      "additionalProperties": false,
+      "description": "Experimental single-node Swarm host setup: explicit address, host capacity and platform overhead. Omitted by default; does not convert or deploy applications."
+    },
+    "managed_swarm_rollouts": {
+      "type": "boolean",
+      "description": "Opt in to indexed application registration and recoverable rollouts on an explicitly provisioned experimental Swarm host. Off by default."
+    },
+    "swarm_migration_timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400,
+      "description": "Host ceiling for experimental Swarm migration and status-probe execution (default 90 seconds). Captured in each admitted plan; changing it does not extend existing deadlines or enable migration admission."
+    },
     "authelia_policy": {
       "type": "string",
       "enum": [

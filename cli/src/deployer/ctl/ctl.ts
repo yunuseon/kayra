@@ -1,15 +1,17 @@
-import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { lstat } from "node:fs/promises";
 import { releasesAnswer, runAnswer, runsAnswer } from "./answers.ts";
 import { field } from "../app.ts";
-import { appOwner, appName, owner as mintOwner, runId, type Owner, type RunId } from "../brand.ts";
-import { ended, releases, type RunMeta } from "../runs/records.ts";
-import { log, meta, runsOf } from "../runs/store.ts";
+import { appOwner, appName, owner as mintOwner, runId, type AppName, type Owner, type RunId } from "../brand.ts";
+import { ended, type RunMeta } from "../runs/records.ts";
+import { log, meta, runsOf } from "../runs/read.ts";
+import { legacyReleases } from "../runs/release-read.ts";
 import { typed } from "../../lib/typed.ts";
+import type { RunsAnswer } from "../../contracts/reporting.ts";
 
 /**
  * The operator's side, run inside the deployer container by `kayra app …` and
- * `kayra job …` over SSH. Reads runs/ and releases/ directly; anything that
+ * `kayra job …` over SSH. Reads legacy run and release projections; anything that
  * starts a run goes through the daemon's control port, so the queue stays the
  * only place runs begin. `--json` makes `runs` and rollback's list answer as
  * data (answers.ts), which kayra draws.
@@ -80,15 +82,36 @@ const start = async (payload: object, json: boolean) => {
   return posted.run === undefined ? posted.code : follow(posted.run.owner, posted.run.id, json);
 };
 
-const releasesOf = (app: string) => {
-  const dir = join(platformDir, "releases", app);
-  return releases(existsSync(dir) ? readdirSync(dir) : []);
+const releasesOf = (app: AppName) => legacyReleases(platformDir, app).releases;
+type ManagedRuns = Readonly<{ kind: "legacy" | "unavailable" }> | Readonly<{ kind: "managed"; value: RunsAnswer }>;
+const managedRuns = async (app: AppName, request?: string): Promise<ManagedRuns> => {
+  const indexed = await lstat(join(platformDir, "managed-apps", app + ".json")).then(() => true, (error: unknown) =>
+    typeof error === "object" && error !== null && field(error, "code") === "ENOENT" ? false : undefined);
+  if (indexed === undefined) return { kind: "unavailable" };
+  if (!indexed) return { kind: "legacy" } as const;
+  const response = await fetch("http://127.0.0.1:8091/deployment/runs", {
+    method: "POST", body: JSON.stringify(request === undefined ? { app } : { app, request }), signal: AbortSignal.timeout(15_000),
+  }).catch(() => undefined);
+  if (!response?.ok) return { kind: "unavailable" } as const;
+  const raw: unknown = await response.json().catch(() => undefined);
+  if (raw === null) return { kind: "legacy" } as const;
+  const contracts = await import("../../contracts/run-reporting.ts").catch(() => undefined);
+  const checked = contracts?.runsSchema.safeParse(raw);
+  return checked?.success === true && checked.data.app === app && checked.data.protocol === "managed-v3" && checked.data.runs.every((row) => request === undefined || row.id === request)
+    ? { kind: "managed", value: checked.data } as const : { kind: "unavailable" } as const;
 };
 
 const commands: Readonly<Record<string, (args: readonly string[], json: boolean) => Promise<number> | number>> = {
-  runs: ([app], json) => {
+  runs: async ([app], json) => {
     const name = appName(app ?? "");
     if (!name.ok) return fail(name.error);
+    const indexed = await managedRuns(name.value);
+    if (indexed.kind === "unavailable") return fail("indexed run reporting is unavailable");
+    if (indexed.kind === "managed") {
+      if (json) console.log(JSON.stringify(indexed.value));
+      else indexed.value.runs.forEach((row) => { console.log([row.id, row.managed?.phase, row.managed?.outcome, row.sha, row.why, row.managed?.requiredAction].filter(Boolean).join("  ")); });
+      return 0;
+    }
     const latest = runsOf(runs, appOwner(name.value)).slice(0, 20);
     if (json) {
       console.log(JSON.stringify(runsAnswer(name.value, latest, releasesOf(name.value)[0])));
@@ -99,9 +122,21 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     });
     return 0;
   },
-  log: ([who, id]) => {
+  log: async ([who, id]) => {
     const minted = mintOwner(who === "gc" || who === "renovate" ? `_${who}` : (who ?? ""));
     if (!minted.ok) return fail(minted.error);
+    const app = appName(who ?? "");
+    if (app.ok && (id === undefined || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))) {
+      const indexed = await managedRuns(app.value, id);
+      if (indexed.kind === "unavailable") return fail("indexed run reporting is unavailable");
+      if (indexed.kind === "managed") {
+        const row = indexed.value.runs[0];
+        const lifecycle = row?.managed;
+        if (row === undefined || lifecycle === undefined) return fail(`no such managed run of ${app.value}`);
+        console.log(`Run ${row.id}\nRequested commit: ${row.sha ?? "none"}\nPhase: ${lifecycle.phase}\nOutcome: ${lifecycle.outcome ?? "pending"}\nVerified active release at this phase: ${lifecycle.activeRelease ?? "none"}\nRequired action: ${lifecycle.requiredAction}`);
+        return 0;
+      }
+    }
     const given = id === undefined ? undefined : runId(id);
     const run = given === undefined ? runsOf(runs, minted.value)[0]?.id : given.ok ? given.value : undefined;
     const text = run === undefined ? undefined : log(runs, minted.value, run);
@@ -130,6 +165,148 @@ const commands: Readonly<Record<string, (args: readonly string[], json: boolean)
     const target = earlier.find((release) => release.sha.startsWith(commit));
     if (target === undefined || commit.length < 7) return fail(`${commit} is not an earlier release of ${name.value}`);
     return start({ app: name.value, ref: target.sha, why: "rollback" }, json);
+  },
+  migration: async ([operation, encoded, extra]) => {
+    if ((operation !== "resolve" && operation !== "audit" && operation !== "cleanup" && operation !== "cleanup-audit") || encoded === undefined || extra !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(encoded)) return fail("usage: ctl migration resolve|audit|cleanup|cleanup-audit <base64url-request>");
+    const decoded: unknown = await Promise.resolve(Buffer.from(encoded, "base64url").toString("utf8")).then((text) => {
+      try { const value: unknown = JSON.parse(text); return value; } catch { return undefined; }
+    });
+    const contracts = await Promise.all([import("../../contracts/migration-resolution.ts"), import("../../contracts/migration-cleanup.ts")]).catch(() => undefined);
+    if (contracts === undefined) return fail("experimental migration control unavailable: optional contract dependencies are not installed");
+    const [{ parseMigrationResolutionQuery, parseMigrationResolutionRequest }, { parseMigrationCleanupRequest }] = contracts;
+    const request = operation === "resolve" ? parseMigrationResolutionRequest(decoded) : operation === "cleanup" ? parseMigrationCleanupRequest(decoded) : parseMigrationResolutionQuery(decoded);
+    if (!request.ok) return fail(request.error);
+    const response = await fetch(`http://127.0.0.1:8091/deployment/migration-${operation}`, {
+      method: "POST", body: JSON.stringify(request.value), signal: AbortSignal.timeout(30_000),
+    }).catch(() => undefined);
+    if (!response?.ok) return fail("migration control unavailable or refused; read the audit before repeating the same decision");
+    console.log(await response.text());
+    return 0;
+  },
+  lifecycle: async ([operation, app, commit, request, extra]) => {
+    if (operation === "recreate-release") {
+      if (app === undefined || commit === undefined || request !== undefined) return fail("usage: ctl lifecycle recreate-release <app> <request-uuid>");
+      const response = await fetch("http://127.0.0.1:8091/deployment/recreate-release", {
+        method: "POST", body: JSON.stringify({ app, request: commit }), signal: AbortSignal.timeout(90_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed recreation release unavailable; inspect and retry the same request");
+      console.log(await response.text());
+      return 0;
+    }
+    if (operation === "recreate-registration") {
+      if (app === undefined || commit !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(app)) return fail("usage: ctl lifecycle recreate-registration <base64url-request>");
+      const parsed = await import("../../contracts/managed-recreation.ts").then(({ managedRecreationRegistrationRequest }) => {
+        const input: unknown = JSON.parse(Buffer.from(app, "base64url").toString("utf8"));
+        const checked = managedRecreationRegistrationRequest.safeParse(input);
+        return checked.success ? checked.data : undefined;
+      }).catch(() => undefined);
+      if (parsed === undefined) return fail("managed recreation request is invalid");
+      const response = await fetch("http://127.0.0.1:8091/registration/recreate", {
+        method: "POST", body: JSON.stringify(parsed), signal: AbortSignal.timeout(90_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed recreation registration unavailable; inspect and retry the same request");
+      console.log(await response.text());
+      return 0;
+    }
+    if (operation === "forward") {
+      if (app === undefined || commit !== undefined || !/^[a-zA-Z0-9_-]{1,4096}$/.test(app)) return fail("usage: ctl lifecycle forward <base64url-request>");
+      const parsed = await import("../../contracts/managed-forward-selection.ts").then(({ parseManagedForwardSelectionRequest }) => {
+        const input: unknown = JSON.parse(Buffer.from(app, "base64url").toString("utf8"));
+        return parseManagedForwardSelectionRequest(input);
+      }).catch(() => undefined);
+      if (parsed?.ok !== true) return fail("managed forward request is invalid or unavailable");
+      const response = await fetch("http://127.0.0.1:8091/deployment/forward", {
+        method: "POST", body: JSON.stringify(parsed.value), signal: AbortSignal.timeout(47 * 60_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed forward control unavailable; inspect status and retry the same request identity");
+      console.log(await response.text());
+      return 0;
+    }
+    if (operation === "list-managed" && app === undefined) {
+      const response = await fetch("http://127.0.0.1:8091/deployment/list-managed", {
+        method: "POST", body: "{}", signal: AbortSignal.timeout(15_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed registration listing is unavailable");
+      console.log(await response.text());
+      return 0;
+    }
+    if (operation === "remove-step" || operation === "remove-finalize" || operation === "purge-step") {
+      const step = operation !== "remove-finalize";
+      if (app === undefined || request !== undefined || (step ? commit !== undefined : commit === undefined)) {
+        return fail("usage: ctl lifecycle remove-step <app> | remove-finalize <app> <request-uuid> | purge-step <app>");
+      }
+      const response = await fetch(`http://127.0.0.1:8091/deployment/${operation}`, {
+        method: "POST", body: JSON.stringify(step ? { app } : { app, request: commit }), signal: AbortSignal.timeout(15_000),
+      }).catch(() => undefined);
+      if (!response?.ok) return fail("managed lifecycle control unavailable; retry under the same application fence");
+      console.log(await response.text());
+      return 0;
+    }
+    const query = (operation === "status" || operation === "pins" || operation === "health") && app !== undefined && commit === undefined;
+    const cancel = operation === "cancel" && app !== undefined && commit !== undefined && request === undefined;
+    const rollout = (operation === "prepare" || operation === "restore") && app !== undefined && commit !== undefined && request !== undefined && extra === undefined;
+    if (!query && !rollout && !cancel) return fail("usage: ctl lifecycle status <app> | pins <app> | health <app> | prepare <app> <full-commit> <request-uuid> | restore <app> <release-record> <request-uuid> | cancel <app> <request-uuid>");
+    const response = await fetch(`http://127.0.0.1:8091/deployment/${operation}`, {
+      method: "POST", body: JSON.stringify(query ? { app } : cancel ? { app, request: commit } : operation === "restore" ? { app, record: commit, request } : { app, commit, request }), signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+    if (!response?.ok) return fail("deployment control unavailable; inspect status and retry only the same request identity");
+    console.log(await response.text());
+    return 0;
+  },
+  preview: async ([app, commit, extra]) => {
+    if (app === undefined || commit === undefined || extra !== undefined) return fail("usage: ctl preview <app> <full-commit>");
+    const response = await fetch("http://127.0.0.1:8091/registration/preview", {
+      method: "POST", body: JSON.stringify({ app, commit }), signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+    if (!response?.ok) return fail("plan preview unavailable; prepare an artifact and inspect its registration and requirements");
+    console.log(await response.text());
+    return 0;
+  },
+  pins: async (args) => {
+    if (args.length !== 0) return fail("usage: ctl pins");
+    const response = await fetch("http://127.0.0.1:8091/registration/pins", {
+      method: "POST", body: "{}", signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+    if (!response?.ok) return fail("image pins unavailable; registry GC must remain disabled");
+    console.log(await response.text());
+    return 0;
+  },
+  build: async ([app, commit, extra]) => {
+    if (app === undefined || commit === undefined || extra !== undefined) return fail("usage: ctl build <app> <full-commit>");
+    const response = await fetch("http://127.0.0.1:8091/registration/build", {
+      method: "POST", body: JSON.stringify({ app, commit }), signal: AbortSignal.timeout(45 * 60_000),
+    }).catch(() => undefined);
+    if (response === undefined) return fail("build control unavailable; retry the same commit to reconstruct the outcome");
+    if (!response.ok) return fail(`build control returned ${String(response.status)}`);
+    console.log(await response.text());
+    return 0;
+  },
+  platform: async ([operation, app, generation, ticket, extra]) => {
+    if (operation !== "app-overlay" || app === undefined || generation === undefined || ticket === undefined || extra !== undefined) return fail("usage: ctl platform app-overlay <app> <generation> <ticket>");
+    const response = await fetch("http://127.0.0.1:8091/platform/app-overlay", {
+      method: "POST", body: JSON.stringify({ app, generation, ticket }), signal: AbortSignal.timeout(95_000),
+    }).catch(() => undefined);
+    if (response === undefined) return fail("platform overlay control unavailable; retry only the same registration identity");
+    if (!response.ok) return fail(`platform overlay control returned ${String(response.status)}`);
+    console.log(await response.text());
+    return 0;
+  },
+  registration: async ([operation, app, generation, ticket]) => {
+    const initialize = operation === "initialize" && app === undefined;
+    const verified = (operation === "verified" || operation === "policy") && app !== undefined && generation === undefined;
+    if (!initialize && !verified && ((operation !== "reserve" && operation !== "submit" && operation !== "reconcile" && operation !== "ownership") ||
+      app === undefined || generation === undefined || (operation === "reserve" ? ticket !== undefined && ticket !== "compose" && ticket !== "swarm" : ticket === undefined))) {
+      return fail("usage: ctl registration initialize | verified|policy <app> | reserve <app> <generation> [runtime] | submit|reconcile|ownership <app> <generation> <ticket>");
+    }
+    const response = await fetch(`http://127.0.0.1:8091/registration/${operation}`, {
+      method: "POST",
+      body: JSON.stringify(initialize ? {} : { app, generation, ...(operation === "reserve" ? { runtime: ticket ?? "compose" } : ticket === undefined ? {} : { ticket }) }),
+      signal: AbortSignal.timeout(15_000),
+    }).catch(() => undefined);
+    if (response === undefined) return fail("registration control unavailable");
+    if (!response.ok) return fail(`registration control returned ${String(response.status)}`);
+    console.log(await response.text());
+    return 0;
   },
   job: async ([job, flag]) => {
     const posted = await post("/job", { job, dryRun: flag === "--dry-run" });

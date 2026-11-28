@@ -6,6 +6,8 @@ import { parser } from "../src/clients/cli/parser.ts";
 import { operation, operationNames } from "../src/core/operations/catalog.ts";
 import { catalog } from "../src/clients/wire/contract.ts";
 import { operationOf, reaches as mcpReaches, tools } from "../src/clients/mcp/tools.ts";
+import { deployer } from "../src/core/recipes/apps.ts";
+import { appName } from "../src/core/fleet/brand.ts";
 import { invocation } from "../src/core/operations/dispatch.ts";
 import { defaults, fields, inputOf, onServer, reaches as uiReaches } from "../../web/src/operations.ts";
 import { fleet, server } from "./support.ts";
@@ -106,4 +108,41 @@ test("every operation is an MCP tool named after it, or refused with a reason, a
     strictEqual(called.ok && called.value.name === name, true, name);
   });
   deepStrictEqual(listed.map((tool) => tool.name).toSorted(), operationNames.flatMap((name) => ("tool" in mcpReaches[name] ? [name.replaceAll(".", "_")] : [])).toSorted());
+});
+
+test("migration recovery transports audit prose as an inert word through the remote shell", () => {
+  const name = appName("shop"); strictEqual(name.ok, true);
+  const reason = "Verified $(touch /tmp/should-never-run) `id`; quoted ' evidence";
+  const payload = { app: "shop", run: "12345678-1234-4234-8234-123456789abc", step: "schema", outcome: "applied", reason };
+  const plan = deployer(shop, { kind: "migration", app: name.value, operation: "resolve", payload });
+  strictEqual(plan.ok, true);
+  const step = plan.value[0]; strictEqual(step?.kind, "run");
+  const encoded = step.argv.at(-1); strictEqual(typeof encoded, "string"); if (typeof encoded !== "string") return;
+  strictEqual(/^[a-zA-Z0-9_-]+$/.test(encoded), true);
+  deepStrictEqual(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")), payload);
+  strictEqual(JSON.stringify(step.argv).includes("touch"), false);
+});
+
+test("retained builds and deployment requests accept exact identities without runtime or authority inputs", () => {
+  const commit = "a".repeat(40); const request = "12345678-1234-4234-8234-123456789abc";
+  const build = { server: "shop", app: "shop", commit }; const prepare = { ...build, request };
+  strictEqual(invocation("app.build", build).ok, true); strictEqual(invocation("app.deployment.prepare", prepare).ok, true);
+  for (const invalid of ["main", "a".repeat(7), "$(id)", "a".repeat(39) + ";"]) {
+    strictEqual(invocation("app.build", { ...build, commit: invalid }).ok, false);
+    strictEqual(invocation("app.deployment.prepare", { ...prepare, commit: invalid }).ok, false);
+  }
+  for (const extra of [{ runtime: "swarm" }, { deadline: 9999 }, { migrationTimeoutCeilingSeconds: 9999 }, { environment: { TOKEN: "private" } }]) {
+    strictEqual(invocation("app.build", { ...build, ...extra }).ok, false);
+    strictEqual(invocation("app.deployment.prepare", { ...prepare, ...extra }).ok, false);
+  }
+  strictEqual(invocation("app.deployment.prepare", { ...prepare, request: "new" }).ok, false);
+});
+
+test("build and prepare clients call the owning lifecycle interface with immutable identities", () => {
+  const name = appName("shop"); strictEqual(name.ok, true); const commit = "a".repeat(40); const request = "12345678-1234-4234-8234-123456789abc";
+  const build = deployer(shop, { kind: "build", app: name.value, commit }); strictEqual(build.ok, true);
+  const buildStep = build.value[0]; strictEqual(buildStep?.kind, "run"); deepStrictEqual(buildStep.argv.slice(-4), ["ctl", "build", "shop", commit]);
+  const prepare = deployer(shop, { kind: "lifecycle-prepare", app: name.value, commit, request }); strictEqual(prepare.ok, true);
+  const step = prepare.value[0]; strictEqual(step?.kind, "run"); deepStrictEqual(step.argv.slice(-5), ["lifecycle", "prepare", "shop", commit, request]);
+  strictEqual(build.value.length, 1); strictEqual(prepare.value.length, 1);
 });

@@ -8,7 +8,7 @@ import { appCheck, appInit } from "../recipes/app-check.ts";
 import { launch } from "../recipes/launch.ts";
 import { appHook } from "../recipes/app-hook.ts";
 import { doctor } from "../recipes/doctor.ts";
-import { appPurge, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
+import { appPurge, appRecreate, apps, deployer, type DeployerCommand } from "../recipes/apps.ts";
 import type { Engine } from "../recipes/steps.ts";
 import { adopt, deploy, down, hosts, preview, provision, setup, up, verify } from "../recipes/host.ts";
 import { backupTest } from "../recipes/backup.ts";
@@ -72,6 +72,19 @@ const invocations = z.discriminatedUnion("name", [
   z.strictObject({ name: z.literal("app.secret.import"), input: operations["app.secret.import"].input }),
   z.strictObject({ name: z.literal("app.secret.generate"), input: operations["app.secret.generate"].input }),
   z.strictObject({ name: z.literal("app.purge"), input: operations["app.purge"].input }),
+  z.strictObject({ name: z.literal("app.build"), input: operations["app.build"].input }),
+  z.strictObject({ name: z.literal("app.deployment.prepare"), input: operations["app.deployment.prepare"].input }),
+  z.strictObject({ name: z.literal("app.deployment.restore"), input: operations["app.deployment.restore"].input }),
+  z.strictObject({ name: z.literal("app.deployment.forward"), input: operations["app.deployment.forward"].input }),
+  z.strictObject({ name: z.literal("app.deployment.recreate"), input: operations["app.deployment.recreate"].input }),
+  z.strictObject({ name: z.literal("app.deployment.health"), input: operations["app.deployment.health"].input }),
+  z.strictObject({ name: z.literal("app.deployment.pins"), input: operations["app.deployment.pins"].input }),
+  z.strictObject({ name: z.literal("app.deployment.status"), input: operations["app.deployment.status"].input }),
+  z.strictObject({ name: z.literal("app.deployment.cancel"), input: operations["app.deployment.cancel"].input }),
+  z.strictObject({ name: z.literal("app.migration.cleanup"), input: operations["app.migration.cleanup"].input }),
+  z.strictObject({ name: z.literal("app.migration.cleanup.audit"), input: operations["app.migration.cleanup.audit"].input }),
+  z.strictObject({ name: z.literal("app.migration.resolve"), input: operations["app.migration.resolve"].input }),
+  z.strictObject({ name: z.literal("app.migration.audit"), input: operations["app.migration.audit"].input }),
   z.strictObject({ name: z.literal("app.runs"), input: operations["app.runs"].input }),
   z.strictObject({ name: z.literal("app.log"), input: operations["app.log"].input }),
   z.strictObject({ name: z.literal("app.deploy"), input: operations["app.deploy"].input }),
@@ -109,7 +122,7 @@ const onApp = (ctx: Context, input: { readonly server: string; readonly app: str
 const appDir = (ctx: Context, dir: string | undefined): Result<AbsolutePath | undefined, string> =>
   dir === undefined ? ok(undefined) : absolutePath(resolve(ctx.here, dir));
 
-type RecipeName = PlanName | SessionName | "app.runs" | "app.log" | "app.releases";
+type RecipeName = PlanName | SessionName | "app.deployment.status" | "app.deployment.health" | "app.deployment.pins" | "app.runs" | "app.log" | "app.releases";
 type Plans = { readonly [N in RecipeName]: (ctx: Context, input: InputOf<N>) => Result<Plan, string> };
 
 const withServer =
@@ -117,7 +130,7 @@ const withServer =
   (ctx: Context, input: { readonly server: string }) =>
     flatMap(onServer(ctx, input.server), (target) => make(ctx.engine, target));
 
-type DeployerName = "app.runs" | "app.log" | "app.deploy" | "app.releases" | "app.rollback";
+type DeployerName = "app.build" | "app.deployment.prepare" | "app.deployment.restore" | "app.deployment.forward" | "app.deployment.health" | "app.deployment.pins" | "app.deployment.status" | "app.deployment.cancel" | "app.migration.cleanup" | "app.migration.cleanup.audit" | "app.migration.resolve" | "app.migration.audit" | "app.runs" | "app.log" | "app.deploy" | "app.releases" | "app.rollback";
 
 const onDeployer =
   <N extends DeployerName>(command: (app: AppName, input: InputOf<N>) => DeployerCommand) =>
@@ -152,6 +165,20 @@ const plans: Plans = {
     flatMap(appDir(ctx, input.dir), (dir) => launch(ctx.engine, ctx.fleet.root, server, { app, repo: input.repo, ref: input.ref, path: input.path, dir }))),
   "app.hook": (ctx, input) => flatMap(onApp(ctx, input), ([server, app]) => appHook(ctx.engine, ctx.fleet.root, server, app)),
   "app.purge": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appPurge(ctx.engine, target, app)),
+  "app.build": onDeployer<"app.build">((app, input) => ({ kind: "build", app, commit: input.commit } as const)),
+  "app.deployment.prepare": onDeployer<"app.deployment.prepare">((app, input) => ({ kind: "lifecycle-prepare", app, commit: input.commit, request: input.request } as const)),
+  "app.deployment.restore": onDeployer<"app.deployment.restore">((app, input) => ({ kind: "lifecycle-restore", app, record: input.record, request: input.request } as const)),
+  "app.deployment.forward": onDeployer<"app.deployment.forward">((app, { blockedRun, commit, request, reason }) => ({ kind: "lifecycle-forward", app, payload: { app, blockedRun, commit, request, reason } } as const)),
+  "app.deployment.recreate": (ctx, input) => flatMap(onApp(ctx, input), ([target, app]) => appRecreate(ctx.engine, target, app,
+    { removal: input.removal, request: input.request, reason: input.reason })),
+  "app.deployment.health": onDeployer<"app.deployment.health">((app) => ({ kind: "lifecycle", app, operation: "health", request: undefined } as const)),
+  "app.deployment.pins": onDeployer<"app.deployment.pins">((app) => ({ kind: "lifecycle", app, operation: "pins", request: undefined } as const)),
+  "app.deployment.status": onDeployer<"app.deployment.status">((app) => ({ kind: "lifecycle", app, operation: "status", request: undefined } as const)),
+  "app.deployment.cancel": onDeployer<"app.deployment.cancel">((app, input) => ({ kind: "lifecycle", app, operation: "cancel", request: input.request } as const)),
+  "app.migration.cleanup": onDeployer<"app.migration.cleanup">((app, input) => ({ kind: "migration", app, operation: "cleanup", payload: { app, run: input.run, step: input.step, purpose: input.purpose, attempt: input.attempt, action: input.action, reason: input.reason } } as const)),
+  "app.migration.cleanup.audit": onDeployer<"app.migration.cleanup.audit">((app, input) => ({ kind: "migration", app, operation: "cleanup-audit", payload: { app, run: input.run, step: input.step } } as const)),
+  "app.migration.resolve": onDeployer<"app.migration.resolve">((app, input) => ({ kind: "migration", app, operation: "resolve", payload: { app, run: input.run, step: input.step, outcome: input.outcome, reason: input.reason } } as const)),
+  "app.migration.audit": onDeployer<"app.migration.audit">((app, input) => ({ kind: "migration", app, operation: "audit", payload: { app, run: input.run, step: input.step } } as const)),
   "app.runs": onDeployer<"app.runs">((app) => ({ kind: "runs", app, more: undefined } as const)),
   "app.log": onDeployer<"app.log">((app, input) => ({ kind: "logs", app, more: input.run } as const)),
   "app.deploy": onDeployer<"app.deploy">((app, input) => ({ kind: "deploy", app, more: input.ref } as const)),
@@ -174,12 +201,12 @@ export const planOf = <N extends RecipeName>(ctx: Context, call: { readonly name
 export const hasPlan = (call: Invocation): call is RecipeCall => Object.hasOwn(plans, call.name);
 
 /** What each query answers. */
-export type Answers = { readonly "app.values": ValuesReport; readonly validate: readonly Report[]; readonly version: KayraVersion; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
+export type Answers = { readonly "app.values": ValuesReport; readonly validate: readonly Report[]; readonly version: KayraVersion; readonly "app.deployment.status": string; readonly "app.deployment.health": string; readonly "app.deployment.pins": string; readonly "app.runs": string; readonly "app.releases": string; readonly "app.log": string };
 
 type Queries = { readonly [N in QueryName]: (ctx: Context, input: InputOf<N>) => Promise<Result<Answers[N], string>> };
 
 /** What a deployer's ctl answers, read whole: its stdout, or why it failed. */
-const deployerAnswer = async (ctx: Context, name: "app.runs" | "app.releases" | "app.log", input: InputOf<typeof name>) => {
+const deployerAnswer = async (ctx: Context, name: "app.deployment.status" | "app.deployment.health" | "app.deployment.pins" | "app.runs" | "app.releases" | "app.log", input: InputOf<typeof name>) => {
   const plan = planOf(ctx, { name, input });
   if (!plan.ok) return plan;
   const [step] = plan.value;
@@ -201,6 +228,9 @@ const queries: Queries = {
     try { return await inspectValues(ctx.fleet.root, target.value[0], target.value[1], dir.value); }
     catch { return err("app values could not be inspected; check file access and secrets.yml"); }
   },
+  "app.deployment.status": (ctx, input) => deployerAnswer(ctx, "app.deployment.status", input),
+  "app.deployment.health": (ctx, input) => deployerAnswer(ctx, "app.deployment.health", input),
+  "app.deployment.pins": (ctx, input) => deployerAnswer(ctx, "app.deployment.pins", input),
   "app.runs": (ctx, input) => deployerAnswer(ctx, "app.runs", input),
   "app.releases": (ctx, input) => deployerAnswer(ctx, "app.releases", input),
   "app.log": (ctx, input) => deployerAnswer(ctx, "app.log", input),

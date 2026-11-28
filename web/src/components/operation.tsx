@@ -121,18 +121,30 @@ const FieldInput = ({
         />
       ) : (
         <div class="inline">
-          <input
-            id={id}
-            value={text}
-            required={field.required}
-            minLength={field.minLength}
-            pattern={field.pattern}
-            list={field.name === "app" ? "operation-apps" : undefined}
-            spellcheck={false}
-            onInput={(event) => {
-              change(event.currentTarget.value);
-            }}
-          />
+          {field.type === "integer" ? (
+            <input
+              type="number"
+              id={id}
+              value={text}
+              required={field.required}
+              min={field.minimum}
+              max={field.maximum}
+              step={1}
+              onInput={(event) => { change(event.currentTarget.value); }}
+            />
+          ) : (
+            <input
+              type="text"
+              id={id}
+              value={text}
+              required={field.required}
+              minLength={field.minLength}
+              pattern={field.pattern}
+              list={field.name === "app" ? "operation-apps" : undefined}
+              spellcheck={false}
+              onInput={(event) => { change(event.currentTarget.value); }}
+            />
+          )}
           {field.name === "dir" ? (
             <button
               type="button"

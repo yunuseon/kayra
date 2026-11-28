@@ -358,6 +358,60 @@ one only in a release that says so.
 `result` is `problem`, `unchecked` or `passed`: a finding's own, a server's and
 the whole run's the worst of what is under it. `hint` is what to do, or `null`.
 
+## Experimental indexed rollouts
+
+For an explicitly registered indexed application on an experimental host:
+
+```bash
+kayra app build SERVER APP FULL_COMMIT
+kayra app deployment prepare SERVER APP FULL_COMMIT REQUEST_UUID
+kayra app deployment status SERVER APP
+kayra app deployment health SERVER APP
+kayra app deployment pins SERVER APP
+kayra app deployment cancel SERVER APP REQUEST_UUID
+```
+
+`FULL_COMMIT` is the exact forty-character commit id. Build retains the verified
+artifact; prepare requests its rollout and returns a receipt. It does not wait
+for readiness or imply promotion. Keep the same request UUID when retrying an
+uncertain request, then read status. Version-two receipts identify the complete
+plan and its original total deadline; older HTTP requests retain version one.
+The host selects the runtime and grants. These commands accept no runtime,
+resource override, migration command, secret value or deadline.
+
+`deployment health` observes current Swarm HTTP services through the deployment
+owner. It reports current healthy task counts separately from ignored historical
+tasks. This is runtime availability, separate from routed readiness and the
+historical active-release certificate shown by `deployment status`; reading it
+never promotes a release. API/UI operation `app.deployment.health` and MCP tool
+`app_deployment_health` expose the same read. Compose keeps its existing health
+path. Missing or unavailable Swarm observations do not fall back to Compose.
+
+`deployment pins` publishes exact image digests for active, candidate, rollback
+and unresolved plans, with complete-plan and workload identities. It includes
+last-known-good references, excludes resolved secret values and fails if a
+required immutable description is missing or corrupt. API/UI operation
+`app.deployment.pins` and MCP tool `app_deployment_pins` expose the same read.
+The snapshot sets `gcSafe: false`: it does not inventory live Docker attachments,
+legacy Compose history or unresolved builds. Existing build pins remain a
+separate export; this command never enables destructive registry GC.
+
+The experimental status, health and pin operations are read-only queries:
+HTTP returns their validated projections directly, and MCP publishes matching
+output schemas. CLI command output is unchanged. The app page's **Deployment**
+tab shows requested/desired releases, the certified active and last-known-good
+release, operation phase, recovery and required action separately from current
+service health. Health from another registration incarnation is withheld until
+refresh. A failed rollout remains failed when the previous release is healthy;
+reading the view cannot promote it. Legacy Compose history stays uncertified.
+This view does not establish worker, maintenance or removal support.
+
+The API and UI expose `app.build` and `app.deployment.prepare`; MCP tools are
+`app_build` and `app_deployment_prepare`. All use the same validated input and
+server lifecycle interface. Existing ordinary Compose applications keep their
+current deployment commands. These experimental commands do not register apps,
+convert backends or enable workers, maintenance or data-retention guarantees.
+
 ## When to run what
 
 | Changed | Run |

@@ -795,7 +795,20 @@ if [ "$managed_workers" = true ]; then
         printf '%s\n' "$id"
     }
     worker_sql() {
-        multipass exec "$vm_name" -- sudo docker exec "$worker_db" psql -U lab -d lab -X -v ON_ERROR_STOP=1 -Atc "$1"
+        python3 - "$vm_name" "$worker_db" "$1" <<'PYTHON'
+import subprocess
+import sys
+
+vm, container, statement = sys.argv[1:]
+result = subprocess.run(
+    ["multipass", "exec", vm, "--", "sudo", "docker", "exec", container,
+     "psql", "-U", "lab", "-d", "lab", "-X", "-v", "ON_ERROR_STOP=1", "-Atc", statement],
+    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10, check=False,
+)
+sys.stdout.write(result.stdout)
+sys.stderr.write(result.stderr)
+raise SystemExit(result.returncode)
+PYTHON
     }
     wait_worker_sql() {
         local query="$1" description="$2"

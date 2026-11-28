@@ -2402,6 +2402,19 @@ sampled failure interval is reported separately from rolling continuity.
 The successful VM is cleaned up and the lifecycle reports, ledger, and raw
 maintenance requests are retained.
 
+A November 28 rehearsal on `c304075` stopped at the held maintenance release.
+The status projection still reported the historical release as active after
+its data epoch became incompatible. A separate continuation on the same
+preserved VM exercised the public forward command and a deployer restart.
+C verified at the new epoch, the original database task stayed running,
+and the ledger showed one migration attempt. The one-second observer
+recorded 29 failed samples before B answered and 17 during forward repair.
+The two sampled spans were 28.294 s and 19.225 s. B answered between them.
+This was an intentional maintenance outage and a successful resumed repair.
+The reporting regression was corrected separately, with the old release
+still available as last known good. The updated fixture also checks an
+audited resolution of an ambiguous migration.
+
 Run `test/lab/upgrade.sh --from 0.26.1 --managed-workers --vm-name <unique-lab-name>`
 to exercise app-owned delivery under the real coordinator. The PostgreSQL
 fixture records claims, shutdown, acknowledgements and effects. An in-flight

@@ -13,12 +13,16 @@ const registerApp = (engine: Engine, server: Server, app: Server["apps"][number]
     "-e", recreation === undefined ? `{"app": ${JSON.stringify(app.entry)}}` : JSON.stringify({ app: app.entry, app_recreation: recreation }),
   ], ansibleEnv(engine, {})), server);
 
+const managedSwarmEnabled = (server: Server) => {
+  const profile = server.vars["experimental_swarm"];
+  return server.vars["managed_swarm_rollouts"] === true &&
+    typeof profile === "object" && profile !== null && "enabled" in profile && profile.enabled === true;
+};
+
 /** Register every app in server.yml, then remove the rest (their data kept). */
 export const apps = (engine: Engine, server: Server) => {
   const managed = server.apps.find((app) => app.entry["runtime"] === "swarm");
-  if (managed !== undefined && (server.vars["managed_swarm_rollouts"] !== true ||
-    typeof server.vars["experimental_swarm"] !== "object" || server.vars["experimental_swarm"] === null ||
-    !("enabled" in server.vars["experimental_swarm"]) || server.vars["experimental_swarm"].enabled !== true)) {
+  if (managed !== undefined && !managedSwarmEnabled(server)) {
     return err(`${managed.name} requires explicitly enabled experimental Swarm and managed_swarm_rollouts`);
   }
   const playbook = (title: string, name: string, ...extra: readonly string[]) =>
@@ -49,7 +53,7 @@ export const apps = (engine: Engine, server: Server) => {
 
 export const appRecreate = (engine: Engine, server: Server, app: AppName, recreation: Recreation) => {
   const entry = server.apps.find((candidate) => candidate.name === app);
-  if (server.kind !== "platform" || entry?.entry["runtime"] !== "swarm" || server.vars["managed_swarm_rollouts"] !== true) {
+  if (server.kind !== "platform" || entry?.entry["runtime"] !== "swarm" || !managedSwarmEnabled(server)) {
     return err("Managed recreation requires an opted-in Swarm application declared in server.yml");
   }
   return ok<Plan>(Object.freeze([fromMain(engine, server), collections(engine, {}), registerApp(engine, server, entry, recreation)]));

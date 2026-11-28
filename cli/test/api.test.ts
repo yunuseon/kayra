@@ -202,6 +202,7 @@ test("every catalog operation is previewed or queried over HTTP; unknown operati
   strictEqual(JSON.stringify(spec).includes('/api/v1'), false);
   strictEqual((await api.post("toString")).status, 404);
   strictEqual((await api.post("setup", { server: "missing" })).status, 400);
+  strictEqual((await api.post("app.deployment.recreate/preview", { ...samples["app.deployment.recreate"], server: "store" })).status, 400);
   strictEqual((await api.post("setup", { server: "lab", unexpected: true })).status, 400);
   strictEqual((await api.post("ssh.exec", { server: "lab", command: [] })).status, 400);
   strictEqual((await api.post("doctor", {}, { options: { columns: "120; evil" } })).status, 400);

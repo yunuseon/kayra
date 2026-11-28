@@ -691,9 +691,9 @@ if [ "$managed_forward" = true ]; then
     forward_reason="Deploy the reviewed fixture repair for schema two"
     kayra_cmd app deployment forward "$server" managed-forward "$forward_run_b" "$forward_c" "$forward_run_c" --reason "$forward_reason" >> "$log" 2>&1 ||
         die "accepting audited forward recovery through the operator CLI"
-    multipass exec "$vm_name" -- sudo docker compose --project-directory /opt/platform kill -s SIGKILL deployer >> "$log" 2>&1 ||
+    kayra_cmd ssh "$server" -- cd /opt/platform '&&' docker compose kill -s SIGKILL deployer >> "$log" 2>&1 ||
         die "interrupting the disposable deployer after forward acceptance"
-    multipass exec "$vm_name" -- sudo docker compose --project-directory /opt/platform up -d deployer >> "$log" 2>&1 ||
+    kayra_cmd ssh "$server" -- cd /opt/platform '&&' docker compose up -d deployer >> "$log" 2>&1 ||
         die "restarting the disposable deployer"
     await_managed_phase managed-forward "$forward_run_c" complete "${work}/forward-recovered.json"
     jq -e --arg commit "$forward_c" '.compatibilityEpoch == 1 and .verifiedActive.commit == $commit and .operation.outcome == "deployed"' "${work}/forward-recovered.json" >/dev/null ||
